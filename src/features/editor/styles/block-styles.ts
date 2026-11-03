@@ -260,14 +260,22 @@ export const BlockStyles = Extension.create({
         },
       clearDirectFormatting:
         () =>
-        ({ tr, dispatch }) =>
-          forSelectedBlocks(tr, (node, pos) => {
+        ({ tr, dispatch }) => {
+          // Its own undo step. Block attributes are reset on every touched block; text marks are
+          // removed from the selection when there is one (as in Word), else from the whole block.
+          if (dispatch) closeHistory(tr)
+          const ranges = tr.selection.empty ? null : tr.selection.ranges.map((r) => [r.$from.pos, r.$to.pos] as const)
+          const applicable = forSelectedBlocks(tr, (node, pos) => {
             if (dispatch) {
               tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...DIRECT_BLOCK_ATTRS })
-              tr.removeMark(pos + 1, pos + node.nodeSize - 1)
+              if (!ranges) tr.removeMark(pos + 1, pos + node.nodeSize - 1)
             }
             return true
-          }),
+          })
+          // setNodeMarkup keeps positions, so the selection ranges are still valid here.
+          if (dispatch && ranges) for (const [from, to] of ranges) tr.removeMark(from, to)
+          return applicable
+        },
     }
   },
 
