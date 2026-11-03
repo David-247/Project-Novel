@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { createAppSlice } from './app-slice'
+import { createEditorSlice } from './editor-slice'
 import type { RootState } from './types'
 
 /**
@@ -11,8 +12,10 @@ import type { RootState } from './types'
  */
 export const useStore = create<RootState>()((...a) => ({
   ...createAppSlice(...a),
+  ...createEditorSlice(...a),
 }))
 
 export { useColorSchemeSync } from './use-color-scheme-sync'
 export type { AppSlice, ColorScheme } from './app-slice'
+export type { EditorSlice } from './editor-slice'
 export type { RootState, SliceCreator } from './types'
