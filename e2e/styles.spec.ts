@@ -22,8 +22,10 @@ test('style picker, shortcuts, Enter chaining, undo and Clear direct formatting'
   await expect(picker(page)).toHaveValue('chapter-title')
 
   // Enter chaining: Chapter Title -> First Paragraph -> Body.
-  await ed.click()
-  await page.keyboard.press('ControlOrMeta+End')
+  // Back to the text (the picker keeps focus after a choice, like the other toolbar selects).
+  await title.click()
+  await expect(ed).toBeFocused()
+  await page.keyboard.press('End')
   await page.keyboard.press('Enter')
   await page.keyboard.type('It began at the harbor.')
   await expect(picker(page)).toHaveValue('first-paragraph')
@@ -112,7 +114,8 @@ test('Manage styles: create, rename, apply and delete a custom style (with confi
     'custom-1': { name: 'Letter', kind: 'paragraph', basedOn: 'block-quote', builtIn: false },
   })
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
-  await page.keyboard.press('Escape')
+  // (Escape would first close a keyboard-focus tooltip inside the dialog, by design; use Close.)
+  await dialog.locator('[data-control-id="dialog.close"]').click()
   await expect(dialog).toBeHidden()
 
   await picker(page).selectOption({ label: 'Letter' })
