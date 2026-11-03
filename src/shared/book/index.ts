@@ -50,3 +50,7 @@ export function defaultBookSettings(): BookSettings {
     view: 'spread',
   }
 }
+
+// Paragraph and chapter styles (styles ticket): concrete style shape, built-ins, resolution and
+// the generated stylesheet. See ./styles.ts.
+export * from './styles'
