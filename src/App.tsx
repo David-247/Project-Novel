@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { AppShell } from '@/features/app-shell'
+import { AppShell, useReloadGuard } from '@/features/app-shell'
 import {
   FindButton,
   FindReplacePanel,
@@ -41,6 +41,9 @@ export const editorDocumentProvider: DocumentProvider = {
 /** Composition root: the only place that wires slices together. */
 export function App() {
   useThemeFollow()
+  // F5 / Mod-R / Alt+Left would reload or navigate the webview and drop unsaved work. Kept off under
+  // the Vite dev server (`pnpm dev`, `pnpm tauri dev`), where reloading is part of the workflow.
+  useReloadGuard(!import.meta.env.DEV)
   useEffect(() => registerDocumentProvider(editorDocumentProvider), [])
   useStorageIntegration()
   return (
