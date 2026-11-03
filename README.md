@@ -70,3 +70,20 @@ The storage slice talks to the editor only through the `DocumentProvider` contra
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## Licenses of dependencies
+
+Every dependency must be MIT-compatible (no GPL/AGPL/proprietary). CI enforces this:
+
+- JS (production and dev): `node scripts/check-licenses.mjs` runs `pnpm licenses list --json` and fails on any
+  license outside the allowlist (MIT, MIT-0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, Apache-2.0, MPL-2.0, CC0-1.0,
+  CC-BY-4.0 for data-only packages such as caniuse-lite, Unlicense, BlueOak-1.0.0).
+- Rust: `cargo deny check licenses` in `src-tauri/` with the allowlist in `src-tauri/deny.toml` (adds Zlib,
+  Unicode-3.0, BSL-1.0 and `Apache-2.0 WITH LLVM-exception`).
+
+**MPL-2.0 (file-level copyleft).** These dependencies are used unmodified, so Novel's own code stays MIT; any change
+to their files would have to be published under MPL-2.0:
+
+- Rust (transitive, through `tauri-utils`' HTML processing via `dom_query`, and through `dirs`): `cssparser`,
+  `cssparser-macros`, `dtoa-short`, `selectors`, `option-ext`.
+- JS (dev only, build tooling via Tailwind CSS): `lightningcss` and its platform package.
