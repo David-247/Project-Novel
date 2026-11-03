@@ -10,6 +10,8 @@ export const COMMANDS = {
   writeFileAtomic: 'storage_write_file_atomic',
   readTextFile: 'storage_read_text_file',
   pathExists: 'storage_path_exists',
+  ensureDir: 'storage_ensure_dir',
+  removeFile: 'storage_remove_file',
   readRecent: 'storage_read_recent',
   rememberRecent: 'storage_remember_recent',
   setRecentMenu: 'storage_set_recent_menu',
@@ -25,7 +27,16 @@ export const MENU_EVENTS = {
 
 /** Error shape returned by the Rust storage commands. */
 interface RustStorageError {
-  kind: 'not_found' | 'invalid_path' | 'outside_project' | 'not_recent' | 'symlink' | 'io'
+  kind:
+    | 'not_found'
+    | 'invalid_path'
+    | 'outside_project'
+    | 'not_recent'
+    | 'symlink'
+    | 'disk_full'
+    | 'read_only'
+    | 'permission_denied'
+    | 'io'
   message: string
 }
 
@@ -34,7 +45,21 @@ function isRustError(e: unknown): e is RustStorageError {
 }
 
 /** Convert a rejected invoke into a ProjectError with a friendly message. */
-function toProjectError(e: unknown, fileLabel: string): ProjectError {
+export function toProjectError(e: unknown, fileLabel: string): ProjectError {
+  if (isRustError(e) && e.kind === 'disk_full') {
+    return new ProjectError(
+      'disk-full',
+      `The disk is full, so ${fileLabel} could not be saved. Free up some space and try again.`,
+      { cause: e },
+    )
+  }
+  if (isRustError(e) && (e.kind === 'read_only' || e.kind === 'permission_denied')) {
+    return new ProjectError(
+      'read-only',
+      `Novel is not allowed to write ${fileLabel}. The project folder may be read-only or on a locked drive.`,
+      { cause: e },
+    )
+  }
   if (isRustError(e) && e.kind === 'not_found') {
     return new ProjectError('missing-file', `${fileLabel} could not be found.`, { cause: e })
   }
@@ -95,6 +120,24 @@ export async function writeFileAtomic(path: string, contents: string, fileLabel 
 export async function readTextFile(path: string, fileLabel = path): Promise<string> {
   try {
     return await invoke<string>(COMMANDS.readTextFile, { path })
+  } catch (e) {
+    throw toProjectError(e, fileLabel)
+  }
+}
+
+/** Create a subfolder of the project root if it does not exist yet. */
+export async function ensureDir(path: string, fileLabel = path): Promise<void> {
+  try {
+    await invoke(COMMANDS.ensureDir, { path })
+  } catch (e) {
+    throw toProjectError(e, fileLabel)
+  }
+}
+
+/** Delete a file inside the project root. Resolves false if it did not exist. */
+export async function removeFile(path: string, fileLabel = path): Promise<boolean> {
+  try {
+    return await invoke<boolean>(COMMANDS.removeFile, { path })
   } catch (e) {
     throw toProjectError(e, fileLabel)
   }

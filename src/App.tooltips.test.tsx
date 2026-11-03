@@ -25,6 +25,7 @@ beforeAll(() => {
 
 afterEach(() => {
   act(() => useStore.getState().findActions.closePanel())
+  act(() => useStore.getState().projectActions.dismissRecoveryPrompt())
   cleanup()
 })
 
@@ -51,6 +52,23 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     expect(new Set(rendered)).toEqual(new Set(expected.map((m) => m.id)))
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
+  })
+
+  it.each([
+    [{ kind: 'restore', savedAt: '2026-11-03T10:00:00Z' } as const, ['recovery.decideLater', 'recovery.discard', 'recovery.restore']],
+    [{ kind: 'reopen', path: '/books/novel', name: 'My Novel' } as const, ['recovery.reopenClose', 'recovery.dismiss', 'recovery.reopen']],
+  ])('covers the crash-recovery dialog (%o), which portals into document.body', async (prompt, ids) => {
+    await renderFullApp()
+    act(() => useStore.getState().projectActions.showRecoveryPrompt(prompt))
+    const dialog = await screen.findByRole('dialog')
+    expect(Array.from(dialog.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))).toEqual(ids)
+    const problems = auditTooltipCoverage(document.body)
+    expect(problems, formatCoverageProblems(problems)).toEqual([])
+    // Registry titles match the visible labels / accessible names.
+    for (const el of Array.from(dialog.querySelectorAll('button[data-control-id]'))) {
+      const name = el.getAttribute('aria-label') ?? el.textContent!.trim()
+      expect(getTooltipCopy(el.getAttribute('data-control-id')!)!.title).toBe(name)
+    }
   })
 
   it('NEGATIVE: fails for a button with no tooltip entry', async () => {
@@ -111,7 +129,19 @@ describe('tooltip registry', () => {
   })
 
   it('pre-registers the native File menu actions and the recovery dialog buttons', () => {
-    for (const id of ['file.new_project', 'file.open_project', 'file.open_recent', 'file.save', 'recovery.restore', 'recovery.discard']) {
+    for (const id of [
+      'file.new_project',
+      'file.open_project',
+      'file.open_recent',
+      'file.save',
+      'recovery.restore',
+      'recovery.discard',
+      'recovery.decideLater',
+      'recovery.reopen',
+      'recovery.dismiss',
+      'recovery.reopenClose',
+      'dialog.close',
+    ]) {
       expect(getTooltipCopy(id), id).toBeDefined()
     }
     expect(getTooltipCopy('constructor')).toBeUndefined()

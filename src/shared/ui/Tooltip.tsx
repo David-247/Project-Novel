@@ -2,7 +2,7 @@ import * as RTooltip from '@radix-ui/react-tooltip'
 import { cloneElement, createContext, isValidElement, useContext, useEffect, useId, useMemo, useState } from 'react'
 import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement, ReactNode, Ref } from 'react'
 import { flushSync } from 'react-dom'
-import { ariaKeyshortcut, detectPlatform, formatShortcut, shortcutList } from './shortcut'
+import { ariaKeyshortcuts, detectPlatform, formatShortcut, shortcutList } from './shortcut'
 import type { Platform, ShortcutSpec } from './shortcut'
 import { cn } from './styles'
 
@@ -49,7 +49,7 @@ export function TooltipProvider({
   children,
 }: TooltipProviderProps) {
   const parent = useContext(TooltipEnvContext)
-  useEffect(installTabListener, [])
+  useEffect(installKeyListener, [])
   const env = useMemo<TooltipEnv>(
     () => ({
       lookup: lookup ?? parent.lookup,
@@ -81,20 +81,25 @@ function isTextField(el: EventTarget | null): boolean {
   return el.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color'].includes((el as HTMLInputElement).type)
 }
 
-// Last time Tab was pressed anywhere (one listener for the whole app, installed lazily).
+// Last time Tab / any key was pressed anywhere (one listener for the whole app, installed lazily).
+// Focus tooltips are for keyboard users: focus that no key press led to (a dialog auto-focusing its
+// first button at startup, script focus after a click) does not pop a tooltip.
 let lastTabAt = -Infinity
-let tabListenerInstalled = false
-function installTabListener() {
-  if (tabListenerInstalled || typeof window === 'undefined') return
-  tabListenerInstalled = true
+let lastKeyAt = -Infinity
+let keyListenerInstalled = false
+function installKeyListener() {
+  if (keyListenerInstalled || typeof window === 'undefined') return
+  keyListenerInstalled = true
   window.addEventListener(
     'keydown',
     (e) => {
+      lastKeyAt = performance.now()
       if (e.key === 'Tab') lastTabAt = performance.now()
     },
     true,
   )
 }
+const KEYBOARD_FOCUS_WINDOW_MS = 1000
 /** Radix Tooltip closes every open tooltip when this document event fires (its internal TOOLTIP_OPEN). */
 const RADIX_TOOLTIP_OPEN_EVENT = 'tooltip.open'
 
@@ -102,7 +107,16 @@ const RADIX_TOOLTIP_OPEN_EVENT = 'tooltip.open'
 let openTooltips = 0
 
 function tabbedRecently(): boolean {
-  return performance.now() - lastTabAt < 1000
+  return performance.now() - lastTabAt < KEYBOARD_FOCUS_WINDOW_MS
+}
+function keyPressedRecently(): boolean {
+  return performance.now() - lastKeyAt < KEYBOARD_FOCUS_WINDOW_MS
+}
+
+/** Focus inside a modal: there a tooltip is its own Escape layer (see Tooltip). */
+function focusInDialog(): boolean {
+  const el = typeof document === 'undefined' ? null : document.activeElement
+  return !!el?.closest('[role="dialog"], [role="alertdialog"]')
 }
 
 /** Keys that leave the tooltip up: focus movement, modifiers, and Escape (handled separately). */
@@ -133,7 +147,8 @@ export interface TooltipProps {
  * Hover + keyboard-focus tooltip over Radix Tooltip, showing title, one-line description and a
  * platform-rendered shortcut hint.
  *
- * - Opens on hover (after the provider delay) and on keyboard focus (not on pointer focus).
+ * - Opens on hover (after the provider delay) and on keyboard focus (not on pointer or script focus).
+ * - Inside a dialog, the first Escape closes only the tooltip; the next one closes the dialog.
  * - The description is also linked permanently via `aria-describedby` to a hidden element, so
  *   screen readers get it without hovering (touch has no hover). Long-press / right-click on
  *   non-text controls shows the tooltip too.
@@ -155,11 +170,14 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
   // and calls preventDefault() on Escape, which would make other Escape handlers think the key was
   // already handled. Window capture runs first; flushSync unmounts the content (and its listener)
   // synchronously, so the event continues to its real handlers untouched.
+  useEffect(installKeyListener, [])
   useEffect(() => {
     if (!open) return
     openTooltips++
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') flushSync(() => setOpen(false))
+      // Inside a dialog, the tooltip is a layer above the dialog (WAI-ARIA): the first Escape closes
+      // just the tooltip, so leave it to Radix, which consumes it and keeps the dialog open.
+      if (e.key === 'Escape' && !focusInDialog()) flushSync(() => setOpen(false))
     }
     window.addEventListener('keydown', onKey, true)
     return () => {
@@ -180,7 +198,7 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
     'aria-describedby': open ? undefined : descId,
   }
   if (keys.length && !childProps['aria-keyshortcuts']) {
-    a11y['aria-keyshortcuts'] = keys.map((k) => ariaKeyshortcut(k, env.platform)).join(' ')
+    a11y['aria-keyshortcuts'] = ariaKeyshortcuts(keys, env.platform)
   }
 
   // Opening outside Radix's own triggers: announce it like Radix does, so any other open tooltip closes.
@@ -202,10 +220,10 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
     },
     onFocus: (e: FocusEvent) => {
       fwdFocus?.(e)
-      // Text fields show their tooltip only when reached with Tab, not when focused by a shortcut
-      // (Mod-f) or script, so the tooltip never pops over a field the user is about to type in.
+      // Focus opens the tooltip only when a key led to it. Text fields need Tab specifically, not a
+      // shortcut (Mod-f), so the tooltip never pops over a field the user is about to type in.
       // preventDefault on a focus event only tells Radix not to open; focus is unaffected.
-      if (isTextField(e.target) && !tabbedRecently()) e.preventDefault()
+      if (isTextField(e.target) ? !tabbedRecently() : !keyPressedRecently()) e.preventDefault()
     },
     onKeyDown: (e: KeyboardEvent) => {
       fwdKeyDown?.(e)

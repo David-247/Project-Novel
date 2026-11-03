@@ -242,6 +242,86 @@ describe('find & replace panel', () => {
     await waitFor(() => expect(useStore.getState().find.matchCount).toBe(4))
   })
 
+  it('keeps keyboard focus in the panel when Replace all disables the focused button', async () => {
+    mountAll(story)
+    act(() => useStore.getState().findActions.openPanel('cat'))
+    await waitFor(() => expect(status()).toBe('1 of 3'))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Replace with' }), { target: { value: 'dog' } })
+    const all = screen.getByRole('button', { name: 'Replace all' })
+    all.focus()
+    fireEvent.click(all)
+    expect(all).toBeDisabled()
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Find' }))
+    // Escape still works from there.
+    act(() => key(document.activeElement!, 'Escape'))
+    expect(useStore.getState().find.open).toBe(false)
+  })
+
+  it('keeps keyboard focus in the panel when Replace consumes the last match', async () => {
+    mountAll({ type: 'doc', content: [para(t('one cat only'))] })
+    act(() => useStore.getState().findActions.openPanel('cat'))
+    await waitFor(() => expect(status()).toBe('1 of 1'))
+    const replace = screen.getByRole('button', { name: 'Replace' })
+    replace.focus()
+    fireEvent.click(replace)
+    expect(replace).toBeDisabled()
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Find' }))
+  })
+
+  it('Next keeps focus on the button while matches remain', async () => {
+    mountAll(story)
+    act(() => useStore.getState().findActions.openPanel('cat'))
+    await waitFor(() => expect(status()).toBe('1 of 3'))
+    const next = screen.getByRole('button', { name: 'Next match' })
+    next.focus()
+    fireEvent.click(next)
+    expect(status()).toBe('2 of 3')
+    expect(document.activeElement).toBe(next)
+  })
+
+  it('Mod-f inside the panel re-focuses without re-prefilling from the selection', async () => {
+    const ed = mountAll(story)
+    act(() => {
+      ed.commands.setTextSelection({ from: 1, to: 4 }) // "The"
+    })
+    act(() => key(ed.view.dom, 'f', { ctrlKey: true }))
+    const input = screen.getByRole('textbox', { name: 'Find' }) as HTMLInputElement
+    expect(input.value).toBe('The')
+    fireEvent.change(input, { target: { value: 'the' } })
+    act(() => key(input, 'f', { ctrlKey: true }))
+    expect(input.value).toBe('the')
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('defers re-scans while an IME composition is in progress', async () => {
+    const ed = mountAll(story)
+    act(() => useStore.getState().findActions.openPanel('cat'))
+    await waitFor(() => expect(useStore.getState().find.matchCount).toBe(3))
+    let composing = true
+    Object.defineProperty(ed.view, 'composing', { configurable: true, get: () => composing })
+    try {
+      act(() => {
+        ed.commands.setTextSelection(ed.state.doc.content.size - 1)
+        ed.commands.insertContent(' cat')
+      })
+      await new Promise((r) => setTimeout(r, 600))
+      expect(useStore.getState().find.matchCount).toBe(3)
+      composing = false
+      await waitFor(() => expect(useStore.getState().find.matchCount).toBe(4))
+    } finally {
+      delete (ed.view as unknown as Record<string, unknown>).composing
+    }
+  })
+
+  it('reserves top padding for the open panel and removes it on close', () => {
+    mountAll(story)
+    act(() => useStore.getState().findActions.openPanel('cat'))
+    expect(document.documentElement.hasAttribute('data-find-open')).toBe(true)
+    expect(document.documentElement.style.getPropertyValue('--nv-find-panel-height')).toMatch(/px$/)
+    fireEvent.click(screen.getByRole('button', { name: 'Close find and replace' }))
+    expect(document.documentElement.hasAttribute('data-find-open')).toBe(false)
+  })
+
   it('every control has a stable data-control-id and an accessible name', () => {
     mountAll(story)
     act(() => useStore.getState().findActions.openPanel('cat'))

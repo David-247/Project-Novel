@@ -153,6 +153,11 @@ function scheduleScan(delay: number, opts: ScanOptions = {}) {
     timer = null
     const ed = getEditor()
     if (ed && isFresh(ed)) return
+    // Never touch decorations mid-IME-composition; try again once it settles.
+    if (ed?.view.composing) {
+      scheduleScan(delay, opts)
+      return
+    }
     scanNow(opts)
   }, delay)
 }
@@ -212,7 +217,11 @@ export function findPrevious(): void {
   goTo(ed, current <= 0 ? matches.length - 1 : current - 1)
 }
 
-/** Replace the current match, then move to the next one. Returns true if something was replaced. */
+/**
+ * Replace the current match, then move to the next one. Returns true if something was replaced.
+ * Each Replace is its own undo step (history is closed before and after), so undo walks back
+ * one replacement at a time; Replace All is a single step.
+ */
 export function replaceCurrent(): boolean {
   const ed = getEditor()
   if (!ed) return false
@@ -293,11 +302,14 @@ export function startFindEngine(): () => void {
   }
 }
 
-/** Open (or re-focus) the panel, pre-filling the query from a short single-block selection. */
-export function openFind(): void {
+/**
+ * Open (or re-focus) the panel, pre-filling the query from a short single-block selection unless
+ * `prefill` is false (Mod-f pressed while focus is already in the panel).
+ */
+export function openFind({ prefill: usePrefill = true }: { prefill?: boolean } = {}): void {
   const ed = getEditor()
   let prefill: string | undefined
-  if (ed) {
+  if (ed && usePrefill) {
     const { from, to, $from, $to, empty } = ed.state.selection
     if (!empty && $from.sameParent($to) && to - from <= MAX_PREFILL) {
       const text = ed.state.doc.textBetween(from, to, '\n', '\n')

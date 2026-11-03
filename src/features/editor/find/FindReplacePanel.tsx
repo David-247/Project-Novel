@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useStore } from '@/shared/store'
-import { Button, Checkbox, IconButton, Panel, StatusText, TextInput, Tooltip, cn } from '@/shared/ui'
+import { Button, Checkbox, IconButton, Panel, StatusText, TextInput, Tooltip, cn, detectPlatform } from '@/shared/ui'
 import { FIND_CONTROLS } from './controls'
 import { closeFind, findNext, findPrevious, openFind, replaceAll, replaceCurrent, startFindEngine } from './engine'
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from './icons'
-import { IS_MAC } from './use-editor-instance'
 import './find.css'
 
 export const FIND_PANEL_ID = 'novel-find-panel'
@@ -13,6 +12,8 @@ export const FIND_PANEL_ID = 'novel-find-panel'
 export interface FindReplacePanelProps {
   className?: string
 }
+
+const IS_MAC = detectPlatform() === 'mac'
 
 function isModF(e: KeyboardEvent): boolean {
   const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
@@ -34,7 +35,9 @@ export function FindReplacePanel({ className }: FindReplacePanelProps) {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || !isModF(e)) return
       e.preventDefault()
-      openFind()
+      // Already in the panel: just re-focus/select the query, never re-prefill from the selection.
+      const inPanel = e.target instanceof Element && e.target.closest(`#${FIND_PANEL_ID}`) !== null
+      openFind({ prefill: !inPanel })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -64,10 +67,29 @@ function OpenPanel({ className }: FindReplacePanelProps) {
   const searchKey = `${caseSensitive}|${wholeWord}|${query}`
 
   useEffect(() => startFindEngine(), [])
+  usePanelHeightVar()
+
+  /**
+   * Run an action from a panel control. If it leaves no matches, the control that triggered it
+   * becomes disabled and would drop keyboard focus to <body>; move focus to the find field instead.
+   */
+  const act = <T,>(fn: () => T): T => {
+    const result = fn()
+    const active = document.activeElement
+    const inField = active === findRef.current
+    if (!inField && (useStore.getState().find.matchCount === 0 || active === document.body || active === null)) {
+      findRef.current?.focus({ preventScroll: true })
+    }
+    return result
+  }
 
   useEffect(() => {
-    findRef.current?.focus()
-    findRef.current?.select()
+    // preventScroll + setSelectionRange: the panel floats (sticky), so focusing it must never
+    // scroll the editor region underneath.
+    const input = findRef.current
+    if (!input) return
+    input.focus({ preventScroll: true })
+    input.setSelectionRange(0, input.value.length)
   }, [focusRequest])
 
   const hasMatches = matchCount > 0
@@ -128,7 +150,7 @@ function OpenPanel({ className }: FindReplacePanelProps) {
               data-control-id={FIND_CONTROLS.previous.id}
               aria-keyshortcuts="Shift+Enter"
               disabled={!hasMatches}
-              onClick={findPrevious}
+              onClick={() => act(findPrevious)}
             >
               <ChevronUpIcon />
             </IconButton>
@@ -139,7 +161,7 @@ function OpenPanel({ className }: FindReplacePanelProps) {
               data-control-id={FIND_CONTROLS.next.id}
               aria-keyshortcuts="Enter"
               disabled={!hasMatches}
-              onClick={findNext}
+              onClick={() => act(findNext)}
             >
               <ChevronDownIcon />
             </IconButton>
@@ -169,12 +191,12 @@ function OpenPanel({ className }: FindReplacePanelProps) {
           />
         </Tooltip>
         <Tooltip>
-          <Button aria-label={FIND_CONTROLS.replace.label} data-control-id={FIND_CONTROLS.replace.id} disabled={!hasMatches} onClick={() => replaceCurrent()}>
+          <Button aria-label={FIND_CONTROLS.replace.label} data-control-id={FIND_CONTROLS.replace.id} disabled={!hasMatches} onClick={() => act(replaceCurrent)}>
             Replace
           </Button>
         </Tooltip>
         <Tooltip>
-          <Button aria-label={FIND_CONTROLS.replaceAll.label} data-control-id={FIND_CONTROLS.replaceAll.id} disabled={!hasMatches} onClick={() => setReplaced({ count: replaceAll(), key: searchKey })}>
+          <Button aria-label={FIND_CONTROLS.replaceAll.label} data-control-id={FIND_CONTROLS.replaceAll.id} disabled={!hasMatches} onClick={() => setReplaced({ count: act(replaceAll), key: searchKey })}>
             Replace all
           </Button>
         </Tooltip>
@@ -201,4 +223,26 @@ function OpenPanel({ className }: FindReplacePanelProps) {
       </div>
     </Panel>
   )
+}
+
+/**
+ * While open, publish the panel's height as `--nv-find-panel-height` and set `data-find-open` on
+ * <html>, so the writing surface can reserve that much top padding (find.css) and the first lines
+ * are never hidden under the floating panel.
+ */
+function usePanelHeightVar() {
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    const el = document.getElementById(FIND_PANEL_ID)
+    const update = () => root.style.setProperty('--nv-find-panel-height', `${el?.offsetHeight ?? 0}px`)
+    update()
+    root.setAttribute('data-find-open', '')
+    const ro = typeof ResizeObserver === 'function' && el ? new ResizeObserver(update) : null
+    if (ro && el) ro.observe(el)
+    return () => {
+      ro?.disconnect()
+      root.removeAttribute('data-find-open')
+      root.style.removeProperty('--nv-find-panel-height')
+    }
+  }, [])
 }

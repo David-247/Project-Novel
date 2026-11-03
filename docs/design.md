@@ -97,7 +97,7 @@ native props and `ref` (React 19 ref-as-prop), and each has a visible focus ring
 | `Select` | `options: {value,label}[]`, `wrapperClassName?` (for layout on the wrapper span), plus native select props (`className` is applied to the `<select>`) | A native select with a themed chevron |
 | `Checkbox` | `label`, `checked`, `onCheckedChange(next)` | Find options such as "Match case" |
 | `Panel` | `label?` (makes it a labelled region) | A raised container, for example the find panel |
-| `Dialog` | `open`, `onOpenChange`, `title`, `description?`, `footer?`, `closeLabel?` | Modal built on Radix Dialog (focus trap, Esc, focus return). Put the primary action last in `footer`. |
+| `Dialog` | `open`, `onOpenChange`, `title`, `description?`, `footer?`, `closeLabel?`, `closeControlId?` | Modal built on Radix Dialog (focus trap, Esc, focus return). Put the primary action last in `footer`. |
 | `DialogClose` | `asChild` | Wraps a footer button so it closes the dialog |
 | `StatusText` | `tone: 'muted' \| 'default' \| 'success' \| 'warning' \| 'danger'`, `live?` | Status-bar items. `live` makes it an `aria-live="polite"` region. |
 | `cn`, `focusRing`, `controlBase`, `fieldBase` | none | Class helpers for custom controls that need to match |
@@ -116,9 +116,14 @@ Titles and shortcuts are taken from the editor's control metadata (`TOOLBAR_CONT
 `HISTORY_CONTROLS`, `FIND_CONTROLS`), which also supplies the accessible names, so they cannot drift apart.
 
 - A tooltip opens on hover (500 ms, then instant while moving along the toolbar) and on keyboard focus.
-  Text fields show it only when reached with Tab, and it hides as soon as you type.
+  Focus counts as keyboard focus only when a key press led to it, so a dialog that auto-focuses its first
+  button, or script focus after a click, does not open one. Text fields need Tab specifically, and the
+  tooltip hides as soon as you type.
 - Escape closes it without consuming the key, so the toolbar's Escape-to-editor and the find panel's
-  Escape-to-close run on the same press.
+  Escape-to-close run on the same press. Inside a dialog the tooltip is a layer above the dialog: the
+  first Escape closes only the tooltip, and the next one closes the dialog.
+- `Dialog`'s close (X) button has a tooltip too. Pass `closeControlId` when `closeLabel` is not plain
+  "Close"; the default id is `dialog.close`.
 - The description and shortcut are always linked through `aria-describedby` (a hidden element), so
   screen readers get them without hovering. Shortcuts are also exposed as `aria-keyshortcuts`.
   On touch, a long-press (`contextmenu`) shows the tooltip. The essentials (the control's name and its
@@ -127,7 +132,7 @@ Titles and shortcuts are taken from the editor's control metadata (`TOOLBAR_CONT
 - `Tooltip` forwards unknown props and `ref` to the control, so it can sit inside `ToolbarItem`.
 - Visuals: `surface-raised` with a `border` hairline and `shadow-raised`, using `text` and `text-muted`.
   These pairs are already in `CONTRAST_PAIRS`.
-- `src/App.tooltips.test.tsx` renders the whole app with the find panel open and fails if any
+- `src/App.tooltips.test.tsx` renders the whole app with the find panel and each recovery dialog open, and fails if any
   button, select, checkbox or text field lacks a registered, wired tooltip (`auditTooltipCoverage`).
 - Native OS menu items (File > New/Open/Open Recent/Save) can't show web tooltips. Their labels and
   accelerators are the hint, and their copy is registered under the `file.*` ids for any future in-app

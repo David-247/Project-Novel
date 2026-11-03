@@ -39,6 +39,13 @@ export interface DocumentProvider {
    * since; without it, unconditionally.
    */
   markClean(version?: number): void
+  /**
+   * Optional: flag the current content as unsaved without changing it (used
+   * after restoring crash-recovery data). Providers whose dirty flag is the
+   * store's `editor.dirty` may omit it; storage then dispatches
+   * `editorActions.docChanged` itself.
+   */
+  markDirty?(): void
   /** Subscribe to user edits. Returns an unsubscribe function. */
   onDocChange(cb: () => void): () => void
 }
@@ -102,6 +109,10 @@ export function createMemoryDocumentProvider(
     getDocVersion: () => version,
     markClean: (v) => {
       if (v === undefined || v === version) dirty = false
+    },
+    markDirty: () => {
+      dirty = true
+      version++
     },
     onDocChange: (cb) => {
       listeners.add(cb)

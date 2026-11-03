@@ -103,6 +103,15 @@ export function ariaKeyshortcut(spec: ShortcutSpec, platform: Platform = detectP
   return [...OTHER_ORDER.filter((m) => mods.has(m)).map((m) => ARIA_NAMES[m]), k].join('+')
 }
 
+/** Full `aria-keyshortcuts` value for one or more specs (space-separated alternatives). */
+export function ariaKeyshortcuts(
+  spec: ShortcutSpec | readonly ShortcutSpec[] | undefined,
+  platform: Platform = detectPlatform(),
+): string | undefined {
+  const list = shortcutList(spec)
+  return list.length ? list.map((s) => ariaKeyshortcut(s, platform)).join(' ') : undefined
+}
+
 /** Normalizes one-or-many specs to an array. */
 export function shortcutList(spec: ShortcutSpec | readonly ShortcutSpec[] | undefined): readonly ShortcutSpec[] {
   if (!spec) return []

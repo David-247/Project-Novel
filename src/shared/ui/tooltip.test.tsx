@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Checkbox, IconButton, TextInput, Tooltip, TooltipProvider } from '.'
+import { Button, Checkbox, Dialog, IconButton, TextInput, Tooltip, TooltipProvider } from '.'
 import type { TooltipCopy } from '.'
 import { ariaKeyshortcut, formatShortcut } from './shortcut'
 
@@ -14,7 +14,16 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
+
+/** Pretend the last key press was long ago (keyboard-focus heuristics use performance.now). */
+function forgetKeys() {
+  const later = performance.now() + 60_000
+  vi.spyOn(performance, 'now').mockReturnValue(later)
+}
 
 const COPY: Record<string, TooltipCopy> = {
   'x.bold': { title: 'Bold', description: 'Make text bold.', shortcut: 'Mod-b' },
@@ -73,6 +82,7 @@ describe('Tooltip', () => {
 
   it('opens on keyboard focus with title, description and platform shortcut; closes on blur', () => {
     const button = renderBold('mac')
+    tab()
     act(() => button.focus())
     const tip = screen.getByRole('tooltip')
     expect(tip).toHaveTextContent('Make text bold. Shortcut: ⌘B.')
@@ -121,6 +131,7 @@ describe('Tooltip', () => {
       </TooltipProvider>,
     )
     const button = screen.getByRole('button', { name: 'Bold' })
+    tab()
     act(() => button.focus())
     expect(screen.getByRole('tooltip')).toBeInTheDocument()
     fireEvent.keyDown(button, { key: 'Escape' })
@@ -128,6 +139,57 @@ describe('Tooltip', () => {
     // The ancestor handler ran and did not see the event as already handled.
     expect(seen).toEqual([false])
     expect(button).toHaveFocus()
+  })
+
+  it('script focus with no key press behind it (e.g. dialog auto-focus) does not open it', () => {
+    const button = renderBold()
+    forgetKeys()
+    act(() => button.focus())
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    // A key press (arrow-key roving, Tab) right before focus counts as keyboard focus.
+    act(() => button.blur())
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    act(() => button.focus())
+    expect(screen.getByRole('tooltip')).toBeInTheDocument()
+  })
+
+  it('inside a dialog, the first Escape closes only the tooltip; the next closes the dialog', () => {
+    const onOpenChange = vi.fn()
+    render(
+      <TooltipProvider lookup={lookup} platform="other">
+        <Dialog
+          open
+          onOpenChange={onOpenChange}
+          title="Recover?"
+          closeControlId="x.bold"
+          footer={
+            <Tooltip>
+              <Button data-control-id="x.check">Keep</Button>
+            </Tooltip>
+          }
+        />
+      </TooltipProvider>,
+    )
+    const keep = screen.getByRole('button', { name: 'Keep' })
+    tab()
+    act(() => keep.focus())
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Case matters.')
+    fireEvent.keyDown(keep, { key: 'Escape' })
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(onOpenChange).not.toHaveBeenCalled()
+    fireEvent.keyDown(keep, { key: 'Escape' })
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('the dialog close (X) button carries a tooltip under its control id', () => {
+    render(
+      <TooltipProvider lookup={lookup} platform="other">
+        <Dialog open onOpenChange={() => {}} title="T" closeLabel="Bold" closeControlId="x.bold" />
+      </TooltipProvider>,
+    )
+    const close = screen.getByRole('button', { name: 'Bold' })
+    expect(close).toHaveAttribute('data-control-id', 'x.bold')
+    expect(document.getElementById(close.getAttribute('aria-describedby')!)).toHaveTextContent('Make text bold.')
   })
 
   it('opens on right-click / long-press (contextmenu) for non-text controls', () => {
@@ -167,6 +229,7 @@ describe('Tooltip', () => {
       </TooltipProvider>,
     )
     const field = screen.getByRole('textbox', { name: 'Find' })
+    forgetKeys()
     act(() => field.focus())
     expect(screen.queryByRole('tooltip')).toBeNull()
     act(() => field.blur())
@@ -188,6 +251,7 @@ describe('Tooltip', () => {
     )
     const box = screen.getByRole('checkbox', { name: 'Match case' })
     expect(document.getElementById(box.getAttribute('aria-describedby')!)).toHaveTextContent('Case matters.')
+    tab()
     act(() => box.focus())
     expect(screen.getByRole('tooltip')).toHaveTextContent('Case matters.')
   })

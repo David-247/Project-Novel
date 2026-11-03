@@ -12,3 +12,9 @@
   outline-offset: 0;
   border-radius: 2px;
 }
+
+/* While the floating find panel is open, keep the first lines of text out from under it
+   (height published by FindReplacePanel). Only grows the existing top padding. */
+:root[data-find-open] .novel-writing-surface {
+  padding-top: max(2.5rem, calc(var(--nv-find-panel-height, 0px) + 1.5rem));
+}

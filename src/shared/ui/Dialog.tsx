@@ -2,6 +2,7 @@ import * as RadixDialog from '@radix-ui/react-dialog'
 import type { ReactNode } from 'react'
 import { IconButton } from './Button'
 import { cn } from './styles'
+import { Tooltip } from './Tooltip'
 
 export interface DialogProps {
   open: boolean
@@ -14,6 +15,8 @@ export interface DialogProps {
   footer?: ReactNode
   /** Accessible name for the close (X) button. */
   closeLabel?: string
+  /** `data-control-id` of the close (X) button, the key of its tooltip copy. Default "dialog.close". */
+  closeControlId?: string
   className?: string
 }
 
@@ -29,6 +32,7 @@ export function Dialog({
   children,
   footer,
   closeLabel = 'Close',
+  closeControlId = 'dialog.close',
   className,
 }: DialogProps) {
   return (
@@ -55,11 +59,13 @@ export function Dialog({
               ) : null}
             </div>
             <RadixDialog.Close asChild>
-              <IconButton label={closeLabel} className="-mr-2 -mt-1">
-                <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4">
-                  <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </IconButton>
+              <Tooltip>
+                <IconButton label={closeLabel} data-control-id={closeControlId} className="-mr-2 -mt-1">
+                  <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4">
+                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </IconButton>
+              </Tooltip>
             </RadixDialog.Close>
           </div>
           {children ? <div className="min-h-0 overflow-auto px-5 py-2 text-ui">{children}</div> : null}

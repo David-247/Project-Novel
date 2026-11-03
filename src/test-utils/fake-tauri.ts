@@ -30,6 +30,10 @@ export const backend = {
   sqlExecuted: [] as string[],
   sqlLoads: [] as string[],
   failSqlLoad: false,
+  /** If set, consulted before every write/mkdir/remove; a returned error is thrown like Rust's. */
+  failWrite: null as null | ((path: string) => { kind: string; message: string } | null),
+  /** Optional hook awaited inside storage_write_file_atomic (to hold a write in flight). */
+  writeGate: null as null | ((path: string) => Promise<void>),
   reset() {
     this.files.clear()
     this.dirs.clear()
@@ -44,6 +48,8 @@ export const backend = {
     this.sqlExecuted.length = 0
     this.sqlLoads.length = 0
     this.failSqlLoad = false
+    this.failWrite = null
+    this.writeGate = null
   },
 }
 
@@ -109,9 +115,32 @@ export async function invokeMock(cmd: string, args: Record<string, unknown> = {}
     }
     case 'storage_write_file_atomic': {
       const c = confined(path, true)
+      const err = backend.failWrite?.(c)
+      if (err) throw err
+      if (backend.writeGate) await backend.writeGate(c)
       backend.files.set(c, args.contents as string)
       backend.writes.push(c)
       return null
+    }
+    case 'storage_ensure_dir': {
+      const c = confined(path, true)
+      const err = backend.failWrite?.(c)
+      if (err) throw err
+      if (backend.files.has(c)) throw { kind: 'invalid_path', message: `Not a folder: ${path}` }
+      backend.dirs.add(c)
+      return null
+    }
+    case 'storage_remove_file': {
+      let c: string
+      try {
+        c = confined(path, true)
+      } catch (e) {
+        if ((e as { kind?: string }).kind === 'not_found') return false
+        throw e
+      }
+      const err = backend.failWrite?.(c)
+      if (err) throw err
+      return backend.files.delete(c)
     }
     case 'storage_read_recent':
       return backend.recent.length ? recentJSON() : null

@@ -1,11 +1,10 @@
 import type { IconButtonProps } from '@/shared/ui'
 import { useStore } from '@/shared/store'
-import { IconButton, Tooltip } from '@/shared/ui'
+import { ariaKeyshortcuts, IconButton, Tooltip } from '@/shared/ui'
 import { FIND_CONTROLS } from './controls'
 import { openFind } from './engine'
 import { FIND_PANEL_ID } from './FindReplacePanel'
 import { SearchIcon } from './icons'
-import { modShortcut } from './use-editor-instance'
 
 export type FindButtonProps = Partial<Omit<IconButtonProps, 'label' | 'children'>>
 
@@ -20,7 +19,7 @@ export function FindButton({ onClick, ...rest }: FindButtonProps) {
       <IconButton
         label={FIND_CONTROLS.open.label}
         data-control-id={FIND_CONTROLS.open.id}
-        aria-keyshortcuts={modShortcut('F')}
+        aria-keyshortcuts={ariaKeyshortcuts(FIND_CONTROLS.open.shortcut)}
         aria-expanded={open}
         aria-controls={open ? FIND_PANEL_ID : undefined}
         onClick={(e) => {

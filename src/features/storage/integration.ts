@@ -2,11 +2,15 @@ import { useEffect } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { startAutosave, stopAutosave } from './autosave'
 import { MENU_EVENTS } from './ipc'
 import {
+  clearRecoveryData,
   confirmUnsavedChanges,
+  hasPendingRecovery,
   loadRecentProjects,
   newProject,
+  offerReopenAfterCrash,
   openProject,
   saveProject,
 } from './project'
@@ -38,6 +42,8 @@ export function useStorageIntegration(): void {
     }
     window.addEventListener('keydown', onKeyDown)
     disposers.push(() => window.removeEventListener('keydown', onKeyDown))
+    const stopAutosaveTimer = startAutosave()
+    disposers.push(() => void stopAutosaveTimer())
 
     let disposed = false
     const track = (p: Promise<UnlistenFn>) => {
@@ -55,10 +61,15 @@ export function useStorageIntegration(): void {
       track(
         win.onCloseRequested(async (event) => {
           event.preventDefault()
-          if (await confirmUnsavedChanges('closing')) await win.destroy()
+          if (!(await confirmUnsavedChanges('closing'))) return
+          // Clean quit (saved, unchanged, or "Don't Save"): recovery data is obsolete,
+          // unless the user has not yet answered Restore / Discard for it.
+          await stopAutosave()
+          if (!hasPendingRecovery()) await clearRecoveryData()
+          await win.destroy()
         }),
       )
-      void loadRecentProjects()
+      void loadRecentProjects().then(offerReopenAfterCrash)
     }
 
     return () => {

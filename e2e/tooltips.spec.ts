@@ -39,8 +39,13 @@ test('keyboard focus shows the tooltip; Escape closes it AND still returns focus
   const editor = page.getByRole('textbox', { name: 'Manuscript' })
   await editor.click()
   await page.keyboard.type('Hello')
-  // Shift+Tab from the editor lands in the toolbar (single tab stop, roving focus).
-  await page.locator('[data-control-id="toolbar.bold"]').focus()
+  // Put focus in the toolbar, then navigate with the keyboard (roving focus): keyboard focus opens.
+  await page.locator('[data-control-id="toolbar.underline"]').focus()
+  // Radix moves roving focus on a timer: wait for each step.
+  await page.keyboard.press('ArrowLeft')
+  await expect(page.locator('[data-control-id="toolbar.italic"]')).toBeFocused()
+  await page.keyboard.press('ArrowLeft')
+  await expect(page.locator('[data-control-id="toolbar.bold"]')).toBeFocused()
   const tip = page.locator('[data-tooltip-body]')
   await expect(tip).toContainText('Bold')
   await page.keyboard.press('ArrowRight')

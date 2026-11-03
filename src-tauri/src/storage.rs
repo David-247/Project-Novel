@@ -36,15 +36,43 @@ pub const EVENT_SAVE: &str = "menu://save";
 /// Error returned to the frontend: a machine-readable kind plus a message.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct StorageError {
-    /// "not_found" | "invalid_path" | "outside_project" | "symlink" | "io"
+    /// "not_found" | "invalid_path" | "outside_project" | "symlink" |
+    /// "disk_full" | "read_only" | "permission_denied" | "io"
     pub kind: &'static str,
     pub message: String,
 }
 
+/// Machine-readable kind for an io error, so the frontend can show friendly
+/// text for the failures users can fix (full disk, read-only folder).
+pub fn io_error_kind(err: &std::io::Error) -> &'static str {
+    match err.kind() {
+        ErrorKind::NotFound => return "not_found",
+        ErrorKind::StorageFull | ErrorKind::QuotaExceeded => return "disk_full",
+        ErrorKind::ReadOnlyFilesystem => return "read_only",
+        ErrorKind::PermissionDenied => return "permission_denied",
+        _ => {}
+    }
+    // Raw OS codes not (yet) mapped to an ErrorKind on every platform.
+    #[cfg(unix)]
+    match err.raw_os_error() {
+        Some(28) /* ENOSPC */ | Some(122) /* EDQUOT (Linux) */ => return "disk_full",
+        Some(30) /* EROFS */ => return "read_only",
+        Some(1) /* EPERM */ | Some(13) /* EACCES */ => return "permission_denied",
+        _ => {}
+    }
+    #[cfg(windows)]
+    match err.raw_os_error() {
+        Some(112) /* ERROR_DISK_FULL */ | Some(39) /* ERROR_HANDLE_DISK_FULL */ => return "disk_full",
+        Some(19) /* ERROR_WRITE_PROTECT */ => return "read_only",
+        Some(5) /* ERROR_ACCESS_DENIED */ => return "permission_denied",
+        _ => {}
+    }
+    "io"
+}
+
 impl StorageError {
     fn io(path: &Path, err: std::io::Error) -> Self {
-        let kind = if err.kind() == ErrorKind::NotFound { "not_found" } else { "io" };
-        StorageError { kind, message: format!("{}: {}", path.display(), err) }
+        StorageError { kind: io_error_kind(&err), message: format!("{}: {}", path.display(), err) }
     }
     fn invalid(message: impl Into<String>) -> Self {
         StorageError { kind: "invalid_path", message: message.into() }
@@ -292,6 +320,63 @@ pub fn storage_read_text_file(state: State<'_, ProjectRoot>, path: String) -> Re
     let root = current_root(&state)?;
     let p = resolve_for_read(&root, &path)?;
     fs::read_to_string(&p).map_err(|e| StorageError::io(&p, e))
+}
+
+/// Create the folder `path` (one level) inside `root` if it does not exist.
+/// Its parent must already exist inside the root; an existing symlink or
+/// non-folder at `path` is refused.
+pub fn ensure_dir_in(root: &Path, path: &str) -> Result<PathBuf> {
+    let dir = resolve_for_write(root, path)?;
+    if is_symlink(&dir) {
+        return Err(StorageError {
+            kind: "symlink",
+            message: format!("Refusing to use a symbolic link as a folder: {}", dir.display()),
+        });
+    }
+    match fs::create_dir(&dir) {
+        Ok(()) => Ok(dir),
+        Err(e) if e.kind() == ErrorKind::AlreadyExists && dir.is_dir() => Ok(dir),
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+            Err(StorageError::invalid(format!("Not a folder: {}", dir.display())))
+        }
+        Err(e) => Err(StorageError::io(&dir, e)),
+    }
+}
+
+/// Delete the file `path` inside `root`. A symlink is removed itself (its
+/// target is never touched). Returns false if there was nothing to delete.
+pub fn remove_file_in(root: &Path, path: &str) -> Result<bool> {
+    let p = match resolve_for_write(root, path) {
+        Ok(p) => p,
+        // The parent folder does not exist, so neither does the file.
+        Err(e) if e.kind == "not_found" => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    match fs::symlink_metadata(&p) {
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(StorageError::io(&p, e)),
+        Ok(m) if m.is_dir() => return Err(StorageError::invalid(format!("Not a file: {}", p.display()))),
+        Ok(_) => {}
+    }
+    match fs::remove_file(&p) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(StorageError::io(&p, e)),
+    }
+}
+
+/// Create a subfolder (e.g. `.recovery`) inside the open project folder if needed.
+#[tauri::command]
+pub fn storage_ensure_dir(state: State<'_, ProjectRoot>, path: String) -> Result<()> {
+    let root = current_root(&state)?;
+    ensure_dir_in(&root, &path).map(|_| ())
+}
+
+/// Delete a file inside the open project folder (e.g. crash-recovery data).
+#[tauri::command]
+pub fn storage_remove_file(state: State<'_, ProjectRoot>, path: String) -> Result<bool> {
+    let root = current_root(&state)?;
+    remove_file_in(&root, &path)
 }
 
 /// True when `path` is an existing file or folder (read-only existence check).
@@ -730,6 +815,90 @@ mod tests {
         fs::write(&p, "{not json").unwrap();
         assert_eq!(load_recent(&p).unwrap(), RecentFile::default());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ensure_dir_creates_confined_subfolder_idempotently() {
+        let base = temp_dir("ensure-dir");
+        fs::create_dir_all(base.join("project")).unwrap();
+        let root = canonical_root(&s(base.join("project"))).unwrap();
+        let rec = root.join(".recovery");
+        ensure_dir_in(&root, &s(rec.clone())).unwrap();
+        assert!(rec.is_dir());
+        ensure_dir_in(&root, &s(rec.clone())).unwrap();
+        // The recovery file can now be written atomically inside it.
+        let target = resolve_for_write(&root, &s(rec.join("manuscript.json"))).unwrap();
+        write_atomic(&target, b"{}").unwrap();
+        assert_eq!(
+            ensure_dir_in(&root, &s(base.join("outside"))).unwrap_err().kind,
+            "outside_project"
+        );
+        assert!(!base.join("outside").exists());
+        assert_eq!(ensure_dir_in(&root, &s(root.join("a").join("b"))).unwrap_err().kind, "not_found");
+        fs::write(root.join("file"), "x").unwrap();
+        assert_eq!(ensure_dir_in(&root, &s(root.join("file"))).unwrap_err().kind, "invalid_path");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn remove_file_is_confined_and_idempotent() {
+        let base = temp_dir("remove");
+        fs::create_dir_all(base.join("project").join(".recovery")).unwrap();
+        let root = canonical_root(&s(base.join("project"))).unwrap();
+        let f = root.join(".recovery").join("manuscript.json");
+        fs::write(&f, "{}").unwrap();
+        assert!(remove_file_in(&root, &s(f.clone())).unwrap());
+        assert!(!f.exists());
+        assert!(!remove_file_in(&root, &s(f.clone())).unwrap());
+        assert!(!remove_file_in(&root, &s(root.join("nodir").join("x.json"))).unwrap());
+        fs::write(base.join("secret.txt"), "s").unwrap();
+        assert_eq!(
+            remove_file_in(&root, &s(root.join("..").join("secret.txt"))).unwrap_err().kind,
+            "outside_project"
+        );
+        assert!(base.join("secret.txt").exists());
+        assert_eq!(remove_file_in(&root, &s(root.join(".recovery"))).unwrap_err().kind, "invalid_path");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn remove_file_deletes_a_symlink_not_its_target() {
+        let base = temp_dir("remove-link");
+        fs::create_dir_all(base.join("project")).unwrap();
+        let root = canonical_root(&s(base.join("project"))).unwrap();
+        let victim = base.join("victim.txt");
+        fs::write(&victim, "precious").unwrap();
+        let link = root.join("manuscript.json");
+        if !try_symlink(&victim, &link) {
+            eprintln!("skipping: cannot create symlinks here");
+            fs::remove_dir_all(base).unwrap();
+            return;
+        }
+        assert!(remove_file_in(&root, &s(link.clone())).unwrap());
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "precious");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn io_errors_map_to_friendly_kinds() {
+        use std::io::Error;
+        assert_eq!(io_error_kind(&Error::from(ErrorKind::NotFound)), "not_found");
+        assert_eq!(io_error_kind(&Error::from(ErrorKind::StorageFull)), "disk_full");
+        assert_eq!(io_error_kind(&Error::from(ErrorKind::ReadOnlyFilesystem)), "read_only");
+        assert_eq!(io_error_kind(&Error::from(ErrorKind::PermissionDenied)), "permission_denied");
+        assert_eq!(io_error_kind(&Error::from(ErrorKind::Other)), "io");
+        #[cfg(windows)]
+        {
+            assert_eq!(io_error_kind(&Error::from_raw_os_error(112)), "disk_full");
+            assert_eq!(io_error_kind(&Error::from_raw_os_error(5)), "permission_denied");
+            assert_eq!(io_error_kind(&Error::from_raw_os_error(19)), "read_only");
+        }
+        #[cfg(unix)]
+        {
+            assert_eq!(io_error_kind(&Error::from_raw_os_error(28)), "disk_full");
+            assert_eq!(io_error_kind(&Error::from_raw_os_error(30)), "read_only");
+            assert_eq!(io_error_kind(&Error::from_raw_os_error(13)), "permission_denied");
+        }
     }
 
     #[test]

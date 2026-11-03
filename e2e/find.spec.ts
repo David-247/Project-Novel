@@ -44,7 +44,10 @@ test('find & replace: count + highlights, options, replace all, single undo, red
   await panel.getByRole('checkbox', { name: 'Match case' }).uncheck()
   await expect(status).toHaveText(/of 2$/)
   await panel.getByRole('textbox', { name: 'Replace with' }).fill('dog')
-  await panel.getByRole('button', { name: 'Replace all' }).click()
+  // Keyboard activation: the button becomes disabled, focus must stay in the panel.
+  await panel.getByRole('button', { name: 'Replace all' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(find).toBeFocused()
   await expect(status).toHaveText('Replaced 2')
   const replaced = 'The dog sat. A dog ran; the category of cats hid.'
   await expect(editor).toHaveText(replaced)
@@ -81,4 +84,28 @@ test('find panel stays below the toolbar and fits a narrow window', async ({ pag
   const box = await panel.boundingBox()
   expect(box && header && box.y >= header.y + header.height).toBe(true)
   expect(box && box.x >= 0 && box.x + box.width <= 380).toBe(true)
+})
+
+test('the open find panel does not cover the first line of text', async ({ page }) => {
+  for (const width of [1200, 380]) {
+    await page.setViewportSize({ width, height: 700 })
+    await page.goto('/')
+    const editor = page.getByRole('textbox', { name: 'Manuscript' })
+    await editor.click()
+    await page.keyboard.type('The cat sat on the mat with another cat beside the window.')
+    await page.keyboard.press('ControlOrMeta+f')
+    const panel = page.getByRole('region', { name: 'Find and replace' })
+    await expect(panel).toBeVisible()
+    // At the top of the document (the editor region may have scrolled to keep the caret visible).
+    await page.getByRole('main', { name: 'Editor' }).evaluate((m) => m.scrollTo(0, 0))
+    await expect
+      .poll(async () => {
+        const p = await panel.boundingBox()
+        const line = await editor.locator('p').first().boundingBox()
+        return !!p && !!line && line.y >= p.y + p.height
+      })
+      .toBe(true)
+    await page.keyboard.press('Escape')
+    await expect(panel).toHaveCount(0)
+  }
 })

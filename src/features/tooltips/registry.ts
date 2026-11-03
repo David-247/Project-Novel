@@ -6,7 +6,7 @@
  * public control metadata (TOOLBAR_CONTROLS / HISTORY_CONTROLS / FIND_CONTROLS), which also gives the
  * controls their accessible names, so name, tooltip title and shortcut can never drift apart. This
  * file adds the one-line descriptions. Controls owned by no slice in this tree (native menu, crash
- * recovery dialog) carry their full copy here.
+ * recovery dialogs, dialog close) carry their full copy here.
  *
  * Shortcut specs use Tiptap notation ("Mod" = Cmd on macOS, Ctrl elsewhere) and are rendered per
  * platform by the shared Tooltip.
@@ -91,16 +91,40 @@ export const NATIVE_MENU_TOOLTIPS: Record<string, TooltipCopy> = {
   },
 }
 
-/** Crash-recovery dialog (autosave ticket). Registered ahead so its buttons are covered on merge. */
+/**
+ * Crash-recovery dialogs (storage slice, RecoveryDialog). Titles match the button labels; the
+ * close (X) buttons get their own ids because their accessible names differ per dialog.
+ */
 const RECOVERY_TOOLTIPS: Record<string, TooltipCopy> = {
   'recovery.restore': {
     title: 'Restore',
-    description: 'Bring back the work recovered from the last session.',
+    description: 'Load the automatic backup, which is newer than your last save.',
   },
   'recovery.discard': {
-    title: 'Discard',
-    description: 'Throw away the recovered work and keep the last saved version.',
+    title: 'Discard Backup',
+    description: 'Delete the backup and keep the last saved version.',
   },
+  'recovery.decideLater': {
+    title: 'Decide later',
+    description: 'Close without choosing. The backup is kept and offered again next time.',
+  },
+  'recovery.reopen': {
+    title: 'Reopen Project',
+    description: 'Open the project that closed unexpectedly so you can recover its changes.',
+  },
+  'recovery.dismiss': {
+    title: 'Not Now',
+    description: 'Skip for now. The backup is kept and offered again next time.',
+  },
+  'recovery.reopenClose': {
+    title: 'Not now',
+    description: 'Close without reopening. The backup is kept and offered again next time.',
+  },
+}
+
+/** Fallback for the close (X) button of a dialog that does not name its own id. */
+const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
+  'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
 }
 
 export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.freeze({
@@ -109,6 +133,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
   ...NATIVE_MENU_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
+  ...DIALOG_TOOLTIPS,
 })
 
 /** Lookup for `<TooltipProvider lookup={getTooltipCopy}>`. */
