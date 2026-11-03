@@ -15,6 +15,7 @@
  * and folder picker through `window.__nvE2E` (see e2e/helpers.ts).
  */
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
+import { autosaveNow } from '@/features/storage'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
 
@@ -141,6 +142,8 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
         .map((p) => `${p.reason}: ${p.label}`),
     /** Number of controls the audit inspected (to prove it saw the UI). */
     countControls: () => document.body.querySelectorAll(CONTROL_SELECTOR).length,
+    /** Take a crash-recovery snapshot now, as the 30 s autosave timer would (perf: autosave mid-typing). */
+    autosaveNow: () => autosaveNow(),
   }
 }
 

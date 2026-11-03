@@ -1,14 +1,16 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { expect, test } from '@playwright/test'
-import { editor, launch, openRecent, saveStatus, seedProject } from './helpers'
+import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { editor, launch, openRecent, readFile, saveStatus, seedProject } from './helpers'
 
 /**
  * Performance budget on a 100,000-word manuscript, in real browser engines
  * (chromium ~ WebView2, webkit ~ WKWebView):
  *  - typing latency: keydown -> next animation frame -> after that frame (input-to-paint),
  *    median < 50 ms over 40 measured keystrokes (5 warm-up keystrokes discarded); p95 reported;
- *  - Replace All of a common word: click -> "Replaced N" shown and painted, < 2 s.
- * Numbers are written to perf-results/perf-<browser>.json (CI artifact) and attached to the report.
+ *  - Replace All of a common word: click -> "Replaced N" shown and painted, < 2 s;
+ *  - combined hot path: typing with the find panel open on "the" (10,000 live matches) while an
+ *    autosave snapshot is forced mid-typing; median < 50 ms; p95 reported, not asserted.
+ * Numbers are written to perf-results/*.json (CI artifact + job summary) and attached to the report.
  */
 
 const WORDS = 100_000
@@ -19,6 +21,9 @@ const VOCAB = [
 ]
 /** Every 10th word is "the": 10,000 occurrences to replace. */
 const THE_EVERY = 10
+const WARMUP = 5
+const MEASURED = 40
+const TYPED = 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do'.slice(0, WARMUP + MEASURED)
 
 function buildManuscript() {
   let n = 0
@@ -47,21 +52,21 @@ function buildManuscript() {
 
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]
 
-test('100k-word manuscript: typing latency and Replace All stay within budget', async ({ page, browserName }, testInfo) => {
-  test.setTimeout(180_000)
-  const { doc, words, the } = buildManuscript()
-  expect(words).toBe(WORDS)
-
+/** Launch, open the 100k-word project from Open Recent; returns the open time. */
+async function openEpic(page: Page, folder: string, doc: unknown): Promise<number> {
   await launch(page)
-  await seedProject(page, '/projects/Epic', 'Epic', doc)
+  const title = folder.split('/').pop()!
+  await seedProject(page, folder, title, doc)
   const openStart = Date.now()
-  await openRecent(page, '/projects/Epic')
-  await expect(saveStatus(page)).toHaveText('Epic: All changes saved', { timeout: 60_000 })
+  await openRecent(page, folder)
+  await expect(saveStatus(page)).toHaveText(`${title}: All changes saved`, { timeout: 60_000 })
   const openMs = Date.now() - openStart
-  const ed = editor(page)
-  await expect(ed.locator('p, h2')).toHaveCount(WORDS / WORDS_PER_PARAGRAPH)
+  await expect(editor(page).locator('p, h2')).toHaveCount(WORDS / WORDS_PER_PARAGRAPH)
+  return openMs
+}
 
-  // ---- Typing latency (input-to-paint) in the middle of the manuscript.
+/** Input-to-paint probe: keydown -> next animation frame -> a task after that frame. */
+async function installLatencyProbe(page: Page) {
   await page.evaluate(() => {
     const w = window as unknown as { __perf: number[] }
     w.__perf = []
@@ -81,35 +86,67 @@ test('100k-word manuscript: typing latency and Replace All stay within budget', 
       true,
     )
   })
+}
+
+/**
+ * Put the caret at the end of paragraph 500 (mid-manuscript), type WARMUP + MEASURED characters one
+ * at a time (each waits for its own paint), and summarize the measured ones. `beforeKey(i)` runs just
+ * before keystroke i.
+ */
+async function measureTyping(page: Page, beforeKey?: (i: number) => Promise<void>) {
+  const ed = editor(page)
   await ed.locator('p').nth(500).click()
   await page.keyboard.press('End')
   await page.waitForFunction(() => (window as unknown as { __perf: number[] }).__perf.length >= 1)
   await page.evaluate(() => ((window as unknown as { __perf: number[] }).__perf = []))
-  const WARMUP = 5
-  const MEASURED = 40
-  const typed = 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do'.slice(0, WARMUP + MEASURED)
-  for (const [i, ch] of [...typed].entries()) {
+  for (const [i, ch] of [...TYPED].entries()) {
+    await beforeKey?.(i)
     await page.keyboard.press(ch === ' ' ? 'Space' : ch)
     await page.waitForFunction((k) => (window as unknown as { __perf: number[] }).__perf.length >= k, i + 1)
   }
   const all = await page.evaluate(() => (window as unknown as { __perf: number[] }).__perf)
   const samples = all.slice(WARMUP)
   const sorted = [...samples].sort((a, b) => a - b)
-  const typing = {
+  await expect(ed.locator('p').nth(500)).toContainText(TYPED)
+  return {
     keystrokes: samples.length,
     medianMs: +pct(sorted, 50).toFixed(2),
     p95Ms: +pct(sorted, 95).toFixed(2),
     maxMs: +sorted[sorted.length - 1].toFixed(2),
   }
-  await expect(ed.locator('p').nth(500)).toContainText(typed)
+}
 
-  // ---- Replace All of a common word.
+async function report(testInfo: TestInfo, name: string, result: Record<string, unknown>) {
+  const full = { scenario: name, browser: testInfo.project.name, platform: process.platform, ...result, measuredAt: new Date().toISOString() }
+  console.info(`[perf] ${JSON.stringify(full)}`)
+  mkdirSync('perf-results', { recursive: true })
+  writeFileSync(`perf-results/${name}-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(full, null, 2))
+  await testInfo.attach(`${name}.json`, { body: JSON.stringify(full, null, 2), contentType: 'application/json' })
+}
+
+const findPanel = (page: Page) => page.getByRole('region', { name: 'Find and replace' })
+
+/** Open the find panel on whole-word "the" and wait until all `the` matches are counted. */
+async function findThe(page: Page, the: number) {
   await page.keyboard.press('ControlOrMeta+f')
-  const panel = page.getByRole('region', { name: 'Find and replace' })
+  const panel = findPanel(page)
   await panel.getByRole('checkbox', { name: 'Whole word' }).check()
   await panel.getByRole('textbox', { name: 'Find' }).fill('the')
   await expect(page.getByTestId('find-status')).toHaveText(new RegExp(` of ${the}$`), { timeout: 30_000 })
-  await panel.getByRole('textbox', { name: 'Replace with' }).fill('a')
+}
+
+test('100k-word manuscript: typing latency and Replace All stay within budget', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const { doc, words, the } = buildManuscript()
+  expect(words).toBe(WORDS)
+
+  const openMs = await openEpic(page, '/projects/Epic', doc)
+  await installLatencyProbe(page)
+  const typing = await measureTyping(page)
+
+  // ---- Replace All of a common word.
+  await findThe(page, the)
+  await findPanel(page).getByRole('textbox', { name: 'Replace with' }).fill('a')
   const replaceAllMs = await page.evaluate(async () => {
     const btn = document.querySelector<HTMLButtonElement>('[data-control-id="find.replaceAll"]')!
     const status = document.querySelector('[data-testid="find-status"]')!
@@ -124,25 +161,58 @@ test('100k-word manuscript: typing latency and Replace All stay within budget', 
     return performance.now() - t0
   })
   await expect(page.getByTestId('find-status')).toHaveText(`Replaced ${the}`)
-  const text = await ed.innerText()
+  const text = await editor(page).innerText()
   expect(text).not.toMatch(/\bthe\b/)
 
-  const result = {
-    browser: browserName,
-    platform: process.platform,
+  await report(testInfo, 'perf', {
     manuscript: { words, blocks: doc.content.length, occurrencesReplaced: the },
     openMs,
     typing,
     replaceAllMs: +replaceAllMs.toFixed(1),
     budgets: { typingMedianMs: 50, replaceAllMs: 2000 },
-    measuredAt: new Date().toISOString(),
-  }
-  console.info(`[perf] ${JSON.stringify(result)}`)
-  mkdirSync('perf-results', { recursive: true })
-  writeFileSync(`perf-results/perf-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(result, null, 2))
-  await testInfo.attach('perf.json', { body: JSON.stringify(result, null, 2), contentType: 'application/json' })
+  })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
   expect(typing.medianMs).toBeLessThan(50)
   expect(replaceAllMs).toBeLessThan(2000)
+})
+
+test('100k-word manuscript, combined hot path: find panel open on "the" + autosave mid-typing', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const { doc, words, the } = buildManuscript()
+  const folder = '/projects/Hot'
+  const openMs = await openEpic(page, folder, doc)
+
+  // 10,000 live matches highlighted while typing.
+  await findThe(page, the)
+  await installLatencyProbe(page)
+
+  // Halfway through the measured keystrokes, force an autosave snapshot (serializes the whole
+  // document) without waiting for it, so it competes with the next keystrokes like the 30 s timer.
+  const autosaveAt = WARMUP + Math.floor(MEASURED / 2)
+  const typing = await measureTyping(page, async (i) => {
+    if (i === autosaveAt) {
+      await page.evaluate(() => {
+        void window.__nvE2E.autosaveNow()
+      })
+    }
+  })
+
+  // The panel stayed open and still counts the matches; the snapshot really was written.
+  await expect(findPanel(page)).toBeVisible()
+  await expect(page.getByTestId('find-status')).toHaveText(new RegExp(` of ${the}$`))
+  await expect.poll(() => readFile(page, `${folder}/.recovery/manuscript.json`)).not.toBeNull()
+  const snapshot = JSON.parse((await readFile(page, `${folder}/.recovery/manuscript.json`))!)
+  expect(JSON.stringify(snapshot.doc)).toContain(TYPED.slice(0, autosaveAt))
+
+  await report(testInfo, 'perf-hotpath', {
+    manuscript: { words, blocks: doc.content.length, liveMatches: the },
+    openMs,
+    autosaveForcedBeforeKeystroke: autosaveAt + 1,
+    typing,
+    budgets: { typingMedianMs: 50 },
+  })
+
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  expect(typing.medianMs).toBeLessThan(50)
 })
