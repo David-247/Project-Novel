@@ -1,0 +1,12 @@
+@import 'tailwindcss';
+/* Design tokens + light/dark themes (data-theme on <html>, see src/shared/theme). */
+@import './shared/theme/tokens.css';
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+}

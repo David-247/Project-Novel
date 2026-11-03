@@ -1,0 +1,20 @@
+/* Find highlights (decorations from find/plugin.ts). Built from theme tokens so they follow
+   light/dark. Matches get a translucent warning-tone wash; the current match additionally gets
+   a solid accent outline, so "current" is not conveyed by colour alone. Text colour is
+   unchanged, and the washes are light enough to keep body text above 4.5:1 in both themes. */
+.nv-find-match {
+  background-color: color-mix(in srgb, var(--nv-warning) 22%, transparent);
+  border-radius: 2px;
+}
+.nv-find-match-current {
+  background-color: color-mix(in srgb, var(--nv-warning) 38%, transparent);
+  outline: 2px solid var(--nv-accent);
+  outline-offset: 0;
+  border-radius: 2px;
+}
+
+/* While the floating find panel is open, keep the first lines of text out from under it
+   (height published by FindReplacePanel). Only grows the existing top padding. */
+:root[data-find-open] .novel-writing-surface {
+  padding-top: max(2.5rem, calc(var(--nv-find-panel-height, 0px) + 1.5rem));
+}
