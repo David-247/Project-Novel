@@ -45,6 +45,11 @@ Use it with `useStore((s) => s.foo.x)` and `useStore.getState().fooActions.doThi
 
 `<AppShell toolbar={...} editor={...} statusBar={...} />` from `@/features/app-shell` is a slot-based layout; other slices plug in via props.
 
+### Project storage
+
+Projects are plain folders (`project.json`, `manuscript.json`, `index.sqlite`); see [docs/project-format.md](docs/project-format.md).
+The storage slice talks to the editor only through the `DocumentProvider` contract in `src/shared/document.ts`.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
