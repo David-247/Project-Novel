@@ -19,6 +19,8 @@ pub fn run() {
             storage::storage_write_file_atomic,
             storage::storage_read_text_file,
             storage::storage_path_exists,
+            storage::storage_ensure_dir,
+            storage::storage_remove_file,
             storage::storage_read_recent,
             storage::storage_remember_recent,
             storage::storage_set_recent_menu,

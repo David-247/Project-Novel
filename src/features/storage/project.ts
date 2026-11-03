@@ -29,7 +29,16 @@ import {
   writeFileAtomic,
 } from './ipc'
 import { flagMissing, parseRecentFile } from './recent'
+import {
+  deleteRecoveryFile,
+  parseRecovery,
+  readRecoveryFile,
+  recoveryFilePath,
+  suppressSnapshotsAt,
+  type RecoverySnapshot,
+} from './recovery'
 import type { RevisionKind } from './schema'
+import { withWriteLock } from './write-lock'
 
 export interface OpenedProject {
   path: string
@@ -43,6 +52,8 @@ let currentMeta: ProjectMeta | null = null
 let currentIndex: ProjectIndex | null = null
 let inFlightSave: Promise<boolean> | null = null
 let lastSaveDoneAt = 0
+/** Recovery snapshot found when the open project was opened, awaiting Restore / Discard. */
+let pendingRecovery: { folder: string; snapshot: RecoverySnapshot } | null = null
 const openedListeners = new Set<(p: OpenedProject) => void>()
 
 /** The registered editor; storage cannot work without one. */
@@ -105,6 +116,8 @@ async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex |
   currentMeta = meta
   currentIndex = index
   lastSaveDoneAt = 0
+  pendingRecovery = null
+  suppressSnapshotsAt(null)
   actions().projectOpened({ path: folder, title: meta.title })
   openedListeners.forEach((cb) => cb({ path: folder, meta }))
   await rememberRecent(meta.title)
@@ -160,6 +173,7 @@ export async function openProjectAt(folder: string): Promise<void> {
   loadDocument(p, parseManuscript(docText))
   const index = await openIndexSafely(folder)
   await activate(folder, meta, index)
+  await detectRecovery(folder, meta, docText)
 }
 
 /**
@@ -207,6 +221,11 @@ export function saveProject(opts: SaveOptions = {}): Promise<boolean> {
   return inFlightSave
 }
 
+/** True while a save of the project is in progress (or queued behind a snapshot). */
+export function isSaveInFlight(): boolean {
+  return inFlightSave !== null
+}
+
 async function writeProject(
   folder: string,
   meta: ProjectMeta,
@@ -216,14 +235,20 @@ async function writeProject(
 ): Promise<boolean> {
   actions().saveStarted()
   try {
-    // Version read before the doc: edits made during the async write keep the doc dirty.
+    // The content is taken when Save is requested. Version read before the doc:
+    // edits made during the async write keep the doc dirty.
     const version = p.getDocVersion()
     const text = serializeManuscript(p.getDocJSON())
-    await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), text, MANUSCRIPT_FILE)
-    const updated: ProjectMeta = { ...meta, updatedAt: new Date().toISOString() }
-    await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
-    if (currentMeta === meta) currentMeta = updated
-    p.markClean(version)
+    // The write lock keeps this from overlapping an autosave snapshot.
+    await withWriteLock(async () => {
+      await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), text, MANUSCRIPT_FILE)
+      const updated: ProjectMeta = { ...meta, updatedAt: new Date().toISOString() }
+      await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
+      if (currentMeta === meta) currentMeta = updated
+      p.markClean(version)
+      // A clean save makes any crash-recovery snapshot obsolete.
+      if (!p.isDirty()) await clearRecoveryUnlocked(folder)
+    })
     if (currentIndex) {
       const byteSize = new TextEncoder().encode(text).length
       await recordRevision(currentIndex, { kind, byteSize, path: MANUSCRIPT_FILE }).catch((e) =>
@@ -264,6 +289,7 @@ export async function confirmUnsavedChanges(action = 'continuing'): Promise<bool
   try {
     const choice = await askUnsavedChanges(useStore.getState().project.title, action)
     if (choice === 'save') return await saveProject()
+    if (choice === 'discard') await discardUnsavedForRecovery(p)
     return choice === 'discard'
   } catch (e) {
     console.error('Unsaved-changes prompt failed:', e)
@@ -316,7 +342,126 @@ export async function closeProject(): Promise<void> {
   await clearProjectRoot()
   currentMeta = null
   lastSaveDoneAt = 0
+  pendingRecovery = null
   actions().projectClosed()
+}
+
+// ---- Crash recovery ---------------------------------------------------------
+
+/** Delete recovery data of `folder`; never throws. Caller holds the write lock. */
+async function clearRecoveryUnlocked(folder: string): Promise<void> {
+  try {
+    await deleteRecoveryFile(folder)
+  } catch (e) {
+    // A stale snapshot is harmless: it is older than project.json's updatedAt, so it is never offered.
+    console.warn('Deleting recovery data failed:', e)
+  }
+  if (pendingRecovery?.folder === folder) pendingRecovery = null
+  if (getCurrentProjectPath() === folder) actions().backupCleared()
+}
+
+/**
+ * Delete the open project's crash-recovery data (after a clean quit, or when
+ * the user chose "Don't Save"). Waits for any in-flight write. Never throws.
+ */
+export function clearRecoveryData(): Promise<void> {
+  const folder = getCurrentProjectPath()
+  if (!folder) return Promise.resolve()
+  return withWriteLock(() => clearRecoveryUnlocked(folder))
+}
+
+/** "Don't Save": drop recovery data and do not snapshot the discarded content again. */
+async function discardUnsavedForRecovery(p: DocumentProvider): Promise<void> {
+  suppressSnapshotsAt(p.getDocVersion())
+  await clearRecoveryData()
+}
+
+/**
+ * After opening `folder`: if `.recovery/manuscript.json` is newer than the last
+ * save (project.json `updatedAt`) and differs from manuscript.json, ask the
+ * user to Restore or Discard it. A stale or identical snapshot is deleted.
+ * Never throws: recovery must not stop a project from opening.
+ */
+async function detectRecovery(folder: string, meta: ProjectMeta, manuscriptText: string): Promise<void> {
+  try {
+    const text = await readRecoveryFile(folder)
+    if (text === null) return
+    const snapshot = parseRecovery(text)
+    if (!snapshot) {
+      console.warn('Ignoring unreadable recovery data in', recoveryFilePath(folder))
+      return
+    }
+    const newer = Date.parse(snapshot.savedAt) > Date.parse(meta.updatedAt)
+    if (!newer || serializeManuscript(snapshot.doc) === manuscriptText) {
+      await withWriteLock(() => clearRecoveryUnlocked(folder))
+      return
+    }
+    pendingRecovery = { folder, snapshot }
+    actions().showRecoveryPrompt({ kind: 'restore', savedAt: snapshot.savedAt })
+  } catch (e) {
+    console.warn('Checking for recovery data failed:', e)
+  }
+}
+
+/**
+ * Restore: load the snapshot into the editor and leave it unsaved (the user
+ * decides whether to save it). The recovery file is kept until then, so a
+ * second crash still recovers it.
+ */
+export async function restoreRecovery(): Promise<boolean> {
+  const pending = pendingRecovery
+  actions().dismissRecoveryPrompt()
+  if (!pending || pending.folder !== getCurrentProjectPath()) return false
+  try {
+    const p = provider()
+    loadDocument(p, pending.snapshot.doc)
+    if (p.markDirty) p.markDirty()
+    else {
+      const { editor, editorActions } = useStore.getState()
+      editorActions.docChanged(editor.isEmpty)
+    }
+    pendingRecovery = null
+    return true
+  } catch (e) {
+    await showError(
+      'Could not restore',
+      e instanceof ProjectError && e.code === 'corrupt-file'
+        ? new ProjectError('corrupt-file', 'The backup copy contains content Novel cannot display, so it was not restored.')
+        : e,
+    )
+    return false
+  }
+}
+
+/** True while a recovery snapshot found on open has not been restored or discarded. */
+export function hasPendingRecovery(): boolean {
+  return pendingRecovery !== null && pendingRecovery.folder === getCurrentProjectPath()
+}
+
+/** Discard: delete the snapshot and keep the manuscript as saved. */
+export async function discardRecovery(): Promise<void> {
+  const pending = pendingRecovery
+  actions().dismissRecoveryPrompt()
+  pendingRecovery = null
+  if (pending && pending.folder === getCurrentProjectPath()) {
+    await withWriteLock(() => clearRecoveryUnlocked(pending.folder))
+  }
+}
+
+/**
+ * At startup (no project open yet): if the most recent project has recovery
+ * data left by a crash, offer to reopen it. Never throws.
+ */
+export async function offerReopenAfterCrash(recent: RecentProject[]): Promise<void> {
+  try {
+    const last = recent[0]
+    if (!last || last.missing || getCurrentProjectPath()) return
+    if (!(await pathExists(recoveryFilePath(last.path)))) return
+    if (getCurrentProjectPath() || useStore.getState().project.recoveryPrompt) return
+    actions().showRecoveryPrompt({ kind: 'reopen', path: last.path, name: last.name })
+  } catch (e) {
+    console.warn('Checking the last project for recovery data failed:', e)
+  }
 }
 
 // ---- Recent projects (file written only by Rust) ---------------------------
@@ -364,5 +509,7 @@ export async function __resetStorageForTests(): Promise<void> {
   currentMeta = null
   inFlightSave = null
   lastSaveDoneAt = 0
+  pendingRecovery = null
+  suppressSnapshotsAt(null)
   openedListeners.clear()
 }
