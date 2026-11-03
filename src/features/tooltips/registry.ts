@@ -13,6 +13,7 @@
  */
 import { FIND_CONTROLS, HISTORY_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import type { ToolbarControlMeta } from '@/features/editor'
+import { SURFACE_CONTROLS } from '@/shared/theme'
 import type { TooltipCopy } from '@/shared/ui'
 
 function fromMeta<K extends string>(
@@ -62,6 +63,30 @@ const FIND_DESCRIPTIONS: Record<keyof typeof FIND_CONTROLS, string> = {
   replaceAll: 'Replace every match at once. One undo puts them all back.',
   caseSensitive: 'Only find matches with the same capital letters.',
   wholeWord: 'Only find whole words, not parts of longer words.',
+}
+
+/** Paper surface picker (shared/theme SurfacePicker); titles come from SURFACE_CONTROLS. */
+const SURFACE_TOOLTIPS: Record<string, TooltipCopy> = {
+  [SURFACE_CONTROLS.group.id]: {
+    title: SURFACE_CONTROLS.group.label,
+    description: 'What the page looks like: Auto, Book, White or Dark paper.',
+  },
+  [SURFACE_CONTROLS.auto.id]: {
+    title: SURFACE_CONTROLS.auto.label,
+    description: 'White paper in light mode, dark paper in dark mode. Follows your computer.',
+  },
+  [SURFACE_CONTROLS.book.id]: {
+    title: SURFACE_CONTROLS.book.label,
+    description: 'Cream paper with a shaded spine, like an open printed book.',
+  },
+  [SURFACE_CONTROLS.white.id]: {
+    title: SURFACE_CONTROLS.white.label,
+    description: 'Plain white paper on a grey desk, like a word processor.',
+  },
+  [SURFACE_CONTROLS.dark.id]: {
+    title: SURFACE_CONTROLS.dark.label,
+    description: 'Dark paper with light text, easy on the eyes at night.',
+  },
 }
 
 /**
@@ -136,6 +161,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...fromMeta(TOOLBAR_CONTROLS, TOOLBAR_DESCRIPTIONS),
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
+  ...SURFACE_TOOLTIPS,
   ...FILE_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,

@@ -8,10 +8,14 @@
   white-space: pre-wrap;
   word-wrap: break-word;
 }
+/* The continuous editor is one long page lying on the desk (paper colours: shared/theme/surfaces.css). */
+.novel-writing-surface {
+  max-width: min(72ch, calc(100% - 1rem));
+  margin: 1.5rem auto;
+}
 .novel-writing-surface:focus-within {
-  outline: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  outline: 2px solid var(--page-focus-ring);
   outline-offset: 4px;
-  border-radius: 4px;
 }
 .novel-writing-surface .novel-editor-content p {
   margin: 0 0 0.75em;
