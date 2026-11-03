@@ -8,6 +8,7 @@ import {
   listSystemFonts,
   NovelEditor,
   primaryFontFamily,
+  setDocJSON,
   SYSTEM_FONT_STACK,
 } from './index'
 import { installLayoutPolyfills } from './jsdom-polyfills.test-util'
@@ -88,5 +89,35 @@ describe('FontFamilyPicker', () => {
       fireEvent.change(select, { target: { value: '' } })
     })
     expect(ed.getJSON().content![0].content![0].marks).toBeUndefined()
+  })
+
+  it('re-reads the font after setDocJSON loads a document', async () => {
+    render(
+      <>
+        <FontFamilyPicker loadFonts={fakeFonts} />
+        <NovelEditor />
+      </>,
+    )
+    const select = screen.getByRole('combobox', { name: 'Font' })
+    await screen.findByRole('option', { name: 'Georgia' })
+    expect(select).toHaveValue('')
+    act(() => {
+      setDocJSON({
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Styled', marks: [{ type: 'textStyle', attrs: { fontFamily: fontFamilyCss('Georgia') } }] },
+            ],
+          },
+        ],
+      })
+    })
+    await waitFor(() => expect(select).toHaveValue('Georgia'))
+    act(() => {
+      setDocJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
+    })
+    await waitFor(() => expect(select).toHaveValue(''))
   })
 })

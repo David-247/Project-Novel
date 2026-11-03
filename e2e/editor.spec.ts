@@ -27,13 +27,19 @@ test('100k-word paste stays responsive', async ({ page }) => {
   console.info(`[perf] chromium 100k-word paste dispatch: ${pasteMs.toFixed(0)} ms`)
   await expect(editor.locator('p')).toHaveCount(1000)
 
-  // Next keystroke latency after the paste (event -> DOM updated).
+  // Keystroke latency after the paste (input -> DOM updated -> next frame), median of 5.
   const keyMs = await page.evaluate(async () => {
-    const t0 = performance.now()
-    document.execCommand('insertText', false, 'x')
-    await new Promise((r) => requestAnimationFrame(() => r(null)))
-    return performance.now() - t0
+    const samples: number[] = []
+    for (let i = 0; i < 5; i++) {
+      const t0 = performance.now()
+      document.execCommand('insertText', false, 'x')
+      await new Promise((r) => requestAnimationFrame(() => r(null)))
+      samples.push(performance.now() - t0)
+    }
+    samples.sort((a, b) => a - b)
+    return samples[2]
   })
-  console.info(`[perf] chromium keystroke after paste: ${keyMs.toFixed(1)} ms`)
+  console.info(`[perf] chromium keystroke after paste (median of 5): ${keyMs.toFixed(1)} ms`)
   expect(pasteMs).toBeLessThan(5000)
+  expect(keyMs).toBeLessThan(50)
 })
