@@ -13,6 +13,7 @@
  */
 import { FIND_CONTROLS, HISTORY_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import type { ToolbarControlMeta } from '@/features/editor'
+import { TRIM_SIZES } from '@/shared/book'
 import type { TooltipCopy } from '@/shared/ui'
 
 function fromMeta<K extends string>(
@@ -127,6 +128,20 @@ const RECOVERY_TOOLTIPS: Record<string, TooltipCopy> = {
   },
 }
 
+/** Book layout controls (book-settings slice): the trim size picker and one entry per catalog size. */
+const BOOK_TOOLTIPS: Record<string, TooltipCopy> = {
+  'book.trimSize': {
+    title: 'Trim size',
+    description: 'Page size of the printed book. Changing it reflows the whole manuscript.',
+  },
+  ...Object.fromEntries(
+    TRIM_SIZES.map((t): [string, TooltipCopy] => [
+      `book.trimSize.${t.id}`,
+      { title: `${t.label} (${t.dimensions})`, description: `Lay the book out on ${t.dimensions} pages.` },
+    ]),
+  ),
+}
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -137,6 +152,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
   ...FILE_TOOLTIPS,
+  ...BOOK_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
 })

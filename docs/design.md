@@ -157,3 +157,11 @@ Example toolbar:
 `AppShell` paints the toolbar header and status footer on `bg`, separated from the editor by a `border`
 hairline. The editor `<main>` uses `bg-surface text-text`, and that is all the shell styles there:
 document content is the editor slice's job, and paper/book surfaces and page spreads are Phase 2.
+
+## Book layout: trim size picker (Phase 2)
+
+- The picker is a Radix dropdown menu opened from a ghost toolbar button (`book.trimSize`) in its own "Book layout" toolbar group after Find. The button shows the current size as label plus dimensions and a chevron, so the current trim size is visible without opening anything.
+- The menu lists the sizes in two labelled groups, US and UK/EU, as radio items with a check mark. Each row is a label (medium weight, `text`) and its dimensions (`text-muted`); both pairs are already in `CONTRAST_PAIRS`. Rows are `min-h-control-lg` (40px) for touch, and the menu opens on press, with no hover-only behaviour.
+- Keyboard: Enter, Space or ArrowDown on the button opens the menu; arrows move, Enter selects, Escape closes and returns focus to the button. The button joins the toolbar roving focus through `ToolbarItem`.
+- Every row has its own `data-control-id` (`book.trimSize.<id>`), registry entry and tooltip (opened on the right), so the coverage audit also passes with the menu open.
+- Changing the size also moves the margins to the new size catalog defaults, but only while the margins still equal the previous size defaults, so margins the user customised are never overwritten.

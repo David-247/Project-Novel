@@ -15,6 +15,7 @@ import {
   Toolbar,
   ToolbarItem,
 } from '@/features/editor'
+import { TrimSizePicker } from '@/features/book-settings'
 import {
   NoProjectActions,
   RecoveryDialog,
@@ -24,7 +25,7 @@ import {
 } from '@/features/storage'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
-import { ToolbarGroup, TooltipProvider } from '@/shared/ui'
+import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
 import { useThemeFollow } from '@/shared/theme'
 
 /** The editor slice, seen by storage through the shared DocumentProvider contract. */
@@ -62,11 +63,19 @@ export function App() {
                 </ToolbarGroup>
               }
               extraGroups={
-                <ToolbarGroup label="Find">
-                  <ToolbarItem>
-                    <FindButton />
-                  </ToolbarItem>
-                </ToolbarGroup>
+                <>
+                  <ToolbarGroup label="Find">
+                    <ToolbarItem>
+                      <FindButton />
+                    </ToolbarItem>
+                  </ToolbarGroup>
+                  <ToolbarSeparator />
+                  <ToolbarGroup label="Book layout">
+                    <ToolbarItem>
+                      <TrimSizePicker />
+                    </ToolbarItem>
+                  </ToolbarGroup>
+                </>
               }
             />
           </>

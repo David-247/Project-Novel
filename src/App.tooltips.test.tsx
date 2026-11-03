@@ -51,7 +51,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel
     // controls, and the no-project New / Open actions in the status bar).
     const expected = [...Object.values(TOOLBAR_CONTROLS), ...Object.values(HISTORY_CONTROLS), ...Object.values(FIND_CONTROLS)]
-    expect(new Set(rendered)).toEqual(new Set([...expected.map((m) => m.id), 'file.new_project', 'file.open_project']))
+    expect(new Set(rendered)).toEqual(new Set([...expected.map((m) => m.id), 'book.trimSize', 'file.new_project', 'file.open_project']))
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
   })
