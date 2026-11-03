@@ -11,7 +11,7 @@ import {
 import { useStore } from '@/shared/store'
 import { Button, cn, Dialog, Select, TextInput, Tooltip } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
-import { getStyleDefinition, ownDef, resetStyle, saveStyle } from './actions'
+import { countStyleUses, getStyleDefinition, ownDef, resetStyle, saveStyle } from './actions'
 import { STYLE_DIALOG_CONTROLS as C } from './controls'
 import type { StyleDialogControlKey } from './controls'
 import { useResolvedStyles } from './resolved'
@@ -64,6 +64,9 @@ function ModifyStyleForm({ styleId, initial, onClose, sample }: { styleId: strin
     () => Object.fromEntries(NUM_KEYS.map((k) => [k, fmtNum(initial[k])])) as Record<NumKey, string>,
   )
   const formId = useId()
+  // Blocks of a chapter style are headings and of a paragraph style paragraphs, so the kind of a
+  // style in use stays fixed (duplicate it, or move its paragraphs first). Counted once, O(document).
+  const [uses] = useState(() => (initial.builtIn ? 0 : countStyleUses(styleId)))
 
   const invalid = useMemo(() => {
     const bad = new Set<NumKey>()
@@ -121,7 +124,7 @@ function ModifyStyleForm({ styleId, initial, onClose, sample }: { styleId: strin
     onClose()
   }
 
-  const field = (key: StyleDialogControlKey, control: (p: { id: string; 'data-control-id': string }) => ReactElement, wide = false) => {
+  const field = (key: StyleDialogControlKey, control: (p: { id: string; 'data-control-id': string }) => ReactElement, wide = false, hint?: string) => {
     const id = `${formId}-${key}`
     return (
       <div className={cn('flex min-w-0 flex-col gap-1', wide && 'col-span-2')}>
@@ -129,6 +132,7 @@ function ModifyStyleForm({ styleId, initial, onClose, sample }: { styleId: strin
           {C[key].label}
         </label>
         <Tooltip>{control({ id, 'data-control-id': C[key].id })}</Tooltip>
+        {hint ? <p className="m-0 text-ui-xs text-text-muted" data-testid={`hint-${key}`}>{hint}</p> : null}
       </div>
     )
   }
@@ -181,10 +185,11 @@ function ModifyStyleForm({ styleId, initial, onClose, sample }: { styleId: strin
                   {...p}
                   wrapperClassName="w-full"
                   value={draft.kind}
+                  disabled={uses > 0}
                   options={[{ value: 'paragraph', label: 'Paragraph' }, { value: 'chapter', label: 'Chapter heading' }]}
                   onChange={(e) => set('kind', e.target.value === 'chapter' ? 'chapter' : 'paragraph')}
                 />
-              ))}
+              ), false, uses > 0 ? `Fixed while ${uses} ${uses === 1 ? 'paragraph uses' : 'paragraphs use'} this style.` : undefined)}
               {field('basedOn', (p) => (
                 <Select {...p} wrapperClassName="w-full" value={draft.basedOn ?? ''} options={[{ value: '', label: 'Nothing' }, ...basedOnOptions]} onChange={(e) => set('basedOn', e.target.value || undefined)} />
               ))}

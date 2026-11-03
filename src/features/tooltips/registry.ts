@@ -54,7 +54,7 @@ const TOOLBAR_DESCRIPTIONS: Record<keyof typeof TOOLBAR_CONTROLS, string> = {
 
 const STYLE_DIALOG_DESCRIPTIONS: Record<keyof typeof STYLE_DIALOG_CONTROLS, string> = {
   name: 'The name shown in the style list and the picker.',
-  kind: 'Chapter heading styles open chapters and parts; paragraph styles are for text.',
+  kind: 'Chapter heading or paragraph style. Locked while paragraphs use the style.',
   basedOn: 'Settings you leave empty come from this style, and follow it when it changes.',
   nextStyle: 'Style of the new paragraph when you press Enter at the end of this one.',
   fontFamily: 'Typeface name, for example Garamond. Leave empty to use the manuscript font.',
