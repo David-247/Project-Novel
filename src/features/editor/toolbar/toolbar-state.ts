@@ -1,4 +1,7 @@
 import type { Editor } from '@tiptap/core'
+import type { Mark } from '@tiptap/pm/model'
+import { Selection } from '@tiptap/pm/state'
+import type { EditorState } from '@tiptap/pm/state'
 import { primaryFontFamily } from '../fonts'
 import { inListItem } from './block-format'
 import { MAX_INDENT } from './presets'
@@ -46,32 +49,64 @@ function str(v: unknown): string {
 }
 
 /**
- * Toolbar state derived from the selection. Cost is O(selection) for marks (O(1) for a
- * caret: stored marks / `$from.marks()`) and O(depth) for block state read from the
- * selection's parent block; it never walks the document.
+ * Marks that apply at the selection, in O(1):
+ * - caret: `storedMarks ?? $from.marks()` (what the next typed character gets);
+ * - range: marks present at BOTH ends (first char after `$from`, last char before `$to`).
+ *   This deliberately does not scan the range, so a mark that is absent only in the middle
+ *   of a long selection still shows as active (toggling then applies it everywhere).
+ */
+function selectionMarks(state: EditorState): readonly Mark[] {
+  const { selection } = state
+  const { $from, $to } = selection
+  if (selection.empty) return state.storedMarks ?? $from.marks()
+  // Range ends may sit between blocks (e.g. select-all): step to the nearest text position
+  // inside the range. `findFrom` only looks at neighbouring blocks (O(depth) here).
+  const $start = $from.parent.inlineContent ? $from : (Selection.findFrom($from, 1, true)?.$from ?? $from)
+  const $end = $to.parent.inlineContent ? $to : (Selection.findFrom($to, -1, true)?.$to ?? $to)
+  const start = $start.nodeAfter?.isText ? $start.nodeAfter.marks : $start.marks()
+  const end = $end.nodeBefore?.isText ? $end.nodeBefore.marks : $end.marks()
+  return start.filter((m) => m.isInSet(end))
+}
+
+/** Innermost list type around the selection head, O(depth). */
+function innermostList(state: EditorState): string | null {
+  const { $from } = state.selection
+  for (let d = $from.depth; d > 0; d--) {
+    const name = $from.node(d).type.name
+    if (name === 'bulletList' || name === 'orderedList') return name
+  }
+  return null
+}
+
+/**
+ * Toolbar state derived from the selection in O(depth) (plus `can().sinkListItem` inside
+ * lists, also O(depth)); it never walks the document or the selected range.
  */
 export function readToolbarState(editor: Editor | null): ToolbarState {
   if (!editor || editor.isDestroyed) return IDLE_TOOLBAR_STATE
   const { state } = editor
   const block = state.selection.$from.parent
-  const textStyle = editor.getAttributes('textStyle')
+  const marks = selectionMarks(state)
+  const has = (name: string) => marks.some((m) => m.type.name === name)
+  const textStyle = marks.find((m) => m.type.name === 'textStyle')?.attrs ?? {}
+  const list = innermostList(state)
   const inList = inListItem(state)
   const indent = typeof block.attrs.indent === 'number' ? block.attrs.indent : 0
   const align = str(block.attrs.textAlign)
   return {
     ready: true,
-    bold: editor.isActive('bold'),
-    italic: editor.isActive('italic'),
-    underline: editor.isActive('underline'),
-    bulletList: editor.isActive('bulletList'),
-    orderedList: editor.isActive('orderedList'),
+    bold: has('bold'),
+    italic: has('italic'),
+    underline: has('underline'),
+    bulletList: list === 'bulletList',
+    orderedList: list === 'orderedList',
     align: align === 'center' || align === 'right' || align === 'justify' ? align : 'left',
     fontFamily: primaryFontFamily(str(textStyle.fontFamily)),
     fontSize: str(textStyle.fontSize),
     lineHeight: str(block.attrs.lineHeight),
     paragraphSpacing: str(block.attrs.paragraphSpacing),
     firstLineIndent: str(block.attrs.firstLineIndent),
-    canIndent: inList || indent < MAX_INDENT,
+    canIndent: inList ? editor.can().sinkListItem('listItem') : indent < MAX_INDENT,
     canOutdent: inList || indent > 0,
   }
 }

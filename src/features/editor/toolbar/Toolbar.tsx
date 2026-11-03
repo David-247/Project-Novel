@@ -7,6 +7,7 @@ import { listSystemFonts } from '../fonts'
 import { TOOLBAR_CONTROLS } from './controls'
 import type { ToolbarControlKey } from './controls'
 import { FontFamilyPicker } from './FontFamilyPicker'
+import { markChain } from './mark-chain'
 import * as I from './icons'
 import { FIRST_LINE_INDENTS, FONT_SIZES, LINE_SPACINGS, PARAGRAPH_SPACINGS, withCurrent } from './presets'
 import type { Alignment } from './toolbar-state'
@@ -114,6 +115,10 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFont
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    // Only for the toolbar's own items: controls placed in the slots (e.g. a find field)
+    // handle Escape themselves, and anything that already handled it is left alone.
+    const target = e.target as HTMLElement
+    if (e.defaultPrevented || !target.hasAttribute('data-radix-collection-item')) return
     if (e.key === 'Escape' && editor) {
       e.preventDefault()
       editor.commands.focus()
@@ -139,8 +144,8 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFont
         </ToolbarItem>
         {select('fontSize', s.fontSize, FONT_SIZES, (v) => {
           if (!editor) return
-          if (v) editor.chain().setFontSize(v).run()
-          else editor.chain().unsetFontSize().run()
+          if (v) markChain(editor).setFontSize(v).run()
+          else markChain(editor).unsetFontSize().run()
         }, 'w-32')}
       </ToolbarGroup>
       <ToolbarSeparator />
