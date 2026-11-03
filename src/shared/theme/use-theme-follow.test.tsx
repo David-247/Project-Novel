@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const tauri = vi.hoisted(() => ({
   isTauri: false,
   initial: null as 'light' | 'dark' | null,
+  themePromise: undefined as Promise<'light' | 'dark' | null> | undefined,
   handler: undefined as ((e: { payload: 'light' | 'dark' }) => void) | undefined,
   unlisten: vi.fn(),
 }))
@@ -11,7 +12,7 @@ const tauri = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => tauri.isTauri }))
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
-    theme: () => Promise.resolve(tauri.initial),
+    theme: () => tauri.themePromise ?? Promise.resolve(tauri.initial),
     onThemeChanged: (h: (e: { payload: 'light' | 'dark' }) => void) => {
       tauri.handler = h
       return Promise.resolve(tauri.unlisten)
@@ -36,6 +37,7 @@ beforeEach(() => {
   mqListeners.clear()
   tauri.isTauri = false
   tauri.initial = null
+  tauri.themePromise = undefined
   tauri.handler = undefined
   tauri.unlisten.mockReset()
   window.matchMedia = ((query: string) => ({
@@ -81,6 +83,23 @@ describe('useThemeFollow', () => {
 
     unmount()
     expect(tauri.unlisten).toHaveBeenCalled()
+  })
+
+  it('drops a stale initial theme() result when a newer theme event arrived first', async () => {
+    tauri.isTauri = true
+    let resolveInitial!: (t: 'light' | 'dark') => void
+    tauri.themePromise = new Promise((r) => (resolveInitial = r))
+    render(<Probe />)
+    await waitFor(() => expect(tauri.handler).toBeDefined())
+
+    act(() => tauri.handler!({ payload: 'dark' }))
+    expect(document.documentElement.dataset.theme).toBe('dark')
+
+    await act(async () => {
+      resolveInitial('light')
+      await Promise.resolve()
+    })
+    expect(document.documentElement.dataset.theme).toBe('dark')
   })
 
   it('does not touch Tauri APIs in a plain browser', () => {

@@ -18,17 +18,19 @@ export interface SelectOption {
 
 export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'children'> {
   options: SelectOption[]
+  /** Classes for the positioning wrapper <span> (layout: width, margins, flex). `className` goes on the <select>. */
+  wrapperClassName?: string
   ref?: Ref<HTMLSelectElement>
 }
 
 /**
  * Native <select> (keyboard, touch and screen-reader behaviour for free) styled to the tokens.
- * The chevron is drawn with CSS so it follows the theme.
+ * The chevron is an inline SVG in currentColor, so it follows the theme.
  */
-export function Select({ options, className, ...rest }: SelectProps) {
+export function Select({ options, className, wrapperClassName, ...rest }: SelectProps) {
   return (
-    <span className={cn('relative inline-flex', className)}>
-      <select className={cn(fieldBase, 'w-full appearance-none pr-8')} {...rest}>
+    <span className={cn('relative inline-flex', wrapperClassName)}>
+      <select className={cn(fieldBase, 'w-full appearance-none pr-8', className)} {...rest}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
