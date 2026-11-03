@@ -1,5 +1,6 @@
 import { getDocumentProvider, onDocumentProviderChange, type DocumentProvider } from '@/shared/document'
 import { useStore } from '@/shared/store'
+import { currentBookSettings, getBookVersion, isBookDirty } from './book-file'
 import { ProjectError } from './format'
 import {
   getCurrentProjectMeta,
@@ -39,6 +40,8 @@ let timer: ReturnType<typeof setTimeout> | null = null
 let inFlight: Promise<void> | null = null
 /** Doc version captured by the last successful snapshot of the current project. */
 let lastSnapshotVersion: number | null = null
+/** Book settings version captured by the last successful snapshot of the current project. */
+let lastSnapshotBookVersion: number | null = null
 let failures = 0
 let disposers: (() => void)[] = []
 let unwatchDoc: (() => void) | null = null
@@ -105,7 +108,14 @@ async function snapshot(): Promise<AutosaveResult> {
       const meta = getCurrentProjectMeta()
       if (!p || !meta || getCurrentProjectPath() !== folder) return false
       const version = p.getDocVersion()
-      if (!p.isDirty() || version === lastSnapshotVersion || snapshotsSuppressedAt(version)) return false
+      const bookVersion = getBookVersion()
+      if (
+        !(p.isDirty() || isBookDirty()) ||
+        (version === lastSnapshotVersion && bookVersion === lastSnapshotBookVersion) ||
+        snapshotsSuppressedAt(version, bookVersion)
+      ) {
+        return false
+      }
       const text = serializeRecovery({
         format: RECOVERY_FORMAT,
         version: RECOVERY_VERSION,
@@ -114,11 +124,13 @@ async function snapshot(): Promise<AutosaveResult> {
         baseUpdatedAt: meta.updatedAt,
         docVersion: version,
         doc: p.getDocJSON(),
+        book: currentBookSettings(),
       })
       // A snapshot the user has not answered yet is moved aside, never overwritten.
       await preserveUnansweredRecoveryUnlocked(folder)
       await writeRecoveryFile(folder, text)
       lastSnapshotVersion = version
+      lastSnapshotBookVersion = bookVersion
       return true
     })
     if (getCurrentProjectPath() !== folder) return written ? 'written' : 'skipped'
@@ -142,9 +154,18 @@ async function snapshot(): Promise<AutosaveResult> {
 /** Edits made while the snapshot was being written need their own snapshot. */
 function rearmIfStillDirty(): void {
   const p = getDocumentProvider()
-  if (!p || !p.isDirty()) return
+  if (!p || !(p.isDirty() || isBookDirty())) return
   const version = p.getDocVersion()
-  if (version !== lastSnapshotVersion && !snapshotsSuppressedAt(version)) arm()
+  const bookVersion = getBookVersion()
+  const unchanged = version === lastSnapshotVersion && bookVersion === lastSnapshotBookVersion
+  if (!unchanged && !snapshotsSuppressedAt(version, bookVersion)) arm()
+}
+
+/** Book settings changes arm the snapshot timer exactly like text edits. */
+function watchBook(): () => void {
+  return useStore.subscribe((s, prev) => {
+    if (s.book.settingsVersion !== prev.book.settingsVersion && s.book.dirty) onEdit()
+  })
 }
 
 /** Per keystroke: O(1), no serialization. Recovery for a never-saved document is out of scope. */
@@ -167,9 +188,11 @@ export function startAutosave(): () => void {
   watchProvider(getDocumentProvider())
   disposers = [
     onDocumentProviderChange(watchProvider),
+    watchBook(),
     onProjectOpened(() => {
       clearTimer()
       lastSnapshotVersion = null
+      lastSnapshotBookVersion = null
       failures = 0
     }),
   ]
@@ -193,5 +216,6 @@ export async function __resetAutosaveForTests(): Promise<void> {
   await stopAutosave()
   inFlight = null
   lastSnapshotVersion = null
+  lastSnapshotBookVersion = null
   failures = 0
 }

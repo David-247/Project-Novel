@@ -1,4 +1,6 @@
+import type { BookSettings } from '@/shared/book'
 import type { DocJSON } from '@/shared/document'
+import { normalizeBook, serializeBook } from './book-file'
 import { isDocJSON, joinPath, ProjectError, serializeManuscript, type ProjectMeta } from './format'
 import { ensureDir, listDir, readTextFile, removeFile, writeFileAtomic } from './ipc'
 
@@ -10,7 +12,8 @@ import { ensureDir, listDir, readTextFile, removeFile, writeFileAtomic } from '.
 export const RECOVERY_DIR = '.recovery'
 export const RECOVERY_FILE = 'manuscript.json'
 export const RECOVERY_FORMAT = 'novel-recovery'
-export const RECOVERY_VERSION = 1
+/** 2 added the optional `book` field (book settings); version 1 snapshots stay readable. */
+export const RECOVERY_VERSION = 2
 /** Label used in error messages. */
 const LABEL = 'The backup copy'
 
@@ -26,6 +29,8 @@ export interface RecoverySnapshot {
   /** Editor document version at snapshot time (diagnostic only). */
   docVersion: number
   doc: DocJSON
+  /** Book settings at snapshot time (version 2+); absent in older snapshots. */
+  book?: BookSettings
 }
 
 export const recoveryDirPath = (folder: string) => joinPath(folder, RECOVERY_DIR)
@@ -49,6 +54,7 @@ export function parseRecovery(text: string): RecoverySnapshot | null {
   if (d.format !== RECOVERY_FORMAT || typeof d.version !== 'number' || d.version > RECOVERY_VERSION) return null
   if (typeof d.savedAt !== 'string' || Number.isNaN(Date.parse(d.savedAt))) return null
   if (!isDocJSON(d.doc)) return null
+  const book = d.book === undefined ? undefined : normalizeBook(d.book).settings
   return {
     format: RECOVERY_FORMAT,
     version: d.version,
@@ -57,6 +63,7 @@ export function parseRecovery(text: string): RecoverySnapshot | null {
     baseUpdatedAt: typeof d.baseUpdatedAt === 'string' ? d.baseUpdatedAt : '',
     docVersion: typeof d.docVersion === 'number' ? d.docVersion : 0,
     doc: d.doc,
+    ...(book ? { book } : {}),
   }
 }
 
@@ -110,9 +117,16 @@ export async function listUnrestoredFiles(folder: string): Promise<string[]> {
  */
 export type RecoveryVerdict = 'offer' | 'identical' | 'unrelated'
 
-export function judgeRecovery(s: RecoverySnapshot, meta: ProjectMeta, manuscriptText?: string): RecoveryVerdict {
+export function judgeRecovery(
+  s: RecoverySnapshot,
+  meta: ProjectMeta,
+  manuscriptText?: string,
+  savedBook?: BookSettings,
+): RecoveryVerdict {
   if (s.projectId && s.projectId !== meta.id) return 'unrelated'
-  if (manuscriptText !== undefined && serializeManuscript(s.doc) === manuscriptText) return 'identical'
+  // Identical only if the book settings match too (a snapshot without them has nothing to lose there).
+  const sameBook = !s.book || !savedBook || serializeBook(s.book) === serializeBook(savedBook)
+  if (manuscriptText !== undefined && sameBook && serializeManuscript(s.doc) === manuscriptText) return 'identical'
   if (s.baseUpdatedAt) return s.baseUpdatedAt === meta.updatedAt ? 'offer' : 'unrelated'
   return Date.parse(s.savedAt) > Date.parse(meta.updatedAt) ? 'offer' : 'unrelated'
 }
@@ -128,11 +142,14 @@ export async function deleteRecoveryFile(folder: string): Promise<void> {
 // another project is open). Snapshots resume as soon as the document changes.
 
 let discardedVersion: number | null = null
+let discardedBookVersion: number | null = null
 
-export function suppressSnapshotsAt(version: number | null): void {
+/** Suppress snapshots while the document is at `version` and the book settings at `bookVersion`. */
+export function suppressSnapshotsAt(version: number | null, bookVersion: number | null = null): void {
   discardedVersion = version
+  discardedBookVersion = bookVersion
 }
 
-export function snapshotsSuppressedAt(version: number): boolean {
-  return discardedVersion === version
+export function snapshotsSuppressedAt(version: number, bookVersion: number | null = null): boolean {
+  return discardedVersion === version && discardedBookVersion === bookVersion
 }

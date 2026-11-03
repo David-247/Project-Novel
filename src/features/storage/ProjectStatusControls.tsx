@@ -9,7 +9,7 @@ import { newProject, openProject, reopenRecoveryPrompt, saveProject } from './pr
  */
 export function NoProjectActions() {
   const path = useStore((s) => s.project.path)
-  const dirty = useStore((s) => s.editor.dirty)
+  const dirty = useStore((s) => s.editor.dirty || s.book.dirty)
   const opening = useStore((s) => s.project.opening)
   if (path) return null
   return (
