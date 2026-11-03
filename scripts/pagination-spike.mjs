@@ -56,10 +56,10 @@ const PAGE = `<!doctype html><html><head><style>
   #ed > * { pointer-events: auto; }
 </style></head><body><div id="scroller"><div id="ed" contenteditable="true"></div></div></body></html>`
 
-/* eslint-disable no-undef */
+/* global document, window, getSelection, NodeFilter, requestAnimationFrame */
 const pageFns = {
   // Strategy A setup + full measure/break/insert pass. Returns timings.
-  measureAndBreak: ({ html, cw, ch, gap }) => {
+  measureAndBreak: ({ html, cw, ch }) => {
     const ed = document.getElementById('ed')
     const t0 = performance.now()
     if (html) ed.innerHTML = html
@@ -311,7 +311,7 @@ const pageFns = {
 
   probe: () => {
     window.__perf = []
-    window.addEventListener('keydown', (e) => {
+    window.addEventListener('keydown', () => {
       const t0 = performance.now()
       requestAnimationFrame(() => {
         const c = new MessageChannel()
@@ -321,7 +321,7 @@ const pageFns = {
     }, true)
   },
 }
-/* eslint-enable no-undef */
+
 
 async function typing(page) {
   await page.evaluate(pageFns.probe)
@@ -348,8 +348,6 @@ async function run(browserType) {
   const browser = await browserType.launch()
   const html = manuscriptHTML()
   const results = {}
-  const a = box('us-5.5x8.5')
-  const b = box('us-6x9')
   const gap = 2 * M.inside
 
   for (const [name, fn, extra] of [
