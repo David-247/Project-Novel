@@ -100,7 +100,12 @@ function installKeyListener() {
   )
 }
 const KEYBOARD_FOCUS_WINDOW_MS = 1000
-/** Radix Tooltip closes every open tooltip when this document event fires (its internal TOOLTIP_OPEN). */
+/**
+ * Radix Tooltip closes every open tooltip when this document event fires (its internal TOOLTIP_OPEN).
+ * This relies on a Radix internal, which is why @radix-ui/react-tooltip is pinned with a tilde range
+ * (~1.4.1) in package.json. Guarded by: src/shared/ui/tooltip.test.tsx "only one tooltip is open at a
+ * time" and e2e/tooltips.spec.ts "hover a toolbar button..." (moving to a neighbour switches).
+ */
 const RADIX_TOOLTIP_OPEN_EVENT = 'tooltip.open'
 
 // Number of tooltips open right now (normally 0 or 1).
@@ -170,6 +175,11 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
   // and calls preventDefault() on Escape, which would make other Escape handlers think the key was
   // already handled. Window capture runs first; flushSync unmounts the content (and its listener)
   // synchronously, so the event continues to its real handlers untouched.
+  // Depends on Radix's listener placement (hence the ~1.4.1 pin). Guarded by:
+  // src/shared/ui/tooltip.test.tsx "Escape closes the tooltip without swallowing the key..." and
+  // "inside a dialog, the first Escape closes only the tooltip...", e2e/tooltips.spec.ts "keyboard
+  // focus shows the tooltip; Escape closes it AND still returns focus to the editor" and "Tab through
+  // the find panel: ... Escape closes tooltip and panel".
   useEffect(installKeyListener, [])
   useEffect(() => {
     if (!open) return
