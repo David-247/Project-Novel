@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { editor, launch, newProject, recoveryControl, seedProject, writeFile } from './helpers'
+import { editor, launch, newProject, pressTab, recoveryControl, seedProject, writeFile } from './helpers'
 
 const tip = (page: Page) => page.locator('[data-tooltip-body]')
 
@@ -70,7 +70,7 @@ test('no project open: the in-window project actions have tooltips and pass the 
   await page.keyboard.type('Unsaved words.')
   await expectFullCoverage(page, 19 + 3)
   await page.locator('[data-control-id="file.new_project"]').focus()
-  await page.keyboard.press('Shift+Tab')
+  await pressTab(page, { shift: true })
   await expect(page.locator('[data-control-id="file.save"]')).toBeFocused()
   await expect(tip(page)).toContainText('With no project open, choose a folder.')
 })
@@ -104,7 +104,7 @@ test('recovery dialog controls have tooltips (hover + focus) and pass the audit'
   await expect(page.getByRole('dialog', { name: 'Restore unsaved changes?' })).toBeVisible()
   await expectFullCoverage(page, 3)
   await recoveryControl(page, 'restore').focus()
-  await page.keyboard.press('Shift+Tab')
+  await pressTab(page, { shift: true })
   await expect(recoveryControl(page, 'discard')).toBeFocused()
   await expect(tip(page)).toBeVisible()
   await recoveryControl(page, 'restore').click()

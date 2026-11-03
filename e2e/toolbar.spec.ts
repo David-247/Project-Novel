@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { lineStart } from './helpers'
 
 test('formatting toolbar: shortcuts, active state and roving keyboard focus', async ({ page }) => {
   await page.goto('/')
@@ -12,7 +13,7 @@ test('formatting toolbar: shortcuts, active state and roving keyboard focus', as
   await page.keyboard.type('bold')
   await expect(editor.locator('strong')).toHaveText('bold')
   await expect(bold).toHaveAttribute('aria-pressed', 'true')
-  await page.keyboard.press('Home')
+  await lineStart(page)
   await expect(bold).toHaveAttribute('aria-pressed', 'false')
 
   await page.keyboard.press('ControlOrMeta+Shift+e')
@@ -48,9 +49,9 @@ test('toolbar controls have 32px targets and wrap at narrow widths', async ({ pa
   await page.goto('/')
   const toolbar = page.getByRole('toolbar', { name: 'Formatting' })
   const controls = toolbar.locator('[data-control-id]')
-  // 16 formatting controls + 4 in the Styles group + history.undo, history.redo, find.open (wired in
-  // App); waits for the app to boot.
-  await expect(controls).toHaveCount(23)
+  // 16 formatting controls + 4 in the Styles group + undo, redo, find.open + book.trimSize + the paper
+  // picker (group + 4 options), wired in App; waits for the app to boot.
+  await expect(controls).toHaveCount(29)
   const n = await controls.count()
   for (let i = 0; i < n; i++) {
     const box = await controls.nth(i).boundingBox()

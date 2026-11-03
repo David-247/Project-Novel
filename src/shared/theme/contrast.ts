@@ -82,3 +82,48 @@ export const CONTRAST_PAIRS: ContrastPair[] = [
   { fg: 'accent', bg: 'surface-hover', kind: 'ui', usage: 'pressed toggle indicator on hover' },
   { fg: 'focus-ring', bg: 'surface-hover', kind: 'ui', usage: 'focus ring on hovered control' },
 ]
+
+/** The four concrete paper token sets: book has a warm light and a warm dark variant. */
+export type SurfaceSet = 'white' | 'dark' | 'book-light' | 'book-dark'
+export const SURFACE_SETS: readonly SurfaceSet[] = ['white', 'dark', 'book-light', 'book-dark']
+
+/** Which concrete set `data-surface` + `data-theme` select (mirrors surfaces.css). */
+export function surfaceSetFor(surface: 'white' | 'dark' | 'book', theme: ThemeName): SurfaceSet {
+  return surface === 'book' ? (theme === 'dark' ? 'book-dark' : 'book-light') : surface
+}
+
+/**
+ * Extracts the colour (6-digit hex) `--*` declarations of each paper surface from surfaces.css
+ * source. Shadows and textures are decorative and skipped.
+ */
+export function parseSurfaceTokens(css: string): Record<SurfaceSet, ThemeTokens> {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const find = (selector: string): ThemeTokens => {
+    const at = stripped.indexOf(`${selector} {`)
+    if (at < 0) throw new Error(`Surface block not found: ${selector}`)
+    const body = stripped.slice(at, stripped.indexOf('}', at))
+    const out: ThemeTokens = {}
+    for (const d of body.matchAll(/--([a-z0-9-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi)) out[d[1]] = d[2]
+    return out
+  }
+  const head = ':is(:root, .nv-surface-preview)'
+  return {
+    white: find(`${head}[data-surface='white']`),
+    dark: find(`${head}[data-surface='dark']`),
+    'book-light': find(`${head}[data-surface='book']`),
+    'book-dark': find(`${head}[data-surface='book'][data-theme='dark']`),
+  }
+}
+
+/** Foreground/background pairs inside one paper surface (token names without `--`). */
+export const SURFACE_CONTRAST_PAIRS: ContrastPair[] = [
+  { fg: 'page-fg', bg: 'page-bg', kind: 'text', usage: 'body text on the page' },
+  { fg: 'page-muted-fg', bg: 'page-bg', kind: 'text', usage: 'page numbers, running heads, footnote text' },
+  { fg: 'page-fg', bg: 'page-selection-bg', kind: 'text', usage: 'selected text' },
+  { fg: 'page-fg', bg: 'page-find-bg', kind: 'text', usage: 'find match' },
+  { fg: 'page-fg', bg: 'page-find-current-bg', kind: 'text', usage: 'current find match' },
+  { fg: 'page-find-ring', bg: 'page-bg', kind: 'ui', usage: 'current-match outline on the page' },
+  { fg: 'page-find-ring', bg: 'page-find-current-bg', kind: 'ui', usage: 'current-match outline against its own fill' },
+  { fg: 'page-focus-ring', bg: 'desk-bg', kind: 'ui', usage: 'focus outline around the page, on the desk' },
+  { fg: 'page-focus-ring', bg: 'page-bg', kind: 'ui', usage: 'focus outline, page side' },
+]

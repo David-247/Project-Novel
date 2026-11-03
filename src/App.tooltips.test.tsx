@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, setDocJSON, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
+import { SURFACE_CONTROLS } from '@/shared/theme'
 import { useStore } from '@/shared/store'
 import { IconButton, Tooltip } from '@/shared/ui'
 import { App } from './App'
@@ -51,7 +52,10 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel
     // controls, and the no-project New / Open actions in the status bar).
     const expected = [...Object.values(TOOLBAR_CONTROLS), ...Object.values(HISTORY_CONTROLS), ...Object.values(FIND_CONTROLS)]
-    expect(new Set(rendered)).toEqual(new Set([...expected.map((m) => m.id), 'file.new_project', 'file.open_project']))
+    const surfaces = Object.values(SURFACE_CONTROLS).map((m) => m.id)
+    expect(new Set(rendered)).toEqual(
+      new Set([...expected.map((m) => m.id), ...surfaces, 'book.trimSize', 'file.new_project', 'file.open_project']),
+    )
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
   })

@@ -44,7 +44,7 @@ export function NovelEditor() {
 
   return (
     <div
-      className="novel-writing-surface mx-auto w-full max-w-[72ch] px-6 py-10"
+      className="novel-writing-surface mx-auto w-full px-6 py-10"
       style={{ fontFamily: SYSTEM_FONT_STACK }}
       data-testid="writing-surface"
       aria-busy={opening || undefined}

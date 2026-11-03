@@ -155,6 +155,66 @@ Example toolbar:
 ## App shell
 
 `AppShell` paints the toolbar header and status footer on `bg`, separated from the editor by a `border`
+hairline. The editor `<main>` is the desk: `bg-desk text-text` (`--desk-bg` of the current paper surface).
+Document content is the editor slice's job, and the page lying on the desk is described next.
+
+## Paper surfaces (Phase 2)
+
+The writing surface is a sheet of paper on a desk, chosen per project with `book.surface`
+(`auto | book | white | dark`; the book slice owns state and persistence).
+
+**Choices.**
+- *White*: a classic word-processor page (`#ffffff`, ink `#1b1d1f`) with a crisp 1px edge and a two-layer
+  shadow on a neutral grey desk (`#d6d9dd`).
+- *Dark*: a charcoal page (`#202327`, text `#e7e9eb`) on a near-black desk (`#0e1012`).
+- *Book*: aged cream paper (`#f4ead2`, ink `#2a2016`) on a walnut-brown desk (`#bfb29a`). The paper has
+  a top-lit gradient, a faint laid-paper grain (both CSS gradients, no bitmaps), shaded inner edges, and
+  a soft shadow toward the gutter of each page. In dark mode it becomes warm dark paper (`#2b2520`,
+  text `#eadfc9`) on `#16120f`. Book never turns into a plain white or dark page: it has two variants.
+- *Auto* (default): white when the OS is light, dark when it is dark, switching live. It reuses
+  `useThemeFollow` / `app.colorScheme`.
+- Why not default cream everywhere: only Book is warm. White and Dark stay neutral so a writer
+  can choose between "a printed book" and "a document" on purpose.
+- The picker is a segmented radio group (`book.surface`, options `book.surface.auto|book|white|dark`).
+  Each option has a swatch painted with the real tokens, a miniature page or, for Book, an open spread;
+  Auto is a white and dark page split on the diagonal. Labels show from the `lg` breakpoint up.
+
+**How it is applied.** `useSurfaceFollow()` (once, in `App.tsx`) writes the resolved surface to
+`<html data-surface="book|white|dark">`; `resolveSurface(surface, colorScheme)` does the Auto logic.
+`src/shared/theme/surfaces.css` defines the tokens per surface (Book also reads `<html data-theme>` for its
+light/dark variant). Switching changes colours, shadows and background images only: no widths,
+paddings, borders or font properties, so nothing reflows.
+
+**Token contract** (all on `<html>`; consume only these, never raw colours):
+
+| Token | Use |
+|---|---|
+| `--page-bg`, `--page-fg`, `--page-muted-fg` | Page fill, body text, secondary text (page numbers, running heads) |
+| `--page-selection-bg` | `::selection` on a page (text stays `--page-fg`) |
+| `--page-find-bg`, `--page-find-current-bg`, `--page-find-ring` | Find matches, the current match, and its outline |
+| `--page-focus-ring` | Focus outline around the page, drawn on the desk |
+| `--desk-bg` | Background behind the pages (Tailwind `bg-desk`) |
+| `--page-shadow`, `--page-edge` | Drop shadow and inner edge shading (box-shadow lists) |
+| `--page-texture` | Background-image layers for the paper (`none` on White and Dark) |
+| `--spine-shadow`, `--spine-width` | Gutter shading colour and extent (transparent / 0% except Book) |
+
+**Class contract for page elements (pagination).**
+- `.nv-page`: one rendered page. It already gets background, text colour, texture, edge shading, shadow and
+  selection colours. Add no colours of your own.
+- `.nv-page--verso` (left page) / `.nv-page--recto` (right page), or `.nv-page[data-page-side="verso|recto"]`:
+  adds the spine gradient on the gutter side. `.page--verso` / `.page--recto` are accepted aliases.
+  A single-page view omits them.
+- `.nv-page-muted`: secondary text on a page.
+- Find highlights use the `.nv-find-match` / `.nv-find-match-current` classes (find.css), which read the
+  tokens above, so they work on any page.
+- Until pagination lands, `.novel-writing-surface` (the continuous editor column) is styled as one long
+  `.nv-page`.
+
+**Contrast.** `parseSurfaceTokens` and `SURFACE_CONTRAST_PAIRS` (`src/shared/theme/contrast.ts`) check, for
+each of the four token sets (white, dark, book-light, book-dark): body and muted text on the page,
+`--page-fg` on selection and both find fills (4.5:1), and the find ring and focus ring (3:1). Texture
+and edge shading are kept faint enough that the flat `--page-bg` ratios stay valid.
+
 hairline. The editor `<main>` uses `bg-surface text-text`, and that is all the shell styles there:
 document content is the editor slice's job, and paper/book surfaces and page spreads are Phase 2.
 
@@ -197,3 +257,11 @@ name is set in the style's own weight, slant, case and (capped) tracking, so the
 styles can be modified and duplicated but not renamed or deleted. Rename and delete confirmation appear inline
 under the list (delete says how many paragraphs switch, and to which style); results are announced in a polite
 live region. Colours are existing token pairs only (selected row `accent` on `accent-soft`, delete in `danger`).
+
+## Book layout: trim size picker (Phase 2)
+
+- The picker is a Radix dropdown menu opened from a ghost toolbar button (`book.trimSize`) in its own "Book layout" toolbar group after Find. The button shows the current size as label plus dimensions and a chevron, so the current trim size is visible without opening anything.
+- The menu lists the sizes in two labelled groups, US and UK/EU, as radio items with a check mark. Each row is a label (medium weight, `text`) and its dimensions (`text-muted`); both pairs are already in `CONTRAST_PAIRS`. Rows are `min-h-control-lg` (40px) for touch, and the menu opens on press, with no hover-only behaviour.
+- Keyboard: Enter, Space or ArrowDown on the button opens the menu; arrows move, Enter selects, Escape closes and returns focus to the button. The button joins the toolbar roving focus through `ToolbarItem`.
+- Every row has its own `data-control-id` (`book.trimSize.<id>`), registry entry and tooltip (opened on the right), so the coverage audit also passes with the menu open.
+- Changing the size also moves the margins to the new size catalog defaults, but only while the margins still equal the previous size defaults, so margins the user customised are never overwritten.

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { pressTab } from './helpers'
 
 // Shortcut hints render per platform from one spec: "⌘B" on macOS, "Ctrl+B" elsewhere.
 const isMac = process.platform === 'darwin'
@@ -73,15 +74,15 @@ test('Tab through the find panel: tooltips on fields, buttons and checkboxes; Es
   await expect(page.getByTestId('find-status')).toHaveText('1 of 2')
 
   // Tab: previous/next/close buttons, then the replace field.
-  await page.keyboard.press('Tab')
+  await pressTab(page)
   await expect(panel.locator('[data-control-id="find.previous"]')).toBeFocused()
   await expect(tip).toContainText('Previous match')
-  await page.keyboard.press('Tab')
-  await page.keyboard.press('Tab')
+  await pressTab(page)
+  await pressTab(page)
   await expect(panel.locator('[data-control-id="find.close"]')).toBeFocused()
   await expect(tip).toContainText('Close find and replace')
   await expect(tip).toContainText('Esc')
-  await page.keyboard.press('Tab')
+  await pressTab(page)
   await expect(panel.getByRole('textbox', { name: 'Replace with' })).toBeFocused()
   await expect(tip).toContainText('Text that replaces each match')
   // Typing hides it so it never covers the text.
@@ -89,8 +90,8 @@ test('Tab through the find panel: tooltips on fields, buttons and checkboxes; Es
   await expect(tip).toHaveCount(0)
 
   await panel.getByRole('checkbox', { name: 'Match case' }).focus()
-  await page.keyboard.press('Shift+Tab')
-  await page.keyboard.press('Tab')
+  await pressTab(page, { shift: true })
+  await pressTab(page)
   await expect(tip).toContainText('Only find matches with the same capital letters')
   // Hovering the checkbox label (not just the box) also shows it.
   await page.mouse.move(0, 0)
@@ -100,7 +101,7 @@ test('Tab through the find panel: tooltips on fields, buttons and checkboxes; Es
   // One Escape: the tooltip closes and the panel's Escape-to-close still runs.
   await page.mouse.move(0, 0)
   await panel.getByRole('checkbox', { name: 'Whole word' }).focus()
-  await page.keyboard.press('Shift+Tab')
+  await pressTab(page, { shift: true })
   await expect(panel.getByRole('checkbox', { name: 'Match case' })).toBeFocused()
   await expect(tip).toContainText('Match case')
   await page.keyboard.press('Escape')

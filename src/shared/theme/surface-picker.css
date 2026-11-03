@@ -1,0 +1,47 @@
+/* Swatches for the paper picker: a miniature desk with a page (or open spread) on it, painted with
+   the same tokens as the real thing. Fixed size, so the toolbar never shifts when the choice changes. */
+.nv-swatch {
+  position: relative;
+  display: inline-block;
+  width: 1.625rem;
+  height: 1.25rem;
+  overflow: hidden;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+}
+.nv-swatch-desk {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 2px 3px;
+  background: var(--desk-bg);
+}
+.nv-swatch-auto > .nv-swatch-desk:last-child {
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+.nv-swatch-desk > .nv-swatch-page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 3px;
+  border-radius: 1px;
+  box-shadow: none;
+}
+.nv-swatch-desk > .nv-swatch-page:only-child {
+  max-width: 14px;
+}
+.nv-swatch-page > i {
+  display: block;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--page-fg);
+  opacity: 0.55;
+}
+.nv-swatch-page > i:last-child {
+  width: 60%;
+}

@@ -73,3 +73,19 @@ export async function seedProject(
 
 /** Editor document as ProseMirror-ish text blocks, for content comparisons. */
 export const editorHTML = (page: Page) => editor(page).evaluate((el) => el.innerHTML)
+
+const IS_MAC = process.platform === 'darwin'
+const isWebKit = (page: Page) => page.context().browser()?.browserType().name() === 'webkit'
+
+/**
+ * Tab / Shift+Tab focus navigation. WebKit on macOS only tabs between text fields unless the user
+ * enabled "Keyboard navigation" (as WKWebView does in the real app); Option+Tab reaches every control.
+ */
+export async function pressTab(page: Page, opts: { shift?: boolean } = {}): Promise<void> {
+  const mods = [IS_MAC && isWebKit(page) ? 'Alt' : null, opts.shift ? 'Shift' : null].filter(Boolean)
+  await page.keyboard.press([...mods, 'Tab'].join('+'))
+}
+
+/** Caret to start / end of line: Home/End elsewhere; on macOS those scroll, so Cmd+Left/Right. */
+export const lineStart = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowLeft' : 'Home')
+export const lineEnd = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowRight' : 'End')

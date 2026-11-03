@@ -146,6 +146,7 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     windowDestroys: 0,
     /** Consulted before every write/mkdir/remove; a returned error is thrown like Rust's. */
     failWrite: null as null | ((path: string) => FakeError | null),
+    failRead: null as null | ((path: string) => FakeError | null),
     /** Awaited inside storage_write_file_atomic (to hold a write in flight). */
     writeGate: null as null | ((path: string) => Promise<void>),
     /** Slow disk: every file read waits this long. */
@@ -172,6 +173,7 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     state.exits = 0
     state.windowDestroys = 0
     state.failWrite = null
+    state.failRead = null
     state.writeGate = null
     state.readDelayMs = 0
     state.fonts = ['E2E Serif', 'E2E Sans']
@@ -308,6 +310,8 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
 
       case 'storage_read_text_file': {
         const c = confined(path, false)
+        const readErr = state.failRead?.(c)
+        if (readErr) throw readErr
         if (state.readDelayMs) await new Promise((r) => setTimeout(r, state.readDelayMs))
         if (!state.files.has(c)) throw notFound(path)
         return state.files.get(c)

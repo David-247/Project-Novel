@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
-import { editor, launch, openRecent, readFile, saveStatus, seedProject } from './helpers'
+import { editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject } from './helpers'
 
 /**
  * Performance budget on a 100,000-word manuscript, in real browser engines
@@ -96,7 +96,7 @@ async function installLatencyProbe(page: Page) {
 async function measureTyping(page: Page, beforeKey?: (i: number) => Promise<void>) {
   const ed = editor(page)
   await ed.locator('p').nth(500).click()
-  await page.keyboard.press('End')
+  await lineEnd(page)
   await page.waitForFunction(() => (window as unknown as { __perf: number[] }).__perf.length >= 1)
   await page.evaluate(() => ((window as unknown as { __perf: number[] }).__perf = []))
   for (const [i, ch] of [...TYPED].entries()) {
