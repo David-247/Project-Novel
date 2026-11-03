@@ -80,7 +80,7 @@ test('find panel stays below the toolbar and fits a narrow window', async ({ pag
   await page.keyboard.press('ControlOrMeta+f')
   const panel = page.getByRole('region', { name: 'Find and replace' })
   await expect(panel).toBeVisible()
-  const header = await page.getByRole('banner', { name: 'Toolbar' }).boundingBox()
+  const header = await page.getByRole('banner', { name: 'App controls' }).boundingBox()
   const box = await panel.boundingBox()
   expect(box && header && box.y >= header.y + header.height).toBe(true)
   expect(box && box.x >= 0 && box.x + box.width <= 380).toBe(true)

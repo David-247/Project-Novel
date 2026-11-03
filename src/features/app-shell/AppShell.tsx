@@ -16,7 +16,7 @@ export function AppShell({ toolbar, editor, statusBar }: AppShellProps) {
     <div className="flex h-full flex-col bg-bg text-text">
       <header
         role="banner"
-        aria-label="Toolbar"
+        aria-label="App controls"
         className="flex min-h-toolbar flex-wrap items-center gap-x-1 gap-y-1 border-b border-border bg-bg px-2 py-1.5 sm:px-3"
       >
         {toolbar}
