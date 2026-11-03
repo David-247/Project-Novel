@@ -18,9 +18,25 @@ export {
   onProjectOpened,
   createProjectAt,
   openProjectAt,
+  isSaveInFlight,
+  restoreRecovery,
+  discardRecovery,
+  clearRecoveryData,
+  hasPendingRecovery,
   type OpenedProject,
   type SaveOptions,
 } from './project'
+
+// Autosave + crash recovery (.recovery/manuscript.json; see docs/project-format.md)
+export { startAutosave, stopAutosave, autosaveNow, AUTOSAVE_INTERVAL_MS, AUTOSAVE_RETRY_DELAYS_MS } from './autosave'
+export {
+  RECOVERY_DIR,
+  RECOVERY_FILE,
+  RECOVERY_FORMAT,
+  RECOVERY_VERSION,
+  parseRecovery,
+  type RecoverySnapshot,
+} from './recovery'
 
 // Low-level file helpers (Rust commands; atomic temp-file + fsync + rename)
 export { writeFileAtomic, readTextFile, MENU_EVENTS } from './ipc'
@@ -44,3 +60,4 @@ export { REVISION_KINDS, INDEX_SCHEMA_VERSION, type RevisionKind } from './schem
 // App wiring
 export { useStorageIntegration } from './integration'
 export { SaveStatusIndicator } from './SaveStatusIndicator'
+export { RecoveryDialog } from './RecoveryDialog'

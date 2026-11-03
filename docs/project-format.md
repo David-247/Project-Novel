@@ -7,7 +7,9 @@ database. The folder name becomes the project title when the project is created.
 My Novel/
 ├── project.json      metadata and schema version
 ├── manuscript.json   the manuscript as ProseMirror document JSON
-└── index.sqlite      index (revisions); can be rebuilt, never the only copy of text
+├── index.sqlite      index (revisions); can be rebuilt, never the only copy of text
+└── .recovery/        crash-recovery snapshot (only while there are unsaved changes)
+    └── manuscript.json
 ```
 
 Projects contain no tokens, credentials, account data or absolute paths of other machines. Novel never makes
@@ -94,7 +96,72 @@ Safety rules enforced in Rust:
 - **Known limitation:** `index.sqlite` is opened through the Tauri SQL plugin, which has no path scope. The webview
   could open a SQLite file anywhere. Only the JSON files go through the confined commands.
 
-Save order: `manuscript.json`, then `project.json` (`updatedAt`), then a `revisions` row.
+Save order: `manuscript.json`, then `project.json` (`updatedAt`), then a `revisions` row. After a save that leaves
+the document clean, `.recovery/manuscript.json` is deleted.
+
+All writes to a project (saves, autosave snapshots, recovery cleanup) go through one queue in the frontend, so they
+never overlap.
+
+Errors from Rust carry a `kind`: `not_found`, `invalid_path`, `outside_project`, `not_recent`, `symlink`,
+`disk_full` (ENOSPC/EDQUOT, Windows `ERROR_DISK_FULL`/`ERROR_HANDLE_DISK_FULL`), `read_only` (EROFS, Windows
+`ERROR_WRITE_PROTECT`), `permission_denied` (EACCES/EPERM, Windows `ERROR_ACCESS_DENIED`) or `io`. The frontend
+turns `disk_full` and `read_only`/`permission_denied` into plain-language messages.
+
+## Crash recovery (`.recovery/`)
+
+**Autosave writes snapshots, not the manuscript.** While the document has unsaved changes, Novel writes a snapshot to
+`.recovery/manuscript.json` at most every 30 seconds. `manuscript.json` changes only when the user saves, so Save
+keeps its meaning (the saved version is the one the user chose). Timing is a trailing throttle: the first change
+after a snapshot starts one 30-second timer, and further typing does not restart it. A crash therefore loses at
+most the last 30 seconds of typing. The document is serialized only when the timer fires, never on a keystroke.
+
+The folder is created when needed (Rust `storage_ensure_dir`, confined to the project folder like every other
+write). The file is written atomically, like the other project files. Compact UTF-8 JSON:
+
+| Field           | Type    | Notes                                                                      |
+| --------------- | ------- | -------------------------------------------------------------------------- |
+| `format`        | string  | Always `"novel-recovery"`.                                                 |
+| `version`       | integer | Recovery format version. Current: `1`. A newer version is ignored.         |
+| `projectId`     | string  | `id` from project.json.                                                    |
+| `savedAt`       | string  | ISO 8601 time of the snapshot.                                             |
+| `baseUpdatedAt` | string  | project.json `updatedAt` (the last real save) when the snapshot was taken. |
+| `docVersion`    | integer | Editor document version (diagnostic only).                                 |
+| `doc`           | object  | The whole document, same shape as manuscript.json.                         |
+
+```json
+{"format":"novel-recovery","version":1,"projectId":"6f1c…","savedAt":"2026-11-03T10:16:12.004Z","baseUpdatedAt":"2026-11-03T10:15:42.120Z","docVersion":312,"doc":{"type":"doc","content":[…]}}
+```
+
+**On open.** If `.recovery/manuscript.json` exists, its `savedAt` is later than project.json's `updatedAt`, and its
+`doc` differs from manuscript.json, Novel asks **Restore** or **Discard Backup**:
+
+- *Restore* loads the snapshot into the editor and marks it unsaved. Nothing on disk changes until the user saves,
+  and the snapshot is kept until then, so a second crash still recovers it.
+- *Discard Backup* deletes the snapshot. The editor keeps the saved manuscript.
+- Closing the dialog (Escape or X) decides nothing. The snapshot stays until the next snapshot or clean save
+  replaces it, and it is offered again the next time the project is opened.
+
+A snapshot that is not newer, or is identical to the manuscript, is deleted without asking. A damaged snapshot, or one
+in an unknown format, is ignored and left in place. A recovery problem never stops a project from opening.
+
+**At startup.** If the most recent project still has a `.recovery/manuscript.json`, Novel offers to reopen it
+(**Reopen Project** / **Not Now**). Opening it then shows the Restore / Discard question above.
+
+**When recovery data is deleted:**
+
+- after a save that leaves the document clean (manual save, or Save in the unsaved-changes prompt);
+- on a clean quit: closing the window when there are no unsaved changes, or after saving;
+- when the user chooses **Don't Save** in the unsaved-changes prompt (on quit, New Project or Open Project). The user
+  explicitly threw those changes away, so Novel also stops snapshotting that content. Snapshots resume with the next
+  edit.
+
+One exception: on quit, a snapshot that the user has not yet answered Restore / Discard for is kept.
+
+**Errors.** If a snapshot cannot be written (disk full, read-only folder, permissions), the status bar shows a
+warning such as "Autosave failed: the disk is full. Retrying in 5 s." No dialog appears. Retries happen after 5 s,
+15 s, then every 30 s until a snapshot succeeds, which clears the warning.
+
+Not in Phase 1: version history UI, cloud backup, and recovery for a document that was never saved as a project.
 
 ## Recent projects
 

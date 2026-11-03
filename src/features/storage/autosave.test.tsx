@@ -1,0 +1,381 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { createMemoryDocumentProvider, registerDocumentProvider, type DocJSON } from '@/shared/document'
+import { useStore } from '@/shared/store'
+import { initialProjectState } from '@/shared/store/project-slice'
+import { backend } from '@/test-utils/fake-tauri'
+
+vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
+vi.mock('@tauri-apps/plugin-dialog', async () => (await import('@/test-utils/fake-tauri')).dialogModule)
+vi.mock('@tauri-apps/plugin-sql', async () => (await import('@/test-utils/fake-tauri')).sqlModule)
+
+import {
+  AUTOSAVE_INTERVAL_MS,
+  autosaveNow,
+  confirmUnsavedChanges,
+  discardRecovery,
+  hasPendingRecovery,
+  loadRecentProjects,
+  newProject,
+  openProject,
+  restoreRecovery,
+  SaveStatusIndicator,
+  saveProject,
+  startAutosave,
+} from './index'
+import { __resetAutosaveForTests } from './autosave'
+import { __resetStorageForTests, clearRecoveryData, offerReopenAfterCrash } from './project'
+import { parseRecovery } from './recovery'
+import { __resetWriteLockForTests } from './write-lock'
+
+const ROOT = '/books/novel'
+const RECOVERY = `${ROOT}/.recovery/manuscript.json`
+const MANUSCRIPT = `${ROOT}/manuscript.json`
+
+const textDoc = (text: string): DocJSON => ({
+  type: 'doc',
+  content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+})
+const recoveryText = () => parseRecovery(backend.files.get(RECOVERY)!)?.doc.content?.[0].content?.[0].text
+const recoveryWrites = () => backend.writes.filter((w) => w === RECOVERY).length
+const project = () => useStore.getState().project
+
+let editor = createMemoryDocumentProvider()
+let unregister = () => {}
+
+/** Simulate an app launch: fresh in-memory state, same disk + recent file. */
+async function launch() {
+  await __resetAutosaveForTests()
+  await __resetStorageForTests()
+  __resetWriteLockForTests()
+  useStore.setState({ project: initialProjectState })
+  unregister()
+  editor = createMemoryDocumentProvider()
+  unregister = registerDocumentProvider(editor)
+  backend.active = backend.previous = null
+  backend.messages.length = 0
+  startAutosave()
+}
+
+async function createProject() {
+  backend.dirs.add(ROOT)
+  backend.pick = ROOT
+  expect(await newProject()).toBe(true)
+}
+
+/** Reopen ROOT from the recent list (as after a restart). */
+async function reopen() {
+  await loadRecentProjects()
+  expect(await openProject(ROOT)).toBe(true)
+}
+
+beforeEach(async () => {
+  vi.useFakeTimers()
+  backend.reset()
+  await launch()
+})
+
+afterEach(async () => {
+  cleanup()
+  await __resetAutosaveForTests()
+  unregister()
+  vi.useRealTimers()
+})
+
+describe('autosave cadence', () => {
+  it('writes a snapshot 30 s after the first unsaved change, never over manuscript.json', async () => {
+    await createProject()
+    const manuscriptBefore = backend.files.get(MANUSCRIPT)
+    editor.update(textDoc('first'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS - 1)
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(recoveryText()).toBe('first')
+    expect(backend.files.get(MANUSCRIPT)).toBe(manuscriptBefore)
+    expect(backend.dirs.has(`${ROOT}/.recovery`)).toBe(true)
+    const snap = parseRecovery(backend.files.get(RECOVERY)!)!
+    expect(snap).toMatchObject({ format: 'novel-recovery', version: 1, docVersion: editor.getDocVersion() })
+    expect(project().lastBackupAt).not.toBeNull()
+    expect(editor.isDirty()).toBe(true)
+  })
+
+  it('throttles: continuous typing gets one snapshot per 30 s, not zero and not one per keystroke', async () => {
+    await createProject()
+    const getDocJSON = vi.spyOn(editor, 'getDocJSON')
+    for (let s = 1; s <= 95; s++) {
+      editor.update(textDoc(`word ${s}`))
+      await vi.advanceTimersByTimeAsync(1000)
+    }
+    expect(recoveryWrites()).toBe(3) // at ~30, ~61, ~92 s
+    // The document is serialized only on timer ticks, never per keystroke.
+    expect(getDocJSON).toHaveBeenCalledTimes(3)
+  })
+
+  it('does nothing while the document is clean or no project is open', async () => {
+    editor.update(textDoc('no project yet'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS * 3)
+    expect(backend.writes).toEqual([])
+
+    backend.answer = "Don't Save" // New Project asks about the unsaved untitled text
+    await createProject()
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS * 3)
+    expect(recoveryWrites()).toBe(0)
+  })
+
+  it('does not rewrite an unchanged snapshot', async () => {
+    await createProject()
+    editor.update(textDoc('once'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(await autosaveNow()).toBe('skipped')
+    expect(recoveryWrites()).toBe(1)
+  })
+})
+
+describe('autosave and manual save', () => {
+  it('never overlaps a manual save: the snapshot waits, then is skipped because the save made the doc clean', async () => {
+    await createProject()
+    editor.update(textDoc('saving'))
+    let release!: () => void
+    backend.writeGate = (path) =>
+      path === MANUSCRIPT ? new Promise<void>((r) => (release = r)) : Promise.resolve()
+    const save = saveProject()
+    await vi.advanceTimersByTimeAsync(0)
+    const snapshot = autosaveNow()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(backend.files.has(RECOVERY)).toBe(false) // still waiting behind the save
+    release()
+    expect(await save).toBe(true)
+    expect(await snapshot).toBe('skipped')
+    expect(recoveryWrites()).toBe(0)
+  })
+
+  it('a snapshot queued behind a save still protects edits made during the save', async () => {
+    await createProject()
+    editor.update(textDoc('v1'))
+    let release!: () => void
+    backend.writeGate = (path) =>
+      path === MANUSCRIPT ? new Promise<void>((r) => (release = r)) : Promise.resolve()
+    const save = saveProject()
+    await vi.advanceTimersByTimeAsync(0)
+    editor.update(textDoc('v2 typed during save'))
+    const snapshot = autosaveNow()
+    release()
+    await save
+    expect(await snapshot).toBe('written')
+    const order = backend.writes.filter((w) => w === MANUSCRIPT || w === RECOVERY)
+    expect(order.at(-1)).toBe(RECOVERY)
+    expect(recoveryText()).toBe('v2 typed during save')
+  })
+
+  it('a clean manual save clears recovery data and the backup state', async () => {
+    await createProject()
+    editor.update(textDoc('draft'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(backend.files.has(RECOVERY)).toBe(true)
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    expect(project().lastBackupAt).toBeNull()
+  })
+})
+
+describe('crash recovery', () => {
+  it('ACCEPTANCE: force-quit within 30 s of the last autosave, reopen, Restore recovers text up to that autosave', async () => {
+    await createProject()
+    editor.update(textDoc('Chapter one, saved by autosave'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    editor.update(textDoc('typed after the last autosave'))
+    await vi.advanceTimersByTimeAsync(20_000)
+
+    await launch() // force quit: no save, no close handler
+    await reopen()
+    expect(project().recoveryPrompt).toMatchObject({ kind: 'restore' })
+    expect(hasPendingRecovery()).toBe(true)
+    expect(await restoreRecovery()).toBe(true)
+    expect(editor.getDocJSON()).toEqual(textDoc('Chapter one, saved by autosave'))
+    expect(editor.isDirty()).toBe(true) // user must save
+    expect(project().recoveryPrompt).toBeNull()
+    expect(backend.files.has(RECOVERY)).toBe(true) // kept until saved: survives a second crash
+
+    expect(await saveProject()).toBe(true)
+    expect(JSON.parse(backend.files.get(MANUSCRIPT)!)).toEqual(textDoc('Chapter one, saved by autosave'))
+    expect(backend.files.has(RECOVERY)).toBe(false)
+  })
+
+  it('Discard deletes the backup and keeps the saved manuscript', async () => {
+    await createProject()
+    editor.update(textDoc('lost on purpose'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    await launch()
+    await reopen()
+    await discardRecovery()
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    expect(editor.getDocJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+    expect(editor.isDirty()).toBe(false)
+    expect(project().recoveryPrompt).toBeNull()
+  })
+
+  it('a snapshot older than the last save is not offered and is deleted', async () => {
+    await createProject()
+    const meta = JSON.parse(backend.files.get(`${ROOT}/project.json`)!)
+    backend.dirs.add(`${ROOT}/.recovery`)
+    backend.files.set(
+      RECOVERY,
+      JSON.stringify({
+        format: 'novel-recovery',
+        version: 1,
+        projectId: meta.id,
+        savedAt: new Date(Date.parse(meta.updatedAt) - 60_000).toISOString(),
+        baseUpdatedAt: meta.updatedAt,
+        docVersion: 1,
+        doc: textDoc('stale'),
+      }),
+    )
+    await launch()
+    await reopen()
+    expect(project().recoveryPrompt).toBeNull()
+    expect(backend.files.has(RECOVERY)).toBe(false)
+  })
+
+  it('a newer snapshot identical to the manuscript is not offered', async () => {
+    await createProject()
+    editor.update(textDoc('same'))
+    await saveProject()
+    editor.update(textDoc('same')) // dirty again, same content
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(backend.files.has(RECOVERY)).toBe(true)
+    await launch()
+    await reopen()
+    expect(project().recoveryPrompt).toBeNull()
+    expect(backend.files.has(RECOVERY)).toBe(false)
+  })
+
+  it('a damaged recovery file is ignored (not deleted) and the project opens', async () => {
+    await createProject()
+    backend.dirs.add(`${ROOT}/.recovery`)
+    backend.files.set(RECOVERY, '{not json')
+    await launch()
+    await reopen()
+    expect(project().recoveryPrompt).toBeNull()
+    expect(project().path).toBe(ROOT)
+  })
+
+  it('"Don\'t Save" clears recovery data and the discarded content is not snapshotted again', async () => {
+    await createProject()
+    editor.update(textDoc('discard me'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    backend.answer = "Don't Save"
+    expect(await confirmUnsavedChanges('closing')).toBe(true)
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    expect(await autosaveNow()).toBe('skipped')
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    // New edits are protected again.
+    editor.update(textDoc('changed my mind'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(recoveryText()).toBe('changed my mind')
+  })
+
+  it('clean quit: clearRecoveryData waits for an in-flight snapshot, then deletes', async () => {
+    await createProject()
+    editor.update(textDoc('x'))
+    let release!: () => void
+    backend.writeGate = (path) => (path === RECOVERY ? new Promise<void>((r) => (release = r)) : Promise.resolve())
+    const snapshot = autosaveNow()
+    await vi.advanceTimersByTimeAsync(0)
+    const cleared = clearRecoveryData()
+    release()
+    await snapshot
+    await cleared
+    expect(backend.files.has(RECOVERY)).toBe(false)
+  })
+
+  it('at startup, offers to reopen the last project when it has recovery data', async () => {
+    await createProject()
+    editor.update(textDoc('crash'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    await launch()
+    await offerReopenAfterCrash(await loadRecentProjects())
+    expect(project().recoveryPrompt).toEqual({ kind: 'reopen', path: ROOT, name: 'novel' })
+
+    // Without recovery data: no prompt.
+    backend.files.delete(RECOVERY)
+    await launch()
+    await offerReopenAfterCrash(await loadRecentProjects())
+    expect(project().recoveryPrompt).toBeNull()
+  })
+})
+
+describe('autosave errors', () => {
+  it('disk full: non-blocking warning, retries after 5 s, 15 s, then recovers and clears the warning', async () => {
+    await createProject()
+    let failing = true
+    backend.failWrite = (path) =>
+      failing && path.startsWith(`${ROOT}/.recovery`)
+        ? { kind: 'disk_full', message: 'There is not enough space on the disk. (os error 112)' }
+        : null
+    editor.update(textDoc('important'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(project().backupWarning).toBe('Autosave failed: the disk is full. Retrying in 5 s.')
+    expect(backend.messages).toEqual([]) // no modal
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(project().backupWarning).toBe('Autosave failed: the disk is full. Retrying in 15 s.')
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(project().backupWarning).toBe('Autosave failed: the disk is full. Retrying in 30 s.')
+    failing = false
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(project().backupWarning).toBeNull()
+    expect(recoveryText()).toBe('important')
+    expect(backend.messages).toEqual([])
+  })
+
+  it('read-only folder maps to a friendly warning; the status bar shows it', async () => {
+    await createProject()
+    backend.failWrite = (path) =>
+      path.startsWith(`${ROOT}/.recovery`) ? { kind: 'read_only', message: 'Read-only file system (os error 30)' } : null
+    editor.update(textDoc('x'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(project().backupWarning).toBe('Autosave failed: the project folder is read-only. Retrying in 5 s.')
+    render(<SaveStatusIndicator />)
+    expect(screen.getByTestId('autosave-warning')).toHaveTextContent('read-only')
+  })
+
+  it('manual save on a full disk shows the friendly message', async () => {
+    await createProject()
+    backend.failWrite = () => ({ kind: 'disk_full', message: 'No space left on device (os error 28)' })
+    editor.update(textDoc('x'))
+    expect(await saveProject()).toBe(false)
+    expect(project().saveError).toMatch(/disk is full/)
+  })
+})
+
+describe('recovery dialog', () => {
+  it('offers Restore and Discard with control ids; Restore loads the backup', async () => {
+    await createProject()
+    editor.update(textDoc('from backup'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    await launch()
+    await reopen()
+    render(<SaveStatusIndicator />)
+    const restore = screen.getByRole('button', { name: 'Restore' })
+    expect(restore).toHaveAttribute('data-control-id', 'recovery.restore')
+    expect(screen.getByRole('button', { name: 'Discard Backup' })).toHaveAttribute('data-control-id', 'recovery.discard')
+    fireEvent.click(restore)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(editor.getDocJSON()).toEqual(textDoc('from backup'))
+    expect(editor.isDirty()).toBe(true)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('closing the dialog decides nothing: the backup is kept', async () => {
+    await createProject()
+    editor.update(textDoc('keep'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    await launch()
+    await reopen()
+    render(<SaveStatusIndicator />)
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(project().recoveryPrompt).toBeNull()
+    expect(hasPendingRecovery()).toBe(true)
+    expect(backend.files.has(RECOVERY)).toBe(true)
+  })
+})

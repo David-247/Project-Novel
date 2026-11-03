@@ -22,6 +22,6 @@ export const useStore = create<RootState>()((...a) => ({
 export { useColorSchemeSync } from './use-color-scheme-sync'
 export type { AppSlice, ColorScheme } from './app-slice'
 export type { EditorSlice } from './editor-slice'
-export type { ProjectSlice, ProjectState, RecentProject, SaveStatus } from './project-slice'
+export type { ProjectSlice, ProjectState, RecentProject, RecoveryPrompt, SaveStatus } from './project-slice'
 export type { FindSlice } from './find-slice'
 export type { RootState, SliceCreator } from './types'

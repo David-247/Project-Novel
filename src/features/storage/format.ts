@@ -29,6 +29,8 @@ export type ProjectErrorCode =
   | 'unsupported-version'
   | 'already-exists'
   | 'no-editor'
+  | 'disk-full'
+  | 'read-only'
   | 'io'
 
 /** An expected storage failure, carrying a message suitable for an error dialog. */
