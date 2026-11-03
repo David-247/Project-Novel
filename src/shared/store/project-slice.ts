@@ -43,6 +43,8 @@ export interface ProjectState {
   backupWarning: string | null
   /** Pending crash-recovery question, if any. */
   recoveryPrompt: RecoveryPrompt | null
+  /** True while a project is being opened (reading and loading a possibly large manuscript). */
+  opening: boolean
 }
 
 export interface ProjectSlice {
@@ -61,6 +63,9 @@ export interface ProjectSlice {
     backupCleared: () => void
     showRecoveryPrompt: (prompt: RecoveryPrompt) => void
     dismissRecoveryPrompt: () => void
+    /** Opening a project started / finished (success or failure). */
+    openStarted: () => void
+    openFinished: () => void
   }
 }
 
@@ -74,6 +79,7 @@ export const initialProjectState: ProjectState = {
   lastBackupAt: null,
   backupWarning: null,
   recoveryPrompt: null,
+  opening: false,
 }
 
 export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
@@ -112,6 +118,8 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
       backupCleared: () => patch({ lastBackupAt: null, backupWarning: null }),
       showRecoveryPrompt: (recoveryPrompt) => patch({ recoveryPrompt }),
       dismissRecoveryPrompt: () => patch({ recoveryPrompt: null }),
+      openStarted: () => patch({ opening: true }),
+      openFinished: () => patch({ opening: false }),
     },
   }
 }

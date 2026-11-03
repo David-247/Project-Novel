@@ -3,7 +3,7 @@ import type { ChainedCommands } from '@tiptap/core'
 import { Fragment } from 'react'
 import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from 'react'
 import { cn, Select, ToggleButton, IconButton, ToolbarGroup, ToolbarSeparator, Tooltip } from '@/shared/ui'
-import { listSystemFonts } from '../fonts'
+import { loadSystemFonts } from '../fonts'
 import { TOOLBAR_CONTROLS } from './controls'
 import type { ToolbarControlKey } from './controls'
 import { FontFamilyPicker } from './FontFamilyPicker'
@@ -53,7 +53,7 @@ const ALIGNMENTS: ReadonlyArray<{ key: ToolbarControlKey; value: Alignment; icon
  * Formatting toolbar (ARIA `toolbar` with roving focus). Active states come from
  * `useToolbarState`, which reads only the selection (see `readToolbarState`).
  */
-export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFonts, className }: ToolbarProps) {
+export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFonts, className }: ToolbarProps) {
   const editor = useMountedEditor()
   const s = useToolbarState(editor)
   const disabled = !editor || !s.ready

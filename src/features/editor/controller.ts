@@ -32,6 +32,18 @@ function schemaForValidation(): Schema {
   return detachedSchema
 }
 
+/**
+ * Parse and validate a doc. A doc with no blocks (`{"type":"doc","content":[]}`, e.g. a
+ * hand-edited or third-party manuscript) is completed to one empty paragraph instead of
+ * being rejected; anything else the schema rejects throws.
+ */
+function docFromJSON(schema: Schema, doc: JSONContent): PMNode {
+  let node = schema.nodeFromJSON(doc)
+  if (node.type === schema.topNodeType && node.childCount === 0) node = schema.topNodeType.createAndFill()!
+  node.check()
+  return node
+}
+
 function isEmptyNode(doc: PMNode): boolean {
   const first = doc.firstChild
   return doc.childCount === 1 && !!first && first.isTextblock && first.content.size === 0
@@ -50,8 +62,7 @@ function notify(listeners: Set<() => void>) {
  * `keepDirty` restores an unmount snapshot without losing its unsaved status.
  */
 function loadInto(editor: Editor, doc: JSONContent, keepDirty = false) {
-  const node = editor.schema.nodeFromJSON(doc)
-  node.check()
+  const node = docFromJSON(editor.schema, doc)
   const state = EditorState.create({ schema: editor.schema, doc: node, plugins: editor.state.plugins })
   editor.view.updateState(state)
   if (keepDirty && useStore.getState().editor.dirty) actions().docChanged(isEmptyNode(node))
@@ -136,9 +147,8 @@ export function setDocJSON(doc: JSONContent): void {
     loadInto(ed, doc)
     return
   }
-  const node = schemaForValidation().nodeFromJSON(doc)
-  node.check()
-  pending = structuredClone(doc)
+  const node = docFromJSON(schemaForValidation(), doc)
+  pending = doc.content?.length ? structuredClone(doc) : (node.toJSON() as JSONContent)
   pendingSnapshotOf = null
   actions().docLoaded(isEmptyNode(node))
   loadCount++

@@ -25,11 +25,12 @@ export function SaveStatusIndicator() {
   const saveStatus = useStore((s) => s.project.saveStatus)
   const backedUp = useStore((s) => s.project.lastBackupAt !== null)
   const warning = useStore((s) => s.project.backupWarning)
+  const opening = useStore((s) => s.project.opening)
   const text = saveStatusText({ path, title, dirty, saveStatus, backedUp })
   return (
     <>
       <span role="status" aria-live="polite" className="text-sm">
-        {title ? `${title}: ${text}` : text}
+        {opening ? 'Opening…' : title ? `${title}: ${text}` : text}
       </span>
       {warning ? (
         <StatusText tone="warning" live className="ml-3" data-testid="autosave-warning">

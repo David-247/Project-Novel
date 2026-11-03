@@ -16,6 +16,10 @@ export function NovelEditor() {
     extensions,
     immediatelyRender: true,
     shouldRerenderOnTransaction: false,
+    // Tiptap's core "delete" extension only emits `delete` events (unused here), but computes
+    // changed ranges in O(steps^2) after every transaction: ~5 s of main-thread time after a
+    // 10,000-match Replace All on a 100k-word manuscript. Off.
+    enableCoreExtensions: { delete: false },
     editorProps: {
       attributes: {
         class: 'novel-editor-content',
