@@ -234,6 +234,18 @@ async function handle(cmd: string, args: Record<string, unknown> = {}): Promise<
       }
       return files.has(c) || dirs.has(c)
     }
+    case 'storage_probe_recent_recovery': {
+      // Like Rust: only folders in the recent list; reads project.json + the snapshot (missing = null).
+      const c = canonical(path)
+      if (!dirs.has(c)) throw notFound(path)
+      if (!recent.some((r) => canonical(r.path) === c)) {
+        throw { kind: 'not_recent', message: `${path} is not in the recent projects list` }
+      }
+      return {
+        project: files.get(`${c}/project.json`) ?? null,
+        recovery: files.get(`${c}/.recovery/manuscript.json`) ?? null,
+      }
+    }
     case 'storage_exit_app':
       exits++
       return null

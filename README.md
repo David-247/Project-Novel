@@ -28,7 +28,8 @@ live in IndexedDB, so closing a page is a "force-kill" and a new page is a "rela
 is driven through `window.__nvE2E` (see `e2e/helpers.ts`): File-menu events, the folder picker's
 answer, and message boxes rendered as an overlay. Production builds never contain it
 (`pnpm build && pnpm verify:prod-bundle` checks). `e2e/perf.spec.ts` writes its measurements to
-`perf-results/`.
+`perf-results/`; it runs in its own projects (`perf-chromium`, then `perf-webkit`) after the
+functional projects finish, so nothing else competes for the CPU while it measures.
 
 Real-app smoke (Windows/Linux only; WebDriver does not exist for macOS WKWebView): install
 `tauri-driver` (`cargo install tauri-driver`) and an msedgedriver matching your WebView2 version,

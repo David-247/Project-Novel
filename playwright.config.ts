@@ -6,6 +6,7 @@ import { defineConfig, devices } from '@playwright/test'
 // PW_PORT overrides the port (use a unique one when several worktrees run e2e at once).
 const port = Number(process.env.PW_PORT ?? 4174)
 const baseURL = `http://127.0.0.1:${port}`
+const PERF = /perf\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
@@ -13,8 +14,23 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   use: { baseURL, trace: 'retain-on-failure' },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: PERF },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] }, testIgnore: PERF },
+    // Perf runs alone: only after both functional projects finished, and one browser at a time,
+    // so no other test competes for the CPU while latency is measured. (If a functional test
+    // fails, the perf projects are skipped.)
+    {
+      name: 'perf-chromium',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: PERF,
+      dependencies: ['chromium', 'webkit'],
+    },
+    {
+      name: 'perf-webkit',
+      use: { ...devices['Desktop Safari'] },
+      testMatch: PERF,
+      dependencies: ['perf-chromium'],
+    },
   ],
   webServer: {
     command: `pnpm build:e2e && pnpm exec vite preview --mode e2e --outDir dist-e2e --host 127.0.0.1 --port ${port} --strictPort`,

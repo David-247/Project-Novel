@@ -45,14 +45,25 @@ test('a failed save (disk full) shows an error, keeps the text, and a later save
   await expect(saveStatus(page)).toHaveText('Full: Saved')
 })
 
-test('a read-only project folder: save error names the cause', async ({ page }) => {
+test('a read-only or write-denied project folder: save error names the cause', async ({ page }) => {
   await launch(page)
   await newProject(page, '/projects/Locked')
   await editor(page).click()
   await page.keyboard.type('x')
   await page.evaluate(() => window.__nvE2E.setFailWrite('/projects/Locked/', 'read_only'))
   await page.keyboard.press('ControlOrMeta+s')
-  await expect(nativeDialog(page)).toContainText('Novel is not allowed to write manuscript.json.')
+  await expect(nativeDialog(page)).toContainText(
+    'Novel could not write manuscript.json because the project folder is read-only.',
+  )
+  await nativeDialog(page).getByRole('button', { name: 'OK' }).click()
+  await expect(saveStatus(page)).toHaveText('Locked: Save failed')
+
+  // Permission denied (Windows also reports a file in use by another program this way).
+  await page.evaluate(() => window.__nvE2E.setFailWrite('/projects/Locked/', 'permission_denied'))
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(nativeDialog(page)).toContainText(
+    'Novel could not write manuscript.json. The project folder may be read-only, or the file is in use by another program.',
+  )
   await nativeDialog(page).getByRole('button', { name: 'OK' }).click()
   await expect(saveStatus(page)).toHaveText('Locked: Save failed')
 })
