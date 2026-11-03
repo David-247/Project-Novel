@@ -18,7 +18,8 @@ export default defineConfig({
     { name: 'webkit', use: { ...devices['Desktop Safari'] }, testIgnore: PERF },
     // Perf runs alone: only after both functional projects finished, and one browser at a time,
     // so no other test competes for the CPU while latency is measured. (If a functional test
-    // fails, the perf projects are skipped.)
+    // fails, the perf projects are skipped; CI therefore runs them in a separate job with
+    // `--project=perf-chromium --project=perf-webkit --no-deps --workers=1`.)
     {
       name: 'perf-chromium',
       use: { ...devices['Desktop Chrome'] },

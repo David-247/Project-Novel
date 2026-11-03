@@ -35,6 +35,27 @@ jobs:
       - run: pnpm build
       - run: pnpm verify:prod-bundle
 
+  licenses:
+    name: License gate (JS + Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Every JS dependency (prod + dev) must be on the MIT-compatible allowlist.
+      - name: JS licenses (pnpm licenses list + allowlist)
+        run: node scripts/check-licenses.mjs
+      # Rust crates: allowlist in src-tauri/deny.toml.
+      - name: Rust licenses (cargo-deny)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check licenses
+
   rust:
     name: cargo test (${{ matrix.os }})
     strategy:
@@ -60,7 +81,7 @@ jobs:
         working-directory: src-tauri
 
   e2e:
-    name: Playwright e2e + perf (${{ matrix.os }})
+    name: Playwright e2e (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -75,8 +96,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium webkit
-      # Both projects: chromium (stands in for WebView2) and webkit (for WKWebView).
-      - run: pnpm test:e2e
+      # Functional projects: chromium (stands in for WebView2) and webkit (for WKWebView). Perf runs
+      # in its own job, so its numbers are published even when a functional test fails.
+      - run: pnpm exec playwright test --project=chromium --project=webkit
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -86,6 +108,29 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 14
+
+  perf:
+    name: Perf, 100k-word manuscript (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium webkit
+      # The perf projects alone (--no-deps: not gated on the functional projects), one browser at a
+      # time (--workers=1) so nothing else competes for the CPU while latency is measured.
+      - run: pnpm exec playwright test --project=perf-chromium --project=perf-webkit --no-deps --workers=1
+      - name: Perf numbers to the job summary
+        if: ${{ !cancelled() }}
+        run: node scripts/perf-summary.mjs
       - name: Upload performance results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -116,11 +161,33 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # No bundle signing: build the app binary only.
       - run: pnpm tauri build --no-bundle
-      # Real-app smoke (Windows only: tauri-driver has no macOS WKWebView driver).
+      # The web bundle tauri build embedded (beforeBuildCommand `pnpm build` -> dist/) must not
+      # contain the e2e-only fake Tauri backend either.
+      - run: pnpm verify:prod-bundle
+      # Real-app smoke (Windows only: tauri-driver has no macOS WKWebView driver). Informational:
+      # WebView2 / msedgedriver version skew on the runner image must not fail the build.
       # msedgedriver comes preinstalled on GitHub's Windows images (EDGEWEBDRIVER).
-      - name: Install tauri-driver
+      - name: WebView2 runtime and msedgedriver versions
         if: runner.os == 'Windows'
-        run: cargo install tauri-driver --locked
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $keys = @(
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+            'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+            'HKCU:\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          )
+          foreach ($k in $keys) {
+            $pv = (Get-ItemProperty -Path $k -Name pv -ErrorAction SilentlyContinue).pv
+            if ($pv) { Write-Output "WebView2 runtime: $pv ($k)"; break }
+          }
+          $driver = if ($env:EDGEWEBDRIVER) { Join-Path $env:EDGEWEBDRIVER 'msedgedriver.exe' } else { 'msedgedriver' }
+          & $driver --version
+      - name: Install tauri-driver (pinned)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Real-app smoke (tauri-driver + msedgedriver)
         if: runner.os == 'Windows'
+        continue-on-error: true
         run: node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe
