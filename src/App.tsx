@@ -1,12 +1,12 @@
 import { AppShell } from '@/features/app-shell'
-import { useColorSchemeSync } from '@/shared/store'
+import { useThemeFollow } from '@/shared/theme'
 
 /** Composition root: the only place that wires slices together. */
 export function App() {
-  useColorSchemeSync()
+  useThemeFollow()
   return (
     <AppShell
-      toolbar={<span className="text-sm font-medium">Novel</span>}
+      toolbar={<span className="px-1 text-ui font-semibold">Novel</span>}
       editor={null}
       statusBar={null}
     />

@@ -1,0 +1,158 @@
+/*
+ * Design tokens: the single theme file.
+ *
+ * 1. Raw per-theme values live in `--nv-*` custom properties on <html>, selected by
+ *    `data-theme="light" | "dark"` (set by useThemeFollow from the OS setting).
+ *    `:root` without the attribute falls back to light.
+ * 2. `@theme inline` maps them to Tailwind utilities (bg-surface, text-text-muted,
+ *    border-border-control, ring-focus-ring, rounded-control, h-control, font-prose...).
+ *
+ * Colors are written as 6-digit hex only: tests/contrast parses this file and checks
+ * WCAG AA for every declared pair in both themes. See docs/design.md.
+ */
+
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  /* Planes */
+  --nv-bg: #e9ecee; /* app chrome: toolbar, status bar, window backdrop */
+  --nv-surface: #fbfbfb; /* writing surface container */
+  --nv-surface-raised: #ffffff; /* panels, dialogs, menus, inputs */
+  --nv-surface-hover: #dde2e5; /* hover/active fill for quiet controls */
+  /* Text */
+  --nv-text: #1b2327;
+  --nv-text-muted: #4f5b62;
+  /* Accent: slate-teal ink */
+  --nv-accent: #1d5c68;
+  --nv-accent-hover: #164a54;
+  --nv-accent-contrast: #ffffff;
+  --nv-accent-soft: #d4e7ea; /* pressed toggle fill; text on it uses --nv-accent */
+  /* Lines */
+  --nv-border: #d3d9dd; /* decorative hairlines between regions (not a control boundary) */
+  --nv-border-control: #79858c; /* control outlines: inputs, selects, checkboxes */
+  --nv-focus-ring: #1d5c68;
+  /* Status */
+  --nv-danger: #a8261d;
+  --nv-danger-contrast: #ffffff;
+  --nv-warning: #7d5300;
+  --nv-success: #2b6636;
+  /* Dialog scrim (decorative, not contrast-tested) */
+  --nv-scrim: rgb(20 28 32 / 0.32);
+  --nv-shadow: 0 1px 2px rgb(20 28 32 / 0.08), 0 8px 24px rgb(20 28 32 / 0.12);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --nv-bg: #14181a;
+  --nv-surface: #1a1f22;
+  --nv-surface-raised: #22292d;
+  --nv-surface-hover: #2c353a;
+  --nv-text: #e3e8ea;
+  --nv-text-muted: #a2adb3;
+  --nv-accent: #7cc3ce;
+  --nv-accent-hover: #9bd3db;
+  --nv-accent-contrast: #0e2125;
+  --nv-accent-soft: #1d3a40;
+  --nv-border: #30393e;
+  --nv-border-control: #6f7c83;
+  --nv-focus-ring: #8fd4de;
+  --nv-danger: #f0a39b;
+  --nv-danger-contrast: #2a0b08;
+  --nv-warning: #e6c07a;
+  --nv-success: #8fca99;
+  --nv-scrim: rgb(0 0 0 / 0.55);
+  --nv-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px rgb(0 0 0 / 0.45);
+}
+
+@theme inline {
+  /* Colors */
+  --color-bg: var(--nv-bg);
+  --color-surface: var(--nv-surface);
+  --color-surface-raised: var(--nv-surface-raised);
+  --color-surface-hover: var(--nv-surface-hover);
+  --color-text: var(--nv-text);
+  --color-text-muted: var(--nv-text-muted);
+  --color-accent: var(--nv-accent);
+  --color-accent-hover: var(--nv-accent-hover);
+  --color-accent-contrast: var(--nv-accent-contrast);
+  --color-accent-soft: var(--nv-accent-soft);
+  --color-border: var(--nv-border);
+  --color-border-control: var(--nv-border-control);
+  --color-focus-ring: var(--nv-focus-ring);
+  --color-danger: var(--nv-danger);
+  --color-danger-contrast: var(--nv-danger-contrast);
+  --color-warning: var(--nv-warning);
+  --color-success: var(--nv-success);
+  --color-scrim: var(--nv-scrim);
+  --shadow-raised: var(--nv-shadow);
+}
+
+@theme {
+  /* Typography: OS fonts only (fully offline, nothing fetched). */
+  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'SF Pro Text',
+    'Helvetica Neue', Ubuntu, Cantarell, sans-serif;
+  --font-prose: 'Iowan Old Style', Charter, 'Sitka Text', Cambria, Georgia, 'Bitstream Charter',
+    serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, Menlo, monospace;
+  --text-ui-xs: 0.75rem; /* 12px: status bar */
+  --text-ui-xs--line-height: 1rem;
+  --text-ui-sm: 0.8125rem; /* 13px: controls */
+  --text-ui-sm--line-height: 1.125rem;
+  --text-ui: 0.875rem; /* 14px: body UI text */
+  --text-ui--line-height: 1.25rem;
+  --text-ui-lg: 1rem; /* 16px: dialog titles */
+  --text-ui-lg--line-height: 1.5rem;
+  --text-prose: 1.125rem; /* 18px: writing surface default */
+  --text-prose--line-height: 1.7;
+
+  /* Radii: controls are tighter than containers, so hierarchy reads at a glance. */
+  --radius-control: 0.375rem; /* 6px */
+  --radius-panel: 0.625rem; /* 10px */
+
+  /* Sizes (named spacing keys -> h-control, min-w-control, h-toolbar ...) */
+  --spacing-control: 2rem; /* 32px: minimum touch target */
+  --spacing-control-lg: 2.5rem; /* 40px */
+  --spacing-toolbar: 3rem; /* 48px */
+  --spacing-statusbar: 2rem; /* 32px */
+  --spacing-gutter: 1rem;
+}
+
+/* The only motion: dialogs answer the user opening them. Disabled under reduced motion. */
+@keyframes nv-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes nv-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@layer base {
+  html {
+    background: var(--nv-bg);
+    color: var(--nv-text);
+  }
+  body {
+    background: var(--nv-bg);
+    color: var(--nv-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-ui);
+    line-height: var(--text-ui--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: var(--nv-accent-soft);
+    color: var(--nv-text);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
+  }
+}
