@@ -84,16 +84,22 @@ test('failing autosave shows a non-blocking warning and recovers', async ({ page
   await page.evaluate(() => window.__nvE2E.setFailWrite(null))
   await page.clock.runFor(6_000)
   await expect(warning).toHaveCount(0)
-  await expect(saveStatus(page)).toHaveText('Flaky: Unsaved changes (backed up)')
+  await expect(saveStatus(page)).toHaveText(/^Flaky: Unsaved changes · backed up \d/)
 })
 
 test('opening a project shows "Opening…" until it is loaded', async ({ page }) => {
   await launch(page)
   await seedProject(page, '/projects/Slow', 'Slow', doc('Loaded at last.'))
   await page.evaluate(() => window.__nvE2E.setReadDelay(700))
+  await editor(page).click()
   await openRecent(page, '/projects/Slow')
   await expect(saveStatus(page)).toHaveText('Opening…')
+  // Read-only while opening: typing now would be overwritten by the load.
+  const surface = page.locator('main [contenteditable]')
+  await expect(surface).toHaveAttribute('contenteditable', 'false')
+  await expect(page.getByTestId('writing-surface')).toHaveAttribute('aria-busy', 'true')
   await expect(saveStatus(page)).toHaveText('Slow: All changes saved')
+  await expect(surface).toHaveAttribute('contenteditable', 'true')
   await expect(editor(page)).toHaveText('Loaded at last.')
 })
 

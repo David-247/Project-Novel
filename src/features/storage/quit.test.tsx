@@ -32,7 +32,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 
 import { autosaveNow, MENU_EVENTS, newProject, useStorageIntegration } from './index'
 import { handleQuitRequest, prepareToExit } from './integration'
-import { saveStatusText as saveStatusTextForTests } from './SaveStatusIndicator'
+import { formatBackupTime, saveStatusText as saveStatusTextForTests } from './SaveStatusIndicator'
 import { __resetAutosaveForTests } from './autosave'
 import { __resetStorageForTests } from './project'
 import { __resetWriteLockForTests } from './write-lock'
@@ -129,9 +129,12 @@ describe('quit', () => {
     }
   })
 
-  it('status text mentions the backup while changes are unsaved', () => {
+  it('status text gives the time of the last backup while changes are unsaved', () => {
     const base = { path: '/p', title: 't', dirty: true, saveStatus: 'idle' as const }
-    expect(saveStatusTextForTests({ ...base, backedUp: true })).toBe('Unsaved changes (backed up)')
+    const at = new Date(2026, 10, 3, 12, 4).getTime()
+    expect(saveStatusTextForTests({ ...base, lastBackupAt: at })).toBe(`Unsaved changes · backed up ${formatBackupTime(at)}`)
+    expect(formatBackupTime(at)).toMatch(/12.04/)
+    expect(saveStatusTextForTests({ ...base, lastBackupAt: null })).toBe('Unsaved changes')
   })
 
   it('the Quit menu item / Cmd+Q / OS quit event is wired to the quit flow', async () => {

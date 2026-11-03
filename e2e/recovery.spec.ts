@@ -20,7 +20,7 @@ test('force-kill after an autosave, relaunch: Restore recovers the text typed up
   await page.keyboard.type('Typed before the autosave.')
   await expect(saveStatus(page)).toHaveText('Crashy: Unsaved changes')
   await page.clock.runFor(31_000)
-  await expect(saveStatus(page)).toHaveText('Crashy: Unsaved changes (backed up)')
+  await expect(saveStatus(page)).toHaveText(/^Crashy: Unsaved changes · backed up \d/)
 
   // Typed after the last autosave: allowed to be lost (< 30 s of work).
   await page.keyboard.press('Enter')
@@ -66,7 +66,7 @@ test('Discard Backup keeps the last saved version', async ({ page, context }) =>
   await expect(saveStatus(page)).toHaveText('Discard: Saved')
   await page.keyboard.type(' Thrown away.')
   await page.clock.runFor(31_000)
-  await expect(saveStatus(page)).toHaveText('Discard: Unsaved changes (backed up)')
+  await expect(saveStatus(page)).toHaveText(/^Discard: Unsaved changes · backed up \d/)
   await page.close({ runBeforeUnload: false })
 
   const relaunched = await context.newPage()
