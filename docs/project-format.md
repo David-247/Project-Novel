@@ -93,6 +93,12 @@ Safety rules enforced in Rust:
   (`storage_pick_project_folder`), or from an entry in the recent list (`storage_open_recent_root`). The webview can
   only undo the last change (`storage_restore_project_root`, used after a failed open) or clear the folder
   (`storage_clear_project_root`). It cannot name an arbitrary folder.
+- Existence checks (`storage_path_exists`) only answer for paths inside the open project folder or a folder in the
+  recent list, and refuse `..`.
+- New Project refuses a folder that already holds `manuscript.json` or `index.sqlite` without a `project.json`, so
+  leftovers of an earlier project are never overwritten.
+- The final rename is retried for about 0.4 s when another program (antivirus, OneDrive, Dropbox) briefly locks the
+  target.
 - **Known limitation:** `index.sqlite` is opened through the Tauri SQL plugin, which has no path scope. The webview
   could open a SQLite file anywhere. Only the JSON files go through the confined commands.
 

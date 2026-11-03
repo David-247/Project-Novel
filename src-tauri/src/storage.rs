@@ -25,6 +25,7 @@ pub const MENU_OPEN_RECENT: &str = "file.open_recent";
 pub const MENU_OPEN_RECENT_ITEM_PREFIX: &str = "file.open_recent.";
 pub const MENU_OPEN_RECENT_EMPTY: &str = "file.open_recent.empty";
 pub const MENU_SAVE: &str = "file.save";
+pub const MENU_QUIT: &str = "app.quit";
 
 /// Events emitted to the frontend when menu items are chosen.
 pub const EVENT_NEW_PROJECT: &str = "menu://new-project";
@@ -32,6 +33,9 @@ pub const EVENT_OPEN_PROJECT: &str = "menu://open-project";
 /// Payload: the project folder path (string).
 pub const EVENT_OPEN_RECENT: &str = "menu://open-recent";
 pub const EVENT_SAVE: &str = "menu://save";
+/// Quit requested (menu, Cmd+Q, or any other app-exit request): the frontend
+/// runs its unsaved-changes flow and then calls `storage_exit_app`.
+pub const EVENT_QUIT: &str = "menu://quit";
 
 /// Error returned to the frontend: a machine-readable kind plus a message.
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -136,13 +140,42 @@ pub fn write_atomic(target: &Path, contents: &[u8]) -> Result<()> {
     // On any error below, dropping `tmp` deletes the temp file.
     tmp.write_all(contents).map_err(|e| StorageError::io(target, e))?;
     tmp.as_file().sync_all().map_err(|e| StorageError::io(target, e))?;
-    tmp.persist(target).map_err(|e| StorageError::io(target, e.error))?;
+    persist_retrying(tmp, target).map_err(|e| StorageError::io(target, e))?;
     // Persist the rename itself (directory entry). Not supported on Windows.
     #[cfg(unix)]
     if let Ok(d) = fs::File::open(dir) {
         let _ = d.sync_all();
     }
     Ok(())
+}
+
+/// Backoff before each retry of the final rename (total ~425 ms).
+const PERSIST_BACKOFF_MS: [u64; 5] = [50, 75, 100, 100, 100];
+
+/// True for errors caused by another process briefly holding the file
+/// (antivirus, search indexer, OneDrive/Dropbox sync): worth retrying.
+pub fn is_transient_lock_error(err: &std::io::Error) -> bool {
+    if err.kind() == ErrorKind::PermissionDenied {
+        return true;
+    }
+    // ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33).
+    cfg!(windows) && matches!(err.raw_os_error(), Some(32) | Some(33))
+}
+
+/// Rename the temp file over `target`, retrying transient lock errors.
+fn persist_retrying(mut tmp: tempfile::NamedTempFile, target: &Path) -> std::io::Result<()> {
+    let mut attempt = 0;
+    loop {
+        match tmp.persist(target) {
+            Ok(_) => return Ok(()),
+            Err(e) if attempt < PERSIST_BACKOFF_MS.len() && is_transient_lock_error(&e.error) => {
+                std::thread::sleep(std::time::Duration::from_millis(PERSIST_BACKOFF_MS[attempt]));
+                attempt += 1;
+                tmp = e.file;
+            }
+            Err(e) => return Err(e.error),
+        }
+    }
 }
 
 /// A project folder the user granted access to: the path as chosen (for
@@ -247,7 +280,12 @@ pub async fn storage_pick_project_folder<R: Runtime>(
     use tauri_plugin_dialog::DialogExt;
     let dialog_app = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        dialog_app.dialog().file().set_title(title).blocking_pick_folder()
+        let mut builder = dialog_app.dialog().file().set_title(title);
+        // Modal to the main window, so the app cannot start a second New/Open meanwhile.
+        if let Some(window) = dialog_app.get_webview_window("main") {
+            builder = builder.set_parent(&window);
+        }
+        builder.blocking_pick_folder()
     })
     .await
     .map_err(lock_err)?;
@@ -304,14 +342,17 @@ pub fn storage_clear_project_root(state: State<'_, ProjectRoot>) -> Result<()> {
 }
 
 /// Atomically write a UTF-8 text file inside the open project folder.
+/// Runs off the main thread (a locked target may be retried for ~0.4 s).
 #[tauri::command]
-pub fn storage_write_file_atomic(
+pub async fn storage_write_file_atomic(
     state: State<'_, ProjectRoot>,
     path: String,
     contents: String,
 ) -> Result<()> {
-    let root = current_root(&state)?;
-    write_atomic(&resolve_for_write(&root, &path)?, contents.as_bytes())
+    let target = resolve_for_write(&current_root(&state)?, &path)?;
+    tauri::async_runtime::spawn_blocking(move || write_atomic(&target, contents.as_bytes()))
+        .await
+        .map_err(lock_err)?
 }
 
 /// Read a UTF-8 text file inside the open project folder.
@@ -379,10 +420,64 @@ pub fn storage_remove_file(state: State<'_, ProjectRoot>, path: String) -> Resul
     remove_file_in(&root, &path)
 }
 
-/// True when `path` is an existing file or folder (read-only existence check).
+/// Existence check confined to `roots` (canonical folders). `..` is refused;
+/// the deepest existing ancestor is canonicalized (resolving links) and must be
+/// inside a root, otherwise "outside_project".
+pub fn exists_within(roots: &[PathBuf], path: &str) -> Result<bool> {
+    let p = absolute(path)?;
+    // Verbatim (\\?\) Windows paths keep ".." as a normal component, so compare the text too.
+    if p.components().any(|c| matches!(c, std::path::Component::ParentDir) || c.as_os_str() == "..") {
+        return Err(StorageError::invalid(format!("Path may not contain '..': {path:?}")));
+    }
+    let mut probe = p.as_path();
+    let existing = loop {
+        if let Ok(c) = fs::canonicalize(probe) {
+            break c;
+        }
+        match probe.parent() {
+            Some(parent) => probe = parent,
+            None => return Err(StorageError::outside(&p)),
+        }
+    };
+    if !roots.iter().any(|r| existing.starts_with(r)) {
+        return Err(StorageError::outside(&p));
+    }
+    Ok(probe == p.as_path())
+}
+
+/// True when `path` exists. Only answers for paths inside the open project
+/// folder or a folder in the recent list (used to flag missing recent projects
+/// and to look for crash-recovery data).
 #[tauri::command]
-pub fn storage_path_exists(path: String) -> Result<bool> {
-    Ok(absolute(&path)?.exists())
+pub fn storage_path_exists<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, ProjectRoot>,
+    path: String,
+) -> Result<bool> {
+    let mut roots: Vec<PathBuf> = load_recent(&recent_file(&app)?)?
+        .projects
+        .iter()
+        .filter_map(|e| fs::canonicalize(&e.path).ok())
+        .collect();
+    if let Some(active) = state.0.lock().map_err(lock_err)?.active.as_ref() {
+        roots.push(active.canonical.clone());
+    }
+    exists_within(&roots, &path)
+}
+
+/// Exit the app. Called by the frontend after its quit flow (unsaved-changes
+/// prompt, recovery cleanup) approved quitting.
+#[tauri::command]
+pub fn storage_exit_app<R: Runtime>(app: AppHandle<R>) {
+    app.exit(0);
+}
+
+/// Decide what to do with `RunEvent::ExitRequested`: true = let the app exit.
+/// Programmatic exits (`app.exit(code)`, after the frontend approved) and exits
+/// after the last window closed (the close flow already ran) proceed; any other
+/// quit (e.g. macOS Dock > Quit) is held and routed through the frontend flow.
+pub fn allow_exit(code: Option<i32>, open_windows: usize) -> bool {
+    code.is_some() || open_windows == 0
 }
 
 fn recent_file<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf> {
@@ -520,17 +615,21 @@ pub fn build_menu<R: Runtime>(
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
     let save = MenuItemBuilder::with_id(MENU_SAVE, "Save").accelerator("CmdOrCtrl+S").build(app)?;
+    // Custom Quit (not PredefinedMenuItem::quit) so it runs the unsaved-changes flow.
+    let quit = MenuItemBuilder::with_id(MENU_QUIT, "Quit Novel").accelerator("CmdOrCtrl+Q").build(app)?;
     let recent_menu = build_recent_submenu(app, recent)?;
 
-    let file = SubmenuBuilder::new(app, "File")
+    let file_builder = SubmenuBuilder::new(app, "File")
         .item(&new_project)
         .item(&open_project)
         .item(&recent_menu)
         .separator()
         .item(&save)
         .separator()
-        .item(&PredefinedMenuItem::close_window(app, None)?)
-        .build()?;
+        .item(&PredefinedMenuItem::close_window(app, None)?);
+    #[cfg(not(target_os = "macos"))]
+    let file_builder = file_builder.item(&quit);
+    let file = file_builder.build()?;
 
     let mut menu = MenuBuilder::new(app);
     #[cfg(target_os = "macos")]
@@ -544,7 +643,7 @@ pub fn build_menu<R: Runtime>(
             .hide_others()
             .show_all()
             .separator()
-            .quit()
+            .item(&quit)
             .build()?;
         let edit = SubmenuBuilder::new(app, "Edit")
             .undo()
@@ -583,6 +682,7 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         MENU_NEW_PROJECT => app.emit(EVENT_NEW_PROJECT, ()),
         MENU_OPEN_PROJECT => app.emit(EVENT_OPEN_PROJECT, ()),
         MENU_SAVE => app.emit(EVENT_SAVE, ()),
+        MENU_QUIT => app.emit(EVENT_QUIT, ()),
         _ => match id.strip_prefix(MENU_OPEN_RECENT_ITEM_PREFIX).and_then(|i| i.parse::<usize>().ok()) {
             Some(index) => {
                 let path = app
@@ -775,6 +875,70 @@ mod tests {
         );
         assert_eq!(grant_recent(&mut slots, &recent, "relative").unwrap_err().kind, "invalid_path");
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn path_exists_is_confined_to_granted_and_recent_folders() {
+        let base = temp_dir("exists");
+        let project = base.join("project");
+        fs::create_dir_all(project.join(".recovery")).unwrap();
+        fs::write(project.join("project.json"), "{}").unwrap();
+        fs::write(base.join("secret.txt"), "s").unwrap();
+        let roots = vec![fs::canonicalize(&project).unwrap()];
+
+        assert!(exists_within(&roots, &s(project.join("project.json"))).unwrap());
+        assert!(!exists_within(&roots, &s(project.join(".recovery").join("manuscript.json"))).unwrap());
+        assert!(!exists_within(&roots, &s(project.join("nope").join("deeper.json"))).unwrap());
+        assert_eq!(exists_within(&roots, &s(base.join("secret.txt"))).unwrap_err().kind, "outside_project");
+        assert_eq!(
+            exists_within(&roots, &s(base.join("missing").join("x"))).unwrap_err().kind,
+            "outside_project"
+        );
+        // Built as text: PathBuf::join("..") on a verbatim (\\?\) path pops instead of appending.
+        let sep = std::path::MAIN_SEPARATOR;
+        let dotdot = format!("{}{sep}..{sep}secret.txt", s(project.clone()));
+        assert_eq!(exists_within(&roots, &dotdot).unwrap_err().kind, "invalid_path");
+        assert_eq!(exists_within(&[], &s(project.join("project.json"))).unwrap_err().kind, "outside_project");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn transient_lock_errors_are_retryable() {
+        assert!(is_transient_lock_error(&std::io::Error::from(ErrorKind::PermissionDenied)));
+        assert!(!is_transient_lock_error(&std::io::Error::from(ErrorKind::NotFound)));
+        #[cfg(windows)]
+        {
+            assert!(is_transient_lock_error(&std::io::Error::from_raw_os_error(32)));
+            assert!(is_transient_lock_error(&std::io::Error::from_raw_os_error(33)));
+        }
+    }
+
+    /// A target held open without FILE_SHARE_DELETE (like AV / sync clients do)
+    /// makes the rename fail until it is released; the write retries and succeeds.
+    #[cfg(windows)]
+    #[test]
+    fn atomic_write_retries_while_target_is_locked() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = temp_dir("locked");
+        let target = dir.join("manuscript.json");
+        fs::write(&target, "old").unwrap();
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(&target).unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            drop(held);
+        });
+        write_atomic(&target, b"new").unwrap();
+        releaser.join().unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert_eq!(entries(&dir), vec!["manuscript.json"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn exit_requests_are_held_unless_approved_or_windowless() {
+        assert!(allow_exit(Some(0), 1)); // app.exit(0) after the frontend approved
+        assert!(allow_exit(None, 0)); // last window closed through the close flow
+        assert!(!allow_exit(None, 1)); // e.g. Dock > Quit with the window open
     }
 
     #[test]

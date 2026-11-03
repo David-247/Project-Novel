@@ -12,8 +12,14 @@ vi.mock('@tauri-apps/plugin-sql', async () => (await import('@/test-utils/fake-t
 const win = vi.hoisted(() => ({
   closeHandler: null as null | ((e: { preventDefault: () => void }) => Promise<void>),
   destroy: null as unknown as () => Promise<void>,
+  listeners: new Map<string, (e: { payload: unknown }) => void>(),
 }))
-vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: async (name: string, cb: (e: { payload: unknown }) => void) => {
+    win.listeners.set(name, cb)
+    return () => {}
+  },
+}))
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     onCloseRequested: async (cb: typeof win.closeHandler) => {
@@ -24,7 +30,8 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }))
 
-import { autosaveNow, newProject, useStorageIntegration } from './index'
+import { autosaveNow, MENU_EVENTS, newProject, useStorageIntegration } from './index'
+import { handleQuitRequest, prepareToExit } from './integration'
 import { saveStatusText as saveStatusTextForTests } from './SaveStatusIndicator'
 import { __resetAutosaveForTests } from './autosave'
 import { __resetStorageForTests } from './project'
@@ -108,5 +115,49 @@ describe('quit', () => {
   it('status text mentions the backup while changes are unsaved', () => {
     const base = { path: '/p', title: 't', dirty: true, saveStatus: 'idle' as const }
     expect(saveStatusTextForTests({ ...base, backedUp: true })).toBe('Unsaved changes (backed up)')
+  })
+
+  it('the Quit menu item / Cmd+Q / OS quit event is wired to the quit flow', async () => {
+    backend.answer = "Don't Save"
+    await vi.waitFor(() => expect(win.listeners.has(MENU_EVENTS.QUIT)).toBe(true))
+    win.listeners.get(MENU_EVENTS.QUIT)!({ payload: null })
+    await vi.waitFor(() => expect(backend.exits).toBe(1))
+    expect(backend.messages[0].text).toMatch(/before quitting/)
+    expect(backend.files.has(RECOVERY)).toBe(false)
+  })
+
+  it('Quit with "Save" saves, clears recovery data and exits', async () => {
+    backend.answer = 'Save'
+    await handleQuitRequest()
+    expect(JSON.parse(backend.files.get(`${ROOT}/manuscript.json`)!)).toEqual(textDoc('unsaved'))
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    expect(backend.exits).toBe(1)
+  })
+
+  it('Quit with "Cancel" does not exit and keeps recovery data', async () => {
+    backend.answer = 'Cancel'
+    await handleQuitRequest()
+    expect(backend.exits).toBe(0)
+    expect(backend.files.has(RECOVERY)).toBe(true)
+  })
+
+  it('close and quit requested together share one prompt', async () => {
+    backend.answer = "Don't Save"
+    const [a, b] = await Promise.all([prepareToExit('closing'), prepareToExit('quitting')])
+    expect(a && b).toBe(true)
+    expect(backend.messages).toHaveLength(1)
+  })
+
+  it('if the dialog plugin fails, quitting falls back to window.confirm and keeps the backup', async () => {
+    backend.failDialog = true
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await handleQuitRequest()
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(backend.exits).toBe(1)
+    // Changes were not saved and not explicitly discarded: the crash-recovery copy stays.
+    expect(backend.files.has(RECOVERY)).toBe(true)
+    confirm.mockRestore()
+    err.mockRestore()
   })
 })

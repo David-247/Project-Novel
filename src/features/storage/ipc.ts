@@ -15,6 +15,7 @@ export const COMMANDS = {
   readRecent: 'storage_read_recent',
   rememberRecent: 'storage_remember_recent',
   setRecentMenu: 'storage_set_recent_menu',
+  exitApp: 'storage_exit_app',
 } as const
 
 /** Events emitted by the native File menu. `OPEN_RECENT` carries the folder path. */
@@ -23,6 +24,8 @@ export const MENU_EVENTS = {
   OPEN_PROJECT: 'menu://open-project',
   OPEN_RECENT: 'menu://open-recent',
   SAVE: 'menu://save',
+  /** Quit requested (Quit menu item, Cmd/Ctrl+Q, or another app-exit request such as Dock > Quit). */
+  QUIT: 'menu://quit',
 } as const
 
 /** Error shape returned by the Rust storage commands. */
@@ -168,4 +171,9 @@ export interface RecentMenuEntry {
 
 export function setRecentMenu(entries: RecentMenuEntry[]): Promise<void> {
   return invoke(COMMANDS.setRecentMenu, { entries })
+}
+
+/** Exit the app (after the quit flow approved it). */
+export function exitApp(): Promise<void> {
+  return invoke(COMMANDS.exitApp)
 }

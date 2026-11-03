@@ -1,6 +1,8 @@
 mod fonts;
 mod storage;
 
+use tauri::{Emitter, Manager};
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -24,7 +26,20 @@ pub fn run() {
             storage::storage_read_recent,
             storage::storage_remember_recent,
             storage::storage_set_recent_menu,
+            storage::storage_exit_app,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Novel");
+        .build(tauri::generate_context!())
+        .expect("error while building Novel")
+        .run(|app, event| {
+            // Quit paths other than our menu item (e.g. macOS Dock > Quit) must
+            // also go through the frontend's unsaved-changes flow.
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+                if !storage::allow_exit(code, app.webview_windows().len()) {
+                    api.prevent_exit();
+                    if let Err(e) = app.emit(storage::EVENT_QUIT, ()) {
+                        eprintln!("failed to emit quit request: {e}");
+                    }
+                }
+            }
+        });
 }

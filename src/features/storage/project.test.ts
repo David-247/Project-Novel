@@ -162,6 +162,58 @@ describe('project storage', () => {
     expect(backend.messages[0].text).toMatch(/already contains a Novel project/)
   })
 
+  it('reopening the already-open project keeps a live index (revisions still recorded)', async () => {
+    await createAt('/books/novel')
+    backend.pick = '/books/novel'
+    expect(await openProject()).toBe(true) // same folder, same sqlite URL
+    expect(backend.sqlPools.get('sqlite:/books/novel/index.sqlite')?.closed).toBe(false)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const before = backend.sqlExecuted.filter((q) => /insert into "revisions"/i.test(q)).length
+    editor.update(textDoc('after reopen'))
+    expect(await saveProject()).toBe(true)
+    expect(backend.sqlExecuted.filter((q) => /insert into "revisions"/i.test(q))).toHaveLength(before + 1)
+    expect(warn).not.toHaveBeenCalledWith('Recording revision failed:', expect.anything())
+    warn.mockRestore()
+  })
+
+  it.each(['manuscript.json', 'index.sqlite'])(
+    'New Project refuses a folder with a leftover %s (no project.json) and overwrites nothing',
+    async (file) => {
+      backend.dirs.add('/books/old')
+      backend.files.set(`/books/old/${file}`, 'precious')
+      backend.pick = '/books/old'
+      expect(await newProject()).toBe(false)
+      expect(backend.messages[0].text).toMatch(new RegExp(`already contains ${file.replace('.', '\\.')}`))
+      expect(backend.files.get(`/books/old/${file}`)).toBe('precious')
+      expect(backend.writes).toEqual([])
+      expect(backend.active).toBeNull()
+    },
+  )
+
+  it('ignores a second New/Open while one is still in its dialogs', async () => {
+    await createAt('/books/novel')
+    editor.update(textDoc('dirty'))
+    let answer!: (v: string) => void
+    const { dialogModule } = await import('@/test-utils/fake-tauri')
+    const original = dialogModule.message
+    // Hold the unsaved-changes prompt of the first flow open.
+    dialogModule.message = (text, opts) => {
+      backend.messages.push({ text, opts })
+      return new Promise<string>((r) => (answer = r))
+    }
+    const first = openProject()
+    await vi.waitFor(() => expect(backend.messages).toHaveLength(1))
+    expect(await newProject()).toBe(false) // overlapping flow ignored, no second prompt
+    expect(await openProject()).toBe(false)
+    expect(backend.messages).toHaveLength(1)
+    answer('Cancel')
+    expect(await first).toBe(false)
+    dialogModule.message = original
+    backend.pick = '/books/novel'
+    editor.markClean()
+    expect(await openProject()).toBe(true) // guard released
+  })
+
   it('still opens and saves when index.sqlite is unavailable', async () => {
     backend.failSqlLoad = true
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -243,6 +295,21 @@ describe('project storage', () => {
       backend.answer = "Don't Save"
       expect(await confirmUnsavedChanges('closing')).toBe(true)
       expect(json('/books/novel/manuscript.json')).not.toEqual(textDoc('unsaved'))
+    })
+
+    it('falls back to window.confirm when the dialog plugin fails, instead of blocking', async () => {
+      backend.failDialog = true
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValueOnce(false)
+      expect(await confirmUnsavedChanges('closing')).toBe(true)
+      expect(await confirmUnsavedChanges('closing')).toBe(false)
+      expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/unsaved changes/))
+      confirm.mockImplementation(() => {
+        throw new Error('no confirm here')
+      })
+      expect(await confirmUnsavedChanges('closing')).toBe(true) // never trap the user
+      confirm.mockRestore()
+      err.mockRestore()
     })
 
     it('Cancel stops', async () => {

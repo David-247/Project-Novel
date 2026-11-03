@@ -3,7 +3,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { startAutosave, stopAutosave } from './autosave'
-import { MENU_EVENTS } from './ipc'
+import { exitApp, MENU_EVENTS } from './ipc'
 import {
   clearRecoveryData,
   confirmUnsavedChanges,
@@ -14,6 +14,35 @@ import {
   openProject,
   saveProject,
 } from './project'
+import { getDocumentProvider } from '@/shared/document'
+
+let exitFlow: Promise<boolean> | null = null
+
+/**
+ * The one close/quit flow: unsaved-changes prompt, stop autosave, then drop
+ * crash-recovery data only if nothing unsaved remains (it was saved, or the
+ * user chose "Don't Save", which already deleted it) and no Restore/Discard
+ * answer is pending. Resolves true when the app may close. Concurrent calls
+ * (e.g. Cmd+Q while the close prompt is open) share one flow.
+ */
+export function prepareToExit(action: 'closing' | 'quitting'): Promise<boolean> {
+  exitFlow ??= (async () => {
+    try {
+      if (!(await confirmUnsavedChanges(action))) return false
+      await stopAutosave()
+      if (!hasPendingRecovery() && !getDocumentProvider()?.isDirty()) await clearRecoveryData()
+      return true
+    } finally {
+      exitFlow = null
+    }
+  })()
+  return exitFlow
+}
+
+/** Quit requested from the menu / Cmd+Q / the OS: run the exit flow, then exit. */
+export async function handleQuitRequest(): Promise<void> {
+  if (await prepareToExit('quitting')) await exitApp()
+}
 
 export function isMacPlatform(): boolean {
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -57,16 +86,12 @@ export function useStorageIntegration(): void {
       track(listen(MENU_EVENTS.OPEN_PROJECT, () => void openProject()))
       track(listen<string>(MENU_EVENTS.OPEN_RECENT, (e) => void openProject(e.payload)))
       track(listen(MENU_EVENTS.SAVE, () => void saveProject()))
+      track(listen(MENU_EVENTS.QUIT, () => void handleQuitRequest()))
       const win = getCurrentWindow()
       track(
         win.onCloseRequested(async (event) => {
           event.preventDefault()
-          if (!(await confirmUnsavedChanges('closing'))) return
-          // Clean quit (saved, unchanged, or "Don't Save"): recovery data is obsolete,
-          // unless the user has not yet answered Restore / Discard for it.
-          await stopAutosave()
-          if (!hasPendingRecovery()) await clearRecoveryData()
-          await win.destroy()
+          if (await prepareToExit('closing')) await win.destroy()
         }),
       )
       void loadRecentProjects().then(offerReopenAfterCrash)

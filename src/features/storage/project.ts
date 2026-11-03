@@ -110,9 +110,19 @@ function loadDocument(p: DocumentProvider, doc: DocJSON): void {
   }
 }
 
-/** Switch module + store state to the project in `folder` (files already read/written). */
-async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex | null) {
+/**
+ * Close the previous project's index, then open `folder`'s. Call only after the
+ * last step that can fail: the SQL plugin keys connections by URL, so reopening
+ * the same project must close the old pool BEFORE loading the new one (closing
+ * afterwards would close the new pool).
+ */
+async function switchIndex(folder: string): Promise<ProjectIndex | null> {
   await closeIndex()
+  return openIndexSafely(folder)
+}
+
+/** Switch module + store state to the project in `folder` (files read/written, index switched). */
+async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex | null) {
   currentMeta = meta
   currentIndex = index
   lastSaveDoneAt = 0
@@ -137,6 +147,16 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
       `This folder already contains a Novel project. Use Open Project to open it, or choose an empty folder.`,
     )
   }
+  // Never overwrite leftovers of a project whose project.json is gone.
+  for (const file of [MANUSCRIPT_FILE, INDEX_FILE]) {
+    if (await pathExists(joinPath(folder, file))) {
+      throw new ProjectError(
+        'already-exists',
+        `This folder already contains ${file} from an earlier project, and Novel will not overwrite it. ` +
+          `Choose an empty folder for the new project.`,
+      )
+    }
+  }
   const version = p.getDocVersion()
   const content = doc ?? p.getDocJSON()
   const meta = newProjectMeta(baseName(folder))
@@ -144,8 +164,7 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(meta), PROJECT_FILE)
   if (doc) loadDocument(p, doc)
   else p.markClean(version)
-  const index = await openIndexSafely(folder)
-  await activate(folder, meta, index)
+  await activate(folder, meta, await switchIndex(folder))
 }
 
 /** Open the project in `folder` (already the granted root). Throws ProjectError for missing/corrupt files. */
@@ -171,8 +190,7 @@ export async function openProjectAt(folder: string): Promise<void> {
     throw e
   }
   loadDocument(p, parseManuscript(docText))
-  const index = await openIndexSafely(folder)
-  await activate(folder, meta, index)
+  await activate(folder, meta, await switchIndex(folder))
   await detectRecovery(folder, meta, docText)
 }
 
@@ -266,7 +284,28 @@ async function writeProject(
   }
 }
 
-async function saveAsNewProject(): Promise<boolean> {
+/**
+ * True while a New / Open / Save-As flow (prompt + folder dialog + load) runs.
+ * A second request meanwhile is ignored: the Rust root has one "previous" slot,
+ * so overlapping flows could restore the wrong folder.
+ */
+let folderFlowBusy = false
+
+async function exclusiveFolderFlow(fn: () => Promise<boolean>): Promise<boolean> {
+  if (folderFlowBusy) return false
+  folderFlowBusy = true
+  try {
+    return await fn()
+  } finally {
+    folderFlowBusy = false
+  }
+}
+
+function saveAsNewProject(): Promise<boolean> {
+  return exclusiveFolderFlow(saveAsNewProjectUnguarded)
+}
+
+async function saveAsNewProjectUnguarded(): Promise<boolean> {
   try {
     provider()
     const folder = await pickProjectFolder('Choose a folder for your project')
@@ -288,17 +327,36 @@ export async function confirmUnsavedChanges(action = 'continuing'): Promise<bool
   if (!p || !p.isDirty()) return true
   try {
     const choice = await askUnsavedChanges(useStore.getState().project.title, action)
-    if (choice === 'save') return await saveProject()
+    if (choice === 'save') {
+      // Inside a New/Open flow with no project yet, Save is a Save-As that belongs to that flow.
+      if (folderFlowBusy && !getCurrentProjectPath()) return await saveAsNewProjectUnguarded()
+      return await saveProject()
+    }
     if (choice === 'discard') await discardUnsavedForRecovery(p)
     return choice === 'discard'
   } catch (e) {
+    // The native dialog failed: never trap the user (e.g. unable to close).
+    // Ask with the webview's own confirm; the recovery snapshot is kept either way.
     console.error('Unsaved-changes prompt failed:', e)
-    return false
+    return fallbackConfirm(`You have unsaved changes. Continue ${action} without saving them?`)
+  }
+}
+
+function fallbackConfirm(text: string): boolean {
+  try {
+    return window.confirm(text)
+  } catch (e) {
+    console.error('Fallback confirm failed; proceeding:', e)
+    return true
   }
 }
 
 /** Menu action: File > New Project. */
-export async function newProject(): Promise<boolean> {
+export function newProject(): Promise<boolean> {
+  return exclusiveFolderFlow(newProjectUnguarded)
+}
+
+async function newProjectUnguarded(): Promise<boolean> {
   if (!(await confirmUnsavedChanges('creating a new project'))) return false
   try {
     provider()
@@ -316,7 +374,11 @@ export async function newProject(): Promise<boolean> {
  * Menu action: File > Open Project... (native dialog), or open `folder`
  * from Open Recent (Rust accepts only folders in its recent list).
  */
-export async function openProject(folder?: string): Promise<boolean> {
+export function openProject(folder?: string): Promise<boolean> {
+  return exclusiveFolderFlow(() => openProjectUnguarded(folder))
+}
+
+async function openProjectUnguarded(folder?: string): Promise<boolean> {
   if (!(await confirmUnsavedChanges('opening another project'))) return false
   let target = folder ?? null
   try {
@@ -510,6 +572,7 @@ export async function __resetStorageForTests(): Promise<void> {
   inFlightSave = null
   lastSaveDoneAt = 0
   pendingRecovery = null
+  folderFlowBusy = false
   suppressSnapshotsAt(null)
   openedListeners.clear()
 }

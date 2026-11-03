@@ -27,9 +27,15 @@ export const backend = {
   messages: [] as { text: string; opts: unknown }[],
   /** Button result of the next message dialog. */
   answer: 'Cancel' as string,
+  /** If true, the message dialog rejects (plugin failure). */
+  failDialog: false,
   sqlExecuted: [] as string[],
   sqlLoads: [] as string[],
+  /** Open SQL pools by connection URL (the plugin replaces/closes by URL). */
+  sqlPools: new Map<string, { closed: boolean }>(),
   failSqlLoad: false,
+  /** Number of storage_exit_app calls. */
+  exits: 0,
   /** If set, consulted before every write/mkdir/remove; a returned error is thrown like Rust's. */
   failWrite: null as null | ((path: string) => { kind: string; message: string } | null),
   /** Optional hook awaited inside storage_write_file_atomic (to hold a write in flight). */
@@ -45,9 +51,12 @@ export const backend = {
     this.pick = null
     this.messages.length = 0
     this.answer = 'Cancel'
+    this.failDialog = false
     this.sqlExecuted.length = 0
     this.sqlLoads.length = 0
+    this.sqlPools.clear()
     this.failSqlLoad = false
+    this.exits = 0
     this.failWrite = null
     this.writeGate = null
   },
@@ -106,8 +115,19 @@ export async function invokeMock(cmd: string, args: Record<string, unknown> = {}
     case 'storage_clear_project_root':
       backend.active = backend.previous = null
       return null
-    case 'storage_path_exists':
-      return backend.files.has(canonical(path)) || backend.dirs.has(canonical(path))
+    case 'storage_path_exists': {
+      // Like Rust: only inside the active root or a recent-list folder; no `..`.
+      if (path.split('/').includes('..')) throw { kind: 'invalid_path', message: "Path may not contain '..'" }
+      const c = canonical(path)
+      const roots = [backend.active, ...backend.recent.map((r) => canonical(r.path))].filter(Boolean) as string[]
+      if (!roots.some((r) => c === r || c.startsWith(r + '/'))) {
+        throw { kind: 'outside_project', message: `${path} is outside the open project folder` }
+      }
+      return backend.files.has(c) || backend.dirs.has(c)
+    }
+    case 'storage_exit_app':
+      backend.exits++
+      return null
     case 'storage_read_text_file': {
       const c = confined(path, false)
       if (!backend.files.has(c)) throw notFound(path)
@@ -165,6 +185,7 @@ export const coreModule = { isTauri: () => true, invoke: invokeMock }
 
 export const dialogModule = {
   message: async (text: string, opts: unknown) => {
+    if (backend.failDialog) throw new Error('dialog plugin unavailable')
     backend.messages.push({ text, opts })
     return backend.answer
   },
@@ -175,13 +196,28 @@ export const sqlModule = {
     load: async (url: string) => {
       if (backend.failSqlLoad) throw new Error('sqlite unavailable')
       backend.sqlLoads.push(url)
+      // Like the plugin: loading a URL replaces its pool; close(url) closes whatever pool that URL has now.
+      const pool = { closed: false }
+      backend.sqlPools.set(url, pool)
+      const live = () => {
+        if (pool.closed) throw new Error(`database ${url} is closed`)
+      }
       return {
         execute: async (q: string) => {
+          live()
           backend.sqlExecuted.push(q)
           return { rowsAffected: 1 }
         },
-        select: async () => [{ user_version: 0 }],
-        close: async () => true,
+        select: async () => {
+          live()
+          return [{ user_version: 0 }]
+        },
+        close: async (db?: string) => {
+          const target = backend.sqlPools.get(db ?? url)
+          if (target) target.closed = true
+          backend.sqlPools.delete(db ?? url)
+          return true
+        },
       }
     },
   },
