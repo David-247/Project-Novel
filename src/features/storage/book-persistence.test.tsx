@@ -25,7 +25,9 @@ import {
 import { __resetAutosaveForTests } from './autosave'
 import { prepareToExit } from './integration'
 import { __resetStorageForTests } from './project'
-import { parseRecovery } from './recovery'
+import { parseBook, serializeBook } from './book-file'
+import { serializeManuscript, type ProjectMeta } from './format'
+import { judgeRecovery, parseRecovery, serializeRecovery } from './recovery'
 import { __resetWriteLockForTests } from './write-lock'
 
 const ROOT = '/books/novel'
@@ -140,7 +142,7 @@ describe('book.json persistence', () => {
     await launch()
     await reopen()
     expect(book()).toMatchObject({ ...defaultBookSettings(), dirty: false })
-    expect(useStore.getState().project.recoveryNotice).toBeNull()
+    expect(useStore.getState().project.bookWarning).toBeNull()
     expect(backend.messages).toEqual([])
   })
 
@@ -154,7 +156,7 @@ describe('book.json persistence', () => {
     await launch()
     await reopen()
     expect(book()).toMatchObject({ ...defaultBookSettings(), dirty: false })
-    expect(useStore.getState().project.recoveryNotice).toMatch(/book\.json is damaged.*not changed/)
+    expect(useStore.getState().project.bookWarning).toMatch(/book\.json is damaged.*not changed/)
     expect(backend.messages).toEqual([]) // non-blocking
     expect(backend.files.get(MANUSCRIPT)).toBe(manuscript)
     expect(backend.writes).not.toContain(MANUSCRIPT)
@@ -167,10 +169,107 @@ describe('book.json persistence', () => {
     await launch()
     await reopen()
     expect(book()).toMatchObject({ trimSize: 'uk-demy', surface: 'auto', styles: { a: { b: 1 } } })
-    expect(useStore.getState().project.recoveryNotice).toMatch(/invalid values \(the paper surface\)/)
+    expect(useStore.getState().project.bookWarning).toMatch(/invalid values \(the paper surface\)/)
     bookActions().setView('single')
     await saveProject()
     expect(onDisk()).toMatchObject({ trimSize: 'uk-demy', newer: [1], styles: { a: { b: 1 } }, view: 'single' })
+  })
+})
+
+describe('an unreadable or damaged book.json is not silently overwritten', () => {
+  const asides = () => [...backend.files.keys()].filter((k) => k.startsWith(`${ROOT}/book.damaged-`))
+
+  it('a read failure followed by a text-only save leaves book.json byte-identical', async () => {
+    await createProject()
+    bookActions().setTrimSize('uk-a5')
+    await saveProject()
+    const real = backend.files.get(BOOK)
+    await launch()
+    backend.failRead = (p) => (p === BOOK ? { kind: 'permission_denied', message: 'locked' } : null)
+    await reopen()
+    backend.failRead = null
+    expect(useStore.getState().project.bookWarning).toMatch(/could not be read.*left as it is/)
+    editor.update(textDoc('typed'))
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(BOOK)).toBe(real)
+    expect(asides()).toEqual([])
+    expect(useStore.getState().project.bookWarning).not.toBeNull()
+  })
+
+  it('a damaged file followed by a book change keeps a copy aside, then writes the new settings', async () => {
+    await createProject()
+    backend.files.set(BOOK, '{"trimSize": "uk-a5", ')
+    await launch()
+    await reopen()
+    editor.update(textDoc('typed'))
+    await saveProject()
+    expect(backend.files.get(BOOK)).toBe('{"trimSize": "uk-a5", ')
+    expect(asides()).toEqual([])
+    bookActions().setSurface('dark')
+    await saveProject()
+    expect(asides()).toHaveLength(1)
+    expect(backend.files.get(asides()[0])).toBe('{"trimSize": "uk-a5", ')
+    expect(onDisk()).toMatchObject({ trimSize: 'us-5.5x8.5', surface: 'dark' })
+    expect(useStore.getState().project.bookWarning).toBeNull()
+  })
+
+  it('a file with only some invalid fields is rewritten by a normal save (no aside copy)', async () => {
+    await createProject()
+    backend.files.set(BOOK, JSON.stringify({ trimSize: 'nope' }))
+    await launch()
+    await reopen()
+    editor.update(textDoc('typed'))
+    await saveProject()
+    expect(onDisk().trimSize).toBe('us-5.5x8.5')
+    expect(asides()).toEqual([])
+  })
+
+  it('the warning survives a later set-aside note and clears when the project closes', async () => {
+    await createProject()
+    backend.files.set(BOOK, 'garbage')
+    await launch()
+    await reopen()
+    useStore.getState().projectActions.setRecoveryNotice('some other note')
+    expect(useStore.getState().project.bookWarning).not.toBeNull()
+    await closeProject()
+    expect(useStore.getState().project.bookWarning).toBeNull()
+  })
+})
+
+describe('unknown keys through crash recovery', () => {
+  it('an unknown top-level key survives snapshot, restore and save, still top-level', async () => {
+    await createProject()
+    backend.files.set(BOOK, JSON.stringify({ ...onDisk(), newer: { keep: 1 } }))
+    await launch()
+    await reopen()
+    bookActions().setSurface('dark')
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(JSON.parse(backend.files.get(RECOVERY)!).book).toMatchObject({ newer: { keep: 1 }, surface: 'dark' })
+    expect(JSON.parse(backend.files.get(RECOVERY)!).book.extra).toBeUndefined()
+    await launch()
+    await reopen()
+    expect(await restoreRecovery()).toBe(true)
+    expect(await saveProject()).toBe(true)
+    expect(onDisk()).toMatchObject({ newer: { keep: 1 }, surface: 'dark' })
+    expect(onDisk().extra).toBeUndefined()
+  })
+
+  it('an identical snapshot with an unknown key is judged identical', () => {
+    const settings = { ...defaultBookSettings(), extra: { newer: 1 } }
+    const snap = parseRecovery(
+      serializeRecovery({
+        format: 'novel-recovery',
+        version: 2,
+        projectId: 'p',
+        savedAt: new Date().toISOString(),
+        baseUpdatedAt: 'b',
+        docVersion: 1,
+        doc: textDoc('x'),
+        book: settings,
+      }),
+    )!
+    const meta = { id: 'p', updatedAt: 'b' } as ProjectMeta
+    expect(judgeRecovery(snap, meta, serializeManuscript(textDoc('x')), parseBook(serializeBook(settings)).settings)).toBe('identical')
   })
 })
 

@@ -94,33 +94,41 @@ export function parseBook(text: string): BookParseResult {
   return normalizeBook(data)
 }
 
-/** One status-bar sentence for the parts of book.json that were replaced by defaults. */
-export function bookWarningText(warnings: string[]): string {
-  const what = warnings.length === 1 && warnings[0] === 'the whole file' ? `${BOOK_FILE} is damaged` : `${BOOK_FILE} had invalid values (${warnings.join(', ')})`
-  return `${what}, so default book settings are in use. Your manuscript was not changed; saving will rewrite ${BOOK_FILE}.`
+/**
+ * One status-bar sentence for the parts of book.json that were replaced by defaults. `keptOnDisk` is true
+ * when the file is left untouched until the user changes a book setting (unreadable or wholly damaged file).
+ */
+export function bookWarningText(warnings: string[], keptOnDisk = false): string {
+  const whole = warnings.length === 1 && warnings[0] === 'the whole file'
+  const what = whole
+    ? `${BOOK_FILE} is damaged or could not be read`
+    : `${BOOK_FILE} had invalid values (${warnings.join(', ')})`
+  const tail = keptOnDisk
+    ? `The file is left as it is until you change a book setting; a copy is kept before it is replaced.`
+    : `Saving will rewrite ${BOOK_FILE}.`
+  return `${what}, so default book settings are in use. Your manuscript was not changed. ${tail}`
 }
 
-/** Pretty-printed book.json text. Unknown keys kept in `extra` are written back after the known ones. */
-export function serializeBook(b: BookSettings): string {
+/** book.json shape of the settings (also used for the recovery snapshot): unknown keys are top-level. */
+export function bookToJSON(b: BookSettings): Record<string, unknown> {
   const { extra, ...known } = b
-  return (
-    JSON.stringify(
-      {
-        ...Object.fromEntries(Object.entries(extra ?? {}).filter(([k]) => !KNOWN_KEYS.has(k))),
-        format: BOOK_FORMAT,
-        version: BOOK_VERSION,
-        trimSize: known.trimSize,
-        margins: known.margins,
-        styles: known.styles,
-        headerFooter: known.headerFooter,
-        footnotes: known.footnotes,
-        surface: known.surface,
-        view: known.view,
-      },
-      null,
-      2,
-    ) + '\n'
-  )
+  return {
+    ...Object.fromEntries(Object.entries(extra ?? {}).filter(([k]) => !KNOWN_KEYS.has(k))),
+    format: BOOK_FORMAT,
+    version: BOOK_VERSION,
+    trimSize: known.trimSize,
+    margins: known.margins,
+    styles: known.styles,
+    headerFooter: known.headerFooter,
+    footnotes: known.footnotes,
+    surface: known.surface,
+    view: known.view,
+  }
+}
+
+/** Pretty-printed book.json text. */
+export function serializeBook(b: BookSettings): string {
+  return JSON.stringify(bookToJSON(b), null, 2) + '\n'
 }
 
 /** The settings currently in the store, without the store-only bookkeeping fields. */

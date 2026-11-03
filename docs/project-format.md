@@ -98,12 +98,15 @@ the file is created at the next save.
 
 **Validation on open.** The file never blocks a project from opening, and `manuscript.json` is never touched:
 
-- Damaged JSON, or JSON that is not an object: all settings are the defaults, and the status bar says
-  "book.json is damaged, so default book settings are in use ... saving will rewrite book.json". The damaged file
-  stays on disk until the next save, so it can still be inspected or repaired by hand.
+- Damaged JSON, JSON that is not an object, or a file that could not be read (for example locked by antivirus or a
+  sync tool): all settings are the defaults, and the status bar warns "book.json is damaged or could not be read ...".
+  The file is then **left untouched**: saves do not write book.json until the user changes a book setting. Just
+  before the first overwrite, the original is copied to `book.damaged-<timestamp>.json` in the project folder (best
+  effort; an unreadable file is read again at that moment). Novel never deletes these copies. Creating a project
+  (New Project, Save As) always writes book.json. The warning clears when book.json is written or the project closes.
 - A field with an invalid value (unknown `trimSize`, a margin that is not a number from 0 to 7200, `styles`,
   `headerFooter` or `footnotes` that is not an object, unknown `surface` or `view`) falls back to its default. The
-  other fields are kept, and the status bar lists what was replaced. A missing field is simply the default, with no
+  other fields are kept, the status bar lists what was replaced, and the next save rewrites the file. A missing field is simply the default, with no
   warning.
 - **Unknown top-level keys are kept** and written back on save, so a newer Novel's additions survive. The contents of
   `styles`, `headerFooter` and `footnotes` are opaque to this part of Novel and are preserved as they are.
@@ -199,7 +202,7 @@ write). The file is written atomically, like the other project files. Compact UT
 
 1. `projectId` differs from project.json `id`: the snapshot belongs to another project. It is not offered and is
    moved aside.
-2. `doc` is identical to manuscript.json, and `book` (if present) equals the settings loaded from book.json: nothing
+2. `doc` is identical to manuscript.json, and `book` (if present, stored in book.json shape with unknown keys at top level) equals the settings loaded from book.json: nothing
    to recover. The snapshot is deleted.
 3. `baseUpdatedAt` equals project.json `updatedAt`: the snapshot was taken on top of the current save. It is offered.
 4. `baseUpdatedAt` is something else: the snapshot was taken on top of a different save. It is not offered and is

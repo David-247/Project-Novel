@@ -51,6 +51,8 @@ export interface ProjectState {
   pendingRecoveryAt: string | null
   /** One-off, non-modal status note about recovery data (e.g. set-aside `unrestored-*` files). */
   recoveryNotice: string | null
+  /** Non-blocking note about book.json (damaged, unreadable or invalid values); null when fine. */
+  bookWarning: string | null
   /** True while a project is being opened (reading and loading a possibly large manuscript). */
   opening: boolean
 }
@@ -74,6 +76,7 @@ export interface ProjectSlice {
     /** A found backup became unanswered (`savedAt`) or was answered / set aside (null). */
     setPendingRecovery: (savedAt: string | null) => void
     setRecoveryNotice: (notice: string | null) => void
+    setBookWarning: (warning: string | null) => void
     /** Opening a project started / finished (success or failure). */
     openStarted: () => void
     openFinished: () => void
@@ -92,6 +95,7 @@ export const initialProjectState: ProjectState = {
   recoveryPrompt: null,
   pendingRecoveryAt: null,
   recoveryNotice: null,
+  bookWarning: null,
   opening: false,
 }
 
@@ -112,6 +116,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
           recoveryPrompt: null,
           pendingRecoveryAt: null,
           recoveryNotice: null,
+          bookWarning: null,
         }),
       projectClosed: () =>
         patch({
@@ -125,6 +130,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
           recoveryPrompt: null,
           pendingRecoveryAt: null,
           recoveryNotice: null,
+          bookWarning: null,
           opening: false,
         }),
       saveStarted: () => patch({ saveStatus: 'saving', saveError: null }),
@@ -138,6 +144,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
       dismissRecoveryPrompt: () => patch({ recoveryPrompt: null }),
       setPendingRecovery: (pendingRecoveryAt) => patch({ pendingRecoveryAt }),
       setRecoveryNotice: (recoveryNotice) => patch({ recoveryNotice }),
+      setBookWarning: (bookWarning) => patch({ bookWarning }),
       openStarted: () => patch({ opening: true }),
       openFinished: () => patch({ opening: false }),
     },

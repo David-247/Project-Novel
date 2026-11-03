@@ -1,6 +1,6 @@
 import type { BookSettings } from '@/shared/book'
 import type { DocJSON } from '@/shared/document'
-import { normalizeBook, serializeBook } from './book-file'
+import { bookToJSON, normalizeBook, serializeBook } from './book-file'
 import { isDocJSON, joinPath, ProjectError, serializeManuscript, type ProjectMeta } from './format'
 import { ensureDir, listDir, readTextFile, removeFile, writeFileAtomic } from './ipc'
 
@@ -38,7 +38,8 @@ export const recoveryFilePath = (folder: string) => joinPath(recoveryDirPath(fol
 
 /** Compact JSON (like manuscript.json). */
 export function serializeRecovery(s: RecoverySnapshot): string {
-  return JSON.stringify(s)
+  // The book goes in book.json shape (unknown keys top-level) so parseRecovery reads it back symmetrically.
+  return JSON.stringify(s.book ? { ...s, book: bookToJSON(s.book) } : s)
 }
 
 /** Parse a recovery file; null if it is damaged or from a newer Novel (then it is ignored, not deleted). */
