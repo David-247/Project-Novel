@@ -69,8 +69,10 @@ at the style's `outlineLevel`; paragraph styles as `paragraph` nodes. Body on a 
 **Phase 1 migration rule (rendering mapping, no rewrite):** a block without `styleId` uses **Body** if it is a
 paragraph, **Chapter Title** if it is a level-1 heading and **Subheading** if it is a level-2 or level-3 heading.
 The mapping happens when the block is rendered, so a Phase 1 `manuscript.json` loads and saves byte-for-byte
-unchanged until the user applies a style. A `styleId` naming a style that no longer exists renders unstyled (base
-text) and shows as "Missing style" in the picker; deleting a style in the app re-maps its blocks first.
+unchanged until the user applies a style. A `styleId` naming a style that no longer exists (for example brought back
+by undo after a delete, pasted, or from an out-of-sync book.json) renders like Body on a paragraph, or like the
+heading's migration default, and shows as "Body (missing style)" (or the heading default) in the picker. Deleting a
+style in the app re-maps its blocks first.
 
 ### Styles in book.json (`styles`)
 
