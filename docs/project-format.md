@@ -8,8 +8,9 @@ My Novel/
 ├── project.json      metadata and schema version
 ├── manuscript.json   the manuscript as ProseMirror document JSON
 ├── index.sqlite      index (revisions); can be rebuilt, never the only copy of text
-└── .recovery/        crash-recovery snapshot (only while there are unsaved changes)
-    └── manuscript.json
+└── .recovery/        crash-recovery data
+    ├── manuscript.json                 current snapshot (only while there are unsaved changes)
+    └── unrestored-<savedAt>.json       older snapshots set aside, never deleted by Novel
 ```
 
 Projects contain no tokens, credentials, account data or absolute paths of other machines. Novel never makes
@@ -111,7 +112,8 @@ never overlap.
 Errors from Rust carry a `kind`: `not_found`, `invalid_path`, `outside_project`, `not_recent`, `symlink`,
 `disk_full` (ENOSPC/EDQUOT, Windows `ERROR_DISK_FULL`/`ERROR_HANDLE_DISK_FULL`), `read_only` (EROFS, Windows
 `ERROR_WRITE_PROTECT`), `permission_denied` (EACCES/EPERM, Windows `ERROR_ACCESS_DENIED`) or `io`. The frontend
-turns `disk_full` and `read_only`/`permission_denied` into plain-language messages.
+turns these into plain-language messages. `permission_denied` says "folder read-only or file in use", because Windows
+also reports a file held open by another program (antivirus, sync tools) as access denied.
 
 ## Crash recovery (`.recovery/`)
 
@@ -138,20 +140,37 @@ write). The file is written atomically, like the other project files. Compact UT
 {"format":"novel-recovery","version":1,"projectId":"6f1c…","savedAt":"2026-11-03T10:16:12.004Z","baseUpdatedAt":"2026-11-03T10:15:42.120Z","docVersion":312,"doc":{"type":"doc","content":[…]}}
 ```
 
-**On open.** If `.recovery/manuscript.json` exists, its `savedAt` is later than project.json's `updatedAt`, and its
-`doc` differs from manuscript.json, Novel asks **Restore** or **Discard Backup**:
+**On open.** Novel decides what to do with `.recovery/manuscript.json` by matching, never by comparing clocks:
+
+1. `projectId` differs from project.json `id`: the snapshot belongs to another project. It is not offered and is
+   moved aside.
+2. `doc` is identical to manuscript.json: nothing to recover. The snapshot is deleted.
+3. `baseUpdatedAt` equals project.json `updatedAt`: the snapshot was taken on top of the current save. It is offered.
+4. `baseUpdatedAt` is something else: the snapshot was taken on top of a different save. It is not offered and is
+   moved aside.
+5. Only a snapshot with no `baseUpdatedAt` falls back to the clock: it is offered if `savedAt` is later than
+   `updatedAt`, and otherwise moved aside.
+
+Because only equality is checked, a clock change (or equal timestamps) can never cause a valid snapshot to be dropped.
+A timestamp never causes a deletion. "Moved aside" means the file is renamed to
+`.recovery/unrestored-<savedAt>.json` (`:` and `.` in the timestamp become `-`), which Novel never deletes; the user
+can open it to copy text out. An offered snapshot gets **Restore** or **Discard Backup**:
 
 - *Restore* loads the snapshot into the editor and marks it unsaved. Nothing on disk changes until the user saves,
   and the snapshot is kept until then, so a second crash still recovers it.
 - *Discard Backup* deletes the snapshot. The editor keeps the saved manuscript.
-- Closing the dialog (Escape or X) decides nothing. The snapshot stays until the next snapshot or clean save
-  replaces it, and it is offered again the next time the project is opened.
+- Closing the dialog (Escape or X) decides nothing, and nothing is lost. If the user quits right away, the snapshot
+  stays in place and is offered again next time. If anything else would replace or delete it (the next autosave
+  snapshot, a Save, or "Don't Save"), it is first moved aside to `unrestored-<savedAt>.json`. If it cannot be moved
+  aside, the new snapshot is not written, and the usual autosave warning and retry apply.
 
-A snapshot that is not newer, or is identical to the manuscript, is deleted without asking. A damaged snapshot, or one
-in an unknown format, is ignored and left in place. A recovery problem never stops a project from opening.
+A damaged snapshot, or one in an unknown format, is ignored and left in place. A recovery problem never stops a
+project from opening.
 
-**At startup.** If the most recent project still has a `.recovery/manuscript.json`, Novel offers to reopen it
-(**Reopen Project** / **Not Now**). Opening it then shows the Restore / Discard question above.
+**At startup.** If the most recent project has a `.recovery/manuscript.json` that would be offered by the rules
+above (Rust `storage_probe_recent_recovery` reads just that file and project.json, and only for folders in the
+recent list), Novel offers to reopen the project (**Reopen Project** / **Not Now**). Opening it then shows the
+Restore / Discard question above.
 
 **When recovery data is deleted:**
 
@@ -159,9 +178,11 @@ in an unknown format, is ignored and left in place. A recovery problem never sto
 - on a clean quit: closing the window when there are no unsaved changes, or after saving;
 - when the user chooses **Don't Save** in the unsaved-changes prompt (on quit, New Project or Open Project). The user
   explicitly threw those changes away, so Novel also stops snapshotting that content. Snapshots resume with the next
-  edit.
+  edit;
+- when the user chooses **Discard Backup**.
 
-One exception: on quit, a snapshot that the user has not yet answered Restore / Discard for is kept.
+A snapshot that the user has not yet answered Restore / Discard for is never deleted. On quit it stays in place;
+in every other case it is moved aside first.
 
 **Errors.** If a snapshot cannot be written (disk full, read-only folder, permissions), the status bar shows a
 warning such as "Autosave failed: the disk is full. Retrying in 5 s." No dialog appears. Retries happen after 5 s,

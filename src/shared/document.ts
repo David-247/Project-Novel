@@ -40,12 +40,10 @@ export interface DocumentProvider {
    */
   markClean(version?: number): void
   /**
-   * Optional: flag the current content as unsaved without changing it (used
-   * after restoring crash-recovery data). Providers whose dirty flag is the
-   * store's `editor.dirty` may omit it; storage then dispatches
-   * `editorActions.docChanged` itself.
+   * Flag the current content as unsaved without changing it (used after
+   * restoring crash-recovery data). Bumps the version; does not fire onDocChange.
    */
-  markDirty?(): void
+  markDirty(): void
   /** Subscribe to user edits. Returns an unsubscribe function. */
   onDocChange(cb: () => void): () => void
 }

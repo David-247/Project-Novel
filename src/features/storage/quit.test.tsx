@@ -112,6 +112,23 @@ describe('quit', () => {
     expect(destroy).toHaveBeenCalledOnce()
   })
 
+  it('if closing the window fails after the prompt, autosave keeps running', async () => {
+    destroy.mockRejectedValueOnce(new Error('destroy failed'))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.useFakeTimers()
+    try {
+      backend.answer = "Don't Save"
+      await quit()
+      expect(destroy).toHaveBeenCalledOnce()
+      // Still open and still protected: the next edit arms the 30 s snapshot timer again.
+      editor.update(textDoc('timer armed again'))
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(JSON.parse(backend.files.get(RECOVERY)!).doc).toEqual(textDoc('timer armed again'))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('status text mentions the backup while changes are unsaved', () => {
     const base = { path: '/p', title: 't', dirty: true, saveStatus: 'idle' as const }
     expect(saveStatusTextForTests({ ...base, backedUp: true })).toBe('Unsaved changes (backed up)')

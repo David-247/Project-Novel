@@ -25,7 +25,9 @@ import {
 } from './index'
 import { __resetAutosaveForTests } from './autosave'
 import { __resetStorageForTests, clearRecoveryData, offerReopenAfterCrash } from './project'
-import { parseRecovery } from './recovery'
+import { parseRecovery, unrestoredFileName } from './recovery'
+import { RecoveryDialog } from './RecoveryDialog'
+import { TooltipProvider } from '@/shared/ui'
 import { __resetWriteLockForTests } from './write-lock'
 
 const ROOT = '/books/novel'
@@ -39,6 +41,39 @@ const textDoc = (text: string): DocJSON => ({
 const recoveryText = () => parseRecovery(backend.files.get(RECOVERY)!)?.doc.content?.[0].content?.[0].text
 const recoveryWrites = () => backend.writes.filter((w) => w === RECOVERY).length
 const project = () => useStore.getState().project
+
+const metaOnDisk = () => JSON.parse(backend.files.get(`${ROOT}/project.json`)!) as { id: string; updatedAt: string }
+const unrestoredPath = (savedAt: string) => `${ROOT}/.recovery/${unrestoredFileName(savedAt)}`
+const unrestoredFiles = () => [...backend.files.keys()].filter((k) => k.includes('/.recovery/unrestored-'))
+
+/** Put a recovery file on disk directly; returns its text. */
+function plantSnapshot(f: { projectId: string; savedAt: string; baseUpdatedAt?: string; doc: DocJSON }): string {
+  backend.dirs.add(`${ROOT}/.recovery`)
+  const text = JSON.stringify({ format: 'novel-recovery', version: 1, docVersion: 1, ...f })
+  backend.files.set(RECOVERY, text)
+  return text
+}
+
+function renderDialog() {
+  return render(
+    <TooltipProvider>
+      <RecoveryDialog />
+    </TooltipProvider>,
+  )
+}
+
+/** Open a project with an unanswered snapshot ("Decide later"): returns that snapshot's savedAt. */
+async function withUnansweredSnapshot(text = 'precious crash text'): Promise<string> {
+  await createProject()
+  editor.update(textDoc(text))
+  await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+  const savedAt = parseRecovery(backend.files.get(RECOVERY)!)!.savedAt
+  await launch()
+  await reopen()
+  expect(hasPendingRecovery()).toBe(true)
+  useStore.getState().projectActions.dismissRecoveryPrompt() // Escape / X
+  return savedAt
+}
 
 let editor = createMemoryDocumentProvider()
 let unregister = () => {}
@@ -214,26 +249,62 @@ describe('crash recovery', () => {
     expect(project().recoveryPrompt).toBeNull()
   })
 
-  it('a snapshot older than the last save is not offered and is deleted', async () => {
+  it('offers by base match, not wall clock: a snapshot "older" than the save (clock skew) is still offered', async () => {
     await createProject()
-    const meta = JSON.parse(backend.files.get(`${ROOT}/project.json`)!)
-    backend.dirs.add(`${ROOT}/.recovery`)
-    backend.files.set(
-      RECOVERY,
-      JSON.stringify({
-        format: 'novel-recovery',
-        version: 1,
-        projectId: meta.id,
-        savedAt: new Date(Date.parse(meta.updatedAt) - 60_000).toISOString(),
-        baseUpdatedAt: meta.updatedAt,
-        docVersion: 1,
-        doc: textDoc('stale'),
-      }),
-    )
+    const meta = metaOnDisk()
+    plantSnapshot({
+      projectId: meta.id,
+      savedAt: new Date(Date.parse(meta.updatedAt) - 3_600_000).toISOString(), // clock went back an hour
+      baseUpdatedAt: meta.updatedAt,
+      doc: textDoc('written while the clock was wrong'),
+    })
+    await launch()
+    await reopen()
+    expect(project().recoveryPrompt).toMatchObject({ kind: 'restore' })
+    expect(backend.files.has(RECOVERY)).toBe(true)
+  })
+
+  it('equal savedAt and updatedAt: decided by the base, and offered', async () => {
+    await createProject()
+    const meta = metaOnDisk()
+    plantSnapshot({ projectId: meta.id, savedAt: meta.updatedAt, baseUpdatedAt: meta.updatedAt, doc: textDoc('same ms') })
+    await launch()
+    await reopen()
+    expect(project().recoveryPrompt).toMatchObject({ kind: 'restore' })
+  })
+
+  it('a snapshot taken on top of a different save is not offered and is moved aside, never deleted', async () => {
+    await createProject()
+    const meta = metaOnDisk()
+    const savedAt = new Date(Date.parse(meta.updatedAt) + 3_600_000).toISOString() // "newer" by the clock
+    const text = plantSnapshot({ projectId: meta.id, savedAt, baseUpdatedAt: '2000-01-01T00:00:00.000Z', doc: textDoc('old base') })
     await launch()
     await reopen()
     expect(project().recoveryPrompt).toBeNull()
     expect(backend.files.has(RECOVERY)).toBe(false)
+    expect(backend.files.get(unrestoredPath(savedAt))).toBe(text)
+  })
+
+  it('another project\'s snapshot (projectId mismatch) is not offered and is moved aside', async () => {
+    await createProject()
+    const meta = metaOnDisk()
+    const savedAt = new Date().toISOString()
+    plantSnapshot({ projectId: 'someone-else', savedAt, baseUpdatedAt: meta.updatedAt, doc: textDoc('foreign') })
+    await launch()
+    await reopen()
+    expect(project().recoveryPrompt).toBeNull()
+    expect(backend.files.has(unrestoredPath(savedAt))).toBe(true)
+  })
+
+  it('without baseUpdatedAt, falls back to savedAt; when not newer it is kept aside, not deleted', async () => {
+    await createProject()
+    const meta = metaOnDisk()
+    const savedAt = new Date(Date.parse(meta.updatedAt) - 1000).toISOString()
+    plantSnapshot({ projectId: meta.id, savedAt, doc: textDoc('legacy') })
+    await launch()
+    await reopen()
+    expect(project().recoveryPrompt).toBeNull()
+    expect(backend.files.has(unrestoredPath(savedAt))).toBe(true)
   })
 
   it('a newer snapshot identical to the manuscript is not offered', async () => {
@@ -354,7 +425,7 @@ describe('recovery dialog', () => {
     await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
     await launch()
     await reopen()
-    render(<SaveStatusIndicator />)
+    renderDialog()
     const restore = screen.getByRole('button', { name: 'Restore' })
     expect(restore).toHaveAttribute('data-control-id', 'recovery.restore')
     expect(screen.getByRole('button', { name: 'Discard Backup' })).toHaveAttribute('data-control-id', 'recovery.discard')
@@ -371,11 +442,100 @@ describe('recovery dialog', () => {
     await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
     await launch()
     await reopen()
-    render(<SaveStatusIndicator />)
+    renderDialog()
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     await vi.advanceTimersByTimeAsync(0)
     expect(project().recoveryPrompt).toBeNull()
     expect(hasPendingRecovery()).toBe(true)
     expect(backend.files.has(RECOVERY)).toBe(true)
+  })
+})
+
+describe('unanswered snapshot ("Decide later") is never destroyed', () => {
+  it('the next autosave moves it aside before writing a new snapshot', async () => {
+    const savedAt = await withUnansweredSnapshot()
+    const oldText = backend.files.get(RECOVERY)
+    editor.update(textDoc('new typing'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(backend.files.get(unrestoredPath(savedAt))).toBe(oldText)
+    expect(recoveryText()).toBe('new typing')
+    expect(hasPendingRecovery()).toBe(false)
+  })
+
+  it('a clean Save moves it aside instead of deleting it', async () => {
+    const savedAt = await withUnansweredSnapshot()
+    editor.update(textDoc('saved instead'))
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    expect(parseRecovery(backend.files.get(unrestoredPath(savedAt))!)!.doc).toEqual(textDoc('precious crash text'))
+  })
+
+  it('"Don\'t Save" moves it aside instead of deleting it', async () => {
+    const savedAt = await withUnansweredSnapshot()
+    editor.update(textDoc('thrown away'))
+    backend.answer = "Don't Save"
+    expect(await confirmUnsavedChanges('closing')).toBe(true)
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    expect(backend.files.has(unrestoredPath(savedAt))).toBe(true)
+  })
+
+  it('if it cannot be moved aside, the new snapshot is not written over it (warning + retry)', async () => {
+    await withUnansweredSnapshot()
+    const oldText = backend.files.get(RECOVERY)
+    backend.failWrite = (path) => (path.includes('unrestored-') ? { kind: 'disk_full', message: 'full' } : null)
+    editor.update(textDoc('new typing'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(backend.files.get(RECOVERY)).toBe(oldText)
+    expect(project().backupWarning).toMatch(/disk is full/)
+  })
+
+  it('an explicit Discard Backup deletes it without keeping a copy', async () => {
+    await createProject()
+    editor.update(textDoc('discard'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    await launch()
+    await reopen()
+    await discardRecovery()
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    expect(unrestoredFiles()).toEqual([])
+  })
+})
+
+describe('recovery details', () => {
+  it('after Restore the status shows the work as backed up (lastBackupAt = snapshot time)', async () => {
+    await createProject()
+    editor.update(textDoc('b'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    const savedAt = parseRecovery(backend.files.get(RECOVERY)!)!.savedAt
+    await launch()
+    await reopen()
+    await restoreRecovery()
+    expect(project().lastBackupAt).toBe(Date.parse(savedAt))
+  })
+
+  it('startup offer uses the same rule as open: a snapshot of a different save is not offered', async () => {
+    await createProject()
+    const meta = metaOnDisk()
+    plantSnapshot({ projectId: meta.id, savedAt: new Date().toISOString(), baseUpdatedAt: 'other', doc: textDoc('x') })
+    await launch()
+    await offerReopenAfterCrash(await loadRecentProjects())
+    expect(project().recoveryPrompt).toBeNull()
+    plantSnapshot({ projectId: 'other-project', savedAt: new Date().toISOString(), baseUpdatedAt: meta.updatedAt, doc: textDoc('x') })
+    await offerReopenAfterCrash(await loadRecentProjects())
+    expect(project().recoveryPrompt).toBeNull()
+  })
+
+  it('Windows access denied (file in use or read-only) gets its own wording', async () => {
+    await createProject()
+    backend.failWrite = (path) =>
+      path.startsWith(`${ROOT}/.recovery`) ? { kind: 'permission_denied', message: 'Access is denied. (os error 5)' } : null
+    editor.update(textDoc('x'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(project().backupWarning).toBe(
+      'Autosave failed: could not write (folder read-only or file in use). Retrying in 5 s.',
+    )
+    backend.failWrite = () => ({ kind: 'permission_denied', message: 'Access is denied. (os error 5)' })
+    expect(await saveProject()).toBe(false)
+    expect(project().saveError).toMatch(/read-only, or the file is in use by another program/)
   })
 })

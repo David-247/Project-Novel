@@ -41,7 +41,13 @@ export function prepareToExit(action: 'closing' | 'quitting'): Promise<boolean> 
 
 /** Quit requested from the menu / Cmd+Q / the OS: run the exit flow, then exit. */
 export async function handleQuitRequest(): Promise<void> {
-  if (await prepareToExit('quitting')) await exitApp()
+  if (!(await prepareToExit('quitting'))) return
+  try {
+    await exitApp()
+  } catch (e) {
+    console.error('Quitting failed:', e)
+    startAutosave()
+  }
 }
 
 export function isMacPlatform(): boolean {
@@ -91,7 +97,14 @@ export function useStorageIntegration(): void {
       track(
         win.onCloseRequested(async (event) => {
           event.preventDefault()
-          if (await prepareToExit('closing')) await win.destroy()
+          if (!(await prepareToExit('closing'))) return
+          try {
+            await win.destroy()
+          } catch (e) {
+            // Still running: keep protecting the user's work.
+            console.error('Closing the window failed:', e)
+            startAutosave()
+          }
         }),
       )
       void loadRecentProjects().then(offerReopenAfterCrash)

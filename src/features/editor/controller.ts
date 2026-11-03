@@ -164,6 +164,15 @@ export function markClean(version?: number): void {
   actions().markClean(version)
 }
 
+/**
+ * Flag the current content as unsaved without changing it (e.g. after storage
+ * restored crash-recovery data with `setDocJSON`). Bumps the doc version like
+ * an edit but does NOT fire `onDocChange` listeners.
+ */
+export function markDirty(): void {
+  actions().docChanged(useStore.getState().editor.isEmpty)
+}
+
 /** Called after every user edit that changes the doc (not on `setDocJSON`). Returns unsubscribe. */
 export function onDocChange(cb: DocChangeListener): () => void {
   docListeners.add(cb)

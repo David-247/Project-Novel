@@ -16,6 +16,7 @@ export const COMMANDS = {
   rememberRecent: 'storage_remember_recent',
   setRecentMenu: 'storage_set_recent_menu',
   exitApp: 'storage_exit_app',
+  probeRecentRecovery: 'storage_probe_recent_recovery',
 } as const
 
 /** Events emitted by the native File menu. `OPEN_RECENT` carries the folder path. */
@@ -56,10 +57,18 @@ export function toProjectError(e: unknown, fileLabel: string): ProjectError {
       { cause: e },
     )
   }
-  if (isRustError(e) && (e.kind === 'read_only' || e.kind === 'permission_denied')) {
+  if (isRustError(e) && e.kind === 'read_only') {
     return new ProjectError(
       'read-only',
-      `Novel is not allowed to write ${fileLabel}. The project folder may be read-only or on a locked drive.`,
+      `Novel could not write ${fileLabel} because the project folder is read-only.`,
+      { cause: e },
+    )
+  }
+  if (isRustError(e) && e.kind === 'permission_denied') {
+    // Windows reports a file held open by another program (antivirus, sync tools) the same way.
+    return new ProjectError(
+      'write-denied',
+      `Novel could not write ${fileLabel}. The project folder may be read-only, or the file is in use by another program.`,
       { cause: e },
     )
   }
@@ -171,6 +180,17 @@ export interface RecentMenuEntry {
 
 export function setRecentMenu(entries: RecentMenuEntry[]): Promise<void> {
   return invoke(COMMANDS.setRecentMenu, { entries })
+}
+
+/** project.json + `.recovery/manuscript.json` of a recent project (raw text; null = missing). */
+export interface RecoveryProbe {
+  project: string | null
+  recovery: string | null
+}
+
+/** Read a recent project's crash-recovery data without opening it (Rust allows recent folders only). */
+export function probeRecentRecovery(path: string): Promise<RecoveryProbe> {
+  return invoke<RecoveryProbe>(COMMANDS.probeRecentRecovery, { path })
 }
 
 /** Exit the app (after the quit flow approved it). */

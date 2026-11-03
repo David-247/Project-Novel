@@ -9,6 +9,8 @@
 // - markClean(version?): race-safe save pattern:
 //     const v = getDocVersion(); const doc = getDocJSON(); await save(doc); markClean(v)
 //   Dirty is cleared only if no edit happened since `v`; markClean() with no argument always clears.
+// - markDirty(): flag the current content as unsaved (bumps the version, no onDocChange), e.g.
+//   after restoring crash-recovery data.
 export { NovelEditor } from './NovelEditor'
 export { FontFamilyPicker, Toolbar, ToolbarItem, TOOLBAR_CONTROLS } from './toolbar'
 export type { FontFamilyPickerProps, ToolbarProps, ToolbarControlMeta, ToolbarControlKey } from './toolbar'
@@ -17,6 +19,7 @@ export {
   setDocJSON,
   isDirty,
   markClean,
+  markDirty,
   getDocVersion,
   onDocChange,
   getEditor,

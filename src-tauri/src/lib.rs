@@ -27,6 +27,7 @@ pub fn run() {
             storage::storage_remember_recent,
             storage::storage_set_recent_menu,
             storage::storage_exit_app,
+            storage::storage_probe_recent_recovery,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Novel")

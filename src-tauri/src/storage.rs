@@ -465,6 +465,53 @@ pub fn storage_path_exists<R: Runtime>(
     exists_within(&roots, &path)
 }
 
+/// project.json and the crash-recovery snapshot of a recent project, read
+/// before it is opened (to decide whether to offer reopening it after a crash).
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryProbe {
+    pub project: Option<String>,
+    pub recovery: Option<String>,
+}
+
+/// Read `<folder>/project.json` and `<folder>/.recovery/manuscript.json` (each
+/// confined to `folder`, missing = None), but only if `folder` is in the
+/// Rust-written recent list. Nothing else can be read this way.
+pub fn probe_recovery(recent: &RecentFile, folder: &str) -> Result<RecoveryProbe> {
+    let root = canonical_root(folder)?;
+    let listed = recent
+        .projects
+        .iter()
+        .any(|e| fs::canonicalize(&e.path).map(|c| c == root).unwrap_or(false));
+    if !listed {
+        return Err(StorageError {
+            kind: "not_recent",
+            message: format!("{folder} is not in the recent projects list"),
+        });
+    }
+    let read = |rel: &[&str]| -> Result<Option<String>> {
+        let mut p = root.clone();
+        for part in rel {
+            p.push(part);
+        }
+        match resolve_for_read(&root, &p.to_string_lossy()) {
+            Ok(c) => fs::read_to_string(&c).map(Some).map_err(|e| StorageError::io(&c, e)),
+            Err(e) if e.kind == "not_found" => Ok(None),
+            Err(e) => Err(e),
+        }
+    };
+    Ok(RecoveryProbe {
+        project: read(&["project.json"])?,
+        recovery: read(&[".recovery", "manuscript.json"])?,
+    })
+}
+
+/// Startup: look at the crash-recovery data of a recent project without opening it.
+#[tauri::command]
+pub fn storage_probe_recent_recovery<R: Runtime>(app: AppHandle<R>, path: String) -> Result<RecoveryProbe> {
+    probe_recovery(&load_recent(&recent_file(&app)?)?, &path)
+}
+
 /// Exit the app. Called by the frontend after its quit flow (unsaved-changes
 /// prompt, recovery cleanup) approved quitting.
 #[tauri::command]
@@ -874,6 +921,26 @@ mod tests {
             "not_found"
         );
         assert_eq!(grant_recent(&mut slots, &recent, "relative").unwrap_err().kind, "invalid_path");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn recovery_probe_reads_only_listed_folders_and_two_files() {
+        let base = temp_dir("probe");
+        let listed = base.join("listed");
+        let other = base.join("other");
+        fs::create_dir_all(listed.join(".recovery")).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(listed.join("project.json"), "P").unwrap();
+        let recent = recent_with(&[&listed]);
+
+        let probe = probe_recovery(&recent, &s(listed.clone())).unwrap();
+        assert_eq!(probe, RecoveryProbe { project: Some("P".into()), recovery: None });
+        fs::write(listed.join(".recovery").join("manuscript.json"), "R").unwrap();
+        let probe = probe_recovery(&recent, &s(listed.clone())).unwrap();
+        assert_eq!(probe.recovery.as_deref(), Some("R"));
+        assert_eq!(probe_recovery(&recent, &s(other)).unwrap_err().kind, "not_recent");
+        assert_eq!(probe_recovery(&recent, &s(base.join("gone"))).unwrap_err().kind, "not_found");
         fs::remove_dir_all(base).unwrap();
     }
 

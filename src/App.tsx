@@ -8,13 +8,14 @@ import {
   HistoryButtons,
   isDirty,
   markClean,
+  markDirty,
   NovelEditor,
   onDocChange,
   setDocJSON,
   Toolbar,
   ToolbarItem,
 } from '@/features/editor'
-import { SaveStatusIndicator, useStorageIntegration } from '@/features/storage'
+import { RecoveryDialog, SaveStatusIndicator, useStorageIntegration } from '@/features/storage'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, TooltipProvider } from '@/shared/ui'
@@ -27,6 +28,7 @@ export const editorDocumentProvider: DocumentProvider = {
   isDirty,
   getDocVersion,
   markClean,
+  markDirty,
   onDocChange,
 }
 
@@ -73,6 +75,8 @@ export function App() {
         }
         statusBar={<SaveStatusIndicator />}
       />
+      {/* Crash-recovery prompts (portal). */}
+      <RecoveryDialog />
     </TooltipProvider>
   )
 }

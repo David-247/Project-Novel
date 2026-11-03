@@ -1,6 +1,5 @@
 import { useStore, type ProjectState } from '@/shared/store'
 import { StatusText } from '@/shared/ui'
-import { RecoveryDialog } from './RecoveryDialog'
 
 export function saveStatusText(
   p: Pick<ProjectState, 'path' | 'title' | 'saveStatus'> & { dirty: boolean; backedUp?: boolean },
@@ -14,8 +13,7 @@ export function saveStatusText(
 
 /**
  * Status-bar save state (announced politely to screen readers), plus a
- * non-blocking warning while autosave snapshots fail. Also hosts the
- * crash-recovery dialog (a portal), so the composition root needs no extra wiring.
+ * non-blocking warning while autosave snapshots fail.
  */
 export function SaveStatusIndicator() {
   const path = useStore((s) => s.project.path)
@@ -36,7 +34,6 @@ export function SaveStatusIndicator() {
           {warning}
         </StatusText>
       ) : null}
-      <RecoveryDialog />
     </>
   )
 }

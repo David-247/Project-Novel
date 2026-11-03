@@ -31,6 +31,7 @@ export type ProjectErrorCode =
   | 'no-editor'
   | 'disk-full'
   | 'read-only'
+  | 'write-denied'
   | 'io'
 
 /** An expected storage failure, carrying a message suitable for an error dialog. */

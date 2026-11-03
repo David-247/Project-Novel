@@ -1,5 +1,5 @@
 import type { DocJSON } from '@/shared/document'
-import { isDocJSON, joinPath, ProjectError } from './format'
+import { isDocJSON, joinPath, ProjectError, serializeManuscript, type ProjectMeta } from './format'
 import { ensureDir, readTextFile, removeFile, writeFileAtomic } from './ipc'
 
 /**
@@ -74,6 +74,37 @@ export async function readRecoveryFile(folder: string): Promise<string | null> {
     if (e instanceof ProjectError && e.code === 'missing-file') return null
     throw e
   }
+}
+
+/** File name for a snapshot set aside unanswered: `unrestored-<savedAt>.json` (no `:` for Windows). */
+export function unrestoredFileName(savedAt: string): string {
+  return `unrestored-${savedAt.replace(/[^0-9A-Za-z-]/g, '-')}.json`
+}
+
+/** Keep `text` (a snapshot nobody answered) as `.recovery/unrestored-<savedAt>.json`. Throws ProjectError. */
+export async function writeUnrestoredFile(folder: string, savedAt: string, text: string): Promise<void> {
+  await ensureDir(recoveryDirPath(folder), LABEL)
+  await writeFileAtomic(joinPath(recoveryDirPath(folder), unrestoredFileName(savedAt)), text, LABEL)
+}
+
+/**
+ * What to do with a snapshot found when a project is opened:
+ * - 'offer': it was taken on top of the current save (`baseUpdatedAt` equals
+ *   project.json `updatedAt`); ask Restore / Discard.
+ * - 'identical': same content as manuscript.json; safe to delete.
+ * - 'unrelated': another project's, or taken on top of a different save; do not
+ *   offer, and do not delete (move it aside).
+ * Timestamps are compared for equality only, so a clock change can never make
+ * Novel drop a snapshot. Only a snapshot without `baseUpdatedAt` falls back to
+ * comparing `savedAt` with `updatedAt`.
+ */
+export type RecoveryVerdict = 'offer' | 'identical' | 'unrelated'
+
+export function judgeRecovery(s: RecoverySnapshot, meta: ProjectMeta, manuscriptText?: string): RecoveryVerdict {
+  if (s.projectId && s.projectId !== meta.id) return 'unrelated'
+  if (manuscriptText !== undefined && serializeManuscript(s.doc) === manuscriptText) return 'identical'
+  if (s.baseUpdatedAt) return s.baseUpdatedAt === meta.updatedAt ? 'offer' : 'unrelated'
+  return Date.parse(s.savedAt) > Date.parse(meta.updatedAt) ? 'offer' : 'unrelated'
 }
 
 /** Delete the recovery file (idempotent). Throws ProjectError. */

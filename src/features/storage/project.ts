@@ -21,6 +21,7 @@ import {
   openRecentRoot,
   pathExists,
   pickProjectFolder,
+  probeRecentRecovery,
   readRecentRaw,
   readTextFile,
   rememberRecentRaw,
@@ -31,10 +32,12 @@ import {
 import { flagMissing, parseRecentFile } from './recent'
 import {
   deleteRecoveryFile,
+  judgeRecovery,
   parseRecovery,
   readRecoveryFile,
   recoveryFilePath,
   suppressSnapshotsAt,
+  writeUnrestoredFile,
   type RecoverySnapshot,
 } from './recovery'
 import type { RevisionKind } from './schema'
@@ -53,7 +56,7 @@ let currentIndex: ProjectIndex | null = null
 let inFlightSave: Promise<boolean> | null = null
 let lastSaveDoneAt = 0
 /** Recovery snapshot found when the open project was opened, awaiting Restore / Discard. */
-let pendingRecovery: { folder: string; snapshot: RecoverySnapshot } | null = null
+let pendingRecovery: { folder: string; snapshot: RecoverySnapshot; text: string } | null = null
 const openedListeners = new Set<(p: OpenedProject) => void>()
 
 /** The registered editor; storage cannot work without one. */
@@ -409,14 +412,37 @@ export async function closeProject(): Promise<void> {
 }
 
 // ---- Crash recovery ---------------------------------------------------------
+//
+// Rule: Novel never silently destroys a snapshot the user has not answered.
+// Only a snapshot that is identical to the manuscript, or one the user
+// explicitly discarded / saved over / chose "Don't Save" for after answering,
+// is deleted. Anything else is moved aside to `.recovery/unrestored-<savedAt>.json`.
 
-/** Delete recovery data of `folder`; never throws. Caller holds the write lock. */
-async function clearRecoveryUnlocked(folder: string): Promise<void> {
+/**
+ * If the snapshot of `folder` is still unanswered (Restore / Discard), move it
+ * aside before it is overwritten or deleted. Throws if it cannot be kept, so
+ * the caller must not go on to overwrite/delete. Caller holds the write lock.
+ */
+export async function preserveUnansweredRecoveryUnlocked(folder: string): Promise<void> {
+  const pending = pendingRecovery
+  if (!pending || pending.folder !== folder) return
+  await writeUnrestoredFile(folder, pending.snapshot.savedAt, pending.text)
+  pendingRecovery = null
+  if (useStore.getState().project.recoveryPrompt?.kind === 'restore') actions().dismissRecoveryPrompt()
+}
+
+/**
+ * Delete recovery data of `folder`; never throws. Caller holds the write lock.
+ * An unanswered snapshot is moved aside first unless `discard` (the user chose Discard Backup).
+ */
+async function clearRecoveryUnlocked(folder: string, discard = false): Promise<void> {
   try {
+    if (!discard) await preserveUnansweredRecoveryUnlocked(folder)
     await deleteRecoveryFile(folder)
   } catch (e) {
-    // A stale snapshot is harmless: it is older than project.json's updatedAt, so it is never offered.
-    console.warn('Deleting recovery data failed:', e)
+    // Kept on disk: a leftover snapshot is never offered unless it matches the current save.
+    console.warn('Deleting recovery data failed; it was kept:', e)
+    return
   }
   if (pendingRecovery?.folder === folder) pendingRecovery = null
   if (getCurrentProjectPath() === folder) actions().backupCleared()
@@ -424,7 +450,8 @@ async function clearRecoveryUnlocked(folder: string): Promise<void> {
 
 /**
  * Delete the open project's crash-recovery data (after a clean quit, or when
- * the user chose "Don't Save"). Waits for any in-flight write. Never throws.
+ * the user chose "Don't Save"). Waits for any in-flight write. An unanswered
+ * snapshot is moved aside, never deleted. Never throws.
  */
 export function clearRecoveryData(): Promise<void> {
   const folder = getCurrentProjectPath()
@@ -438,11 +465,22 @@ async function discardUnsavedForRecovery(p: DocumentProvider): Promise<void> {
   await clearRecoveryData()
 }
 
+/** Move a snapshot that is not offered (and not identical) aside; never throws. Caller holds the lock. */
+async function setAsideUnlocked(folder: string, snapshot: RecoverySnapshot, text: string): Promise<void> {
+  try {
+    await writeUnrestoredFile(folder, snapshot.savedAt, text)
+    await deleteRecoveryFile(folder)
+  } catch (e) {
+    console.warn('Moving old recovery data aside failed; it was left in place:', e)
+  }
+}
+
 /**
- * After opening `folder`: if `.recovery/manuscript.json` is newer than the last
- * save (project.json `updatedAt`) and differs from manuscript.json, ask the
- * user to Restore or Discard it. A stale or identical snapshot is deleted.
- * Never throws: recovery must not stop a project from opening.
+ * After opening `folder`, decide what to do with `.recovery/manuscript.json`
+ * (see judgeRecovery): offer Restore / Discard, delete it (identical to the
+ * manuscript), or move it aside (cannot tell it belongs to the current save).
+ * A damaged snapshot is left in place. Never throws: recovery must not stop a
+ * project from opening.
  */
 async function detectRecovery(folder: string, meta: ProjectMeta, manuscriptText: string): Promise<void> {
   try {
@@ -453,13 +491,15 @@ async function detectRecovery(folder: string, meta: ProjectMeta, manuscriptText:
       console.warn('Ignoring unreadable recovery data in', recoveryFilePath(folder))
       return
     }
-    const newer = Date.parse(snapshot.savedAt) > Date.parse(meta.updatedAt)
-    if (!newer || serializeManuscript(snapshot.doc) === manuscriptText) {
-      await withWriteLock(() => clearRecoveryUnlocked(folder))
-      return
+    const verdict = judgeRecovery(snapshot, meta, manuscriptText)
+    if (verdict === 'identical') {
+      await withWriteLock(() => clearRecoveryUnlocked(folder, true))
+    } else if (verdict === 'unrelated') {
+      await withWriteLock(() => setAsideUnlocked(folder, snapshot, text))
+    } else {
+      pendingRecovery = { folder, snapshot, text }
+      actions().showRecoveryPrompt({ kind: 'restore', savedAt: snapshot.savedAt })
     }
-    pendingRecovery = { folder, snapshot }
-    actions().showRecoveryPrompt({ kind: 'restore', savedAt: snapshot.savedAt })
   } catch (e) {
     console.warn('Checking for recovery data failed:', e)
   }
@@ -477,12 +517,11 @@ export async function restoreRecovery(): Promise<boolean> {
   try {
     const p = provider()
     loadDocument(p, pending.snapshot.doc)
-    if (p.markDirty) p.markDirty()
-    else {
-      const { editor, editorActions } = useStore.getState()
-      editorActions.docChanged(editor.isEmpty)
-    }
+    p.markDirty()
     pendingRecovery = null
+    // The editor content is exactly what the recovery file holds: it is backed up.
+    const savedAt = Date.parse(pending.snapshot.savedAt)
+    actions().backupSucceeded(Number.isNaN(savedAt) ? Date.now() : savedAt)
     return true
   } catch (e) {
     await showError(
@@ -506,19 +545,23 @@ export async function discardRecovery(): Promise<void> {
   actions().dismissRecoveryPrompt()
   pendingRecovery = null
   if (pending && pending.folder === getCurrentProjectPath()) {
-    await withWriteLock(() => clearRecoveryUnlocked(pending.folder))
+    await withWriteLock(() => clearRecoveryUnlocked(pending.folder, true))
   }
 }
 
 /**
- * At startup (no project open yet): if the most recent project has recovery
- * data left by a crash, offer to reopen it. Never throws.
+ * At startup (no project open yet): if the most recent project has a snapshot
+ * that would be offered on open (same rule as detectRecovery), offer to reopen
+ * it. Never throws.
  */
 export async function offerReopenAfterCrash(recent: RecentProject[]): Promise<void> {
   try {
     const last = recent[0]
     if (!last || last.missing || getCurrentProjectPath()) return
-    if (!(await pathExists(recoveryFilePath(last.path)))) return
+    const probe = await probeRecentRecovery(last.path)
+    if (!probe.project || !probe.recovery) return
+    const snapshot = parseRecovery(probe.recovery)
+    if (!snapshot || judgeRecovery(snapshot, parseProjectMeta(probe.project)) !== 'offer') return
     if (getCurrentProjectPath() || useStore.getState().project.recoveryPrompt) return
     actions().showRecoveryPrompt({ kind: 'reopen', path: last.path, name: last.name })
   } catch (e) {

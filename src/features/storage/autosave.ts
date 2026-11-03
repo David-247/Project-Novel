@@ -1,7 +1,12 @@
 import { getDocumentProvider, onDocumentProviderChange, type DocumentProvider } from '@/shared/document'
 import { useStore } from '@/shared/store'
 import { ProjectError } from './format'
-import { getCurrentProjectMeta, getCurrentProjectPath, onProjectOpened } from './project'
+import {
+  getCurrentProjectMeta,
+  getCurrentProjectPath,
+  onProjectOpened,
+  preserveUnansweredRecoveryUnlocked,
+} from './project'
 import {
   RECOVERY_FORMAT,
   RECOVERY_VERSION,
@@ -66,7 +71,9 @@ export function backupWarningText(e: unknown, retryMs: number): string {
       ? 'the disk is full'
       : e instanceof ProjectError && e.code === 'read-only'
         ? 'the project folder is read-only'
-        : 'the project folder could not be written'
+        : e instanceof ProjectError && e.code === 'write-denied'
+          ? 'could not write (folder read-only or file in use)'
+          : 'the project folder could not be written'
   return `Autosave failed: ${reason}. Retrying in ${secs} s.`
 }
 
@@ -108,6 +115,8 @@ async function snapshot(): Promise<AutosaveResult> {
         docVersion: version,
         doc: p.getDocJSON(),
       })
+      // A snapshot the user has not answered yet is moved aside, never overwritten.
+      await preserveUnansweredRecoveryUnlocked(folder)
       await writeRecoveryFile(folder, text)
       lastSnapshotVersion = version
       return true
@@ -133,7 +142,9 @@ async function snapshot(): Promise<AutosaveResult> {
 /** Edits made while the snapshot was being written need their own snapshot. */
 function rearmIfStillDirty(): void {
   const p = getDocumentProvider()
-  if (p && p.isDirty() && p.getDocVersion() !== lastSnapshotVersion) arm()
+  if (!p || !p.isDirty()) return
+  const version = p.getDocVersion()
+  if (version !== lastSnapshotVersion && !snapshotsSuppressedAt(version)) arm()
 }
 
 /** Per keystroke: O(1), no serialization. Recovery for a never-saved document is out of scope. */

@@ -125,6 +125,17 @@ export async function invokeMock(cmd: string, args: Record<string, unknown> = {}
       }
       return backend.files.has(c) || backend.dirs.has(c)
     }
+    case 'storage_probe_recent_recovery': {
+      const c = canonical(path)
+      if (!backend.dirs.has(c)) throw notFound(path)
+      if (!backend.recent.some((r) => canonical(r.path) === c)) {
+        throw { kind: 'not_recent', message: `${path} is not in the recent projects list` }
+      }
+      return {
+        project: backend.files.get(`${c}/project.json`) ?? null,
+        recovery: backend.files.get(`${c}/.recovery/manuscript.json`) ?? null,
+      }
+    }
     case 'storage_exit_app':
       backend.exits++
       return null

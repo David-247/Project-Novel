@@ -14,7 +14,8 @@ export function formatSnapshotTime(iso: string, now: Date = new Date()): string 
  * Crash-recovery questions (rendered via a portal):
  * - "restore": a backup newer than the last save was found in the open project.
  * - "reopen": at startup, the last project has a backup left by a crash.
- * Closing with Escape / X decides nothing: the backup is kept and offered again next time.
+ * Closing with Escape / X decides nothing: the backup is kept (moved aside to
+ * `.recovery/unrestored-<savedAt>.json` before anything would overwrite or delete it).
  */
 export function RecoveryDialog() {
   const prompt = useStore((s) => s.project.recoveryPrompt)
