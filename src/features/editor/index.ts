@@ -6,4 +6,10 @@ export { getDocJSON, setDocJSON, isDirty, markClean, onDocChange, getEditor } fr
 export type { DocChangeListener } from './controller'
 export { createEditorExtensions } from './extensions'
 export { SYSTEM_FONT_STACK, listSystemFonts, fontFamilyCss, primaryFontFamily } from './fonts'
+// Find & replace + history (task 4)
+export { FindReplacePanel } from './find/FindReplacePanel'
+export type { FindReplacePanelProps } from './find/FindReplacePanel'
+export { FindButton } from './find/FindButton'
+export { HistoryButtons } from './history/HistoryButtons'
+export { HISTORY_DEPTH } from './extensions'
 export type { Editor, JSONContent } from '@tiptap/core'
