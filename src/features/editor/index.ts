@@ -28,6 +28,8 @@ export { SYSTEM_FONT_STACK, listSystemFonts, fontFamilyCss, primaryFontFamily } 
 export { FindReplacePanel } from './find/FindReplacePanel'
 export type { FindReplacePanelProps } from './find/FindReplacePanel'
 export { FindButton } from './find/FindButton'
+export type { FindButtonProps } from './find/FindButton'
 export { HistoryButtons } from './history/HistoryButtons'
+export type { HistoryButtonsProps } from './history/HistoryButtons'
 export { HISTORY_DEPTH } from './extensions'
 export type { Editor, JSONContent } from '@tiptap/core'
