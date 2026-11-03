@@ -4,3 +4,5 @@
 .claude/settings.json
 # vibeless-managed
 .vibeless/hooks/
+
+.superpowers/
