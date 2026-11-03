@@ -8,7 +8,7 @@ export interface AppShellProps {
 
 /**
  * Three planes: quiet chrome (toolbar, status bar on `bg`) around the brightest, calmest
- * plane, the writing surface (`surface`). Nothing here assumes a desktop width: the toolbar
+ * plane, the desk the page lies on (`desk`, from the paper surface). Nothing here assumes a desktop width: the toolbar
  * wraps, the editor region scrolls, and the status bar truncates.
  */
 export function AppShell({ toolbar, editor, statusBar }: AppShellProps) {
@@ -24,7 +24,7 @@ export function AppShell({ toolbar, editor, statusBar }: AppShellProps) {
       <main
         role="main"
         aria-label="Editor"
-        className="min-h-0 flex-1 overflow-auto bg-surface text-text"
+        className="min-h-0 flex-1 overflow-auto bg-desk text-text"
       >
         {editor}
       </main>

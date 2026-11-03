@@ -24,8 +24,8 @@ import {
 } from '@/features/storage'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
-import { ToolbarGroup, TooltipProvider } from '@/shared/ui'
-import { useThemeFollow } from '@/shared/theme'
+import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
+import { SurfacePicker, useSurfaceFollow, useThemeFollow } from '@/shared/theme'
 
 /** The editor slice, seen by storage through the shared DocumentProvider contract. */
 export const editorDocumentProvider: DocumentProvider = {
@@ -41,6 +41,7 @@ export const editorDocumentProvider: DocumentProvider = {
 /** Composition root: the only place that wires slices together. */
 export function App() {
   useThemeFollow()
+  useSurfaceFollow()
   // F5 / Mod-R / Alt+Left would reload or navigate the webview and drop unsaved work. Kept off under
   // the Vite dev server (`pnpm dev`, `pnpm tauri dev`), where reloading is part of the workflow.
   useReloadGuard(!import.meta.env.DEV)
@@ -62,11 +63,17 @@ export function App() {
                 </ToolbarGroup>
               }
               extraGroups={
-                <ToolbarGroup label="Find">
-                  <ToolbarItem>
-                    <FindButton />
-                  </ToolbarItem>
-                </ToolbarGroup>
+                <>
+                  <ToolbarGroup label="Find">
+                    <ToolbarItem>
+                      <FindButton />
+                    </ToolbarItem>
+                  </ToolbarGroup>
+                  <ToolbarSeparator />
+                  <ToolbarGroup label="Paper">
+                    <SurfacePicker wrap={(button) => <ToolbarItem>{button}</ToolbarItem>} />
+                  </ToolbarGroup>
+                </>
               }
             />
           </>
