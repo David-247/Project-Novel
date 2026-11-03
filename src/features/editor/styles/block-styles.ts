@@ -1,4 +1,5 @@
 import { Extension } from '@tiptap/core'
+import { closeHistory } from '@tiptap/pm/history'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
@@ -253,6 +254,8 @@ export const BlockStyles = Extension.create({
         ({ tr, dispatch }) => {
           const style = getResolvedStyles().get(styleId)
           if (!style) return false
+          // Its own undo step, never merged into the typing just before it.
+          if (dispatch) closeHistory(tr)
           return forSelectedBlocks(tr, (_node, pos) => (dispatch ? restyleBlock(tr, pos, style) : canTake(tr, pos, style)))
         },
       clearDirectFormatting:

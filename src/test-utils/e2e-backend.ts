@@ -17,6 +17,7 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { autosaveNow } from '@/features/storage'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
+import { useStore } from '@/shared/store'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
 
 /** Set by tests before the app boots (page.addInitScript). */
@@ -144,6 +145,10 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     countControls: () => document.body.querySelectorAll(CONTROL_SELECTOR).length,
     /** Take a crash-recovery snapshot now, as the 30 s autosave timer would (perf: autosave mid-typing). */
     autosaveNow: () => autosaveNow(),
+    /** Editor document version (bumps on every document change; style edits must not bump it). */
+    docVersion: () => useStore.getState().editor.docVersion,
+    /** book.styles as stored (overrides only). */
+    bookStyles: () => useStore.getState().book.styles,
   }
 }
 

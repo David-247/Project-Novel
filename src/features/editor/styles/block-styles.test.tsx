@@ -78,6 +78,16 @@ describe('setBlockStyle', () => {
     expect(ed.state.doc.child(0).attrs.styleId).toBeNull()
   })
 
+  it('is its own undo step, not merged with the typing right before it', () => {
+    const ed = mount([p('Chapter')])
+    caretAtEndOf(ed, 0)
+    run(() => ed.commands.insertContent(' One'))
+    run(() => ed.commands.setBlockStyle('chapter-title'))
+    run(() => ed.commands.undo())
+    expect(ed.state.doc.child(0).type.name).toBe('paragraph')
+    expect(ed.state.doc.textContent).toBe('Chapter One')
+  })
+
   it('Mod-Alt-1 / Mod-Alt-0 apply Chapter Title / Body; Body is stored as null', () => {
     const ed = mount([p('Title')])
     caretAtEndOf(ed, 0)
