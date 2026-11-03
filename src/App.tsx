@@ -1,10 +1,34 @@
+import { useEffect } from 'react'
 import { AppShell } from '@/features/app-shell'
-import { NovelEditor, Toolbar } from '@/features/editor'
+import {
+  getDocJSON,
+  getDocVersion,
+  isDirty,
+  markClean,
+  NovelEditor,
+  onDocChange,
+  setDocJSON,
+  Toolbar,
+} from '@/features/editor'
+import { SaveStatusIndicator, useStorageIntegration } from '@/features/storage'
+import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { useThemeFollow } from '@/shared/theme'
+
+/** The editor slice, seen by storage through the shared DocumentProvider contract. */
+export const editorDocumentProvider: DocumentProvider = {
+  getDocJSON: () => getDocJSON() as DocJSON,
+  setDocJSON: (doc) => setDocJSON(doc),
+  isDirty,
+  getDocVersion,
+  markClean,
+  onDocChange,
+}
 
 /** Composition root: the only place that wires slices together. */
 export function App() {
   useThemeFollow()
+  useEffect(() => registerDocumentProvider(editorDocumentProvider), [])
+  useStorageIntegration()
   return (
     <AppShell
       toolbar={
@@ -14,7 +38,7 @@ export function App() {
         </>
       }
       editor={<NovelEditor />}
-      statusBar={null}
+      statusBar={<SaveStatusIndicator />}
     />
   )
 }

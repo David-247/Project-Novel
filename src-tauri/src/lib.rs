@@ -1,9 +1,28 @@
 mod fonts;
+mod storage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![fonts::list_system_fonts])
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_sql::Builder::new().build())
+        .manage(storage::RecentMenuState::default())
+        .manage(storage::ProjectRoot::default())
+        .menu(|app| storage::build_menu(app, &[]))
+        .on_menu_event(|app, event| storage::handle_menu_event(app, event.id().as_ref()))
+        .invoke_handler(tauri::generate_handler![
+            fonts::list_system_fonts,
+            storage::storage_pick_project_folder,
+            storage::storage_open_recent_root,
+            storage::storage_restore_project_root,
+            storage::storage_clear_project_root,
+            storage::storage_write_file_atomic,
+            storage::storage_read_text_file,
+            storage::storage_path_exists,
+            storage::storage_read_recent,
+            storage::storage_remember_recent,
+            storage::storage_set_recent_menu,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Novel");
 }
