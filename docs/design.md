@@ -157,3 +157,43 @@ Example toolbar:
 `AppShell` paints the toolbar header and status footer on `bg`, separated from the editor by a `border`
 hairline. The editor `<main>` uses `bg-surface text-text`, and that is all the shell styles there:
 document content is the editor slice's job, and paper/book surfaces and page spreads are Phase 2.
+
+## Paragraph and chapter styles (Phase 2)
+
+**Rendering.** Styles are one generated `<style>` element (`BookStyleSheet`), one rule per style keyed by
+`[data-style="<id>"]` under `.novel-editor-content`. Editing a style rewrites that text only: O(number of styles),
+no document transaction (measured: 40 chapters in a 100k-word manuscript restyle in ~20 ms in Chromium, ~60 ms in
+WebKit). Direct formatting from the toolbar is inline style on the block or a text mark, so it always wins over the
+style, as in Word; **Clear direct formatting** (Mod-\) removes it.
+
+**Book points.** Sizes and spacing are in points, rendered as `calc(N * var(--nv-pt, 1pt))`. The continuous
+writing view sets `--nv-pt` so Body (11 pt) shows at the Phase 1 reading size (18px); page surfaces set it to a
+true point times their zoom.
+
+**Built-in defaults** (book typography for an 11 pt text face): Body 11/16.5 pt, ragged right, 1.5 em indent, no
+space between paragraphs (switch to Justify in Modify style for print); First Paragraph without the indent; Chapter
+Number 12 pt small capitals, tracked; Chapter Title 20 pt centred with a 72 pt sink, new page; Part Title 24 pt
+capitals, 144 pt sink, new right-hand page; Subheading 13 pt semibold; Scene Break centred, 12 pt above and below;
+Block Quote 10 pt indented 2 em both sides; Epigraph 10 pt italic indented 4 em; Dedication italic, centred,
+144 pt sink, new right-hand page. **Heading group:** a style whose `nextStyle` is another breaking style (Chapter
+Number → Chapter Title) breaks once; the second block gets no break and no space before.
+
+**Pagination contract.** Top-level blocks whose style breaks carry `data-break-before="page|recto"` (a ProseMirror
+node decoration, so style edits never change the document). Every paragraph/heading carries `data-style`.
+
+**Toolbar.** A "Styles" group after the spacing controls: the picker (a native select showing the current
+paragraph's style; Mod-Alt-0 Body, Mod-Alt-1 Chapter Title), Modify style (pilcrow-and-nib icon), Manage styles
+(stack of set lines) and Clear direct formatting (struck T).
+
+**Modify style.** The one expressive element is the *proof*: a slice of manuscript on the writing plane showing
+the paragraph before (muted), a dashed "New page" / "New right-hand page" rule when the style breaks, the sample
+(the writer's own paragraph when opened from the toolbar) and the next paragraph in the style Enter would create.
+It renders through the same resolver as the manuscript, so the preview cannot disagree with the result. The form
+is grouped Style / Type / Paragraph; an empty field inherits, and its placeholder or "From <parent>" option says
+what it inherits. Two columns from `md`, one column (form, then proof) on phones; the dialog widens to 48rem.
+
+**Manage styles.** Chapter and paragraph styles in two labelled groups; each row is a pressed-state button whose
+name is set in the style's own weight, slant, case and (capped) tracking, so the list reads as a specimen. Built-in
+styles can be modified and duplicated but not renamed or deleted. Rename and delete confirmation appear inline
+under the list (delete says how many paragraphs switch, and to which style); results are announced in a polite
+live region. Colours are existing token pairs only (selected row `accent` on `accent-soft`, delete in `danger`).

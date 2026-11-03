@@ -136,7 +136,7 @@ export function getEditor(): Editor | null {
 const OPTIONAL_BLOCK_ATTRS = ['textAlign', 'lineHeight', 'paragraphSpacing', 'indent', 'firstLineIndent', 'styleId'] as const
 
 /**
- * Drop OPTIONAL_BLOCK_ATTRS that equal the schema default (textAlign/lineHeight/paragraphSpacing/
+ * Drop OPTIONAL_BLOCK_ATTRS that equal the schema default (textAlign/lineHeight/paragraphSpacing/styleId/
  * firstLineIndent null, indent 0) from `json` (its nodes are updated in place, their `attrs` objects
  * are replaced, never mutated), and an `attrs` object left empty. Keeps
  * manuscript.json free of per-paragraph noise without storage knowing the editor schema.

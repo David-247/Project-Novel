@@ -22,7 +22,8 @@ function specimen(s: ResolvedStyle): CSSProperties {
     fontWeight: s.fontWeight,
     italic: s.italic,
     textTransform: s.textTransform,
-    letterSpacing: s.letterSpacing,
+    // Wide tracking (Scene Break's 0.5 em) would make a list row unreadable: capped for the specimen.
+    letterSpacing: s.letterSpacing === undefined ? undefined : Math.min(s.letterSpacing, 0.12),
   }) as CSSProperties
   const size = Math.min(17, Math.max(13, (s.fontSize ?? 11) * 1.25))
   return { ...css, fontSize: `${size}px`, lineHeight: 1.25 }
