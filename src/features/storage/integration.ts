@@ -15,6 +15,7 @@ import {
   saveProject,
 } from './project'
 import { getDocumentProvider } from '@/shared/document'
+import { detectPlatform, matchesShortcut, type Platform } from '@/shared/ui'
 
 let exitFlow: Promise<boolean> | null = null
 
@@ -53,14 +54,15 @@ export async function handleQuitRequest(): Promise<void> {
   }
 }
 
-export function isMacPlatform(): boolean {
-  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-}
+/** The Save shortcut (also shown in the File menu and the file.save tooltip). */
+export const SAVE_SHORTCUT = 'Mod-s'
 
 /** Mod-S: Cmd+S on macOS, Ctrl+S elsewhere (no Shift/Alt). */
-export function isSaveShortcut(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>, mac = isMacPlatform()): boolean {
-  const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-  return mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's'
+export function isSaveShortcut(
+  e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>,
+  platform: Platform = detectPlatform(),
+): boolean {
+  return matchesShortcut(SAVE_SHORTCUT, e, platform)
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   Checkbox,
   Dialog,
   IconButton,
+  matchesShortcut,
   Select,
   StatusText,
   TextInput,
@@ -93,5 +94,25 @@ describe('shared/ui primitives', () => {
     expect(screen.getByText('body')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('matchesShortcut', () => {
+  const ev = (key: string, m: Partial<Record<'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey', boolean>> = {}) => ({
+    key,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...m,
+  })
+  it('resolves Mod per platform and requires exactly the spec modifiers', () => {
+    expect(matchesShortcut('Mod-s', ev('s', { ctrlKey: true }), 'other')).toBe(true)
+    expect(matchesShortcut('Mod-s', ev('S', { metaKey: true }), 'mac')).toBe(true)
+    expect(matchesShortcut('Mod-s', ev('s', { metaKey: true }), 'other')).toBe(false)
+    expect(matchesShortcut('Mod-s', ev('s', { ctrlKey: true, shiftKey: true }), 'other')).toBe(false)
+    expect(matchesShortcut('Mod-Shift-z', ev('Z', { ctrlKey: true, shiftKey: true }), 'other')).toBe(true)
+    expect(matchesShortcut('Escape', ev('Escape'), 'mac')).toBe(true)
+    expect(matchesShortcut('Escape', ev('escape'), 'mac')).toBe(false)
   })
 })

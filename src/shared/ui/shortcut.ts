@@ -112,6 +112,27 @@ export function ariaKeyshortcuts(
   return list.length ? list.map((s) => ariaKeyshortcut(s, platform)).join(' ') : undefined
 }
 
+type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>
+
+/**
+ * True when a key event is exactly `spec` on `platform`: the same key (letters case-insensitive)
+ * and exactly the spec's modifiers ("Mod-s" is Cmd+S on macOS, Ctrl+S elsewhere; Ctrl+Shift+S or
+ * Cmd+S on Windows do not match).
+ */
+export function matchesShortcut(spec: ShortcutSpec, e: ShortcutEvent, platform: Platform = detectPlatform()): boolean {
+  const { modifiers, key } = parse(spec)
+  const mods = resolveMods(modifiers, platform)
+  if (
+    e.ctrlKey !== mods.has('ctrl') ||
+    e.metaKey !== mods.has('meta') ||
+    e.altKey !== mods.has('alt') ||
+    e.shiftKey !== mods.has('shift')
+  ) {
+    return false
+  }
+  return e.key.length === 1 && key.length === 1 ? e.key.toLowerCase() === key.toLowerCase() : e.key === key
+}
+
 /** Normalizes one-or-many specs to an array. */
 export function shortcutList(spec: ShortcutSpec | readonly ShortcutSpec[] | undefined): readonly ShortcutSpec[] {
   if (!spec) return []

@@ -8,13 +8,13 @@ const key = (k: Partial<KeyboardEvent>) => ({ key: 's', ctrlKey: false, metaKey:
 
 describe('Mod-S', () => {
   it('is Ctrl+S off macOS and Cmd+S on macOS', () => {
-    expect(isSaveShortcut(key({ ctrlKey: true }), false)).toBe(true)
-    expect(isSaveShortcut(key({ metaKey: true }), false)).toBe(false)
-    expect(isSaveShortcut(key({ metaKey: true }), true)).toBe(true)
-    expect(isSaveShortcut(key({ ctrlKey: true }), true)).toBe(false)
-    expect(isSaveShortcut(key({ ctrlKey: true, key: 'S' }), false)).toBe(true)
-    expect(isSaveShortcut(key({ ctrlKey: true, shiftKey: true }), false)).toBe(false)
-    expect(isSaveShortcut(key({ ctrlKey: true, key: 'a' }), false)).toBe(false)
+    expect(isSaveShortcut(key({ ctrlKey: true }), 'other')).toBe(true)
+    expect(isSaveShortcut(key({ metaKey: true }), 'other')).toBe(false)
+    expect(isSaveShortcut(key({ metaKey: true }), 'mac')).toBe(true)
+    expect(isSaveShortcut(key({ ctrlKey: true }), 'mac')).toBe(false)
+    expect(isSaveShortcut(key({ ctrlKey: true, key: 'S' }), 'other')).toBe(true)
+    expect(isSaveShortcut(key({ ctrlKey: true, shiftKey: true }), 'other')).toBe(false)
+    expect(isSaveShortcut(key({ ctrlKey: true, key: 'a' }), 'other')).toBe(false)
   })
 })
 
