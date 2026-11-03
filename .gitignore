@@ -17,3 +17,4 @@ test-results/
 coverage/
 *.log
 .DS_Store
+.claude/worktrees/

@@ -35,6 +35,8 @@ export default tseslint.config(
       'playwright-report',
       'test-results',
       'coverage',
+      '.claude',
+      '.superpowers',
       // Deliberate violation; linted explicitly by tests/cross-slice-lint.test.ts
       'tests/fixtures',
     ],

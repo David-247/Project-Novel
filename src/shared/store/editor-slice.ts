@@ -20,8 +20,8 @@ export interface EditorSlice {
     docChanged: (isEmpty: boolean) => void
     /** A document was loaded (history reset); clears dirty. */
     docLoaded: (isEmpty: boolean) => void
-    /** Content was persisted; clears dirty. */
-    markClean: () => void
+    /** Content was persisted; clears dirty (only if `version` is omitted or equals `docVersion`). */
+    markClean: (version?: number) => void
   }
 }
 
@@ -32,7 +32,11 @@ export const createEditorSlice: SliceCreator<EditorSlice> = (set) => ({
       set((s) => ({ editor: { isEmpty, docVersion: s.editor.docVersion + 1, dirty: true } })),
     docLoaded: (isEmpty) =>
       set((s) => ({ editor: { isEmpty, docVersion: s.editor.docVersion + 1, dirty: false } })),
-    markClean: () =>
-      set((s) => (s.editor.dirty ? { editor: { ...s.editor, dirty: false } } : s)),
+    markClean: (version) =>
+      set((s) =>
+        s.editor.dirty && (version === undefined || version === s.editor.docVersion)
+          ? { editor: { ...s.editor, dirty: false } }
+          : s,
+      ),
   },
 })

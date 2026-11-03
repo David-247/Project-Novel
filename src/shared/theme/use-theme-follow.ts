@@ -27,14 +27,24 @@ export function useThemeFollow(): void {
     const set = useStore.getState().appActions.setColorScheme
     let unlisten: (() => void) | undefined
     let disposed = false
+    // The initial theme() read is async; if a newer value arrives first (a Tauri theme event or a
+    // media-query change in the store), that one wins and the stale initial read is dropped.
+    let superseded = false
+    const unsubStore = useStore.subscribe((s, prev) => {
+      if (s.app.colorScheme !== prev.app.colorScheme) superseded = true
+    })
     win
       .theme()
       .then((t) => {
-        if (!disposed && t) set(t)
+        if (!disposed && !superseded && t) set(t)
       })
       .catch(() => {})
+      .finally(() => unsubStore())
     win
-      .onThemeChanged(({ payload }) => set(payload))
+      .onThemeChanged(({ payload }) => {
+        superseded = true
+        set(payload)
+      })
       .then((fn) => {
         if (disposed) fn()
         else unlisten = fn
@@ -42,6 +52,7 @@ export function useThemeFollow(): void {
       .catch(() => {})
     return () => {
       disposed = true
+      unsubStore()
       unlisten?.()
     }
   }, [])
