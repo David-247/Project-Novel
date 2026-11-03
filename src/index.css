@@ -1,0 +1,17 @@
+@import 'tailwindcss';
+
+/* OS light/dark detection only; real theming is a later ticket. */
+:root {
+  color-scheme: light dark;
+}
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+  font-family: system-ui, sans-serif;
+}
