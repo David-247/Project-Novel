@@ -42,7 +42,7 @@ mapped to Tailwind with `@theme inline`, so utilities switch instantly when the 
 | `border` | Decorative hairlines between regions |
 | `border-control` | Outlines of inputs, selects, checkboxes and secondary buttons (3:1) |
 | `focus-ring` | Keyboard focus outline (3:1 on every plane) |
-| `danger`, `danger-contrast`, `warning`, `success` | Status text and the danger button |
+| `danger`, `danger-hover`, `danger-contrast`, `warning`, `success` | Status text and the danger button (with its hover fill) |
 | `scrim`, `shadow-raised` | Dialog overlay and raised shadow (decorative) |
 
 Utilities: `bg-surface`, `text-text-muted`, `border-border-control`, `outline-focus-ring` and so on.
@@ -61,8 +61,9 @@ Color values must stay 6-digit hex: the contrast test parses this file.
 `useThemeFollow()` from `@/shared/theme` is called once in `App.tsx`. It feeds the store action
 `appActions.setColorScheme` from two sources:
 1. the `prefers-color-scheme` media query (`useColorSchemeSync` in the store), which works in any webview;
-2. in Tauri, `getCurrentWindow().theme()` and `onThemeChanged`. This needs the `core:default` permissions
-   that are already granted.
+2. in Tauri, `getCurrentWindow().theme()` and `onThemeChanged`, which need only the already granted
+   `core:default` permissions. The initial `theme()` read is async. If an event or a media-query change
+   lands before it resolves, the stale initial value is dropped.
 
 A layout effect then writes `app.colorScheme` to `<html data-theme>` before paint. The theme blocks also
 set `color-scheme`, so native controls and scrollbars match. Without the attribute, `:root` falls back
@@ -75,7 +76,9 @@ in both themes:
 - text pairs need at least 4.5:1;
 - UI pairs (control borders, focus ring, button fills) need at least 3:1.
 
-Add a pair there whenever a new fg/bg combination is introduced. Disabled controls (50% opacity) are
+Add a pair there whenever a new fg/bg combination is introduced, including hover states: every hover
+fill is its own token (`surface-hover`, `accent-hover`, `danger-hover`). Opacity is never used for hover, so every
+hover state can be tested. Disabled controls (50% opacity) are
 exempt under WCAG.
 
 ## Primitives: `@/shared/ui`
@@ -91,7 +94,7 @@ native props and `ref` (React 19 ref-as-prop), and each has a visible focus ring
 | `ToolbarGroup` | `label` (required) | A `role="group"` cluster that wraps on narrow widths |
 | `ToolbarSeparator` | none | A vertical `role="separator"` |
 | `TextInput` | native input props | Find field, rename field. Set `aria-invalid` to get a danger border. |
-| `Select` | `options: {value,label}[]` plus native select props | A native select with a themed chevron |
+| `Select` | `options: {value,label}[]`, `wrapperClassName?` (for layout on the wrapper span), plus native select props (`className` is applied to the `<select>`) | A native select with a themed chevron |
 | `Checkbox` | `label`, `checked`, `onCheckedChange(next)` | Find options such as "Match case" |
 | `Panel` | `label?` (makes it a labelled region) | A raised container, for example the find panel |
 | `Dialog` | `open`, `onOpenChange`, `title`, `description?`, `footer?`, `closeLabel?` | Modal built on Radix Dialog (focus trap, Esc, focus return). Put the primary action last in `footer`. |

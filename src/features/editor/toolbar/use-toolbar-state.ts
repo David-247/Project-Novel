@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { useCallback, useRef, useSyncExternalStore } from 'react'
-import { useStore } from '@/shared/store'
+import { subscribeDocLoad } from '../controller'
 import { IDLE_TOOLBAR_STATE, readToolbarState } from './toolbar-state'
 import type { ToolbarState } from './toolbar-state'
 
@@ -12,8 +12,9 @@ function shallowEqual(a: ToolbarState, b: ToolbarState): boolean {
 /**
  * Toolbar state for `editor`, re-rendering only when a derived value changes. Recomputed
  * (O(selection), see `readToolbarState`) on every editor transaction (edits and selection
- * changes) and on document loads (`setDocJSON` swaps state without a transaction, which the
- * store's `docVersion` reports). Unlike `useEditorState`, it is correct immediately after the
+ * changes) and on whole-document loads (`setDocJSON` / mount restore swap EditorState without a
+ * transaction; the controller's `subscribeDocLoad` reports them). It reads the closure `editor`,
+ * never a stale snapshot. Unlike `useEditorState`, it is correct immediately after the
  * editor mounts.
  */
 export function useToolbarState(editor: Editor | null): ToolbarState {
@@ -23,12 +24,10 @@ export function useToolbarState(editor: Editor | null): ToolbarState {
     (onChange: () => void) => {
       if (!editor) return () => {}
       editor.on('transaction', onChange)
-      const offStore = useStore.subscribe((s, prev) => {
-        if (s.editor.docVersion !== prev.editor.docVersion) onChange()
-      })
+      const offLoad = subscribeDocLoad(onChange)
       return () => {
         editor.off('transaction', onChange)
-        offStore()
+        offLoad()
       }
     },
     [editor],

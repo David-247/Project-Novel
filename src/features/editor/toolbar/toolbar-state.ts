@@ -19,6 +19,7 @@ export interface ToolbarState {
   fontSize: string
   lineHeight: string
   paragraphSpacing: string
+  firstLineIndent: string
   canIndent: boolean
   canOutdent: boolean
 }
@@ -35,6 +36,7 @@ export const IDLE_TOOLBAR_STATE: ToolbarState = {
   fontSize: '',
   lineHeight: '',
   paragraphSpacing: '',
+  firstLineIndent: '',
   canIndent: false,
   canOutdent: false,
 }
@@ -68,6 +70,7 @@ export function readToolbarState(editor: Editor | null): ToolbarState {
     fontSize: str(textStyle.fontSize),
     lineHeight: str(block.attrs.lineHeight),
     paragraphSpacing: str(block.attrs.paragraphSpacing),
+    firstLineIndent: str(block.attrs.firstLineIndent),
     canIndent: inList || indent < MAX_INDENT,
     canOutdent: inList || indent > 0,
   }

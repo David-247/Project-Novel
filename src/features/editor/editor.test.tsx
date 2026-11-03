@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { useStore } from '@/shared/store'
 import {
   getDocJSON,
+  getDocVersion,
   getEditor,
   isDirty,
   markClean,
@@ -36,7 +37,7 @@ const story = {
 
 // Block attributes added by the formatting toolbar (task 3) appear with their defaults
 // once a doc has been through the live schema.
-const BLOCK_DEFAULTS = { textAlign: null, lineHeight: null, paragraphSpacing: null, indent: 0 }
+const BLOCK_DEFAULTS = { textAlign: null, lineHeight: null, paragraphSpacing: null, indent: 0, firstLineIndent: null }
 const storyLoaded = {
   type: 'doc',
   content: [
@@ -116,6 +117,67 @@ describe('NovelEditor', () => {
     expect(isDirty()).toBe(false)
   })
 
+  it('rejects a schema-invalid doc before mount without crashing the later mount', () => {
+    expect(getEditor()).toBeNull()
+    setDocJSON(story)
+    const bad = { type: 'doc', content: [{ type: 'nope', content: [{ type: 'text', text: 'x' }] }] }
+    expect(() => setDocJSON(bad)).toThrow()
+    const invalidContent = { type: 'doc', content: [{ type: 'text', text: 'bare text in doc' }] }
+    expect(() => setDocJSON(invalidContent)).toThrow()
+    expect(getDocJSON()).toEqual(story)
+
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(() => mount()).not.toThrow()
+    expect(getDocJSON()).toEqual(storyLoaded)
+    expect(errors).not.toHaveBeenCalled()
+    errors.mockRestore()
+  })
+
+  it('setDocJSON with an invalid doc while mounted throws and keeps content and dirty', () => {
+    const ed = mount()
+    act(() => {
+      ed.commands.insertContent('keep me')
+    })
+    expect(() => setDocJSON({ type: 'doc', content: [{ type: 'nope' }] })).toThrow()
+    expect(isDirty()).toBe(true)
+    expect(JSON.stringify(getDocJSON())).toContain('keep me')
+  })
+
+  it('keeps the document (and dirty) across unmount and restores it on remount', () => {
+    const ed = mount()
+    act(() => {
+      ed.commands.insertContent('unsaved words')
+    })
+    cleanup()
+    expect(getEditor()).toBeNull()
+    expect(JSON.stringify(getDocJSON())).toContain('unsaved words')
+    expect(isDirty()).toBe(true)
+
+    mount()
+    expect(JSON.stringify(getDocJSON())).toContain('unsaved words')
+    expect(isDirty()).toBe(true)
+  })
+
+  it('markClean(version) only clears dirty when no edit happened since that version', () => {
+    const ed = mount()
+    act(() => {
+      ed.commands.insertContent('a')
+    })
+    const v = getDocVersion()
+    act(() => {
+      ed.commands.insertContent('b') // edit during an in-flight save
+    })
+    markClean(v)
+    expect(isDirty()).toBe(true)
+    markClean(getDocVersion())
+    expect(isDirty()).toBe(false)
+    act(() => {
+      ed.commands.insertContent('c')
+    })
+    markClean()
+    expect(isDirty()).toBe(false)
+  })
+
   it('supports bold/italic/underline and lists', () => {
     const ed = mount()
     act(() => {
@@ -151,6 +213,6 @@ describe('NovelEditor', () => {
 
     console.info(`[perf] 100k-word paste: ${pasteMs.toFixed(0)} ms; next keystroke: ${typeMs.toFixed(1)} ms`)
     expect(pasteMs).toBeLessThan(15_000)
-    expect(typeMs).toBeLessThan(200)
+    expect(typeMs).toBeLessThan(50)
   }, 30_000)
 })

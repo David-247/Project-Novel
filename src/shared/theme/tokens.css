@@ -29,10 +29,11 @@
   --nv-accent-soft: #d4e7ea; /* pressed toggle fill; text on it uses --nv-accent */
   /* Lines */
   --nv-border: #d3d9dd; /* decorative hairlines between regions (not a control boundary) */
-  --nv-border-control: #79858c; /* control outlines: inputs, selects, checkboxes */
+  --nv-border-control: #6b777e; /* control outlines: inputs, selects, checkboxes */
   --nv-focus-ring: #1d5c68;
   /* Status */
   --nv-danger: #a8261d;
+  --nv-danger-hover: #8f1f17;
   --nv-danger-contrast: #ffffff;
   --nv-warning: #7d5300;
   --nv-success: #2b6636;
@@ -54,9 +55,10 @@
   --nv-accent-contrast: #0e2125;
   --nv-accent-soft: #1d3a40;
   --nv-border: #30393e;
-  --nv-border-control: #6f7c83;
+  --nv-border-control: #7a868d;
   --nv-focus-ring: #8fd4de;
   --nv-danger: #f0a39b;
+  --nv-danger-hover: #f5b8b1;
   --nv-danger-contrast: #2a0b08;
   --nv-warning: #e6c07a;
   --nv-success: #8fca99;
@@ -80,6 +82,7 @@
   --color-border-control: var(--nv-border-control);
   --color-focus-ring: var(--nv-focus-ring);
   --color-danger: var(--nv-danger);
+  --color-danger-hover: var(--nv-danger-hover);
   --color-danger-contrast: var(--nv-danger-contrast);
   --color-warning: var(--nv-warning);
   --color-success: var(--nv-success);

@@ -8,7 +8,7 @@ import { TOOLBAR_CONTROLS } from './controls'
 import type { ToolbarControlKey } from './controls'
 import { FontFamilyPicker } from './FontFamilyPicker'
 import * as I from './icons'
-import { FONT_SIZES, LINE_SPACINGS, PARAGRAPH_SPACINGS, withCurrent } from './presets'
+import { FIRST_LINE_INDENTS, FONT_SIZES, LINE_SPACINGS, PARAGRAPH_SPACINGS, withCurrent } from './presets'
 import type { Alignment } from './toolbar-state'
 import { useMountedEditor } from './use-mounted-editor'
 import { useToolbarState } from './use-toolbar-state'
@@ -103,7 +103,7 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFont
         <Select
           aria-label={meta.label}
           data-control-id={meta.id}
-          className={width}
+          wrapperClassName={width}
           options={withCurrent(presets, value)}
           value={value}
           disabled={disabled}
@@ -170,6 +170,7 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFont
       <ToolbarGroup label="Spacing and indent" className="gap-1">
         {select('lineSpacing', s.lineHeight, LINE_SPACINGS, (v) => editor?.chain().setBlockLineHeight(v || null).run(), 'w-32')}
         {select('paragraphSpacing', s.paragraphSpacing, PARAGRAPH_SPACINGS, (v) => editor?.chain().setBlockSpacing(v || null).run(), 'w-36')}
+        {select('firstLineIndent', s.firstLineIndent, FIRST_LINE_INDENTS, (v) => editor?.chain().setFirstLineIndent(v || null).run(), 'w-40')}
         {action('indentDecrease', s.canOutdent, (c) => c.outdentBlock(), <I.IndentDecreaseIcon />)}
         {action('indentIncrease', s.canIndent, (c) => c.indentBlock(), <I.IndentIncreaseIcon />)}
       </ToolbarGroup>

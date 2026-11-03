@@ -41,7 +41,7 @@ test('toolbar controls have 32px targets and wrap at narrow widths', async ({ pa
   const toolbar = page.getByRole('toolbar', { name: 'Formatting' })
   const controls = toolbar.locator('[data-control-id]')
   const n = await controls.count()
-  expect(n).toBe(15)
+  expect(n).toBe(16)
   for (let i = 0; i < n; i++) {
     const box = await controls.nth(i).boundingBox()
     expect(box!.height).toBeGreaterThanOrEqual(32)

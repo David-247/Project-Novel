@@ -13,6 +13,8 @@ declare module '@tiptap/core' {
       setBlockLineHeight: (value: string | null) => ReturnType
       /** Space after the selected paragraphs/headings (CSS length, e.g. `'1em'`); `null` unsets. */
       setBlockSpacing: (value: string | null) => ReturnType
+      /** First-line indent of the selected paragraphs/headings (CSS length, e.g. `'0.5in'`); `null` unsets. */
+      setFirstLineIndent: (value: string | null) => ReturnType
       /** Indent: sinks the list item when inside a list, otherwise raises the block indent level. */
       indentBlock: () => ReturnType
       /** Outdent: lifts the list item when inside a list, otherwise lowers the block indent level. */
@@ -67,6 +69,7 @@ function updateBlocks(
  * Paragraph/heading layout attributes, rendered as inline style:
  * - `lineHeight` -> `line-height`
  * - `paragraphSpacing` -> `margin-bottom` (space after)
+ * - `firstLineIndent` -> `text-indent`
  * - `indent` (0..MAX_INDENT) -> `margin-left: indent * INDENT_STEP_EM em` (+ `data-indent`)
  * Shortcuts: Mod-] indent, Mod-[ outdent.
  */
@@ -94,6 +97,14 @@ export const BlockFormat = Extension.create({
               return v ? { style: `margin-bottom: ${v}` } : {}
             },
           },
+          firstLineIndent: {
+            default: null,
+            parseHTML: (el) => cssValue(el.style.textIndent),
+            renderHTML: (attrs) => {
+              const v = cssValue(attrs.firstLineIndent)
+              return v ? { style: `text-indent: ${v}` } : {}
+            },
+          },
           indent: {
             default: 0,
             parseHTML: (el) => clampIndent(el.getAttribute('data-indent')),
@@ -117,6 +128,10 @@ export const BlockFormat = Extension.create({
         (value) =>
         ({ tr, dispatch }) =>
           updateBlocks(tr, dispatch, () => ({ paragraphSpacing: cssValue(value) })),
+      setFirstLineIndent:
+        (value) =>
+        ({ tr, dispatch }) =>
+          updateBlocks(tr, dispatch, () => ({ firstLineIndent: cssValue(value) })),
       indentBlock:
         () =>
         ({ tr, dispatch, commands }) => {

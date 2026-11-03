@@ -23,6 +23,7 @@ export const TOOLBAR_CONTROLS = {
   alignJustify: { id: 'toolbar.alignJustify', label: 'Justify', shortcut: 'Mod-Shift-j' },
   lineSpacing: { id: 'toolbar.lineSpacing', label: 'Line spacing' },
   paragraphSpacing: { id: 'toolbar.paragraphSpacing', label: 'Space after paragraph' },
+  firstLineIndent: { id: 'toolbar.firstLineIndent', label: 'First-line indent' },
   indentDecrease: { id: 'toolbar.indentDecrease', label: 'Decrease indent', shortcut: 'Mod-[' },
   indentIncrease: { id: 'toolbar.indentIncrease', label: 'Increase indent', shortcut: 'Mod-]' },
 } as const satisfies Record<string, ToolbarControlMeta>

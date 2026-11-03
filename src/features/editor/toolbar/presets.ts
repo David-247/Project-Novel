@@ -30,6 +30,16 @@ export const PARAGRAPH_SPACINGS: readonly Preset[] = [
   { value: '1.5em', label: 'After: large' },
 ]
 
+/** First-line indent (rendered as `text-indent`). 0.5 in is the manuscript-format standard. */
+export const FIRST_LINE_INDENTS: readonly Preset[] = [
+  { value: '', label: 'First line: default' },
+  { value: '0', label: 'First line: none' },
+  { value: '1em', label: 'First line: 1 em' },
+  { value: '1.5em', label: 'First line: 1.5 em' },
+  { value: '2em', label: 'First line: 2 em' },
+  { value: '0.5in', label: 'First line: 0.5 in' },
+]
+
 /** Block indent: each level adds `INDENT_STEP_EM` em of left margin, up to `MAX_INDENT`. */
 export const MAX_INDENT = 8
 export const INDENT_STEP_EM = 2

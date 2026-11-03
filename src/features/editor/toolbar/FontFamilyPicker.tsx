@@ -60,7 +60,7 @@ export function FontFamilyPicker({ loadFonts = listSystemFonts, disabled, ...res
     <Select
       aria-label={TOOLBAR_CONTROLS.fontFamily.label}
       data-control-id={TOOLBAR_CONTROLS.fontFamily.id}
-      className="w-44"
+      wrapperClassName="w-44"
       options={options}
       value={current}
       disabled={disabled || !editor}

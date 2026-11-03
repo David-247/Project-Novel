@@ -233,6 +233,33 @@ describe('Toolbar blocks', () => {
     expect(firstBlock(ed).attrs.lineHeight).toBeNull()
   })
 
+  it('sets a first-line indent preset rendered as text-indent, and reflects it per block', () => {
+    const ed = setup()
+    run(() =>
+      setDocJSON({
+        type: 'doc',
+        content: ['a', 'b'].map((t) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] })),
+      }),
+    )
+    run(() => ed.commands.setTextSelection(1))
+    expect(ctl('toolbar.firstLineIndent')).toHaveValue('')
+    choose('toolbar.firstLineIndent', '0.5in')
+    expect(firstBlock(ed).attrs.firstLineIndent).toBe('0.5in')
+    expect(ed.view.dom.querySelector('p')!.style.textIndent).toBe('0.5in')
+    expect(ctl('toolbar.firstLineIndent')).toHaveValue('0.5in')
+    run(() => ed.commands.setTextSelection(4)) // second paragraph: unset
+    expect(ctl('toolbar.firstLineIndent')).toHaveValue('')
+    run(() => ed.commands.setTextSelection(1))
+    expect(ctl('toolbar.firstLineIndent')).toHaveValue('0.5in')
+    choose('toolbar.firstLineIndent', '0')
+    expect(firstBlock(ed).attrs.firstLineIndent).toBe('0')
+    choose('toolbar.firstLineIndent', '')
+    expect(firstBlock(ed).attrs.firstLineIndent).toBeNull()
+    // Unsafe values are rejected rather than written into a style attribute.
+    run(() => ed.commands.setFirstLineIndent('1em; color: red'))
+    expect(firstBlock(ed).attrs.firstLineIndent).toBeNull()
+  })
+
   it('applies block attributes to every block in the selection only', () => {
     const ed = setup()
     run(() =>
@@ -280,10 +307,10 @@ describe('Toolbar blocks', () => {
     const ed = setup()
     run(() =>
       ed.commands.setContent(
-        '<p style="line-height: 2; margin-bottom: 0.5em; text-align: right" data-indent="3">x</p>',
+        '<p style="line-height: 2; margin-bottom: 0.5em; text-align: right; text-indent: 1.5em" data-indent="3">x</p>',
       ),
     )
-    expect(firstBlock(ed).attrs).toMatchObject({ lineHeight: '2', paragraphSpacing: '0.5em', textAlign: 'right', indent: 3 })
+    expect(firstBlock(ed).attrs).toMatchObject({ lineHeight: '2', paragraphSpacing: '0.5em', textAlign: 'right', indent: 3, firstLineIndent: '1.5em' })
   })
 })
 

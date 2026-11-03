@@ -63,12 +63,15 @@ describe('shared/ui primitives', () => {
     render(
       <>
         <TextInput aria-label="Find" />
-        <Select aria-label="Scope" options={[{ value: 'doc', label: 'Document' }]} />
+        <Select aria-label="Scope" className="w-40" wrapperClassName="ml-2" options={[{ value: 'doc', label: 'Document' }]} />
         <Checkbox label="Match case" checked={false} onCheckedChange={onChecked} />
       </>,
     )
     expect(screen.getByRole('textbox', { name: 'Find' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Scope' })).toHaveValue('doc')
+    const select = screen.getByRole('combobox', { name: 'Scope' })
+    expect(select).toHaveValue('doc')
+    expect(select).toHaveClass('w-40')
+    expect(select.parentElement).toHaveClass('ml-2')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Match case' }))
     expect(onChecked).toHaveBeenCalledWith(true)
   })
