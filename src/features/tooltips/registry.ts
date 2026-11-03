@@ -11,7 +11,7 @@
  * Shortcut specs use Tiptap notation ("Mod" = Cmd on macOS, Ctrl elsewhere) and are rendered per
  * platform by the shared Tooltip.
  */
-import { FIND_CONTROLS, HISTORY_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, HISTORY_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import type { ToolbarControlMeta } from '@/features/editor'
 import type { TooltipCopy } from '@/shared/ui'
 
@@ -44,6 +44,45 @@ const TOOLBAR_DESCRIPTIONS: Record<keyof typeof TOOLBAR_CONTROLS, string> = {
   firstLineIndent: 'How far the first line of each paragraph is pushed in.',
   indentDecrease: 'Move the paragraph one step to the left.',
   indentIncrease: 'Move the paragraph one step to the right.',
+  stylePicker: 'Style of the current paragraph. Pick one to apply it. The shortcuts apply Body and Chapter Title.',
+  styleEdit: "Change how the current paragraph's style looks, everywhere in the manuscript.",
+  styleManage: 'See every style in the book, and create, duplicate, rename or delete your own.',
+  clearFormatting: 'Remove formatting applied by hand to the paragraph, so it looks exactly like its style.',
+}
+
+const STYLE_DIALOG_DESCRIPTIONS: Record<keyof typeof STYLE_DIALOG_CONTROLS, string> = {
+  name: 'The name shown in the style list and the picker.',
+  kind: 'Chapter heading styles open chapters and parts; paragraph styles are for text.',
+  basedOn: 'Settings you leave empty come from this style, and follow it when it changes.',
+  nextStyle: 'Style of the new paragraph when you press Enter at the end of this one.',
+  fontFamily: 'Typeface name, for example Garamond. Leave empty to use the manuscript font.',
+  fontSize: 'Text size in points. Leave empty to inherit it.',
+  fontWeight: 'How heavy the letters are, from light to bold.',
+  italic: 'Upright or italic letters.',
+  textTransform: 'Show the text in capitals, small capitals or another case, without retyping it.',
+  letterSpacing: 'Extra space between letters, in ems. Small values like 0.05 go a long way.',
+  align: 'How lines line up: left, centered, right or justified.',
+  lineHeight: 'Distance between lines as a multiple of the text size, for example 1.5.',
+  spaceBefore: 'Space above the paragraph, in points.',
+  spaceAfter: 'Space below the paragraph, in points.',
+  firstLineIndent: 'How far the first line is pushed in, in ems.',
+  indentLeft: 'Space between the left margin and the whole paragraph, in ems.',
+  indentRight: 'Space between the whole paragraph and the right margin, in ems.',
+  breakBefore: 'Start a new page, or a new right-hand page, before each paragraph in this style.',
+  modifyReset: 'Put this built-in style back the way it came.',
+  modifyCancel: 'Close without changing the style.',
+  modifySave: 'Apply the changes to every paragraph that uses this style.',
+  manageItem: 'Select this style to modify, duplicate, rename or delete it.',
+  manageNew: 'Add a style based on the selected one.',
+  manageDuplicate: 'Make a copy of the selected style under a new name.',
+  manageRename: 'Give the selected style a new name. Built-in styles keep their names.',
+  manageRenameField: 'The new name for the style. Enter saves it.',
+  manageRenameSave: 'Save the new name.',
+  manageRenameCancel: 'Keep the current name.',
+  manageModify: 'Open the selected style to change how it looks.',
+  manageDelete: 'Remove the selected style. You confirm first; its paragraphs switch to the style it was based on.',
+  manageDeleteConfirm: 'Delete the style now. Its paragraphs switch to the style it was based on.',
+  manageDeleteCancel: 'Do not delete the style.',
 }
 
 const HISTORY_DESCRIPTIONS: Record<keyof typeof HISTORY_CONTROLS, string> = {
@@ -136,6 +175,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...fromMeta(TOOLBAR_CONTROLS, TOOLBAR_DESCRIPTIONS),
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
+  ...fromMeta(STYLE_DIALOG_CONTROLS, STYLE_DIALOG_DESCRIPTIONS),
   ...FILE_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,

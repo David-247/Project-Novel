@@ -1,6 +1,6 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, setDocJSON, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, setDocJSON, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
 import { useStore } from '@/shared/store'
 import { IconButton, Tooltip } from '@/shared/ui'
@@ -102,6 +102,33 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     act(() => useStore.getState().projectActions.setPendingRecovery(null))
   })
 
+  it('covers the Modify style and Manage styles dialogs (incl. rename and delete confirmation)', async () => {
+    await renderFullApp()
+    act(() => useStore.getState().findActions.closePanel())
+    const audit = () => {
+      const problems = auditTooltipCoverage(document.body)
+      expect(problems, formatCoverageProblems(problems)).toEqual([])
+    }
+    // Manage styles: create a custom style (opens the rename form), then ask to delete it.
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="styles.manage"]')!))
+    const manage = await screen.findByRole('dialog', { name: 'Manage styles' })
+    act(() => void fireEvent.click(manage.querySelector('[data-control-id="styles.manage.new"]')!))
+    expect(manage.querySelector('[data-control-id="styles.manage.renameField"]')).not.toBeNull()
+    audit()
+    act(() => void fireEvent.click(manage.querySelector('[data-control-id="styles.manage.delete"]')!))
+    expect(manage.querySelector('[data-control-id="styles.manage.deleteConfirm"]')).not.toBeNull()
+    audit()
+    // Modify (stacked over Manage) for the custom style: every field of a custom style is shown.
+    act(() => void fireEvent.click(manage.querySelector('[data-control-id="styles.manage.modify"]')!))
+    const modify = await screen.findByRole('dialog', { name: /^Modify style/ })
+    const fieldIds = Object.values(STYLE_DIALOG_CONTROLS)
+      .map((m) => m.id)
+      .filter((id) => id.startsWith('styles.field.'))
+    for (const id of fieldIds) expect(modify.querySelector(`[data-control-id="${id}"]`), id).not.toBeNull()
+    audit()
+    act(() => useStore.getState().bookActions.resetBook())
+  })
+
   it('NEGATIVE: fails for a button with no tooltip entry', async () => {
     await renderFullApp(
       <>
@@ -152,6 +179,7 @@ describe('tooltip registry', () => {
       ...Object.values(TOOLBAR_CONTROLS),
       ...Object.values(HISTORY_CONTROLS),
       ...Object.values(FIND_CONTROLS),
+      ...Object.values(STYLE_DIALOG_CONTROLS),
     ]) {
       const copy = getTooltipCopy(meta.id)!
       expect(copy.title).toBe(meta.label)

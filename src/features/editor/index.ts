@@ -39,3 +39,20 @@ export { HISTORY_DEPTH } from './extensions'
 export { FIND_CONTROLS } from './find/controls'
 export { HISTORY_CONTROLS } from './history/controls'
 export type { Editor, JSONContent } from '@tiptap/core'
+// Paragraph and chapter styles (Phase 2). Definitions: book.styles (shape, built-ins and
+// registerBuiltInStyle live in @/shared/book). Blocks carry `styleId` and render
+// `data-style="<id>"` plus `data-break-before="page|recto"` (pagination contract).
+export { STYLE_DIALOG_CONTROLS } from './styles/controls'
+export { BookStyleSheet, STYLE_SCOPE } from './styles/BookStyleSheet'
+export { getResolvedStyles, useResolvedStyles } from './styles/resolved'
+export { defaultStyleIdFor, effectiveStyleId } from './styles/block-styles'
+export {
+  countStyleUses,
+  createStyle,
+  deleteStyle,
+  duplicateStyle,
+  getStyleDefinition,
+  renameStyle,
+  resetStyle,
+  saveStyle,
+} from './styles/actions'
