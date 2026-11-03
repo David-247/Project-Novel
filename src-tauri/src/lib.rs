@@ -33,8 +33,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Novel")
         .run(|app, event| {
-            // Quit paths other than our menu item (e.g. macOS Dock > Quit) must
-            // also go through the frontend's unsaved-changes flow.
+            // A programmatic exit request that the frontend has not approved is held
+            // and routed through its unsaved-changes flow (see storage::allow_exit).
+            // NOT covered: macOS Dock > Quit, logging off, and Windows shutdown end
+            // the process without reaching the quit flow; there crash recovery
+            // limits the loss to the last <= 30 s (docs/project-format.md).
             if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
                 if !storage::allow_exit(code, app.webview_windows().len()) {
                     api.prevent_exit();

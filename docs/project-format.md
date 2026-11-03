@@ -195,6 +195,12 @@ An `unrestored-<savedAt>.json` file has the snapshot format above; the text is i
 
 Delete `unrestored-*.json` files yourself once you no longer need them.
 
+**Quitting without the quit flow.** Closing the window, File > Quit and Cmd/Ctrl+Q run the unsaved-changes prompt.
+macOS Dock > Quit, logging off, and Windows shutdown/restart end the process without it (they do not reach the
+app's exit handling). The same is true of a crash or a force-quit. In all of these cases the last snapshot in
+`.recovery/` is what survives: at most the last 30 seconds of typing are lost, and the next start offers to recover
+the rest.
+
 **When recovery data is deleted:**
 
 - after a save that leaves the document clean (manual save, or Save in the unsaved-changes prompt);

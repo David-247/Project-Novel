@@ -26,7 +26,10 @@ export const MENU_EVENTS = {
   OPEN_PROJECT: 'menu://open-project',
   OPEN_RECENT: 'menu://open-recent',
   SAVE: 'menu://save',
-  /** Quit requested (Quit menu item, Cmd/Ctrl+Q, or another app-exit request such as Dock > Quit). */
+  /**
+   * Quit requested (Quit menu item, Cmd/Ctrl+Q, or an exit request Rust held). Not sent for macOS
+   * Dock > Quit, logoff or Windows shutdown, which bypass the quit flow (crash recovery: <= 30 s lost).
+   */
   QUIT: 'menu://quit',
 } as const
 

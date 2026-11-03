@@ -33,8 +33,10 @@ pub const EVENT_OPEN_PROJECT: &str = "menu://open-project";
 /// Payload: the project folder path (string).
 pub const EVENT_OPEN_RECENT: &str = "menu://open-recent";
 pub const EVENT_SAVE: &str = "menu://save";
-/// Quit requested (menu, Cmd+Q, or any other app-exit request): the frontend
-/// runs its unsaved-changes flow and then calls `storage_exit_app`.
+/// Quit requested (our Quit menu item / Cmd+Q, or an exit request held by
+/// `allow_exit`): the frontend runs its unsaved-changes flow and then calls
+/// `storage_exit_app`. macOS Dock > Quit, logoff and Windows shutdown never get
+/// here (they bypass `ExitRequested`); crash recovery covers them (<= 30 s lost).
 pub const EVENT_QUIT: &str = "menu://quit";
 
 /// Error returned to the frontend: a machine-readable kind plus a message.
@@ -553,8 +555,11 @@ pub fn storage_exit_app<R: Runtime>(app: AppHandle<R>) {
 
 /// Decide what to do with `RunEvent::ExitRequested`: true = let the app exit.
 /// Programmatic exits (`app.exit(code)`, after the frontend approved) and exits
-/// after the last window closed (the close flow already ran) proceed; any other
-/// quit (e.g. macOS Dock > Quit) is held and routed through the frontend flow.
+/// after the last window closed (the close flow already ran) proceed; an exit
+/// request with no code while a window is open is held and routed through the
+/// frontend flow. This does NOT cover macOS Dock > Quit, logging off, or Windows
+/// shutdown: those terminate the process without an `ExitRequested` the app can
+/// hold, so unsaved work there is protected only by crash recovery (<= 30 s).
 pub fn allow_exit(code: Option<i32>, open_windows: usize) -> bool {
     code.is_some() || open_windows == 0
 }
@@ -1037,7 +1042,7 @@ mod tests {
     fn exit_requests_are_held_unless_approved_or_windowless() {
         assert!(allow_exit(Some(0), 1)); // app.exit(0) after the frontend approved
         assert!(allow_exit(None, 0)); // last window closed through the close flow
-        assert!(!allow_exit(None, 1)); // e.g. Dock > Quit with the window open
+        assert!(!allow_exit(None, 1)); // an unapproved exit request with the window open
     }
 
     #[test]

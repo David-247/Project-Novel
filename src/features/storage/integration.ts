@@ -39,7 +39,10 @@ export function prepareToExit(action: 'closing' | 'quitting'): Promise<boolean> 
   return exitFlow
 }
 
-/** Quit requested from the menu / Cmd+Q / the OS: run the exit flow, then exit. */
+/**
+ * Quit requested from the menu / Cmd+Q (or an exit request Rust held): run the exit flow, then exit.
+ * macOS Dock > Quit, logoff and Windows shutdown never reach this; crash recovery covers them.
+ */
 export async function handleQuitRequest(): Promise<void> {
   if (!(await prepareToExit('quitting'))) return
   try {
