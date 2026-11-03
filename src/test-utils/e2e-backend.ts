@@ -283,6 +283,14 @@ async function handle(cmd: string, args: Record<string, unknown> = {}): Promise<
       await persist((s) => s.delete(`file:${c}`))
       return existed
     }
+    case 'storage_list_dir': {
+      const c = confined(path, false)
+      if (files.has(c)) throw { kind: 'invalid_path', message: `Not a folder: ${path}` }
+      return [...files.keys()]
+        .filter((f) => parentOf(f) === c)
+        .map((f) => f.slice(c.length + 1))
+        .sort()
+    }
     case 'storage_read_recent':
       return recent.length ? recentJSON() : null
     case 'storage_remember_recent': {

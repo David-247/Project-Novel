@@ -5,8 +5,8 @@
  * Titles and shortcuts are not retyped here: for editor controls they come from the editor slice's
  * public control metadata (TOOLBAR_CONTROLS / HISTORY_CONTROLS / FIND_CONTROLS), which also gives the
  * controls their accessible names, so name, tooltip title and shortcut can never drift apart. This
- * file adds the one-line descriptions. Controls owned by no slice in this tree (native menu, crash
- * recovery dialogs, dialog close) carry their full copy here.
+ * file adds the one-line descriptions. Controls whose slices keep no control metadata (project
+ * file actions, crash-recovery controls, dialog close) carry their full copy here.
  *
  * Shortcut specs use Tiptap notation ("Mod" = Cmd on macOS, Ctrl elsewhere) and are rendered per
  * platform by the shared Tooltip.
@@ -65,11 +65,12 @@ const FIND_DESCRIPTIONS: Record<keyof typeof FIND_CONTROLS, string> = {
 }
 
 /**
- * Native File menu items (Tauri menu, built in src-tauri/src/storage.rs). Operating-system menus
- * cannot show web tooltips: their labels and accelerators are the hint. This copy is kept so any
- * in-app control that later triggers the same action reuses the id and gets the same tooltip.
+ * Project file actions. Rendered in the window (storage slice, NoProjectActions in the status bar
+ * while no project is open) and mirrored by the native File menu items with the same ids
+ * (src-tauri/src/storage.rs; operating-system menus cannot show web tooltips, so there the label and
+ * accelerator are the hint).
  */
-export const NATIVE_MENU_TOOLTIPS: Record<string, TooltipCopy> = {
+const FILE_TOOLTIPS: Record<string, TooltipCopy> = {
   'file.new_project': {
     title: 'New Project',
     description: 'Start a new project folder for a manuscript.',
@@ -86,7 +87,7 @@ export const NATIVE_MENU_TOOLTIPS: Record<string, TooltipCopy> = {
   },
   'file.save': {
     title: 'Save',
-    description: 'Save the manuscript to its project folder now.',
+    description: 'Save the manuscript to its project folder now. With no project open, choose a folder.',
     shortcut: 'Mod-s',
   },
 }
@@ -106,7 +107,11 @@ const RECOVERY_TOOLTIPS: Record<string, TooltipCopy> = {
   },
   'recovery.decideLater': {
     title: 'Decide later',
-    description: 'Close without choosing. The backup is kept and offered again next time.',
+    description: 'Close without choosing. Until your next save or autosave, the status bar can reopen this.',
+  },
+  'recovery.reopenPrompt': {
+    title: 'Backup available — Restore…',
+    description: 'Show the Restore or Discard question again for the backup found when you opened.',
   },
   'recovery.reopen': {
     title: 'Reopen Project',
@@ -114,11 +119,11 @@ const RECOVERY_TOOLTIPS: Record<string, TooltipCopy> = {
   },
   'recovery.dismiss': {
     title: 'Not Now',
-    description: 'Skip for now. The backup is kept and offered again next time.',
+    description: 'Do not reopen now. The backup stays in the project and is offered when you open it.',
   },
   'recovery.reopenClose': {
-    title: 'Not now',
-    description: 'Close without reopening. The backup is kept and offered again next time.',
+    title: 'Close',
+    description: 'Close without reopening. The backup stays in the project and is offered when you open it.',
   },
 }
 
@@ -131,7 +136,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...fromMeta(TOOLBAR_CONTROLS, TOOLBAR_DESCRIPTIONS),
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
-  ...NATIVE_MENU_TOOLTIPS,
+  ...FILE_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
 })

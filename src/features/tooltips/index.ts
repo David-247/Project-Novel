@@ -4,6 +4,6 @@
 //   Feed getTooltipCopy to <TooltipProvider lookup> from @/shared/ui at the composition root;
 //   call sites wrap controls in <Tooltip> from @/shared/ui and never import this slice.
 // - auditTooltipCoverage: lists controls under a DOM root that would show no tooltip (used by tests).
-export { TOOLTIP_REGISTRY, NATIVE_MENU_TOOLTIPS, getTooltipCopy } from './registry'
+export { TOOLTIP_REGISTRY, getTooltipCopy } from './registry'
 export { auditTooltipCoverage, formatCoverageProblems, CONTROL_SELECTOR } from './coverage'
 export type { CoverageProblem, CoverageReason } from './coverage'

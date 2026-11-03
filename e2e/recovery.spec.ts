@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { editor, launch, newProject, recoveryControl, saveStatus } from './helpers'
+import { editor, launch, newProject, openRecent, recoveryControl, saveStatus, seedProject, writeFile } from './helpers'
 
 // Autosave snapshots at most every 30 s. Playwright's fake clock (time flows normally, and
 // runFor() jumps ahead) fires the 30 s timer without waiting 30 s of real time.
@@ -77,4 +77,48 @@ test('Discard Backup keeps the last saved version', async ({ page, context }) =>
   await expect(relaunched.getByRole('dialog')).toHaveCount(0)
   await expect(editor(relaunched)).toHaveText('Kept.')
   await expect(saveStatus(relaunched)).toHaveText('Discard: All changes saved')
+})
+
+test('"Decide later" leaves a status-bar "Backup available — Restore…" that re-opens the question', async ({
+  page,
+  context,
+}) => {
+  await page.clock.install()
+  await launch(page)
+  await newProject(page, '/projects/Later')
+  await editor(page).click()
+  await page.keyboard.type('Saved.')
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(saveStatus(page)).toHaveText('Later: Saved')
+  await page.keyboard.type(' Backed up.')
+  await page.clock.runFor(31_000)
+  await expect(saveStatus(page)).toContainText('backed up')
+  await page.close({ runBeforeUnload: false })
+
+  const relaunched = await context.newPage()
+  await launch(relaunched)
+  await recoveryControl(relaunched, 'reopen').click()
+  const restoreDialog = relaunched.getByRole('dialog', { name: 'Restore unsaved changes?' })
+  await expect(restoreDialog).toBeVisible()
+  await recoveryControl(relaunched, 'decideLater').click()
+  await expect(restoreDialog).toHaveCount(0)
+
+  const later = recoveryControl(relaunched, 'reopenPrompt')
+  await expect(later).toHaveText('Backup available — Restore…')
+  await later.click()
+  await expect(restoreDialog).toBeVisible()
+  await recoveryControl(relaunched, 'restore').click()
+  await expect(editor(relaunched)).toHaveText('Saved. Backed up.')
+  await expect(later).toHaveCount(0)
+})
+
+test('set-aside unrestored backups are mentioned on open, without a dialog', async ({ page }) => {
+  await launch(page)
+  const doc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }] }
+  await seedProject(page, '/projects/Aside', 'Aside', doc)
+  await writeFile(page, '/projects/Aside/.recovery/unrestored-2026-01-01T00-00-00-000Z.json', '{}')
+  await openRecent(page, '/projects/Aside')
+  await expect(saveStatus(page)).toHaveText('Aside: All changes saved')
+  await expect(page.getByTestId('recovery-notice')).toHaveText("1 older backup is kept in this project's .recovery folder.")
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })

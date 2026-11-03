@@ -33,8 +33,10 @@ import { flagMissing, parseRecentFile } from './recent'
 import {
   deleteRecoveryFile,
   judgeRecovery,
+  listUnrestoredFiles,
   parseRecovery,
   readRecoveryFile,
+  RECOVERY_DIR,
   recoveryFilePath,
   suppressSnapshotsAt,
   writeUnrestoredFile,
@@ -56,7 +58,16 @@ let currentIndex: ProjectIndex | null = null
 let inFlightSave: Promise<boolean> | null = null
 let lastSaveDoneAt = 0
 /** Recovery snapshot found when the open project was opened, awaiting Restore / Discard. */
-let pendingRecovery: { folder: string; snapshot: RecoverySnapshot; text: string } | null = null
+type PendingRecovery = { folder: string; snapshot: RecoverySnapshot; text: string }
+let pendingRecovery: PendingRecovery | null = null
+
+/** Set the unanswered snapshot; the store mirrors it for the status-bar "Backup available" control. */
+function setPendingRecovery(p: PendingRecovery | null): void {
+  pendingRecovery = p
+  if (useStore.getState().project.pendingRecoveryAt !== (p?.snapshot.savedAt ?? null)) {
+    actions().setPendingRecovery(p?.snapshot.savedAt ?? null)
+  }
+}
 const openedListeners = new Set<(p: OpenedProject) => void>()
 
 /** The registered editor; storage cannot work without one. */
@@ -129,7 +140,7 @@ async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex |
   currentMeta = meta
   currentIndex = index
   lastSaveDoneAt = 0
-  pendingRecovery = null
+  setPendingRecovery(null)
   suppressSnapshotsAt(null)
   actions().projectOpened({ path: folder, title: meta.title })
   openedListeners.forEach((cb) => cb({ path: folder, meta }))
@@ -417,6 +428,16 @@ export async function closeProject(): Promise<void> {
 }
 
 // ---- Crash recovery ---------------------------------------------------------
+
+/** Status note after an unanswered backup was moved aside during this session. */
+export const SET_ASIDE_NOTICE = `The earlier backup was kept in this project's ${RECOVERY_DIR} folder (unrestored file).`
+
+/** Status note on open when set-aside backups exist (docs/project-format.md explains recovering them). */
+export function unrestoredNotice(count: number): string {
+  return count === 1
+    ? `1 older backup is kept in this project's ${RECOVERY_DIR} folder.`
+    : `${count} older backups are kept in this project's ${RECOVERY_DIR} folder.`
+}
 //
 // Rule: Novel never silently destroys a snapshot the user has not answered.
 // Only a snapshot that is identical to the manuscript, or one the user
@@ -432,8 +453,9 @@ export async function preserveUnansweredRecoveryUnlocked(folder: string): Promis
   const pending = pendingRecovery
   if (!pending || pending.folder !== folder) return
   await writeUnrestoredFile(folder, pending.snapshot.savedAt, pending.text)
-  pendingRecovery = null
+  setPendingRecovery(null)
   if (useStore.getState().project.recoveryPrompt?.kind === 'restore') actions().dismissRecoveryPrompt()
+  if (getCurrentProjectPath() === folder) actions().setRecoveryNotice(SET_ASIDE_NOTICE)
 }
 
 /**
@@ -449,7 +471,7 @@ async function clearRecoveryUnlocked(folder: string, discard = false): Promise<v
     console.warn('Deleting recovery data failed; it was kept:', e)
     return
   }
-  if (pendingRecovery?.folder === folder) pendingRecovery = null
+  if (pendingRecovery?.folder === folder) setPendingRecovery(null)
   if (getCurrentProjectPath() === folder) actions().backupCleared()
 }
 
@@ -488,6 +510,11 @@ async function setAsideUnlocked(folder: string, snapshot: RecoverySnapshot, text
  * project from opening.
  */
 async function detectRecovery(folder: string, meta: ProjectMeta, manuscriptText: string): Promise<void> {
+  await judgeFoundRecovery(folder, meta, manuscriptText)
+  await noteUnrestoredFiles(folder)
+}
+
+async function judgeFoundRecovery(folder: string, meta: ProjectMeta, manuscriptText: string): Promise<void> {
   try {
     const text = await readRecoveryFile(folder)
     if (text === null) return
@@ -502,12 +529,33 @@ async function detectRecovery(folder: string, meta: ProjectMeta, manuscriptText:
     } else if (verdict === 'unrelated') {
       await withWriteLock(() => setAsideUnlocked(folder, snapshot, text))
     } else {
-      pendingRecovery = { folder, snapshot, text }
+      setPendingRecovery({ folder, snapshot, text })
       actions().showRecoveryPrompt({ kind: 'restore', savedAt: snapshot.savedAt })
     }
   } catch (e) {
     console.warn('Checking for recovery data failed:', e)
   }
+}
+
+/** Mention set-aside `unrestored-*.json` backups once, in the status bar (no dialog). Never throws. */
+async function noteUnrestoredFiles(folder: string): Promise<void> {
+  try {
+    const count = (await listUnrestoredFiles(folder)).length
+    if (count > 0 && getCurrentProjectPath() === folder) actions().setRecoveryNotice(unrestoredNotice(count))
+  } catch (e) {
+    console.warn('Looking for set-aside backups failed:', e)
+  }
+}
+
+/**
+ * "Backup available — Restore…": show the Restore / Discard question again for the backup that
+ * is still unanswered (after "Decide later"). Returns false if there is none any more.
+ */
+export function reopenRecoveryPrompt(): boolean {
+  const pending = pendingRecovery
+  if (!pending || pending.folder !== getCurrentProjectPath()) return false
+  actions().showRecoveryPrompt({ kind: 'restore', savedAt: pending.snapshot.savedAt })
+  return true
 }
 
 /**
@@ -523,7 +571,7 @@ export async function restoreRecovery(): Promise<boolean> {
     const p = provider()
     loadDocument(p, pending.snapshot.doc)
     p.markDirty()
-    pendingRecovery = null
+    setPendingRecovery(null)
     // The editor content is exactly what the recovery file holds: it is backed up.
     const savedAt = Date.parse(pending.snapshot.savedAt)
     actions().backupSucceeded(Number.isNaN(savedAt) ? Date.now() : savedAt)
@@ -548,7 +596,7 @@ export function hasPendingRecovery(): boolean {
 export async function discardRecovery(): Promise<void> {
   const pending = pendingRecovery
   actions().dismissRecoveryPrompt()
-  pendingRecovery = null
+  setPendingRecovery(null)
   if (pending && pending.folder === getCurrentProjectPath()) {
     await withWriteLock(() => clearRecoveryUnlocked(pending.folder, true))
   }

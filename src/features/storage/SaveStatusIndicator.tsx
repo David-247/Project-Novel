@@ -1,12 +1,15 @@
 import { useStore, type ProjectState } from '@/shared/store'
 import { StatusText } from '@/shared/ui'
 
+/** Status while text typed without a project exists only in memory. */
+export const NOT_SAVED_HINT = 'Not saved yet — choose Save as project to keep your work'
+
 export function saveStatusText(
   p: Pick<ProjectState, 'path' | 'title' | 'saveStatus'> & { dirty: boolean; backedUp?: boolean },
 ): string {
   if (p.saveStatus === 'saving') return 'Saving…'
   if (p.saveStatus === 'error') return 'Save failed'
-  if (!p.path) return p.dirty ? 'Not saved: no project' : 'No project open'
+  if (!p.path) return p.dirty ? NOT_SAVED_HINT : 'No project open'
   if (p.dirty) return p.backedUp ? 'Unsaved changes (backed up)' : 'Unsaved changes'
   return p.saveStatus === 'saved' ? 'Saved' : 'All changes saved'
 }

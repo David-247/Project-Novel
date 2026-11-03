@@ -60,6 +60,21 @@ test('tooltips on hover and on keyboard focus for a sample of controls; coverage
   await expectFullCoverage(page, 19 + 8)
 })
 
+test('no project open: the in-window project actions have tooltips and pass the audit', async ({ page }) => {
+  await launch(page)
+  await expectFullCoverage(page, 19 + 2)
+  await page.locator('[data-control-id="file.new_project"]').hover()
+  await expect(tip(page)).toContainText('Start a new project folder for a manuscript.')
+  await pointerAway(page)
+  await editor(page).click()
+  await page.keyboard.type('Unsaved words.')
+  await expectFullCoverage(page, 19 + 3)
+  await page.locator('[data-control-id="file.new_project"]').focus()
+  await page.keyboard.press('Shift+Tab')
+  await expect(page.locator('[data-control-id="file.save"]')).toBeFocused()
+  await expect(tip(page)).toContainText('With no project open, choose a folder.')
+})
+
 test('recovery dialog controls have tooltips (hover + focus) and pass the audit', async ({ page }) => {
   await launch(page)
   const doc = (t: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }] })

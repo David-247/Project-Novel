@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { editor, editorHTML, launch, newProject, openRecent, readFile, saveStatus } from './helpers'
+import { editor, editorHTML, launch, newProject, openRecent, readFile, saveStatus, seedProject } from './helpers'
 
 test('create a project, type formatted text, save with Mod-S, relaunch and reopen from the recent list', async ({
   page,
@@ -63,9 +63,39 @@ test('Save with no project open asks for a folder and creates the project (Save 
   await launch(page)
   await editor(page).click()
   await page.keyboard.type('Draft before any project.')
-  await expect(saveStatus(page)).toHaveText('Not saved: no project')
+  await expect(saveStatus(page)).toHaveText('Not saved yet — choose Save as project to keep your work')
   await page.evaluate(() => window.__nvE2E.setNextPick('/projects/Draft'))
   await page.keyboard.press('ControlOrMeta+s')
   await expect(saveStatus(page)).toHaveText('Draft: All changes saved')
   expect(await readFile(page, '/projects/Draft/manuscript.json')).toContain('Draft before any project.')
+})
+
+test('first run without the File menu: type, then the in-window "Save as project…" saves', async ({ page }) => {
+  await launch(page)
+  const statusBar = page.locator('footer[aria-label="Status bar"]')
+  await expect(statusBar.getByRole('button', { name: 'New project…' })).toBeVisible()
+  await expect(statusBar.getByRole('button', { name: 'Open project…' })).toBeVisible()
+  await expect(statusBar.getByRole('button', { name: 'Save as project…' })).toHaveCount(0)
+
+  await editor(page).click()
+  await page.keyboard.type('My first words.')
+  await expect(saveStatus(page)).toHaveText('Not saved yet — choose Save as project to keep your work')
+  await page.evaluate(() => window.__nvE2E.setNextPick('/projects/First'))
+  await statusBar.getByRole('button', { name: 'Save as project…' }).click()
+  await expect(saveStatus(page)).toHaveText('First: All changes saved')
+  expect(await readFile(page, '/projects/First/manuscript.json')).toContain('My first words.')
+  // A project is open: the no-project actions are gone.
+  await expect(statusBar.getByRole('button', { name: 'New project…' })).toHaveCount(0)
+})
+
+test('in-window "Open project…" opens a project folder', async ({ page }) => {
+  await launch(page)
+  await seedProject(page, '/projects/Shelf', 'Shelf', {
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'From the shelf.' }] }],
+  })
+  await page.evaluate(() => window.__nvE2E.setNextPick('/projects/Shelf'))
+  await page.locator('footer').getByRole('button', { name: 'Open project…' }).click()
+  await expect(saveStatus(page)).toHaveText('Shelf: All changes saved')
+  await expect(editor(page)).toHaveText('From the shelf.')
 })

@@ -406,6 +406,38 @@ pub fn remove_file_in(root: &Path, path: &str) -> Result<bool> {
     }
 }
 
+/// Names of the regular files directly inside the folder `path` within `root`
+/// (sorted; subfolders and symlinks are skipped). A folder that does not exist
+/// has no files.
+pub fn list_dir_in(root: &Path, path: &str) -> Result<Vec<String>> {
+    let dir = match resolve_for_read(root, path) {
+        Ok(d) => d,
+        Err(e) if e.kind == "not_found" => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    if !dir.is_dir() {
+        return Err(StorageError::invalid(format!("Not a folder: {}", dir.display())));
+    }
+    let mut names = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| StorageError::io(&dir, e))? {
+        let entry = entry.map_err(|e| StorageError::io(&dir, e))?;
+        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
+        if let (true, Some(name)) = (is_file, entry.file_name().to_str()) {
+            names.push(name.to_string());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// List the files of a folder inside the open project folder (e.g. set-aside
+/// `.recovery/unrestored-*.json` backups, mentioned in the status bar on open).
+#[tauri::command]
+pub fn storage_list_dir(state: State<'_, ProjectRoot>, path: String) -> Result<Vec<String>> {
+    let root = current_root(&state)?;
+    list_dir_in(&root, &path)
+}
+
 /// Create a subfolder (e.g. `.recovery`) inside the open project folder if needed.
 #[tauri::command]
 pub fn storage_ensure_dir(state: State<'_, ProjectRoot>, path: String) -> Result<()> {
@@ -1089,6 +1121,32 @@ mod tests {
         );
         assert!(base.join("secret.txt").exists());
         assert_eq!(remove_file_in(&root, &s(root.join(".recovery"))).unwrap_err().kind, "invalid_path");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn list_dir_is_confined_and_lists_files_only() {
+        let base = temp_dir("list");
+        let rec = base.join("project").join(".recovery");
+        fs::create_dir_all(rec.join("sub")).unwrap();
+        let root = canonical_root(&s(base.join("project"))).unwrap();
+        fs::write(rec.join("unrestored-b.json"), "{}").unwrap();
+        fs::write(rec.join("manuscript.json"), "{}").unwrap();
+        fs::write(rec.join("unrestored-a.json"), "{}").unwrap();
+        assert_eq!(
+            list_dir_in(&root, &s(root.join(".recovery"))).unwrap(),
+            vec!["manuscript.json", "unrestored-a.json", "unrestored-b.json"]
+        );
+        assert!(list_dir_in(&root, &s(root.join("missing"))).unwrap().is_empty());
+        assert_eq!(list_dir_in(&root, &s(base.clone())).unwrap_err().kind, "outside_project");
+        assert_eq!(
+            list_dir_in(&root, &s(root.join("..").join("project").join(".."))).unwrap_err().kind,
+            "outside_project"
+        );
+        assert_eq!(
+            list_dir_in(&root, &s(rec.join("manuscript.json"))).unwrap_err().kind,
+            "invalid_path"
+        );
         fs::remove_dir_all(base).unwrap();
     }
 

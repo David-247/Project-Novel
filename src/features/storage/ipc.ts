@@ -17,6 +17,7 @@ export const COMMANDS = {
   setRecentMenu: 'storage_set_recent_menu',
   exitApp: 'storage_exit_app',
   probeRecentRecovery: 'storage_probe_recent_recovery',
+  listDir: 'storage_list_dir',
 } as const
 
 /** Events emitted by the native File menu. `OPEN_RECENT` carries the folder path. */
@@ -150,6 +151,15 @@ export async function ensureDir(path: string, fileLabel = path): Promise<void> {
 export async function removeFile(path: string, fileLabel = path): Promise<boolean> {
   try {
     return await invoke<boolean>(COMMANDS.removeFile, { path })
+  } catch (e) {
+    throw toProjectError(e, fileLabel)
+  }
+}
+
+/** Names of the files directly inside a folder of the project root (none if it does not exist). */
+export async function listDir(path: string, fileLabel = path): Promise<string[]> {
+  try {
+    return await invoke<string[]>(COMMANDS.listDir, { path })
   } catch (e) {
     throw toProjectError(e, fileLabel)
   }

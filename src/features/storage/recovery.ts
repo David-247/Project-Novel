@@ -1,6 +1,6 @@
 import type { DocJSON } from '@/shared/document'
 import { isDocJSON, joinPath, ProjectError, serializeManuscript, type ProjectMeta } from './format'
-import { ensureDir, readTextFile, removeFile, writeFileAtomic } from './ipc'
+import { ensureDir, listDir, readTextFile, removeFile, writeFileAtomic } from './ipc'
 
 /**
  * Crash-recovery snapshot (docs/project-format.md, "Crash recovery").
@@ -85,6 +85,16 @@ export function unrestoredFileName(savedAt: string): string {
 export async function writeUnrestoredFile(folder: string, savedAt: string, text: string): Promise<void> {
   await ensureDir(recoveryDirPath(folder), LABEL)
   await writeFileAtomic(joinPath(recoveryDirPath(folder), unrestoredFileName(savedAt)), text, LABEL)
+}
+
+/** True for a file name written by writeUnrestoredFile. */
+export function isUnrestoredFileName(name: string): boolean {
+  return /^unrestored-.*\.json$/.test(name)
+}
+
+/** Names of the set-aside `unrestored-*.json` snapshots in `.recovery/` (sorted). Throws ProjectError. */
+export async function listUnrestoredFiles(folder: string): Promise<string[]> {
+  return (await listDir(recoveryDirPath(folder), LABEL)).filter(isUnrestoredFileName).sort()
 }
 
 /**

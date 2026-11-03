@@ -14,8 +14,10 @@ export function formatSnapshotTime(iso: string, now: Date = new Date()): string 
  * Crash-recovery questions (rendered via a portal):
  * - "restore": a backup newer than the last save was found in the open project.
  * - "reopen": at startup, the last project has a backup left by a crash.
- * Closing with Escape / X decides nothing: the backup is kept (moved aside to
- * `.recovery/unrestored-<savedAt>.json` before anything would overwrite or delete it).
+ * Closing with Escape / X decides nothing: the backup is kept. For "restore", the status bar then
+ * offers "Backup available — Restore…" (RecoveryStatus) until a save or the next autosave moves the
+ * backup aside to `.recovery/unrestored-<savedAt>.json`. For "reopen", the backup stays in the
+ * project and is offered again when that project is opened.
  */
 export function RecoveryDialog() {
   const prompt = useStore((s) => s.project.recoveryPrompt)
@@ -32,7 +34,7 @@ export function RecoveryDialog() {
         onOpenChange={onOpenChange}
         title="Recover unsaved work?"
         description={`Novel closed unexpectedly while "${prompt.name}" had unsaved changes. Reopen it to recover them?`}
-        closeLabel="Not now"
+        closeLabel="Close"
         closeControlId="recovery.reopenClose"
         footer={
           <>

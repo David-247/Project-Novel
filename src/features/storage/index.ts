@@ -23,6 +23,7 @@ export {
   discardRecovery,
   clearRecoveryData,
   hasPendingRecovery,
+  reopenRecoveryPrompt,
   type OpenedProject,
   type SaveOptions,
 } from './project'
@@ -61,3 +62,4 @@ export { REVISION_KINDS, INDEX_SCHEMA_VERSION, type RevisionKind } from './schem
 export { useStorageIntegration } from './integration'
 export { SaveStatusIndicator } from './SaveStatusIndicator'
 export { RecoveryDialog } from './RecoveryDialog'
+export { NoProjectActions, RecoveryStatus } from './ProjectStatusControls'

@@ -159,18 +159,41 @@ can open it to copy text out. An offered snapshot gets **Restore** or **Discard 
 - *Restore* loads the snapshot into the editor and marks it unsaved. Nothing on disk changes until the user saves,
   and the snapshot is kept until then, so a second crash still recovers it.
 - *Discard Backup* deletes the snapshot. The editor keeps the saved manuscript.
-- Closing the dialog (Escape or X) decides nothing, and nothing is lost. If the user quits right away, the snapshot
-  stays in place and is offered again next time. If anything else would replace or delete it (the next autosave
-  snapshot, a Save, or "Don't Save"), it is first moved aside to `unrestored-<savedAt>.json`. If it cannot be moved
-  aside, the new snapshot is not written, and the usual autosave warning and retry apply.
+- *Decide later* (the X, or Escape) decides nothing, and nothing is lost. The status bar then shows
+  **Backup available — Restore…**, which brings the question back. That stays until something would replace or
+  delete the snapshot: the next autosave snapshot (at most 30 s after the next edit), a Save, or "Don't Save". The
+  snapshot is then first moved aside to `unrestored-<savedAt>.json` (see "Recovering a set-aside backup" below),
+  the status bar says so, and it is no longer offered. If it cannot be moved aside, the new snapshot is not written,
+  and the usual autosave warning and retry apply. If the user quits before any of that, the snapshot stays in place
+  and is offered again the next time the project is opened.
 
 A damaged snapshot, or one in an unknown format, is ignored and left in place. A recovery problem never stops a
 project from opening.
 
 **At startup.** If the most recent project has a `.recovery/manuscript.json` that would be offered by the rules
 above (Rust `storage_probe_recent_recovery` reads just that file and project.json, and only for folders in the
-recent list), Novel offers to reopen the project (**Reopen Project** / **Not Now**). Opening it then shows the
-Restore / Discard question above.
+recent list), Novel offers to reopen the project (**Reopen Project** / **Not Now**; the X is **Close** and does the
+same as Not Now). Opening it then shows the Restore / Discard question above. Not Now leaves the snapshot where it
+is: it is offered again at the next start while this is still the most recent project, and whenever the project is
+opened.
+
+**Set-aside backups on open.** When a project is opened and `.recovery/` holds `unrestored-*.json` files, the status
+bar mentions it once ("1 older backup is kept in this project's .recovery folder."). No dialog appears; Novel never
+deletes or restores these files itself.
+
+### Recovering a set-aside backup
+
+An `unrestored-<savedAt>.json` file has the snapshot format above; the text is in its `doc` field. To get it back:
+
+1. Quit Novel (or open another project) so the project is not open.
+2. Copy the project folder first, as a safety net.
+3. Either copy the text you need out of the file's `doc` field with any text editor, or replace the manuscript
+   with it: put the value of `doc` (the object starting with `{"type":"doc"`) into `manuscript.json`, replacing the
+   whole file content.
+4. Open the project in Novel. If the editor shows the text, save once. If `manuscript.json` is reported as damaged,
+   restore it from your copy.
+
+Delete `unrestored-*.json` files yourself once you no longer need them.
 
 **When recovery data is deleted:**
 

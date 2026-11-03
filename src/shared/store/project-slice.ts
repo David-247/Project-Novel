@@ -43,6 +43,14 @@ export interface ProjectState {
   backupWarning: string | null
   /** Pending crash-recovery question, if any. */
   recoveryPrompt: RecoveryPrompt | null
+  /**
+   * `savedAt` of a backup found on open that is still unanswered (Restore / Discard), even while
+   * its prompt is closed ("Decide later"); null when there is none. Drives the status-bar
+   * "Backup available" control that re-opens the prompt.
+   */
+  pendingRecoveryAt: string | null
+  /** One-off, non-modal status note about recovery data (e.g. set-aside `unrestored-*` files). */
+  recoveryNotice: string | null
   /** True while a project is being opened (reading and loading a possibly large manuscript). */
   opening: boolean
 }
@@ -63,6 +71,9 @@ export interface ProjectSlice {
     backupCleared: () => void
     showRecoveryPrompt: (prompt: RecoveryPrompt) => void
     dismissRecoveryPrompt: () => void
+    /** A found backup became unanswered (`savedAt`) or was answered / set aside (null). */
+    setPendingRecovery: (savedAt: string | null) => void
+    setRecoveryNotice: (notice: string | null) => void
     /** Opening a project started / finished (success or failure). */
     openStarted: () => void
     openFinished: () => void
@@ -79,6 +90,8 @@ export const initialProjectState: ProjectState = {
   lastBackupAt: null,
   backupWarning: null,
   recoveryPrompt: null,
+  pendingRecoveryAt: null,
+  recoveryNotice: null,
   opening: false,
 }
 
@@ -97,6 +110,8 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
           lastBackupAt: null,
           backupWarning: null,
           recoveryPrompt: null,
+          pendingRecoveryAt: null,
+          recoveryNotice: null,
         }),
       projectClosed: () =>
         patch({
@@ -108,6 +123,9 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
           lastBackupAt: null,
           backupWarning: null,
           recoveryPrompt: null,
+          pendingRecoveryAt: null,
+          recoveryNotice: null,
+          opening: false,
         }),
       saveStarted: () => patch({ saveStatus: 'saving', saveError: null }),
       saveSucceeded: (at) => patch({ saveStatus: 'saved', lastSavedAt: at, saveError: null }),
@@ -118,6 +136,8 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
       backupCleared: () => patch({ lastBackupAt: null, backupWarning: null }),
       showRecoveryPrompt: (recoveryPrompt) => patch({ recoveryPrompt }),
       dismissRecoveryPrompt: () => patch({ recoveryPrompt: null }),
+      setPendingRecovery: (pendingRecoveryAt) => patch({ pendingRecoveryAt }),
+      setRecoveryNotice: (recoveryNotice) => patch({ recoveryNotice }),
       openStarted: () => patch({ opening: true }),
       openFinished: () => patch({ opening: false }),
     },

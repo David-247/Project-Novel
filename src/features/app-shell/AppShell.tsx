@@ -31,7 +31,7 @@ export function AppShell({ toolbar, editor, statusBar }: AppShellProps) {
       {statusBar ? (
         <footer
           aria-label="Status bar"
-          className="flex min-h-statusbar min-w-0 items-center gap-4 overflow-hidden border-t border-border bg-bg px-3 text-ui-xs text-text-muted"
+          className="flex min-h-statusbar min-w-0 flex-wrap items-center gap-x-4 gap-y-1 overflow-hidden border-t border-border bg-bg px-3 py-0.5 text-ui-xs text-text-muted"
         >
           {statusBar}
         </footer>

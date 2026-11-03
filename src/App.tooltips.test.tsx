@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, setDocJSON, TOOLBAR_CONTROLS } from '@/features/editor'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
 import { useStore } from '@/shared/store'
 import { IconButton, Tooltip } from '@/shared/ui'
@@ -27,6 +27,7 @@ afterEach(() => {
   act(() => useStore.getState().findActions.closePanel())
   act(() => useStore.getState().projectActions.dismissRecoveryPrompt())
   cleanup()
+  setDocJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
 })
 
 /** Renders the whole app with every conditional control surface (find panel) open. */
@@ -47,9 +48,10 @@ describe('tooltip coverage (every control in the app has a registered, wired too
   it('finds no control without a tooltip in the full app', async () => {
     const { container } = await renderFullApp()
     const rendered = Array.from(container.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
-    // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel controls).
+    // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel
+    // controls, and the no-project New / Open actions in the status bar).
     const expected = [...Object.values(TOOLBAR_CONTROLS), ...Object.values(HISTORY_CONTROLS), ...Object.values(FIND_CONTROLS)]
-    expect(new Set(rendered)).toEqual(new Set(expected.map((m) => m.id)))
+    expect(new Set(rendered)).toEqual(new Set([...expected.map((m) => m.id), 'file.new_project', 'file.open_project']))
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
   })
@@ -69,6 +71,35 @@ describe('tooltip coverage (every control in the app has a registered, wired too
       const name = el.getAttribute('aria-label') ?? el.textContent!.trim()
       expect(getTooltipCopy(el.getAttribute('data-control-id')!)!.title).toBe(name)
     }
+  })
+
+  it('covers the no-project state: New / Open, and Save as project once text was typed', async () => {
+    const { container } = await renderFullApp()
+    const statusBar = container.querySelector('footer[aria-label="Status bar"]')!
+    const ids = () => Array.from(statusBar.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
+    expect(ids()).toEqual(['file.new_project', 'file.open_project'])
+    expect(statusBar).toHaveTextContent('No project open')
+    act(() => {
+      getEditor()!.commands.insertContent('First words.')
+    })
+    expect(ids()).toEqual(['file.save', 'file.new_project', 'file.open_project'])
+    expect(statusBar).toHaveTextContent('Not saved yet — choose Save as project to keep your work')
+    const problems = auditTooltipCoverage(document.body)
+    expect(problems, formatCoverageProblems(problems)).toEqual([])
+    expect(screen.getByRole('button', { name: 'Save as project…' })).toHaveAccessibleDescription(
+      /With no project open, choose a folder\./,
+    )
+  })
+
+  it('covers the "Backup available — Restore…" status-bar control (unanswered backup, prompt closed)', async () => {
+    const { container } = await renderFullApp()
+    act(() => useStore.getState().projectActions.setPendingRecovery('2026-11-03T10:00:00Z'))
+    const button = screen.getByRole('button', { name: 'Backup available — Restore…' })
+    expect(button).toHaveAttribute('data-control-id', 'recovery.reopenPrompt')
+    expect(container.querySelector('footer')).toContainElement(button)
+    const problems = auditTooltipCoverage(document.body)
+    expect(problems, formatCoverageProblems(problems)).toEqual([])
+    act(() => useStore.getState().projectActions.setPendingRecovery(null))
   })
 
   it('NEGATIVE: fails for a button with no tooltip entry', async () => {
@@ -128,7 +159,7 @@ describe('tooltip registry', () => {
     }
   })
 
-  it('pre-registers the native File menu actions and the recovery dialog buttons', () => {
+  it('registers the project file actions and the recovery controls', () => {
     for (const id of [
       'file.new_project',
       'file.open_project',
@@ -137,6 +168,7 @@ describe('tooltip registry', () => {
       'recovery.restore',
       'recovery.discard',
       'recovery.decideLater',
+      'recovery.reopenPrompt',
       'recovery.reopen',
       'recovery.dismiss',
       'recovery.reopenClose',

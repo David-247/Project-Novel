@@ -173,6 +173,14 @@ export async function invokeMock(cmd: string, args: Record<string, unknown> = {}
       if (err) throw err
       return backend.files.delete(c)
     }
+    case 'storage_list_dir': {
+      const c = confined(path, false)
+      if (backend.files.has(c)) throw { kind: 'invalid_path', message: `Not a folder: ${path}` }
+      return [...backend.files.keys()]
+        .filter((f) => parent(f) === c)
+        .map((f) => f.slice(c.length + 1))
+        .sort()
+    }
     case 'storage_read_recent':
       return backend.recent.length ? recentJSON() : null
     case 'storage_remember_recent': {

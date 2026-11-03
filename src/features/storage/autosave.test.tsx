@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createMemoryDocumentProvider, registerDocumentProvider, type DocJSON } from '@/shared/document'
 import { useStore } from '@/shared/store'
 import { initialProjectState } from '@/shared/store/project-slice'
@@ -18,13 +18,15 @@ import {
   loadRecentProjects,
   newProject,
   openProject,
+  RecoveryStatus,
+  reopenRecoveryPrompt,
   restoreRecovery,
   SaveStatusIndicator,
   saveProject,
   startAutosave,
 } from './index'
 import { __resetAutosaveForTests } from './autosave'
-import { __resetStorageForTests, clearRecoveryData, offerReopenAfterCrash } from './project'
+import { __resetStorageForTests, clearRecoveryData, offerReopenAfterCrash, unrestoredNotice } from './project'
 import { parseRecovery, unrestoredFileName } from './recovery'
 import { RecoveryDialog } from './RecoveryDialog'
 import { TooltipProvider } from '@/shared/ui'
@@ -498,6 +500,68 @@ describe('unanswered snapshot ("Decide later") is never destroyed', () => {
     await discardRecovery()
     expect(backend.files.has(RECOVERY)).toBe(false)
     expect(unrestoredFiles()).toEqual([])
+  })
+})
+
+describe('"Decide later" stays visible and reversible', () => {
+  it('the store mirrors the unanswered backup, the status bar re-opens the prompt, and a later snapshot sets it aside with a note', async () => {
+    const savedAt = await withUnansweredSnapshot()
+    expect(project().recoveryPrompt).toBeNull()
+    expect(project().pendingRecoveryAt).toBe(savedAt)
+    render(
+      <TooltipProvider>
+        <RecoveryStatus />
+      </TooltipProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Backup available — Restore…' }))
+    expect(project().recoveryPrompt).toEqual({ kind: 'restore', savedAt })
+    // While the prompt is up, the status-bar control is hidden (the prompt is the control).
+    expect(screen.queryByRole('button', { name: 'Backup available — Restore…' })).toBeNull()
+    act(() => useStore.getState().projectActions.dismissRecoveryPrompt())
+    expect(reopenRecoveryPrompt()).toBe(true)
+    act(() => useStore.getState().projectActions.dismissRecoveryPrompt())
+
+    editor.update(textDoc('new typing'))
+    await act(() => vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS))
+    expect(backend.files.has(unrestoredPath(savedAt))).toBe(true)
+    expect(project().pendingRecoveryAt).toBeNull()
+    expect(reopenRecoveryPrompt()).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Backup available — Restore…' })).toBeNull()
+    expect(screen.getByTestId('recovery-notice')).toHaveTextContent(".recovery folder")
+  })
+
+  it('Restore and Discard clear the status-bar control', async () => {
+    await withUnansweredSnapshot()
+    await restoreRecovery()
+    expect(project().pendingRecoveryAt).toBeNull()
+    backend.reset()
+    await launch()
+    await withUnansweredSnapshot()
+    await discardRecovery()
+    expect(project().pendingRecoveryAt).toBeNull()
+  })
+
+  it('on open, set-aside unrestored-* backups are mentioned once in the status bar (no dialog)', async () => {
+    await createProject()
+    backend.dirs.add(`${ROOT}/.recovery`)
+    backend.files.set(unrestoredPath('2026-01-01T00:00:00.000Z'), '{}')
+    backend.files.set(unrestoredPath('2026-01-02T00:00:00.000Z'), '{}')
+    await launch()
+    await reopen()
+    expect(project().recoveryPrompt).toBeNull()
+    expect(project().recoveryNotice).toBe(unrestoredNotice(2))
+    expect(project().recoveryNotice).toMatch(/2 older backups are kept in this project's .recovery folder/)
+    await launch()
+    backend.files.delete(unrestoredPath('2026-01-01T00:00:00.000Z'))
+    await reopen()
+    expect(project().recoveryNotice).toBe('1 older backup is kept in this project\'s .recovery folder.')
+  })
+
+  it('a project without set-aside backups shows no note', async () => {
+    await createProject()
+    await launch()
+    await reopen()
+    expect(project().recoveryNotice).toBeNull()
   })
 })
 

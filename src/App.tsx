@@ -15,7 +15,13 @@ import {
   Toolbar,
   ToolbarItem,
 } from '@/features/editor'
-import { RecoveryDialog, SaveStatusIndicator, useStorageIntegration } from '@/features/storage'
+import {
+  NoProjectActions,
+  RecoveryDialog,
+  RecoveryStatus,
+  SaveStatusIndicator,
+  useStorageIntegration,
+} from '@/features/storage'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, TooltipProvider } from '@/shared/ui'
@@ -73,7 +79,14 @@ export function App() {
             <NovelEditor />
           </>
         }
-        statusBar={<SaveStatusIndicator />}
+        statusBar={
+          <>
+            <SaveStatusIndicator />
+            <RecoveryStatus />
+            <span className="flex-1" />
+            <NoProjectActions />
+          </>
+        }
       />
       {/* Crash-recovery prompts (portal). */}
       <RecoveryDialog />
