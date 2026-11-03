@@ -117,20 +117,54 @@ pub fn write_atomic(target: &Path, contents: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// The canonical folder of the open project. File commands that take a path
-/// from the webview may only touch files inside it.
+/// A project folder the user granted access to: the path as chosen (for
+/// display and the recent list) and its canonical form (for confinement).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantedRoot {
+    pub display: String,
+    pub canonical: PathBuf,
+}
+
+/// Roots that file commands are confined to. Only Rust sets `active`: from a
+/// native folder dialog, or from an entry of the Rust-written recent list.
+/// `previous` lets the webview undo a grant after a failed create/open
+/// (it can only go back to a root the user already granted).
 #[derive(Default)]
-pub struct ProjectRoot(pub Mutex<Option<PathBuf>>);
+pub struct ProjectRoot(pub Mutex<RootSlots>);
+
+#[derive(Default, Debug)]
+pub struct RootSlots {
+    pub active: Option<GrantedRoot>,
+    pub previous: Option<GrantedRoot>,
+}
+
+impl RootSlots {
+    pub fn grant(&mut self, root: GrantedRoot) {
+        self.previous = self.active.take();
+        self.active = Some(root);
+    }
+    pub fn restore(&mut self) {
+        self.active = self.previous.take();
+    }
+    pub fn clear(&mut self) {
+        self.active = None;
+        self.previous = None;
+    }
+}
 
 fn lock_err<E: std::fmt::Display>(e: E) -> StorageError {
     StorageError { kind: "io", message: e.to_string() }
 }
 
 fn current_root(state: &ProjectRoot) -> Result<PathBuf> {
-    state.0.lock().map_err(lock_err)?.clone().ok_or_else(|| StorageError {
-        kind: "outside_project",
-        message: "No project folder is open".into(),
-    })
+    state
+        .0
+        .lock()
+        .map_err(lock_err)?
+        .active
+        .as_ref()
+        .map(|r| r.canonical.clone())
+        .ok_or_else(|| StorageError { kind: "outside_project", message: "No project folder is open".into() })
 }
 
 /// Resolve `path` for writing: canonicalize its parent folder (resolving `..`
@@ -170,13 +204,74 @@ pub fn canonical_root(path: &str) -> Result<PathBuf> {
     Ok(canon)
 }
 
-/// Set (or clear, with `None`) the folder the file commands are confined to.
-/// The frontend calls it with the folder the user picked in a native dialog
-/// (or from Open Recent) before reading or writing project files.
+fn granted(path: &str) -> Result<GrantedRoot> {
+    Ok(GrantedRoot { display: path.to_string(), canonical: canonical_root(path)? })
+}
+
+/// Show the native folder picker (Rust side, so the webview cannot choose the
+/// path itself). If the user picks a folder it becomes the active project
+/// root and its path is returned; `None` if cancelled.
 #[tauri::command]
-pub fn storage_set_project_root(state: State<'_, ProjectRoot>, path: Option<String>) -> Result<()> {
-    let root = path.as_deref().map(canonical_root).transpose()?;
-    *state.0.lock().map_err(lock_err)? = root;
+pub async fn storage_pick_project_folder<R: Runtime>(
+    app: AppHandle<R>,
+    title: String,
+) -> Result<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let dialog_app = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app.dialog().file().set_title(title).blocking_pick_folder()
+    })
+    .await
+    .map_err(lock_err)?;
+    let Some(picked) = picked else { return Ok(None) };
+    let path = picked.into_path().map_err(lock_err)?;
+    let display = path.to_string_lossy().into_owned();
+    let root = granted(&display)?;
+    app.state::<ProjectRoot>().0.lock().map_err(lock_err)?.grant(root);
+    Ok(Some(display))
+}
+
+/// Make `path` the active project root, but only if it is in the recent list
+/// (which only Rust writes). Errors: "not_found" if the folder is gone,
+/// "not_recent" if it is not in the list.
+pub fn grant_recent(slots: &mut RootSlots, recent: &RecentFile, path: &str) -> Result<()> {
+    let wanted = granted(path)?;
+    let listed = recent
+        .projects
+        .iter()
+        .any(|e| fs::canonicalize(&e.path).map(|c| c == wanted.canonical).unwrap_or(false));
+    if !listed {
+        return Err(StorageError {
+            kind: "not_recent",
+            message: format!("{path} is not in the recent projects list"),
+        });
+    }
+    slots.grant(wanted);
+    Ok(())
+}
+
+/// Open Recent: grant a folder from the Rust-persisted recent list.
+#[tauri::command]
+pub fn storage_open_recent_root<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, ProjectRoot>,
+    path: String,
+) -> Result<()> {
+    let recent = load_recent(&recent_file(&app)?)?;
+    grant_recent(&mut *state.0.lock().map_err(lock_err)?, &recent, &path)
+}
+
+/// Undo the last grant (after a failed create/open), returning to the previous root.
+#[tauri::command]
+pub fn storage_restore_project_root(state: State<'_, ProjectRoot>) -> Result<()> {
+    state.0.lock().map_err(lock_err)?.restore();
+    Ok(())
+}
+
+/// Close the project: no root, so file commands refuse everything.
+#[tauri::command]
+pub fn storage_clear_project_root(state: State<'_, ProjectRoot>) -> Result<()> {
+    state.0.lock().map_err(lock_err)?.clear();
     Ok(())
 }
 
@@ -224,14 +319,72 @@ pub fn storage_read_recent<R: Runtime>(app: AppHandle<R>) -> Result<Option<Strin
     }
 }
 
-/// Atomically replace the recent-projects file (creates the config dir).
+/// Maximum number of entries in the recent-projects list.
+pub const RECENT_LIMIT: usize = 10;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentEntry {
+    pub path: String,
+    pub name: String,
+    pub opened_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecentFile {
+    pub version: u32,
+    pub projects: Vec<RecentEntry>,
+}
+
+impl Default for RecentFile {
+    fn default() -> Self {
+        RecentFile { version: 1, projects: Vec::new() }
+    }
+}
+
+/// Load the recent list; a missing or damaged file is an empty list.
+pub fn load_recent(path: &Path) -> Result<RecentFile> {
+    match fs::read_to_string(path) {
+        Ok(s) => Ok(serde_json::from_str(&s).unwrap_or_default()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(RecentFile::default()),
+        Err(e) => Err(StorageError::io(path, e)),
+    }
+}
+
+/// Put `root` first (de-duplicated by canonical folder), capped at RECENT_LIMIT.
+pub fn add_recent(list: &mut RecentFile, root: &GrantedRoot, name: String, opened_at: String) {
+    list.projects
+        .retain(|e| fs::canonicalize(&e.path).map(|c| c != root.canonical).unwrap_or(true) && e.path != root.display);
+    list.projects.insert(0, RecentEntry { path: root.display.clone(), name, opened_at });
+    list.projects.truncate(RECENT_LIMIT);
+    list.version = 1;
+}
+
+/// Record the ACTIVE project root in the recent list (the webview supplies
+/// only the display name and timestamp, never the path). Returns the new list as JSON.
 #[tauri::command]
-pub fn storage_write_recent<R: Runtime>(app: AppHandle<R>, contents: String) -> Result<()> {
+pub fn storage_remember_recent<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, ProjectRoot>,
+    name: String,
+    opened_at: String,
+) -> Result<String> {
+    let root = state
+        .0
+        .lock()
+        .map_err(lock_err)?
+        .active
+        .clone()
+        .ok_or_else(|| StorageError { kind: "outside_project", message: "No project folder is open".into() })?;
     let p = recent_file(&app)?;
+    let mut list = load_recent(&p)?;
+    add_recent(&mut list, &root, name, opened_at);
+    let json = serde_json::to_string_pretty(&list).map_err(lock_err)?;
     if let Some(dir) = p.parent() {
         fs::create_dir_all(dir).map_err(|e| StorageError::io(dir, e))?;
     }
-    write_atomic(&p, contents.as_bytes())
+    write_atomic(&p, json.as_bytes())?;
+    Ok(json)
 }
 
 /// One entry of the File > Open Recent submenu.
@@ -503,6 +656,80 @@ mod tests {
         assert_eq!(resolve_for_read(&root, &s(root.join("missing.json"))).unwrap_err().kind, "not_found");
         assert_eq!(canonical_root("relative").unwrap_err().kind, "invalid_path");
         fs::remove_dir_all(base).unwrap();
+    }
+
+    fn recent_with(paths: &[&Path]) -> RecentFile {
+        RecentFile {
+            version: 1,
+            projects: paths
+                .iter()
+                .map(|p| RecentEntry { path: s(p.to_path_buf()), name: "n".into(), opened_at: "t".into() })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn recent_root_is_granted_only_for_listed_folders() {
+        let base = temp_dir("grant");
+        let listed = base.join("listed");
+        let other = base.join("other");
+        fs::create_dir_all(&listed).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let recent = recent_with(&[&listed]);
+        let mut slots = RootSlots::default();
+
+        assert_eq!(grant_recent(&mut slots, &recent, &s(other.clone())).unwrap_err().kind, "not_recent");
+        assert!(slots.active.is_none());
+        // `..` spelling of the same folder still matches by canonical path.
+        let spelled = other.join("..").join("listed");
+        grant_recent(&mut slots, &recent, &s(spelled)).unwrap();
+        assert_eq!(slots.active.as_ref().unwrap().canonical, fs::canonicalize(&listed).unwrap());
+        assert_eq!(
+            grant_recent(&mut slots, &recent, &s(base.join("gone"))).unwrap_err().kind,
+            "not_found"
+        );
+        assert_eq!(grant_recent(&mut slots, &recent, "relative").unwrap_err().kind, "invalid_path");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn root_slots_grant_restore_clear() {
+        let a = GrantedRoot { display: "a".into(), canonical: PathBuf::from("/a") };
+        let b = GrantedRoot { display: "b".into(), canonical: PathBuf::from("/b") };
+        let mut slots = RootSlots::default();
+        slots.grant(a.clone());
+        slots.grant(b);
+        slots.restore();
+        assert_eq!(slots.active, Some(a));
+        slots.clear();
+        assert!(slots.active.is_none() && slots.previous.is_none());
+    }
+
+    #[test]
+    fn add_recent_dedupes_and_caps() {
+        let base = temp_dir("recent");
+        let mut list = RecentFile::default();
+        for i in 0..(RECENT_LIMIT + 3) {
+            let dir = base.join(format!("p{i}"));
+            fs::create_dir_all(&dir).unwrap();
+            add_recent(&mut list, &granted(&s(dir)).unwrap(), format!("p{i}"), "t".into());
+        }
+        assert_eq!(list.projects.len(), RECENT_LIMIT);
+        let again = base.join("p3").join("..").join("p3");
+        add_recent(&mut list, &granted(&s(again)).unwrap(), "again".into(), "t2".into());
+        assert_eq!(list.projects[0].name, "again");
+        assert_eq!(list.projects.iter().filter(|e| e.name.starts_with("p3") || e.name == "again").count(), 1);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn damaged_recent_file_is_empty() {
+        let dir = temp_dir("recent-bad");
+        let p = dir.join(RECENT_FILE_NAME);
+        assert_eq!(load_recent(&p).unwrap(), RecentFile::default());
+        fs::write(&p, "{not json").unwrap();
+        assert_eq!(load_recent(&p).unwrap(), RecentFile::default());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

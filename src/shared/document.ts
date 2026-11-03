@@ -23,13 +23,23 @@ export interface DocJSON extends DocNodeJSON {
 export interface DocumentProvider {
   /** Current document as ProseMirror JSON. */
   getDocJSON(): DocJSON
-  /** Replace the whole document (e.g. after opening a project). */
+  /**
+   * Replace the whole document (e.g. after opening a project); clears dirty and
+   * does not fire onDocChange. Throws, leaving the document untouched, if `doc`
+   * does not fit the editor schema.
+   */
   setDocJSON(doc: DocJSON): void
-  /** True if the document changed since the last `markClean()`. */
+  /** True if the document changed since the last load / `markClean()`. */
   isDirty(): boolean
-  /** Mark the current content as saved. */
-  markClean(): void
-  /** Subscribe to content changes. Returns an unsubscribe function. */
+  /** Increments on every edit and load. */
+  getDocVersion(): number
+  /**
+   * Mark content as saved. With `version` (read via getDocVersion() before
+   * the doc was taken for saving) dirty is cleared only if nothing changed
+   * since; without it, unconditionally.
+   */
+  markClean(version?: number): void
+  /** Subscribe to user edits. Returns an unsubscribe function. */
   onDocChange(cb: () => void): () => void
 }
 
@@ -65,32 +75,33 @@ export function onDocumentProviderChange(cb: (p: DocumentProvider | null) => voi
 }
 
 /**
- * A plain in-memory provider (no editor). Useful for tests and as a stand-in
- * before an editor registers. `setDocJSON` marks the doc clean; `update` changes
- * it and marks it dirty, like typing would.
+ * A plain in-memory provider with the same semantics as the editor (for tests
+ * and tools without an editor). `update` changes the doc like a user edit.
  */
 export function createMemoryDocumentProvider(
   initial: DocJSON = emptyDoc(),
 ): DocumentProvider & { update(doc: DocJSON): void } {
   let doc = initial
   let dirty = false
+  let version = 0
   const listeners = new Set<() => void>()
-  const notify = () => listeners.forEach((cb) => cb())
   return {
     getDocJSON: () => doc,
     setDocJSON: (d) => {
       doc = d
       dirty = false
-      notify()
+      version++
     },
     update: (d) => {
       doc = d
       dirty = true
-      notify()
+      version++
+      listeners.forEach((cb) => cb())
     },
     isDirty: () => dirty,
-    markClean: () => {
-      dirty = false
+    getDocVersion: () => version,
+    markClean: (v) => {
+      if (v === undefined || v === version) dirty = false
     },
     onDocChange: (cb) => {
       listeners.add(cb)

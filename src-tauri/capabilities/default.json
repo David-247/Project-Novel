@@ -6,7 +6,6 @@
   "permissions": [
     "core:default",
     "core:window:allow-destroy",
-    "dialog:allow-open",
     "dialog:allow-message",
     "sql:allow-load",
     "sql:allow-execute",

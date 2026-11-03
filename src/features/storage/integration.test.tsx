@@ -30,7 +30,7 @@ describe('save status', () => {
 
   it('renders from the store as a polite status', () => {
     useStore.getState().projectActions.projectOpened({ path: '/p', title: 'My Novel' })
-    useStore.getState().projectActions.setDirty(true)
+    useStore.getState().editorActions.docChanged(false) // editor.dirty is the source of truth
     render(<SaveStatusIndicator />)
     expect(screen.getByRole('status')).toHaveTextContent('My Novel: Unsaved changes')
   })

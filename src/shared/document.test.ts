@@ -32,6 +32,17 @@ describe('document provider registry', () => {
     expect(p.isDirty()).toBe(false)
     p.setDocJSON(emptyDoc())
     expect(p.isDirty()).toBe(false)
-    expect(changed).toHaveBeenCalledTimes(2)
+    expect(changed).toHaveBeenCalledTimes(1)
+  })
+
+  it('memory provider markClean(version) ignores stale versions', () => {
+    const p = createMemoryDocumentProvider()
+    p.update({ type: 'doc', content: [] })
+    const v = p.getDocVersion()
+    p.update({ type: 'doc' })
+    p.markClean(v)
+    expect(p.isDirty()).toBe(true)
+    p.markClean(p.getDocVersion())
+    expect(p.isDirty()).toBe(false)
   })
 })

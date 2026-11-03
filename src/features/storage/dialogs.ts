@@ -1,11 +1,5 @@
-import { message, open } from '@tauri-apps/plugin-dialog'
+import { message } from '@tauri-apps/plugin-dialog'
 import { ProjectError } from './format'
-
-/** Native folder picker. Returns null if cancelled. */
-export async function pickFolder(title: string): Promise<string | null> {
-  const picked = await open({ directory: true, multiple: false, title })
-  return typeof picked === 'string' ? picked : null
-}
 
 /** Show an error dialog for any failure; ProjectErrors keep their friendly text. */
 export async function showError(title: string, err: unknown): Promise<void> {

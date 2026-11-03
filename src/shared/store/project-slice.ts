@@ -1,5 +1,8 @@
 import type { SliceCreator } from './types'
 
+// Unsaved-changes state is NOT kept here: `editor.dirty` (editor slice) is the
+// single source of truth.
+
 /** 'idle' = nothing saved yet this session; 'error' = last save failed. */
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 
@@ -19,8 +22,6 @@ export interface ProjectState {
   path: string | null
   /** Title of the open project. */
   title: string | null
-  /** True when the document has unsaved changes. */
-  dirty: boolean
   saveStatus: SaveStatus
   /** Epoch ms of the last successful save. */
   lastSavedAt: number | null
@@ -36,7 +37,6 @@ export interface ProjectSlice {
   projectActions: {
     projectOpened: (p: { path: string; title: string }) => void
     projectClosed: () => void
-    setDirty: (dirty: boolean) => void
     saveStarted: () => void
     saveSucceeded: (at: number) => void
     saveFailed: (message: string) => void
@@ -47,7 +47,6 @@ export interface ProjectSlice {
 export const initialProjectState: ProjectState = {
   path: null,
   title: null,
-  dirty: false,
   saveStatus: 'idle',
   lastSavedAt: null,
   saveError: null,
@@ -60,10 +59,9 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
     project: initialProjectState,
     projectActions: {
       projectOpened: ({ path, title }) =>
-        patch({ path, title, dirty: false, saveStatus: 'idle', lastSavedAt: null, saveError: null }),
+        patch({ path, title, saveStatus: 'idle', lastSavedAt: null, saveError: null }),
       projectClosed: () =>
-        patch({ path: null, title: null, dirty: false, saveStatus: 'idle', lastSavedAt: null, saveError: null }),
-      setDirty: (dirty) => patch({ dirty }),
+        patch({ path: null, title: null, saveStatus: 'idle', lastSavedAt: null, saveError: null }),
       saveStarted: () => patch({ saveStatus: 'saving', saveError: null }),
       saveSucceeded: (at) => patch({ saveStatus: 'saved', lastSavedAt: at, saveError: null }),
       saveFailed: (message) => patch({ saveStatus: 'error', saveError: message }),

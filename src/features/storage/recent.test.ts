@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { RecentProject } from '@/shared/store'
-import {
-  addRecent,
-  flagMissing,
-  parseRecentFile,
-  RECENT_LIMIT,
-  removeRecent,
-  samePath,
-  serializeRecent,
-} from './recent'
+import { flagMissing, parseRecentFile, RECENT_LIMIT, samePath } from './recent'
+
+// Adding/de-duplicating/capping is done by Rust (storage_remember_recent); see storage.rs tests.
 
 const entry = (path: string, name = path, openedAt = '2026-01-01T00:00:00.000Z'): RecentProject => ({
   path,
@@ -16,42 +10,23 @@ const entry = (path: string, name = path, openedAt = '2026-01-01T00:00:00.000Z')
   openedAt,
 })
 
-describe('recent projects list', () => {
-  it('puts the newest first and de-duplicates', () => {
-    let list = addRecent([], entry('/a'))
-    list = addRecent(list, entry('/b'))
-    list = addRecent(list, entry('/a/', 'A again'))
-    expect(list.map((r) => r.name)).toEqual(['A again', '/b'])
-  })
-
+describe('recent projects list (read side)', () => {
   it('compares Windows paths case-insensitively', () => {
     expect(samePath('C:\\Books\\Novel', 'c:\\books\\novel\\')).toBe(true)
     expect(samePath('/home/A', '/home/a')).toBe(false)
-    const list = addRecent([entry('C:\\Books\\Novel')], entry('c:\\books\\novel'))
-    expect(list).toHaveLength(1)
+    expect(samePath('/home/a/', '/home/a')).toBe(true)
   })
 
-  it('is capped', () => {
-    let list: RecentProject[] = []
-    for (let i = 0; i < RECENT_LIMIT + 5; i++) list = addRecent(list, entry(`/p${i}`))
-    expect(list).toHaveLength(RECENT_LIMIT)
-    expect(list[0].path).toBe(`/p${RECENT_LIMIT + 4}`)
-  })
-
-  it('removes and flags entries', () => {
+  it('flags and unflags missing entries', () => {
     const list = [entry('/a'), entry('/b')]
-    expect(removeRecent(list, '/a')).toEqual([entry('/b')])
     const flagged = flagMissing(list, '/b', true)
     expect(flagged[1].missing).toBe(true)
+    expect(flagged[0]).toEqual(entry('/a'))
     expect(flagMissing(flagged, '/b', false)[1]).toEqual(entry('/b'))
-    // Re-opening clears the flag
-    expect(addRecent(flagged, { ...entry('/b'), missing: true })[0].missing).toBeUndefined()
   })
 
-  it('round-trips through the file format without the missing flag', () => {
-    const list = [entry('/a'), { ...entry('/b'), missing: true }]
-    const text = serializeRecent(list)
-    expect(JSON.parse(text).version).toBe(1)
+  it('parses the Rust-written file', () => {
+    const text = JSON.stringify({ version: 1, projects: [entry('/a'), entry('/b')] }, null, 2)
     expect(parseRecentFile(text)).toEqual([entry('/a'), entry('/b')])
   })
 
@@ -65,5 +40,7 @@ describe('recent projects list', () => {
         JSON.stringify({ projects: [entry('/a'), { path: 5 }, null, entry('/a'), { path: '/c', name: 'c' }] }),
       ),
     ).toEqual([entry('/a')])
+    const many = Array.from({ length: RECENT_LIMIT + 3 }, (_, i) => entry(`/p${i}`))
+    expect(parseRecentFile(JSON.stringify({ projects: many }))).toHaveLength(RECENT_LIMIT)
   })
 })

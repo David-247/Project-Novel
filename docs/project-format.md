@@ -83,8 +83,16 @@ with a random name (`.<name>.XXXXXX.tmp`, created exclusively so an existing fil
 the same folder, the temp file is fsynced, then renamed over the original. A crash leaves either the old or the new
 file, never a partial one. A leftover `*.tmp` file is safe to delete.
 
-Safety rules enforced in Rust: reads and writes are confined to the open project folder (paths are canonicalized,
-so `..` and symlinks cannot escape it), and a project file that is itself a symbolic link is never overwritten.
+Safety rules enforced in Rust:
+
+- Reads and writes are confined to the open project folder. Paths are canonicalized, so `..` and symlinks cannot
+  escape it. A project file that is itself a symbolic link is never overwritten.
+- Only Rust sets that folder. It comes either from the native folder dialog, which Rust shows itself
+  (`storage_pick_project_folder`), or from an entry in the recent list (`storage_open_recent_root`). The webview can
+  only undo the last change (`storage_restore_project_root`, used after a failed open) or clear the folder
+  (`storage_clear_project_root`). It cannot name an arbitrary folder.
+- **Known limitation:** `index.sqlite` is opened through the Tauri SQL plugin, which has no path scope. The webview
+  could open a SQLite file anywhere. Only the JSON files go through the confined commands.
 
 Save order: `manuscript.json`, then `project.json` (`updatedAt`), then a `revisions` row.
 
@@ -98,5 +106,7 @@ Not part of a project. Stored in the app config directory as `recent-projects.js
 { "version": 1, "projects": [{ "path": "C:\\Books\\My Novel", "name": "My Novel", "openedAt": "2026-11-03T10:00:00.000Z" }] }
 ```
 
+Only Rust writes this file (`storage_remember_recent` records the open project's folder; the webview supplies just
+the display name and timestamp), because an entry here is what lets Open Recent reopen a folder without a dialog.
 Most recent first, de-duplicated by folder, at most 10 entries. Folders that no longer contain a `project.json` are
 shown as "(missing)" and disabled in File > Open Recent. A damaged file is treated as an empty list.

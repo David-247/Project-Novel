@@ -3,12 +3,15 @@ import { ProjectError } from './format'
 
 /** Command names (src-tauri/src/storage.rs). */
 export const COMMANDS = {
-  setProjectRoot: 'storage_set_project_root',
+  pickProjectFolder: 'storage_pick_project_folder',
+  openRecentRoot: 'storage_open_recent_root',
+  restoreProjectRoot: 'storage_restore_project_root',
+  clearProjectRoot: 'storage_clear_project_root',
   writeFileAtomic: 'storage_write_file_atomic',
   readTextFile: 'storage_read_text_file',
   pathExists: 'storage_path_exists',
   readRecent: 'storage_read_recent',
-  writeRecent: 'storage_write_recent',
+  rememberRecent: 'storage_remember_recent',
   setRecentMenu: 'storage_set_recent_menu',
 } as const
 
@@ -22,7 +25,7 @@ export const MENU_EVENTS = {
 
 /** Error shape returned by the Rust storage commands. */
 interface RustStorageError {
-  kind: 'not_found' | 'invalid_path' | 'outside_project' | 'symlink' | 'io'
+  kind: 'not_found' | 'invalid_path' | 'outside_project' | 'not_recent' | 'symlink' | 'io'
   message: string
 }
 
@@ -46,15 +49,38 @@ function toProjectError(e: unknown, fileLabel: string): ProjectError {
 }
 
 /**
- * Confine the file commands to `folder` (the user-chosen project folder), or
- * clear with null. Reads and writes outside it are refused by Rust.
+ * Native folder picker shown by Rust. The chosen folder becomes the project
+ * root that file commands are confined to. Resolves null if cancelled.
  */
-export async function setProjectRoot(folder: string | null): Promise<void> {
+export async function pickProjectFolder(title: string): Promise<string | null> {
   try {
-    await invoke(COMMANDS.setProjectRoot, { path: folder })
+    return await invoke<string | null>(COMMANDS.pickProjectFolder, { title })
   } catch (e) {
-    throw toProjectError(e, folder ?? 'project folder')
+    throw toProjectError(e, 'The chosen folder')
   }
+}
+
+/** Grant a folder from the (Rust-written) recent list as the project root. */
+export async function openRecentRoot(path: string): Promise<void> {
+  try {
+    await invoke(COMMANDS.openRecentRoot, { path })
+  } catch (e) {
+    if (isRustError(e) && e.kind === 'not_found') {
+      throw new ProjectError('missing-folder', `The project folder could not be found:
+${path}`, { cause: e })
+    }
+    throw toProjectError(e, path)
+  }
+}
+
+/** Undo the last root grant (after a failed create/open). Never throws. */
+export async function restoreProjectRoot(): Promise<void> {
+  await invoke(COMMANDS.restoreProjectRoot).catch((e) => console.warn('Restoring the project folder failed:', e))
+}
+
+/** No project: file commands refuse everything. Never throws. */
+export async function clearProjectRoot(): Promise<void> {
+  await invoke(COMMANDS.clearProjectRoot).catch((e) => console.warn('Clearing the project folder failed:', e))
 }
 
 /** Atomically write a text file inside the project root: random temp file in the same folder, fsync, rename. */
@@ -86,8 +112,9 @@ export function readRecentRaw(): Promise<string | null> {
   return invoke<string | null>(COMMANDS.readRecent)
 }
 
-export function writeRecentRaw(contents: string): Promise<void> {
-  return invoke(COMMANDS.writeRecent, { contents })
+/** Add the ACTIVE project root to the recent list (Rust supplies the path). Returns the new file JSON. */
+export function rememberRecentRaw(name: string, openedAt: string): Promise<string> {
+  return invoke<string>(COMMANDS.rememberRecent, { name, openedAt })
 }
 
 export interface RecentMenuEntry {

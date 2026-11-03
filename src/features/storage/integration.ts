@@ -9,7 +9,6 @@ import {
   newProject,
   openProject,
   saveProject,
-  trackDirtyState,
 } from './project'
 
 export function isMacPlatform(): boolean {
@@ -23,14 +22,14 @@ export function isSaveShortcut(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaK
 }
 
 /**
- * Wire storage into the running app: dirty tracking, Mod-S, native File menu
+ * Wire storage into the running app: Mod-S, native File menu
  * events, the recent-projects list, and the unsaved-changes prompt on close.
  * Call once from the composition root. Tauri-only parts are skipped in a
  * plain browser (e.g. `pnpm dev`, Playwright).
  */
 export function useStorageIntegration(): void {
   useEffect(() => {
-    const disposers: (() => void)[] = [trackDirtyState()]
+    const disposers: (() => void)[] = []
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isSaveShortcut(e)) return
