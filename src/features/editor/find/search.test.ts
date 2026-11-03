@@ -1,9 +1,9 @@
 import { getSchema } from '@tiptap/core'
 import type { JSONContent } from '@tiptap/core'
 import { EditorState } from '@tiptap/pm/state'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createEditorExtensions } from '../extensions'
-import { buildMatcher, findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
+import { buildMatcher, findMatches, indexAtOrAfter, replaceAllRanges, replaceRange, wordCharBefore } from './search'
 
 const schema = getSchema(createEditorExtensions())
 const ci = { caseSensitive: false, wholeWord: false }
@@ -74,6 +74,44 @@ describe('findMatches', () => {
     expect(findMatches(doc, 'fishtwo', ci)).toEqual([])
     expect(findMatches(doc, 'redfish', ci)).toEqual([])
     expect(findMatches(doc, 'red\nfish', ci)).toEqual([])
+  })
+
+  it('whole word uses no regex lookbehind (unsupported on WebKit < 16.4)', () => {
+    const re = buildMatcher('cat', { caseSensitive: false, wholeWord: true })!
+    expect(re.source).not.toContain('(?<')
+  })
+
+  it('whole word retries overlapping candidates after a rejected start', () => {
+    const ww = { caseSensitive: false, wholeWord: true }
+    // "a a" at 1 is rejected (preceded by "b"); the overlapping candidate at 3 is accepted.
+    expect(findMatches(docOf([t('ba a a')]), 'a a', ww)).toEqual([{ from: 1 + 3, to: 1 + 6 }])
+    const aa = findMatches(docOf([t('aaa aa')]), 'aa', ww)
+    expect(aa).toEqual([{ from: 1 + 4, to: 1 + 6 }])
+  })
+
+  it('whole word handles astral (surrogate-pair) characters before a match', () => {
+    const ww = { caseSensitive: false, wholeWord: true }
+    // U+1D400 MATHEMATICAL BOLD CAPITAL A is a letter; U+1F600 (emoji) is not.
+    expect(texts(docOf([t('\u{1D400}cat cat')]), 'cat', ww)).toEqual(['cat'])
+    expect(findMatches(docOf([t('\u{1D400}cat cat')]), 'cat', ww)[0].from).toBe(1 + 6)
+    expect(texts(docOf([t('\u{1F600}cat')]), 'cat', ww)).toEqual(['cat'])
+    expect(wordCharBefore('\u{1D400}x', 2)).toBe(true)
+    expect(wordCharBefore('\u{1F600}x', 2)).toBe(false)
+    expect(wordCharBefore('x', 0)).toBe(false)
+    // Rejected candidate right after an astral letter, retried by code point.
+    expect(texts(docOf([t('a\u{1D400} \u{1D400}')]), '\u{1D400}', ww)).toEqual(['\u{1D400}'])
+  })
+
+  it('never throws: a failing scan yields no matches', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const broken = {
+      descendants: () => {
+        throw new Error('boom')
+      },
+    } as unknown as ReturnType<typeof docOf>
+    expect(findMatches(broken, 'x', ci)).toEqual([])
+    expect(err).toHaveBeenCalled()
+    err.mockRestore()
   })
 
   it('finds non-overlapping successive matches', () => {

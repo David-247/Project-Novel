@@ -20,9 +20,32 @@ const LEAF = '￼'
 
 const REGEX_SPECIALS = /[.*+?^${}()|[\]\\/]/g
 
-/** Letters, digits (any script) and underscore count as word characters for "Whole word". */
-const WORD_BEFORE = '(?<![\\p{L}\\p{N}\\p{M}_])'
+/**
+ * Letters, digits (any script), combining marks and underscore count as word characters for
+ * "Whole word". The end boundary is a lookahead in the regex; the start boundary is checked in
+ * code (`wordCharBefore`) because regex lookbehind throws on WebKit before Safari 16.4, which
+ * older macOS Tauri webviews use.
+ */
 const WORD_AFTER = '(?![\\p{L}\\p{N}\\p{M}_])'
+const WORD_CHAR = /^[\p{L}\p{N}\p{M}_]$/u
+
+/** True when the code point ending just before `index` is a word character (surrogate-aware). */
+export function wordCharBefore(text: string, index: number): boolean {
+  if (index <= 0) return false
+  const low = text.charCodeAt(index - 1)
+  let ch = text[index - 1]
+  if (low >= 0xdc00 && low <= 0xdfff && index >= 2) {
+    const high = text.charCodeAt(index - 2)
+    if (high >= 0xd800 && high <= 0xdbff) ch = text.slice(index - 2, index)
+  }
+  return WORD_CHAR.test(ch)
+}
+
+/** UTF-16 length of the code point starting at `index` (1 or 2). */
+function codePointLength(text: string, index: number): number {
+  const cp = text.codePointAt(index)
+  return cp !== undefined && cp > 0xffff ? 2 : 1
+}
 
 /**
  * Compile the query to a global regex. The query is literal text (special characters escaped).
@@ -32,8 +55,13 @@ const WORD_AFTER = '(?![\\p{L}\\p{N}\\p{M}_])'
 export function buildMatcher(query: string, options: FindOptions): RegExp | null {
   if (query.length === 0) return null
   let source = query.replace(REGEX_SPECIALS, '\\$&')
-  if (options.wholeWord) source = WORD_BEFORE + source + WORD_AFTER
-  return new RegExp(source, options.caseSensitive ? 'gu' : 'giu')
+  if (options.wholeWord) source += WORD_AFTER
+  try {
+    return new RegExp(source, options.caseSensitive ? 'gu' : 'giu')
+  } catch (err) {
+    console.error('[find] could not build matcher', err)
+    return null
+  }
 }
 
 /** The text of one textblock with one char per position (inline leaves become LEAF). */
@@ -49,11 +77,20 @@ function blockText(block: PMNode): string {
 /**
  * All matches in document order. Searches each textblock's full text (not individual text
  * nodes), so a match may span mark boundaries (e.g. "wor**ld**"). Matches never span two
- * textblocks or a hard break. O(document size) per call.
+ * textblocks or a hard break. O(document size) per call. Never throws: an engine error yields [].
  */
 export function findMatches(doc: PMNode, query: string, options: FindOptions): MatchRange[] {
   const re = buildMatcher(query, options)
   if (!re) return []
+  try {
+    return scan(doc, re, options.wholeWord)
+  } catch (err) {
+    console.error('[find] search failed', err)
+    return []
+  }
+}
+
+function scan(doc: PMNode, re: RegExp, wholeWord: boolean): MatchRange[] {
   const out: MatchRange[] = []
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true
@@ -65,6 +102,11 @@ export function findMatches(doc: PMNode, query: string, options: FindOptions): M
     while ((m = re.exec(text)) !== null) {
       if (m[0].length === 0) {
         re.lastIndex++
+        continue
+      }
+      if (wholeWord && wordCharBefore(text, m.index)) {
+        // Rejected start: retry from the next code point (a later, overlapping candidate may fit).
+        re.lastIndex = m.index + codePointLength(text, m.index)
         continue
       }
       out.push({ from: start + m.index, to: start + m.index + m[0].length })
