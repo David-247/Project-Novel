@@ -410,17 +410,22 @@ const isBreaking = (s: StyleFormat) => s.breakBefore === 'page' || s.breakBefore
  */
 export function buildStyleSheetCSS(styles: ResolvedStyles, scope: string): string {
   const rules: string[] = []
-  // Fallbacks first, for a data-style naming no defined style (deleted then brought back by undo or
-  // redo, pasted, or an out-of-sync book.json): paragraphs look like Body, headings like their
-  // migration default. Same specificity as the per-id rules below, which come later and win.
-  const fallbacks: Array<[string, string]> = [
-    [':where(p)', DEFAULT_STYLE_ID],
-    [':where(h1)', STYLE_IDS.chapterTitle],
-    [':where(h2, h3)', STYLE_IDS.subheading],
+  // Fallbacks for a data-style naming NO defined style (deleted then brought back by undo or redo,
+  // pasted, or an out-of-sync book.json): paragraphs look like Body, headings like their migration
+  // default. They exclude every defined id, so a defined style never inherits from them (unset
+  // properties of a defined style still come from the surface). :where() adds no specificity.
+  const defined = [...styles.keys()].filter((id) => STYLE_ID_PATTERN.test(id))
+  const notDefined = defined.length ? `:not(${defined.map((id) => `[data-style="${id}"]`).join(', ')})` : ''
+  const fallbacks: Array<[string[], string]> = [
+    [['p'], DEFAULT_STYLE_ID],
+    [['h1'], STYLE_IDS.chapterTitle],
+    [['h2', 'h3'], STYLE_IDS.subheading],
   ]
-  for (const [selector, id] of fallbacks) {
+  for (const [tags, id] of fallbacks) {
     const s = styles.get(id)
-    if (s) rules.push(`${scope} ${selector}[data-style] { ${declarationText(s)} }`)
+    if (!s) continue
+    const targets = tags.map((t) => `${t}[data-style]${notDefined}`).join(', ')
+    rules.push(`${scope} :where(${targets}) { ${declarationText(s)} }`)
   }
   for (const s of styles.values()) {
     if (!STYLE_ID_PATTERN.test(s.id)) continue

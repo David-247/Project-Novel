@@ -206,8 +206,11 @@ describe('missing styles', () => {
     expect(picker.value).toBe(id)
     expect(picker.selectedOptions[0].textContent).toBe('Body (missing style)')
     const sheet = document.querySelector('[data-testid="book-styles"]')!.textContent!
-    expect(sheet.split('\n')[0]).toMatch(/^\.novel-editor-content :where\(p\)\[data-style\] \{ font-size: calc\(11 /)
+    // The Body fallback applies to it: the deleted id is neither excluded nor given its own rule.
+    expect(sheet.split('\n')[0]).toMatch(/^\.novel-editor-content :where\(p\[data-style\]:not\(.*\)\) \{ font-size: calc\(11 /)
     expect(sheet).not.toContain(`[data-style="${id}"]`)
+    const fallback = sheet.split('\n')[0].slice(0, sheet.split('\n')[0].indexOf(' {')).replace('.novel-editor-content ', '')
+    expect(blocks(ed)[0].matches(fallback)).toBe(true)
   })
 
   it('locks the Kind of a custom style while paragraphs use it', () => {
