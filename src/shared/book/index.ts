@@ -32,12 +32,19 @@ export interface BookSettings {
   footnotes: FootnoteSettings
   surface: PaperSurface
   view: BookView
+  /**
+   * Unknown top-level keys of book.json (written by a newer Novel), kept so a save does not drop them.
+   * Added by the Book settings ticket; absent for default settings.
+   */
+  extra?: Record<string, unknown>
 }
 
 export const DEFAULT_TRIM_SIZE: TrimSizeId = 'us-5.5x8.5'
 
 /** Defaults for a 5.5 x 8.5 in trade paperback (points). */
 export const DEFAULT_MARGINS: Margins = { top: 54, bottom: 54, inside: 63, outside: 45 }
+
+export * from './trim-sizes'
 
 export function defaultBookSettings(): BookSettings {
   return {
