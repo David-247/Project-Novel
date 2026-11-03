@@ -10,6 +10,8 @@
 # build / deps
 node_modules/
 dist/
+dist-e2e/
+perf-results/
 src-tauri/target/
 src-tauri/gen/
 playwright-report/

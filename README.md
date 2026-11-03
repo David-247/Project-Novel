@@ -13,10 +13,26 @@ pnpm dev           # web build only (Vite on :1420)
 pnpm lint          # ESLint, incl. cross-slice import rule
 pnpm typecheck
 pnpm test          # Vitest (jsdom)
-pnpm test:e2e      # Playwright smoke test against the Vite dev server
-                   # (first run: pnpm exec playwright install chromium)
+pnpm test:e2e      # Playwright e2e + perf, chromium and webkit (see below)
+                   # (first run: pnpm exec playwright install chromium webkit)
 pnpm tauri build   # production build
 ```
+
+### End-to-end tests
+
+`pnpm test:e2e` builds the web app in e2e mode (`pnpm build:e2e` → `dist-e2e/`), serves it with
+`vite preview` on port 4174 (override with `PW_PORT`), and runs `e2e/*.spec.ts` in Playwright's
+chromium (stand-in for WebView2) and webkit (stand-in for macOS WKWebView). In e2e mode only,
+`src/main.tsx` installs a fake Tauri backend (`src/test-utils/e2e-backend.ts`) whose project files
+live in IndexedDB, so closing a page is a "force-kill" and a new page is a "relaunch". Native-only UI
+is driven through `window.__nvE2E` (see `e2e/helpers.ts`): File-menu events, the folder picker's
+answer, and message boxes rendered as an overlay. Production builds never contain it
+(`pnpm build && pnpm verify:prod-bundle` checks). `e2e/perf.spec.ts` writes its measurements to
+`perf-results/`.
+
+Real-app smoke (Windows/Linux only; WebDriver does not exist for macOS WKWebView): install
+`tauri-driver` (`cargo install tauri-driver`) and an msedgedriver matching your WebView2 version,
+build the app, then `node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe`.
 
 ## Architecture
 

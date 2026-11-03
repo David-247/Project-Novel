@@ -5,8 +5,38 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  # Playwright starts its own server (no reuse) and enables retries + the HTML report.
+  CI: '1'
+
 jobs:
-  build:
+  checks:
+    name: Lint, typecheck, unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      # Production web bundle must not contain the e2e-only fake Tauri backend.
+      - run: pnpm build
+      - run: pnpm verify:prod-bundle
+
+  rust:
+    name: cargo test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -24,8 +54,73 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
+      # tauri::generate_context! embeds ../dist at compile time.
+      - run: pnpm build
+      - run: cargo test --locked
+        working-directory: src-tauri
+
+  e2e:
+    name: Playwright e2e + perf (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium webkit
+      # Both projects: chromium (stands in for WebView2) and webkit (for WKWebView).
+      - run: pnpm test:e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.os }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+      - name: Upload performance results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results-${{ matrix.os }}
+          path: perf-results/
+          if-no-files-found: warn
+          retention-days: 90
+
+  tauri-build:
+    name: Tauri build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
       # No bundle signing: build the app binary only.
       - run: pnpm tauri build --no-bundle
+      # Real-app smoke (Windows only: tauri-driver has no macOS WKWebView driver).
+      # msedgedriver comes preinstalled on GitHub's Windows images (EDGEWEBDRIVER).
+      - name: Install tauri-driver
+        if: runner.os == 'Windows'
+        run: cargo install tauri-driver --locked
+      - name: Real-app smoke (tauri-driver + msedgedriver)
+        if: runner.os == 'Windows'
+        run: node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe
