@@ -390,7 +390,12 @@ async function openProjectUnguarded(folder?: string): Promise<boolean> {
     else target = await pickProjectFolder('Open a Novel project folder')
     if (!target) return false
     const granted = target
-    await inGrantedRoot(() => openProjectAt(granted))
+    actions().openStarted()
+    try {
+      await inGrantedRoot(() => openProjectAt(granted))
+    } finally {
+      actions().openFinished()
+    }
     return true
   } catch (e) {
     if (target && e instanceof ProjectError && (e.code === 'missing-folder' || e.code === 'not-a-project')) {

@@ -133,6 +133,16 @@ describe('NovelEditor', () => {
     errors.mockRestore()
   })
 
+  it('loads a doc with no blocks as one empty paragraph (before and after mount)', () => {
+    setDocJSON({ type: 'doc', content: [] })
+    mount()
+    expect(getDocJSON()).toMatchObject({ type: 'doc', content: [{ type: 'paragraph' }] })
+    expect(useStore.getState().editor.isEmpty).toBe(true)
+    act(() => setDocJSON({ type: 'doc' }))
+    expect(getDocJSON().content).toHaveLength(1)
+    expect(isDirty()).toBe(false)
+  })
+
   it('setDocJSON with an invalid doc while mounted throws and keeps content and dirty', () => {
     const ed = mount()
     act(() => {

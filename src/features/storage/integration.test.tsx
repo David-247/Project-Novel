@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { useStore } from '@/shared/store'
 import { isSaveShortcut } from './integration'
@@ -33,5 +33,14 @@ describe('save status', () => {
     useStore.getState().editorActions.docChanged(false) // editor.dirty is the source of truth
     render(<SaveStatusIndicator />)
     expect(screen.getByRole('status')).toHaveTextContent('My Novel: Unsaved changes')
+  })
+
+  it('shows "Opening…" while a project is being opened', () => {
+    const { container } = render(<SaveStatusIndicator />)
+    const status = () => container.querySelector('[role="status"]')
+    act(() => useStore.getState().projectActions.openStarted())
+    expect(status()).toHaveTextContent(/^Opening…$/)
+    act(() => useStore.getState().projectActions.openFinished())
+    expect(status()).not.toHaveTextContent('Opening…')
   })
 })

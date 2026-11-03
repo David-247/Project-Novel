@@ -64,6 +64,21 @@ describe('FontFamilyPicker', () => {
     expect(select).toHaveAttribute('data-control-id', 'toolbar.fontFamily')
   })
 
+  it('says installed fonts are unavailable when listing them fails (system font still usable)', async () => {
+    mockIPC(() => {
+      throw new Error('font enumeration failed')
+    })
+    render(
+      <>
+        <FontFamilyPicker />
+        <NovelEditor />
+      </>,
+    )
+    await screen.findByRole('option', { name: 'System default (installed fonts unavailable)' })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    expect(screen.getByRole('combobox', { name: 'Font family' })).toHaveValue('')
+  })
+
   it('applies a selected installed font to the selection and can reset it', async () => {
     render(
       <>

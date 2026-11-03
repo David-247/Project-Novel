@@ -9,14 +9,20 @@ function isTauri(): boolean {
 
 /**
  * Installed OS font family names (sorted, de-duplicated) from the Rust
- * `list_system_fonts` command. Outside Tauri (browser, vitest) or on any
- * failure it resolves to `[]`, meaning "system stack only".
+ * `list_system_fonts` command. Outside Tauri (browser, vitest) it resolves to
+ * `[]` ("system stack only"); if the command fails it REJECTS, so the picker
+ * can show that installed fonts are unavailable.
  */
-export async function listSystemFonts(): Promise<string[]> {
+export async function loadSystemFonts(): Promise<string[]> {
   if (!isTauri()) return []
+  const fonts = await invoke<unknown>('list_system_fonts')
+  return Array.isArray(fonts) ? fonts.filter((f): f is string => typeof f === 'string') : []
+}
+
+/** Like `loadSystemFonts`, but resolves to `[]` on any failure. */
+export async function listSystemFonts(): Promise<string[]> {
   try {
-    const fonts = await invoke<unknown>('list_system_fonts')
-    return Array.isArray(fonts) ? fonts.filter((f): f is string => typeof f === 'string') : []
+    return await loadSystemFonts()
   } catch {
     return []
   }

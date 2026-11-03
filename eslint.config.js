@@ -30,6 +30,8 @@ export default tseslint.config(
   {
     ignores: [
       'dist',
+      'dist-e2e',
+      'perf-results',
       'src-tauri',
       'node_modules',
       'playwright-report',
@@ -48,6 +50,11 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
     plugins: { 'react-hooks': reactHooks },
     rules: { ...reactHooks.configs.recommended.rules },
+  },
+  {
+    // Node scripts (bundle check, tauri-driver smoke).
+    files: ['**/*.mjs'],
+    languageOptions: { globals: { ...globals.node } },
   },
   ...crossSliceRules,
 )

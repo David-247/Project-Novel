@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Ref, SelectHTMLAttributes } from 'react'
 import { Select } from '@/shared/ui'
-import { fontFamilyCss, listSystemFonts } from '../fonts'
+import { fontFamilyCss, loadSystemFonts } from '../fonts'
 import { TOOLBAR_CONTROLS } from './controls'
 import { markChain } from './mark-chain'
 import { useMountedEditor } from './use-mounted-editor'
@@ -16,39 +16,41 @@ export interface FontFamilyPickerProps
 
 const SYSTEM_DEFAULT = ''
 
-/** Installed OS font families, loaded once per `loadFonts` reference ([] when unavailable). */
-function useSystemFonts(loadFonts: () => Promise<string[]>): string[] {
-  const [fonts, setFonts] = useState<string[]>([])
+/** Installed OS font families, loaded once per `loadFonts` reference; `failed` if loading rejected. */
+function useSystemFonts(loadFonts: () => Promise<string[]>): { fonts: string[]; failed: boolean } {
+  const [state, setState] = useState<{ fonts: string[]; failed: boolean }>({ fonts: [], failed: false })
   useEffect(() => {
     let cancelled = false
     loadFonts()
-      .then((list) => {
-        if (!cancelled) setFonts(list)
+      .then((fonts) => {
+        if (!cancelled) setState({ fonts, failed: false })
       })
-      .catch(() => {
-        if (!cancelled) setFonts([])
+      .catch((e) => {
+        console.warn('Listing installed fonts failed:', e)
+        if (!cancelled) setState({ fonts: [], failed: true })
       })
     return () => {
       cancelled = true
     }
   }, [loadFonts])
-  return fonts
+  return state
 }
 
 /**
  * Font family control (toolbar `toolbar.fontFamily`). Applies the chosen installed OS font
  * to the selection (or the stored marks at the caret) via TextStyle + FontFamily;
  * "System default" removes it. Falls back to only "System default" when the OS font list
- * is unavailable. Focus handling: see `markChain`.
+ * is unavailable; if listing them failed, that option says so. Focus handling: see `markChain`.
  */
-export function FontFamilyPicker({ loadFonts = listSystemFonts, disabled, ...rest }: FontFamilyPickerProps) {
-  const fonts = useSystemFonts(loadFonts)
+export function FontFamilyPicker({ loadFonts = loadSystemFonts, disabled, ...rest }: FontFamilyPickerProps) {
+  const { fonts, failed } = useSystemFonts(loadFonts)
   const editor = useMountedEditor()
 
   const current = useToolbarState(editor).fontFamily
 
   const names = current && !fonts.includes(current) ? [current, ...fonts] : fonts
-  const options = [{ value: SYSTEM_DEFAULT, label: 'System default' }, ...names.map((f) => ({ value: f, label: f }))]
+  const defaultLabel = failed ? 'System default (installed fonts unavailable)' : 'System default'
+  const options = [{ value: SYSTEM_DEFAULT, label: defaultLabel }, ...names.map((f) => ({ value: f, label: f }))]
 
   const onChange = (value: string) => {
     if (!editor) return

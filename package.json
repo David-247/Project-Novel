@@ -12,6 +12,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "build:e2e": "vite build --mode e2e --outDir dist-e2e",
+    "verify:prod-bundle": "node scripts/verify-prod-bundle.mjs dist",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
