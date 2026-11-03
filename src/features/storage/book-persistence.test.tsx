@@ -123,7 +123,7 @@ describe('book.json persistence', () => {
     await createProject()
     bookActions().setView('single')
     let release = () => {}
-    backend.writeGate = (path: string) => (path === BOOK ? new Promise<void>((r) => (release = r)) : undefined)
+    backend.writeGate = (path: string) => (path === BOOK ? new Promise<void>((r) => (release = r)) : Promise.resolve())
     const saving = saveProject()
     await vi.advanceTimersByTimeAsync(0)
     bookActions().setSurface('white')
