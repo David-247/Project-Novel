@@ -42,6 +42,62 @@ export interface LayoutSnapshot {
   pageOfLine: Int32Array
 }
 
+/**
+ * ProseMirror view internals used defensively (both optional): `domObserver.flush()` reads pending
+ * DOM changes and selection; `input.mouseDown` is set while a pointer press is in progress.
+ */
+interface ViewInternals {
+  domObserver?: { flush(): void; forceFlush?(): void }
+  input?: { mouseDown?: unknown }
+}
+
+/** Frames a pass may wait for the browser's selection to reach ProseMirror. */
+const MAX_DEFERRALS = 5
+
+/**
+ * True when the DOM selection is inside the editor but differs from ProseMirror's: a native caret
+ * move (Home, End, arrows) whose selectionchange has not been handled yet. Redrawing now would put
+ * the old selection back.
+ */
+function domSelectionPending(view: EditorView): boolean {
+  if (!view.hasFocus()) return false
+  const sel = view.dom.ownerDocument.getSelection()
+  if (!sel?.anchorNode || !sel.focusNode || !view.dom.contains(sel.anchorNode)) return false
+  try {
+    const anchor = view.posAtDOM(sel.anchorNode, sel.anchorOffset)
+    const head = view.posAtDOM(sel.focusNode, sel.focusOffset)
+    const s = view.state.selection
+    return anchor !== s.anchor || head !== s.head
+  } catch {
+    return false
+  }
+}
+
+/** Spec carried by this slice's decorations (also identifies them). */
+interface ShiftSpec {
+  nvShift: string
+  inline: boolean
+  /** An inline decoration that runs to the end of its textblock. */
+  atEnd: boolean
+}
+
+/** Signature of one decoration relative to its block: node decorations by start, inline ones by range. */
+function sigPart(spec: ShiftSpec, fromRel: number, toRel: number) {
+  return spec.inline ? `i${fromRel}:${spec.atEnd ? 'end' : toRel}:${spec.nvShift}` : `n${fromRel}:${spec.nvShift}`
+}
+
+/** Signature of the (mapped) decorations currently drawn on a block. */
+function signatureOf(decos: Decoration[], pos: number, end: number) {
+  return decos
+    .filter((d) => (d.spec as Partial<ShiftSpec>).nvShift !== undefined && d.from >= pos && d.to <= end + 1)
+    .sort((a, b) => a.from - b.from || Number((a.spec as ShiftSpec).inline) - Number((b.spec as ShiftSpec).inline))
+    .map((d) => {
+      const spec = d.spec as ShiftSpec
+      return sigPart(spec, d.from - pos, (spec.atEnd ? end : d.to) - pos)
+    })
+    .join(',')
+}
+
 /** Listeners for completed passes (the view uses them to scroll / hit-test). */
 type SnapshotListener = (s: LayoutSnapshot) => void
 
@@ -70,13 +126,17 @@ export class PaginationEngine {
   private epoch = 0
   private frame = 0
   private flushPending = false
-  private lastSigs: string[] = []
+  /** Per block node: signature of its decorations in the last pass (positions relative to the block). */
+  private lastSigs = new WeakMap<PMNode, string>()
+  /** Per block node: its stream top in the last pass. */
+  private prevTops = new Map<PMNode, number>()
   private lastKey = ''
   private snapshot: LayoutSnapshot | null = null
   private listeners = new Set<SnapshotListener>()
   private unsubs: (() => void)[] = []
   private destroyed = false
   private scrollAfterPass = false
+  private deferrals = 0
 
   constructor(private view: EditorView) {
     currentEngine = this // eslint-disable-line @typescript-eslint/no-this-alias
@@ -157,12 +217,31 @@ export class PaginationEngine {
     const view = this.view
     const root = view.dom as HTMLElement
     if (!root.isConnected) return
+    const internals = view as unknown as ViewInternals
+    // Never redraw under an IME composition or a pointer drag; their end updates the view again.
+    if (view.composing || internals.input?.mouseDown) {
+      this.schedule()
+      return
+    }
+    // Take in DOM changes the browser made but ProseMirror has not read yet (a Home / arrow key's
+    // native selection move whose selectionchange is still queued): dispatching on a stale state
+    // would write the old selection back into the DOM.
+    internals.domObserver?.forceFlush?.()
+    internals.domObserver?.flush()
+    if (this.deferrals < MAX_DEFERRALS && domSelectionPending(view)) {
+      this.deferrals++
+      this.schedule()
+      return
+    }
+    this.deferrals = 0
     const { book, layout } = useStore.getState()
     const geometry = resolvePageGeometry(book.trimSize, book.margins)
     const widthPx = `${geometry.contentWidth}px`
     if (root.style.width !== widthPx) root.style.width = widthPx
     if (!root.offsetWidth) return
     const key = `${geometry.contentWidth}|${this.epoch}`
+    const t0 = performance.now()
+    let measured = 0
     const scale = scaleOf(root)
     const rootTop = root.getBoundingClientRect().top
     const doc = view.state.doc
@@ -176,16 +255,37 @@ export class PaginationEngine {
     const blockDom: HTMLElement[] = []
     const blockMetrics: BlockMetrics[] = []
     const blockNodes: PMNode[] = []
+    // Stream tops: unchanged blocks keep their last top plus the shift of the changed blocks above
+    // them, so a keystroke reads two element boxes instead of one per block.
+    const prevTops = key === this.lastKey ? this.prevTops : new Map<PMNode, number>()
+    const nextTops = new Map<PMNode, number>()
+    let delta = 0
+    let anchor = true
     let b = 0
     doc.forEach((node, pos) => {
       const dom = view.nodeDOM(pos) as HTMLElement | null
       if (!dom || dom.nodeType !== 1) return
       let m = this.cache.get(node)
+      let fresh = false
       if (!m || m.key !== key) {
         m = measureBlock(view, node, pos, dom, scale, key)
         this.cache.set(node, m)
+        measured++
+        fresh = true
       }
-      const top = (dom.getBoundingClientRect().top - rootTop) / scale - ownShift(dom)
+      const known = fresh || nextTops.has(node) ? undefined : prevTops.get(node)
+      let top: number
+      if (known !== undefined && !anchor) top = known + delta
+      else {
+        top = (dom.getBoundingClientRect().top - rootTop) / scale - ownShift(dom)
+        if (known !== undefined) {
+          delta = top - known
+          anchor = false
+        } else anchor = true
+      }
+      // A node instance used twice in the document is never trusted for its top.
+      if (nextTops.has(node)) nextTops.set(node, Number.NaN)
+      else nextTops.set(node, top)
       const bb = blockBreakBefore(node, dom)
       m.units.forEach((u, k) => {
         units.push({ firstLine: lines.length, lineCount: u.lines.length, breakBefore: k === 0 ? bb : null, keepWithNext: u.keepWithNext })
@@ -200,6 +300,8 @@ export class PaginationEngine {
       blockNodes.push(node)
       b++
     })
+    for (const [n, t] of nextTops) if (Number.isNaN(t)) nextTops.delete(n)
+    this.prevTops = nextTops
 
     // Line index -> document position (relative to the doc), lazily.
     const lineToUnitLine = (li: number) => {
@@ -216,6 +318,7 @@ export class PaginationEngine {
       return blockPos[block] + lineStart(view, blockPos[block], blockDom[block], u, k, scale)
     }
 
+    const t1 = performance.now()
     // ---- 2. Break.
     const reserve = hasReservations()
       ? (pageIndex: number, s: number, e: number) =>
@@ -223,6 +326,7 @@ export class PaginationEngine {
       : undefined
     const ranges = breakPages(lines, units, { contentHeight: geometry.contentHeight, reserve })
 
+    const t2 = performance.now()
     // ---- 3. Place and decorate.
     const view0: BookView = layout.effectiveView
     const placement = placePages(ranges.length, geometry, view0)
@@ -237,24 +341,34 @@ export class PaginationEngine {
     })
 
     const decos: Decoration[] = []
-    const sigs: string[] = []
+    const current = paginationKey.getState(view.state) ?? DecorationSet.empty
+    const geometryChanged = key !== this.lastKey
+    let changed = geometryChanged
     let lineCursor = 0
     for (let bi = 0; bi < blockNodes.length; bi++) {
       const m = blockMetrics[bi]
+      const node = blockNodes[bi]
+      const pos = blockPos[bi]
       const nLines = m.units.reduce((s, u) => s + u.lines.length, 0)
       const first = lineCursor
       lineCursor += nLines
-      const sig: string[] = []
-      this.decorateBlock(blockNodes[bi], blockPos[bi], first, m, pageOfLine, offsets, (li) => posOfLine(li), decos, sig)
-      sigs.push(sig.join(','))
+      const sigParts: string[] = []
+      this.decorateBlock(node, pos, first, m, pageOfLine, offsets, (li) => posOfLine(li), decos, sigParts)
+      const sig = sigParts.join(',')
+      if (!changed) {
+        // An unchanged node compares with its last signature; an edited one with the decorations
+        // ProseMirror mapped through the edit (usually still right: then nothing is redrawn).
+        const last = this.lastSigs.get(node) ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1)
+        if (last !== sig) changed = true
+      }
+      this.lastSigs.set(node, sig)
     }
 
+    const t3 = performance.now()
     // ---- 4. Page model.
     const pages = this.pageModel(ranges, lines, units, unitRef, blockNodes, blockPos, unitNodes, posOfLine, doc.content.size)
 
-    const geometryChanged = key !== this.lastKey
-    const changed = geometryChanged || sigs.length !== this.lastSigs.length || sigs.some((s, i) => s !== this.lastSigs[i])
-    this.lastSigs = sigs
+    const t4 = performance.now()
     this.lastKey = key
     if (changed) {
       const tr = view.state.tr.setMeta(paginationKey, DecorationSet.create(doc, decos)).setMeta('addToHistory', false)
@@ -262,13 +376,30 @@ export class PaginationEngine {
       view.dispatch(tr)
     }
     this.scrollAfterPass = false
+    const t5 = performance.now()
 
     this.snapshot = { geometry, placement, ranges, pages, offsets, lines, pageOfLine }
     const store = useStore.getState()
     if (!samePages(store.layout.pages, pages)) store.layoutActions.setPages(pages)
     store.layoutActions.setCurrentPage(pageAt(pages, view.state.selection.head))
     this.listeners.forEach((l) => l(this.snapshot!))
+    const t6 = performance.now()
+    this.timings = {
+      measuredBlocks: measured,
+      startedAt: t0,
+      measureMs: t1 - t0,
+      breakMs: t2 - t1,
+      decorateMs: t3 - t2,
+      modelMs: t4 - t3,
+      dispatchMs: t5 - t4,
+      publishMs: t6 - t5,
+      totalMs: t6 - t0,
+      redecorated: changed,
+    }
   }
+
+  /** Durations of the last pass (diagnostics, perf reports). */
+  timings: Record<string, number | boolean> = {}
 
   /**
    * Decorations for one top-level block whose lines are `[first, first + lines)`.
@@ -287,10 +418,12 @@ export class PaginationEngine {
     out: Decoration[],
     sig: string[],
   ) {
-    const push = (from: number, to: number, dx: number, dy: number, inline: boolean) => {
+    const push = (from: number, to: number, dx: number, dy: number, inline: boolean, atEnd = false) => {
       const attrs = shiftAttrs(dx, dy)
-      out.push(inline ? Decoration.inline(from, to, attrs) : Decoration.node(from, to, attrs))
-      sig.push(`${inline ? 'i' : 'n'}${from - pos}:${to - pos}:${attrs.style}`)
+      const spec: ShiftSpec = { nvShift: attrs.style, inline, atEnd }
+      // The last moved lines of a paragraph end at its end: text typed there stays with them.
+      out.push(inline ? Decoration.inline(from, to, attrs, { ...spec, inclusiveEnd: atEnd }) : Decoration.node(from, to, attrs, spec))
+      sig.push(sigPart(spec, from - pos, to - pos))
     }
     // Line range of each unit (global line indices).
     const unitFirst: number[] = []
@@ -333,7 +466,7 @@ export class PaginationEngine {
           const from = posOfLine(li)
           const to = lj <= hi ? posOfLine(lj) : end
           const o = offsets[p]
-          if (to > from) push(from, to, o.dx - o0.dx, o.dy - o0.dy, true)
+          if (to > from) push(from, to, o.dx - o0.dx, o.dy - o0.dy, true, lj > hi)
           li = lj
         }
         return

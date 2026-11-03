@@ -7,6 +7,11 @@
   min-height: 100%;
   background: var(--desk-bg, transparent);
 }
+/* The find panel floats over the top of the editor region: keep the first page below it (same
+   contract as the continuous surface, see editor/find/find.css). */
+:root[data-find-open] .nv-desk {
+  padding-top: calc(var(--nv-find-panel-height, 0px) + 0.5rem);
+}
 .nv-sizer {
   position: relative;
   margin: 0 auto;

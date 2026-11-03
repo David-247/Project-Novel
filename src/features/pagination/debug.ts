@@ -16,5 +16,9 @@ export function getPaginationDebug() {
     reserved: snap ? snap.ranges.map((r) => r.reserved) : [],
     /** Number of measured line boxes in the stream. */
     lineCount: snap ? snap.lines.length : 0,
+    /** Durations of the last pass (ms) and what it did. */
+    lastPass: engine ? { ...engine.timings } : {},
+    /** Line range [start, end) of each page. */
+    lineRanges: snap ? snap.ranges.map((r) => [r.startLine, r.endLine] as const) : [],
   }
 }

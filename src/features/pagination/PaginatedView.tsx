@@ -91,6 +91,7 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     measure()
     const ro = new ResizeObserver(onScroll)
     ro.observe(scroller)
+    if (hostRef.current) ro.observe(hostRef.current)
     scroller.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       ro.disconnect()
@@ -188,17 +189,36 @@ function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement:
     extend ? TextSelection.create(view.state.doc, view.state.selection.anchor, sel.head) : sel,
   )
   view.dispatch(tr)
+  if (!extend) caretToPageStart(view, page.from)
   scrollToRow(row)
   return true
 }
 
 /**
- * A press on the desk, a margin or the space between paragraphs lands on the editor root, whose
- * layout box does not match where text is painted. Put the caret on the nearest line of the nearest
- * page instead of letting the browser guess from layout coordinates.
+ * A page that starts mid-paragraph starts at the same document position where the previous page's
+ * last line ends. ProseMirror draws a caret there at the end of that line (on the previous page);
+ * when the caret was put at a page start on purpose, draw it at the top of the page instead. Both
+ * DOM positions are equivalent for ProseMirror, so it keeps this one.
+ */
+function caretToPageStart(view: EditorView, pageFrom: number) {
+  const sel = view.state.selection
+  if (!sel.empty || sel.head !== pageFrom) return
+  try {
+    const { node, offset } = view.domAtPos(pageFrom, 1)
+    view.dom.ownerDocument.getSelection()?.collapse(node, offset)
+  } catch {
+    // Position without DOM (should not happen); leave the caret where ProseMirror put it.
+  }
+}
+
+/**
+ * A press on the desk, a margin or the space between paragraphs lands on the editor root (or on the
+ * empty part of a block whose last lines were moved to the next page), whose layout box does not
+ * match where text is painted. Put the caret on the nearest line of the nearest page instead of
+ * letting the browser guess from layout coordinates.
  */
 function placeCaretFromDesk(view: EditorView, e: MouseEvent): boolean {
-  if (e.button !== 0 || e.target !== view.dom) return false
+  if (e.button !== 0 || !(e.target instanceof Node) || !view.dom.contains(e.target)) return false
   const snap = getEngine()?.getSnapshot()
   if (!snap || !snap.pages.length) return false
   const root = view.dom as HTMLElement
@@ -218,6 +238,10 @@ function placeCaretFromDesk(view: EditorView, e: MouseEvent): boolean {
       page = i
     }
   }
+  // Inside a text block, a press on text (or anything but the bare root) is the browser's to handle.
+  const c0 = placement.content(page)
+  const inText = x >= c0.x && x <= c0.x + geometry.contentWidth && y >= c0.y && y <= c0.y + geometry.contentHeight
+  if (inText && e.target !== view.dom) return false
   while (page < pages.length - 1 && pages[page].isBlank) page++
   const r = ranges[page]
   let pos = pages[page].from
@@ -243,6 +267,12 @@ function placeCaretFromDesk(view: EditorView, e: MouseEvent): boolean {
   const sel = e.shiftKey ? TextSelection.create(view.state.doc, view.state.selection.anchor, near.head) : near
   view.dispatch(view.state.tr.setSelection(sel))
   view.focus()
+  if (sel.empty) caretToPageStart(view, pages[page].from)
   e.preventDefault()
+  // ProseMirror's own mousedown handling is skipped, but it must still know a click just happened:
+  // otherwise a caret moved to the document start soon after focusing (Home, Mod-Home) is taken
+  // for Chrome's focus bug and reverted.
+  const input = (view as unknown as { input?: { lastClick?: { time: number; x: number; y: number } } }).input
+  if (input?.lastClick) input.lastClick = { ...input.lastClick, time: Date.now(), x: e.clientX, y: e.clientY }
   return true
 }

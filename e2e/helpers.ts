@@ -71,5 +71,35 @@ export async function seedProject(
   await page.evaluate(([f, t]) => window.__nvE2E.addRecent(f, t), [folder, title] as const)
 }
 
-/** Editor document as ProseMirror-ish text blocks, for content comparisons. */
-export const editorHTML = (page: Page) => editor(page).evaluate((el) => el.innerHTML)
+/** Wait until the pagination engine has laid out the current document (no reflow pending) and painted. */
+export async function waitForLayout(page: Page): Promise<void> {
+  await page.waitForFunction(() => window.__nvE2E.paginationSettled())
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
+  await page.waitForFunction(() => window.__nvE2E.paginationSettled())
+}
+
+/**
+ * Editor document markup, for content comparisons. Page placement is view state, not content: the
+ * pagination offsets (class nv-shift, left/top, data-nv-dy, and the inline wrappers of lines moved
+ * to a later page) are removed after the layout settled.
+ */
+export async function editorHTML(page: Page): Promise<string> {
+  await waitForLayout(page)
+  return editor(page).evaluate((el) => {
+    const copy = el.cloneNode(true) as HTMLElement
+    for (const n of Array.from(copy.querySelectorAll<HTMLElement>('.nv-shift'))) {
+      if (n.tagName === 'SPAN' && n.attributes.length === 3) {
+        n.replaceWith(...Array.from(n.childNodes))
+        continue
+      }
+      n.classList.remove('nv-shift')
+      if (!n.classList.length) n.removeAttribute('class')
+      n.removeAttribute('data-nv-dy')
+      n.style.removeProperty('left')
+      n.style.removeProperty('top')
+      if (!n.getAttribute('style')) n.removeAttribute('style')
+    }
+    copy.normalize()
+    return copy.innerHTML
+  })
+}

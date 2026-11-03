@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getSchema } from '@tiptap/core'
 import Document from '@tiptap/extension-document'
@@ -48,7 +48,10 @@ const schema = getSchema([Document, Paragraph, Text, Heading, PageBreakFixture])
 
 describe('header / footer page slots', () => {
   const cleanups: (() => void)[] = []
-  afterEach(() => cleanups.splice(0).forEach((c) => c()))
+  afterEach(() => {
+    cleanups.splice(0).forEach((c) => c())
+    cleanup()
+  })
 
   it('renders registered slots in every rendered page with the page model', () => {
     cleanups.push(

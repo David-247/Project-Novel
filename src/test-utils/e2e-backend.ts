@@ -154,6 +154,11 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     paginationSettled: () => getPaginationDebug().settled,
     /** Px reserved at the bottom of each page. */
     paginationReserved: () => getPaginationDebug().reserved,
+    /** Engine internals for diagnostics: line count and the line range of each page. */
+    paginationLines: () => {
+      const d = getPaginationDebug()
+      return { lineCount: d.lineCount, lineRanges: d.lineRanges, lastPass: d.lastPass }
+    },
     /** The published layout model (store `layout` slice). */
     layout: () => {
       const l = useStore.getState().layout
