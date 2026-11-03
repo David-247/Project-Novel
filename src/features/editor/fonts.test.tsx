@@ -57,10 +57,10 @@ describe('FontFamilyPicker', () => {
         <NovelEditor />
       </>,
     )
-    const select = screen.getByRole('combobox', { name: 'Font' })
+    const select = screen.getByRole('combobox', { name: 'Font family' })
     await waitFor(() => expect(select).toBeEnabled())
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['System default'])
-    expect(select).toHaveAttribute('title')
+    expect(select).toHaveAttribute('data-control-id', 'toolbar.fontFamily')
   })
 
   it('applies a selected installed font to the selection and can reset it', async () => {
@@ -70,7 +70,7 @@ describe('FontFamilyPicker', () => {
         <NovelEditor />
       </>,
     )
-    const select = screen.getByRole('combobox', { name: 'Font' })
+    const select = screen.getByRole('combobox', { name: 'Font family' })
     await screen.findByRole('option', { name: 'Georgia' })
     const ed = getEditor()!
     act(() => {
@@ -81,7 +81,7 @@ describe('FontFamilyPicker', () => {
       fireEvent.change(select, { target: { value: 'Georgia' } })
     })
     const mark = ed.getJSON().content![0].content![0].marks![0]
-    expect(mark).toEqual({ type: 'textStyle', attrs: { fontFamily: fontFamilyCss('Georgia') } })
+    expect(mark).toEqual({ type: 'textStyle', attrs: { fontFamily: fontFamilyCss('Georgia'), fontSize: null } })
     await waitFor(() => expect(select).toHaveValue('Georgia'))
 
     act(() => {

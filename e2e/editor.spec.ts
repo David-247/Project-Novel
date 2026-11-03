@@ -8,7 +8,7 @@ test('user types into the editor in the OS system font', async ({ page }) => {
   await expect(editor).toContainText('Hello novel')
   const font = await editor.evaluate((el) => getComputedStyle(el).fontFamily)
   expect(font).toMatch(/^system-ui/)
-  await expect(page.getByRole('combobox', { name: 'Font' })).toBeEnabled()
+  await expect(page.getByRole('combobox', { name: 'Font family' })).toBeEnabled()
 })
 
 test('100k-word paste stays responsive', async ({ page }) => {

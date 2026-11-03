@@ -1,7 +1,7 @@
 // Public interface of the "editor" slice. Other slices may import ONLY from here.
 export { NovelEditor } from './NovelEditor'
-export { FontFamilyPicker } from './FontFamilyPicker'
-export type { FontFamilyPickerProps } from './FontFamilyPicker'
+export { FontFamilyPicker, Toolbar, ToolbarItem, TOOLBAR_CONTROLS } from './toolbar'
+export type { FontFamilyPickerProps, ToolbarProps, ToolbarControlMeta, ToolbarControlKey } from './toolbar'
 export { getDocJSON, setDocJSON, isDirty, markClean, onDocChange, getEditor } from './controller'
 export type { DocChangeListener } from './controller'
 export { createEditorExtensions } from './extensions'

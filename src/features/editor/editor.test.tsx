@@ -34,6 +34,17 @@ const story = {
   ],
 }
 
+// Block attributes added by the formatting toolbar (task 3) appear with their defaults
+// once a doc has been through the live schema.
+const BLOCK_DEFAULTS = { textAlign: null, lineHeight: null, paragraphSpacing: null, indent: 0 }
+const storyLoaded = {
+  type: 'doc',
+  content: [
+    { ...story.content[0], attrs: { ...story.content[0].attrs, ...BLOCK_DEFAULTS } },
+    { ...story.content[1], attrs: { ...BLOCK_DEFAULTS } },
+  ],
+}
+
 describe('NovelEditor', () => {
   it('mounts an editable manuscript in the OS system font by default', () => {
     mount()
@@ -56,7 +67,7 @@ describe('NovelEditor', () => {
   it('handles the empty doc and tracks edits in the store without the doc JSON', () => {
     const ed = mount()
     expect(useStore.getState().editor.isEmpty).toBe(true)
-    expect(getDocJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+    expect(getDocJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph', attrs: BLOCK_DEFAULTS }] })
     const cb = vi.fn()
     const off = onDocChange(cb)
     const before = useStore.getState().editor.docVersion
@@ -88,7 +99,7 @@ describe('NovelEditor', () => {
     const off = onDocChange(cb)
 
     act(() => setDocJSON(story))
-    expect(getDocJSON()).toEqual(story)
+    expect(getDocJSON()).toEqual(storyLoaded)
     expect(isDirty()).toBe(false)
     expect(useStore.getState().editor.isEmpty).toBe(false)
     expect(cb).not.toHaveBeenCalled()
@@ -101,7 +112,7 @@ describe('NovelEditor', () => {
     setDocJSON(story)
     expect(getDocJSON()).toEqual(story)
     mount()
-    expect(getDocJSON()).toEqual(story)
+    expect(getDocJSON()).toEqual(storyLoaded)
     expect(isDirty()).toBe(false)
   })
 
