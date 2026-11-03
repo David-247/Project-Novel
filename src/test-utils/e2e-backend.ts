@@ -17,6 +17,7 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { autosaveNow } from '@/features/storage'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
+import { getEditor } from '@/features/editor'
 import { useStore } from '@/shared/store'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
 
@@ -147,6 +148,15 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     autosaveNow: () => autosaveNow(),
     /** Editor document version (bumps on every document change; style edits must not bump it). */
     docVersion: () => useStore.getState().editor.docVersion,
+    /**
+     * Make the editor read the DOM selection now. ProseMirror picks up a click / End-key caret move
+     * on the async `selectionchange` event; a test that presses the next key (or changes a toolbar
+     * select) within the same task can otherwise act on the previous selection under CPU load.
+     */
+    syncSelection: () => {
+      const view = getEditor()?.view as unknown as { domObserver?: { flush(): void } } | undefined
+      view?.domObserver?.flush()
+    },
     /** book.styles as stored (overrides only). */
     bookStyles: () => useStore.getState().book.styles,
   }

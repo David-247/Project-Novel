@@ -1,10 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
-import { launch } from './helpers'
+import { launch, newProject, openRecent, readFile, saveStatus } from './helpers'
 
 const ctl = (page: Page, id: string) => page.locator(`[data-control-id="${id}"]`)
 const picker = (page: Page) => ctl(page, 'styles.picker')
 /** CSS, not role: an open modal hides the manuscript from the accessibility tree. */
 const manuscript = (page: Page) => page.locator('main [contenteditable="true"]')
+/** Let the editor take the caret position from a click or a native caret key before the next action. */
+const settle = (page: Page) => page.evaluate(() => window.__nvE2E.syncSelection())
 const px = (v: string) => parseFloat(v)
 
 test('style picker, shortcuts, Enter chaining, undo and Clear direct formatting', async ({ page }) => {
@@ -26,6 +28,7 @@ test('style picker, shortcuts, Enter chaining, undo and Clear direct formatting'
   await title.click()
   await expect(ed).toBeFocused()
   await page.keyboard.press('End')
+  await settle(page)
   await page.keyboard.press('Enter')
   await page.keyboard.type('It began at the harbor.')
   await expect(picker(page)).toHaveValue('first-paragraph')
@@ -70,6 +73,7 @@ test('Modify style dialog: live preview, and the change restyles every chapter w
   await expect(titles).toHaveCount(3)
   const sizeBefore = px(await titles.first().evaluate((el) => getComputedStyle(el).fontSize))
   await titles.nth(1).click()
+  await settle(page)
 
   await ctl(page, 'styles.edit').click()
   const dialog = page.getByRole('dialog', { name: 'Modify style: Chapter Title' })
@@ -130,4 +134,106 @@ test('Manage styles: create, rename, apply and delete a custom style (with confi
   await expect(dialog.locator('[data-style-row="custom-1"]')).toHaveCount(0)
   await expect(ed.locator('p[data-style="block-quote"]')).toHaveText('Dear Mara,')
   expect(await page.evaluate(() => window.__nvE2E.bookStyles())).toEqual({})
+})
+
+/** Manage styles > select `basedOn` > New style > name it `name` > close. The new id is custom-1. */
+async function createCustomStyle(page: Page, basedOn: string, name: string) {
+  await ctl(page, 'styles.manage').click()
+  const dialog = page.getByRole('dialog', { name: 'Manage styles' })
+  await dialog.locator(`[data-style-row="${basedOn}"]`).click()
+  await dialog.locator('[data-control-id="styles.manage.new"]').click()
+  await dialog.locator('[data-control-id="styles.manage.renameField"]').fill(name)
+  await page.keyboard.press('Enter')
+  await expect(dialog.locator('[data-style-row="custom-1"]')).toHaveText(new RegExp(name))
+  await dialog.locator('[data-control-id="dialog.close"]').click()
+  await expect(dialog).toBeHidden()
+}
+
+test('a deleted style brought back by redo renders like Body and shows as missing in the picker', async ({ page }) => {
+  await launch(page)
+  const ed = manuscript(page)
+  await ed.click()
+  await page.keyboard.type('First line.')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Dear Mara,')
+  const bodyIndent = await ed.locator('p').first().evaluate((el) => getComputedStyle(el).textIndent)
+  expect(px(bodyIndent)).toBeGreaterThan(0)
+  await createCustomStyle(page, 'block-quote', 'Letter')
+
+  const letter = ed.locator('p').nth(1)
+  await letter.click()
+  await settle(page)
+  await picker(page).selectOption({ label: 'Letter' })
+  await expect(letter).toHaveAttribute('data-style', 'custom-1')
+  await expect(letter).toHaveCSS('text-indent', '0px')
+  await letter.click()
+  await settle(page)
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(letter).toHaveAttribute('data-style', 'body')
+
+  // Delete the (now unused) style, then redo the application: the id comes back without a rule.
+  await ctl(page, 'styles.manage').click()
+  const dialog = page.getByRole('dialog', { name: 'Manage styles' })
+  await dialog.locator('[data-style-row="custom-1"]').click()
+  await dialog.locator('[data-control-id="styles.manage.delete"]').click()
+  await dialog.locator('[data-control-id="styles.manage.deleteConfirm"]').click()
+  await dialog.locator('[data-control-id="dialog.close"]').click()
+  await expect(dialog).toBeHidden()
+  await letter.click()
+  await settle(page)
+  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await expect(letter).toHaveAttribute('data-style', 'custom-1')
+  await expect(letter).toHaveCSS('text-indent', bodyIndent)
+  await expect(picker(page).locator('option:checked')).toHaveText('Body (missing style)')
+})
+
+test('custom styles and a modified Chapter Title persist through save, close and reopen (book.json)', async ({ page }) => {
+  await launch(page)
+  await newProject(page, '/projects/Styled')
+  const ed = manuscript(page)
+  await ed.click()
+  await page.keyboard.type('Chapter One')
+  await page.keyboard.press('ControlOrMeta+Alt+1')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Dear Mara,')
+
+  // Modify Chapter Title.
+  await ed.locator('h1').click()
+  await settle(page)
+  await ctl(page, 'styles.edit').click()
+  const modify = page.getByRole('dialog', { name: 'Modify style: Chapter Title' })
+  await modify.locator('[data-control-id="styles.field.fontSize"]').fill('28')
+  await modify.locator('[data-control-id="styles.modify.save"]').click()
+  await expect(modify).toBeHidden()
+
+  // A custom style, applied to the paragraph.
+  await createCustomStyle(page, 'epigraph', 'Letter')
+  await ed.locator('p').click()
+  await settle(page)
+  // (Enter after the Chapter Title made it a First Paragraph.)
+  await expect(picker(page)).toHaveValue('first-paragraph')
+  await picker(page).selectOption({ label: 'Letter' })
+  await expect(ed.locator('p')).toHaveAttribute('data-style', 'custom-1')
+  await expect(saveStatus(page)).toHaveText('Styled: Unsaved changes')
+  const titleSize = await ed.locator('h1').evaluate((el) => getComputedStyle(el).fontSize)
+
+  await ed.locator('p').click()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(saveStatus(page)).toHaveText('Styled: Saved')
+  const book = JSON.parse((await readFile(page, '/projects/Styled/book.json'))!)
+  expect(book.styles).toEqual({
+    'chapter-title': { fontSize: 28 },
+    'custom-1': { name: 'Letter', kind: 'paragraph', basedOn: 'epigraph', builtIn: false },
+  })
+
+  // Close and reopen (relaunch: fresh app state, same disk).
+  await page.reload()
+  await launch(page)
+  await openRecent(page, '/projects/Styled')
+  await expect(saveStatus(page)).toContainText('Styled:')
+  await expect(ed.locator('p[data-style="custom-1"]')).toHaveText('Dear Mara,')
+  await expect(ed.locator('p')).toHaveCSS('font-style', 'italic')
+  await expect(ed.locator('h1[data-style="chapter-title"]')).toHaveCSS('font-size', titleSize)
+  await ed.locator('p').click()
+  await expect(picker(page).locator('option:checked')).toHaveText('Letter')
 })

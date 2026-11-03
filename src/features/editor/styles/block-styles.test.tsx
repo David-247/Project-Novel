@@ -1,8 +1,9 @@
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { TextSelection } from '@tiptap/pm/state'
 import { useStore } from '@/shared/store'
-import { getDocJSON, getEditor, NovelEditor, setDocJSON } from '../index'
+import { getDocJSON, getEditor, NovelEditor, setDocJSON, Toolbar } from '../index'
+import { readToolbarState } from '../toolbar/toolbar-state'
 import type { Editor, JSONContent } from '../index'
 import { installLayoutPolyfills } from '../jsdom-polyfills.test-util'
 import { createStyle, deleteStyle, duplicateStyle, renameStyle, saveStyle, getStyleDefinition, ownDef } from './actions'
@@ -155,6 +156,71 @@ describe('direct formatting', () => {
     expect(after.attrs).toMatchObject({ styleId: 'block-quote', textAlign: null, lineHeight: null })
     expect(blocks(ed)[0].getAttribute('style')).toBeNull()
     expect(blocks(ed)[0].querySelector('strong')).toBeNull()
+  })
+})
+
+describe('Clear direct formatting', () => {
+  it('is its own undo step (typing just before it survives the undo)', () => {
+    const ed = mount([p('Hello', { textAlign: 'center' })])
+    caretAtEndOf(ed, 0)
+    run(() => ed.commands.insertContent(' there'))
+    run(() => ed.commands.clearDirectFormatting())
+    expect(ed.state.doc.child(0).attrs.textAlign).toBeNull()
+    run(() => ed.commands.undo())
+    expect(ed.state.doc.child(0).attrs.textAlign).toBe('center')
+    expect(ed.state.doc.textContent).toBe('Hello there')
+  })
+
+  it('with a selection, removes marks only inside it; with a caret, from the whole block', () => {
+    const bold = (text: string) => ({ type: 'text', text, marks: [{ type: 'bold' }] })
+    const ed = mount([{ type: 'paragraph', content: [bold('one two three')] }])
+    // Select "two" (positions: paragraph opens at 0, text starts at 1).
+    run(() => ed.commands.setTextSelection({ from: 5, to: 8 }))
+    run(() => ed.commands.clearDirectFormatting())
+    const parts = () => {
+      const out: Array<[string, boolean]> = []
+      ed.state.doc.child(0).forEach((n) => void out.push([n.text!, n.marks.length > 0]))
+      return out
+    }
+    expect(parts()).toEqual([['one ', true], ['two', false], [' three', true]])
+    caretAtEndOf(ed, 0)
+    run(() => ed.commands.clearDirectFormatting())
+    expect(parts()).toEqual([['one two three', false]])
+  })
+})
+
+describe('missing styles', () => {
+  it('a style id brought back by redo after a delete renders with the Body fallback and shows as missing', () => {
+    render(<Toolbar loadFonts={async () => []} />)
+    const ed = mount([p('Dear Mara,')])
+    let id = ''
+    run(() => (id = createStyle('block-quote', 'Letter')))
+    caretAtEndOf(ed, 0)
+    run(() => ed.commands.setBlockStyle(id))
+    run(() => ed.commands.undo())
+    run(() => deleteStyle(id))
+    run(() => ed.commands.redo())
+    expect(blocks(ed)[0].dataset.style).toBe(id)
+    expect(readToolbarState(ed)).toMatchObject({ styleId: id, fallbackStyleId: 'body' })
+    const picker = document.querySelector<HTMLSelectElement>('[data-control-id="styles.picker"]')!
+    expect(picker.value).toBe(id)
+    expect(picker.selectedOptions[0].textContent).toBe('Body (missing style)')
+    const sheet = document.querySelector('[data-testid="book-styles"]')!.textContent!
+    expect(sheet.split('\n')[0]).toMatch(/^\.novel-editor-content :where\(p\)\[data-style\] \{ font-size: calc\(11 /)
+    expect(sheet).not.toContain(`[data-style="${id}"]`)
+  })
+
+  it('locks the Kind of a custom style while paragraphs use it', () => {
+    render(<Toolbar loadFonts={async () => []} />)
+    const ed = mount([p('Dear Mara,')])
+    let id = ''
+    run(() => (id = createStyle('block-quote', 'Letter')))
+    caretAtEndOf(ed, 0)
+    run(() => ed.commands.setBlockStyle(id))
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="styles.edit"]')!))
+    const kind = document.querySelector<HTMLSelectElement>('[data-control-id="styles.field.kind"]')!
+    expect(kind.disabled).toBe(true)
+    expect(document.querySelector('[data-testid="hint-kind"]')!.textContent).toBe('Fixed while 1 paragraph uses this style.')
   })
 })
 
