@@ -1,9 +1,9 @@
 // Fails if a production bundle (default dist/) contains the e2e-only fake Tauri backend.
-// Run after `pnpm build`. The markers exist only in src/test-utils/e2e-backend.ts.
+// Run after `pnpm build`. The markers exist only in src/test-utils/e2e-backend.ts and fake-tauri-core.ts.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-const MARKERS = ['nv-e2e-fake-fs', '__nvE2E', '[e2e-backend]', 'installE2EBackend']
+const MARKERS = ['nv-e2e-fake-fs', '__nvE2E', '[e2e-backend]', 'installE2EBackend', 'no message dialog in this fake']
 const root = process.argv[2] ?? 'dist'
 
 function* walk(dir) {
