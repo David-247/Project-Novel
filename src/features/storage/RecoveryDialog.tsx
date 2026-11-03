@@ -1,5 +1,5 @@
 import { useStore } from '@/shared/store'
-import { Button, Dialog } from '@/shared/ui'
+import { Button, Dialog, Tooltip } from '@/shared/ui'
 import { discardRecovery, openProject, restoreRecovery } from './project'
 
 /** "Today at 14:05" style time for a snapshot (falls back to the raw string). */
@@ -32,21 +32,26 @@ export function RecoveryDialog() {
         title="Recover unsaved work?"
         description={`Novel closed unexpectedly while "${prompt.name}" had unsaved changes. Reopen it to recover them?`}
         closeLabel="Not now"
+        closeControlId="recovery.reopenClose"
         footer={
           <>
-            <Button data-control-id="recovery.dismiss" onClick={dismiss}>
-              Not Now
-            </Button>
-            <Button
-              variant="primary"
-              data-control-id="recovery.reopen"
-              onClick={() => {
-                dismiss()
-                void openProject(prompt.path)
-              }}
-            >
-              Reopen Project
-            </Button>
+            <Tooltip>
+              <Button data-control-id="recovery.dismiss" onClick={dismiss}>
+                Not Now
+              </Button>
+            </Tooltip>
+            <Tooltip>
+              <Button
+                variant="primary"
+                data-control-id="recovery.reopen"
+                onClick={() => {
+                  dismiss()
+                  void openProject(prompt.path)
+                }}
+              >
+                Reopen Project
+              </Button>
+            </Tooltip>
           </>
         }
       />
@@ -65,14 +70,19 @@ export function RecoveryDialog() {
           : undefined
       }
       closeLabel="Decide later"
+      closeControlId="recovery.decideLater"
       footer={
         <>
-          <Button variant="danger" data-control-id="recovery.discard" onClick={() => void discardRecovery()}>
-            Discard Backup
-          </Button>
-          <Button variant="primary" data-control-id="recovery.restore" onClick={() => void restoreRecovery()}>
-            Restore
-          </Button>
+          <Tooltip>
+            <Button variant="danger" data-control-id="recovery.discard" onClick={() => void discardRecovery()}>
+              Discard Backup
+            </Button>
+          </Tooltip>
+          <Tooltip>
+            <Button variant="primary" data-control-id="recovery.restore" onClick={() => void restoreRecovery()}>
+              Restore
+            </Button>
+          </Tooltip>
         </>
       }
     />

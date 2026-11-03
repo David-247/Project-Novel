@@ -2,9 +2,10 @@ import type { Editor } from '@tiptap/core'
 import { Fragment, useCallback, useSyncExternalStore } from 'react'
 import type { MouseEvent, ReactElement, ReactNode } from 'react'
 import { useStore } from '@/shared/store'
-import { IconButton } from '@/shared/ui'
+import { ariaKeyshortcuts, IconButton, Tooltip } from '@/shared/ui'
+import { HISTORY_CONTROLS } from '../find/controls'
 import { RedoIcon, UndoIcon } from '../find/icons'
-import { modShortcut, useEditorInstance } from '../find/use-editor-instance'
+import { useEditorInstance } from '../find/use-editor-instance'
 
 function snapshot(editor: Editor | null): string {
   if (!editor || editor.isDestroyed) return '00'
@@ -62,26 +63,30 @@ export function HistoryButtons({ wrap = identity }: HistoryButtonsProps = {}) {
   }
 
   const undo = (
-    <IconButton
-      label="Undo"
-      data-control-id="history.undo"
-      aria-keyshortcuts={modShortcut('Z')}
-      disabled={!canUndo}
-      onClick={(e) => run(e, 'undo')}
-    >
-      <UndoIcon />
-    </IconButton>
+    <Tooltip>
+      <IconButton
+        label={HISTORY_CONTROLS.undo.label}
+        data-control-id={HISTORY_CONTROLS.undo.id}
+        aria-keyshortcuts={ariaKeyshortcuts(HISTORY_CONTROLS.undo.shortcut)}
+        disabled={!canUndo}
+        onClick={(e) => run(e, 'undo')}
+      >
+        <UndoIcon />
+      </IconButton>
+    </Tooltip>
   )
   const redo = (
-    <IconButton
-      label="Redo"
-      data-control-id="history.redo"
-      aria-keyshortcuts={`${modShortcut('Z', true)} ${modShortcut('Y')}`}
-      disabled={!canRedo}
-      onClick={(e) => run(e, 'redo')}
-    >
-      <RedoIcon />
-    </IconButton>
+    <Tooltip>
+      <IconButton
+        label={HISTORY_CONTROLS.redo.label}
+        data-control-id={HISTORY_CONTROLS.redo.id}
+        aria-keyshortcuts={ariaKeyshortcuts(HISTORY_CONTROLS.redo.shortcut)}
+        disabled={!canRedo}
+        onClick={(e) => run(e, 'redo')}
+      >
+        <RedoIcon />
+      </IconButton>
+    </Tooltip>
   )
   return (
     <>

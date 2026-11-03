@@ -75,7 +75,6 @@ export function ToggleButton({
       type={type}
       aria-pressed={pressed}
       aria-label={label}
-      data-state={pressed ? 'on' : 'off'}
       onClick={(e) => {
         onClick?.(e)
         if (!e.defaultPrevented) onPressedChange(!pressed)
@@ -89,6 +88,8 @@ export function ToggleButton({
         className,
       )}
       {...rest}
+      // After rest: wrappers (e.g. a Tooltip trigger) must not override the pressed state.
+      data-state={pressed ? 'on' : 'off'}
     />
   )
 }

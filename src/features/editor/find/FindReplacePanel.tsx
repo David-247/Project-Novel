@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useStore } from '@/shared/store'
-import { Button, Checkbox, IconButton, Panel, StatusText, TextInput, cn } from '@/shared/ui'
+import { Button, Checkbox, IconButton, Panel, StatusText, TextInput, Tooltip, cn, detectPlatform } from '@/shared/ui'
+import { FIND_CONTROLS } from './controls'
 import { closeFind, findNext, findPrevious, openFind, replaceAll, replaceCurrent, startFindEngine } from './engine'
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from './icons'
-import { IS_MAC } from './use-editor-instance'
 import './find.css'
 
 export const FIND_PANEL_ID = 'novel-find-panel'
@@ -12,6 +12,8 @@ export const FIND_PANEL_ID = 'novel-find-panel'
 export interface FindReplacePanelProps {
   className?: string
 }
+
+const IS_MAC = detectPlatform() === 'mac'
 
 function isModF(e: KeyboardEvent): boolean {
   const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
@@ -125,81 +127,99 @@ function OpenPanel({ className }: FindReplacePanelProps) {
       className={cn('flex w-full max-w-[36rem] flex-col gap-2', className)}
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <TextInput
-          ref={findRef}
-          aria-label="Find"
-          placeholder="Find"
-          data-control-id="find.query"
-          aria-keyshortcuts="Enter Shift+Enter Escape"
-          value={query}
-          onChange={(e) => actions.setQuery(e.target.value)}
-          onKeyDown={onFindKeyDown}
-          className="w-auto min-w-[10rem] flex-1"
-        />
+        <Tooltip>
+          <TextInput
+            ref={findRef}
+            aria-label={FIND_CONTROLS.query.label}
+            placeholder={FIND_CONTROLS.query.label}
+            data-control-id={FIND_CONTROLS.query.id}
+            aria-keyshortcuts="Enter Shift+Enter Escape"
+            value={query}
+            onChange={(e) => actions.setQuery(e.target.value)}
+            onKeyDown={onFindKeyDown}
+            className="w-auto min-w-[10rem] flex-1"
+          />
+        </Tooltip>
         <StatusText live className="min-w-[5.5rem] text-center" data-testid="find-status">
           {status}
         </StatusText>
         <div className="flex items-center gap-0.5">
-          <IconButton
-            label="Previous match"
-            data-control-id="find.previous"
-            aria-keyshortcuts="Shift+Enter"
-            disabled={!hasMatches}
-            onClick={() => act(findPrevious)}
-          >
-            <ChevronUpIcon />
-          </IconButton>
-          <IconButton
-            label="Next match"
-            data-control-id="find.next"
-            aria-keyshortcuts="Enter"
-            disabled={!hasMatches}
-            onClick={() => act(findNext)}
-          >
-            <ChevronDownIcon />
-          </IconButton>
-          <IconButton
-            label="Close find and replace"
-            data-control-id="find.close"
-            aria-keyshortcuts="Escape"
-            onClick={() => closeFind()}
-          >
-            <CloseIcon />
-          </IconButton>
+          <Tooltip>
+            <IconButton
+              label={FIND_CONTROLS.previous.label}
+              data-control-id={FIND_CONTROLS.previous.id}
+              aria-keyshortcuts="Shift+Enter"
+              disabled={!hasMatches}
+              onClick={() => act(findPrevious)}
+            >
+              <ChevronUpIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip>
+            <IconButton
+              label={FIND_CONTROLS.next.label}
+              data-control-id={FIND_CONTROLS.next.id}
+              aria-keyshortcuts="Enter"
+              disabled={!hasMatches}
+              onClick={() => act(findNext)}
+            >
+              <ChevronDownIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip>
+            <IconButton
+              label={FIND_CONTROLS.close.label}
+              data-control-id={FIND_CONTROLS.close.id}
+              aria-keyshortcuts="Escape"
+              onClick={() => closeFind()}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Tooltip>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <TextInput
-          aria-label="Replace with"
-          placeholder="Replace with"
-          data-control-id="find.replacement"
-          value={replacement}
-          onChange={(e) => actions.setReplacement(e.target.value)}
-          onKeyDown={onReplaceKeyDown}
-          className="w-auto min-w-[10rem] flex-1"
-        />
-        <Button aria-label="Replace" data-control-id="find.replace" disabled={!hasMatches} onClick={() => act(replaceCurrent)}>
-          Replace
-        </Button>
-        <Button aria-label="Replace all" data-control-id="find.replaceAll" disabled={!hasMatches} onClick={() => setReplaced({ count: act(replaceAll), key: searchKey })}>
-          Replace all
-        </Button>
+        <Tooltip>
+          <TextInput
+            aria-label={FIND_CONTROLS.replacement.label}
+            placeholder={FIND_CONTROLS.replacement.label}
+            data-control-id={FIND_CONTROLS.replacement.id}
+            value={replacement}
+            onChange={(e) => actions.setReplacement(e.target.value)}
+            onKeyDown={onReplaceKeyDown}
+            className="w-auto min-w-[10rem] flex-1"
+          />
+        </Tooltip>
+        <Tooltip>
+          <Button aria-label={FIND_CONTROLS.replace.label} data-control-id={FIND_CONTROLS.replace.id} disabled={!hasMatches} onClick={() => act(replaceCurrent)}>
+            Replace
+          </Button>
+        </Tooltip>
+        <Tooltip>
+          <Button aria-label={FIND_CONTROLS.replaceAll.label} data-control-id={FIND_CONTROLS.replaceAll.id} disabled={!hasMatches} onClick={() => setReplaced({ count: act(replaceAll), key: searchKey })}>
+            Replace all
+          </Button>
+        </Tooltip>
       </div>
       <div className="flex flex-wrap items-center gap-x-4">
-        <Checkbox
-          label="Match case"
-          aria-label="Match case"
-          data-control-id="find.caseSensitive"
-          checked={caseSensitive}
-          onCheckedChange={actions.setCaseSensitive}
-        />
-        <Checkbox
-          label="Whole word"
-          aria-label="Whole word"
-          data-control-id="find.wholeWord"
-          checked={wholeWord}
-          onCheckedChange={actions.setWholeWord}
-        />
+        <Tooltip wrap>
+          <Checkbox
+            label={FIND_CONTROLS.caseSensitive.label}
+            aria-label={FIND_CONTROLS.caseSensitive.label}
+            data-control-id={FIND_CONTROLS.caseSensitive.id}
+            checked={caseSensitive}
+            onCheckedChange={actions.setCaseSensitive}
+          />
+        </Tooltip>
+        <Tooltip wrap>
+          <Checkbox
+            label={FIND_CONTROLS.wholeWord.label}
+            aria-label={FIND_CONTROLS.wholeWord.label}
+            data-control-id={FIND_CONTROLS.wholeWord.id}
+            checked={wholeWord}
+            onCheckedChange={actions.setWholeWord}
+          />
+        </Tooltip>
       </div>
     </Panel>
   )
