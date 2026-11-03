@@ -78,7 +78,7 @@ describe('storage + real editor (composition root adapter)', () => {
     expect(ok).toBe(true)
     const saved = JSON.parse(backend.files.get('/books/novel/manuscript.json')!)
     expect(JSON.stringify(saved)).toContain('It was a dark night. The rain fell.')
-    expect(saved.content[0]).toMatchObject(manuscript.content[0])
+    expect(saved.content[0]).toEqual(manuscript.content[0])
     expect(useStore.getState().editor.dirty).toBe(false)
     expect(screen.getByRole('status')).toHaveTextContent('My Novel: Saved')
     expect(backend.messages).toEqual([])

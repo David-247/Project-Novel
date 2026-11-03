@@ -48,7 +48,9 @@ exists. Unknown extra fields are ignored.
 
 The whole manuscript as a single ProseMirror document in JSON form (`editor.state.doc.toJSON()`), written compactly
 (no indentation). The root node has `"type": "doc"`; nodes have `type` and optional `attrs`, `content`, `marks` and
-`text`.
+`text`. Paragraph/heading layout attributes (`textAlign`, `lineHeight`, `paragraphSpacing`, `indent`,
+`firstLineIndent`) are written only when they differ from their defaults (`null`, or `0` for `indent`); a missing
+one means the default.
 
 ```json
 {"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"It was a dark and stormy night."}]}]}

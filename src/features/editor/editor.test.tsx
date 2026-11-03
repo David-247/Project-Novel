@@ -35,16 +35,9 @@ const story = {
   ],
 }
 
-// Block attributes added by the formatting toolbar (task 3) appear with their defaults
-// once a doc has been through the live schema.
-const BLOCK_DEFAULTS = { textAlign: null, lineHeight: null, paragraphSpacing: null, indent: 0, firstLineIndent: null }
-const storyLoaded = {
-  type: 'doc',
-  content: [
-    { ...story.content[0], attrs: { ...story.content[0].attrs, ...BLOCK_DEFAULTS } },
-    { ...story.content[1], attrs: { ...BLOCK_DEFAULTS } },
-  ],
-}
+// Block layout attributes (formatting toolbar) are left out of getDocJSON() while they have
+// their defaults, so a loaded doc comes back exactly as it was written.
+const storyLoaded = story
 
 describe('NovelEditor', () => {
   it('mounts an editable manuscript in the OS system font by default', () => {
@@ -68,6 +61,19 @@ describe('NovelEditor', () => {
     expect(screen.getByTestId('writing-surface')).not.toHaveAttribute('aria-busy')
   })
 
+  it('getDocJSON keeps non-default block attrs and drops default ones (heading level is kept)', () => {
+    const ed = mount()
+    act(() => {
+      setDocJSON(story)
+      ed.chain().setTextSelection(1).setTextAlign('center').run()
+    })
+    const doc = getDocJSON()
+    expect(doc.content![0].attrs).toEqual({ level: 1, textAlign: 'center' })
+    expect(doc.content![1].attrs).toBeUndefined()
+    // The live document still has every attribute (defaults are only dropped from the JSON).
+    expect(ed.state.doc.child(1).attrs).toMatchObject({ textAlign: null, indent: 0, lineHeight: null })
+  })
+
   it('defines the Phase 1 base schema', () => {
     const ed = mount()
     const nodes = Object.keys(ed.schema.nodes)
@@ -82,7 +88,7 @@ describe('NovelEditor', () => {
   it('handles the empty doc and tracks edits in the store without the doc JSON', () => {
     const ed = mount()
     expect(useStore.getState().editor.isEmpty).toBe(true)
-    expect(getDocJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph', attrs: BLOCK_DEFAULTS }] })
+    expect(getDocJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
     const cb = vi.fn()
     const off = onDocChange(cb)
     const before = useStore.getState().editor.docVersion

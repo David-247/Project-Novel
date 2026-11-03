@@ -129,11 +129,46 @@ export function getEditor(): Editor | null {
   return live()
 }
 
-/** Current document as ProseMirror JSON (O(n); call on save, not per keystroke). */
+/**
+ * Optional block layout attributes (formatting toolbar). A block that does not use one gets no
+ * entry in the saved JSON; loading a doc without them gives the same defaults.
+ */
+const OPTIONAL_BLOCK_ATTRS = ['textAlign', 'lineHeight', 'paragraphSpacing', 'indent', 'firstLineIndent'] as const
+
+/**
+ * Drop OPTIONAL_BLOCK_ATTRS that equal the schema default (textAlign/lineHeight/paragraphSpacing/
+ * firstLineIndent null, indent 0) from `json` (its nodes are updated in place, their `attrs` objects
+ * are replaced, never mutated), and an `attrs` object left empty. Keeps
+ * manuscript.json free of per-paragraph noise without storage knowing the editor schema.
+ */
+export function stripDefaultBlockAttrs(json: JSONContent, schema: Schema): JSONContent {
+  const visit = (node: JSONContent) => {
+    const spec = node.type ? schema.nodes[node.type]?.spec.attrs : undefined
+    if (node.attrs && spec) {
+      // Node.toJSON() shares the live node's attrs object: never delete from it, replace it.
+      let attrs: Record<string, unknown> | null = null
+      for (const name of OPTIONAL_BLOCK_ATTRS) {
+        if (name in node.attrs && name in spec && node.attrs[name] === spec[name].default) {
+          attrs ??= { ...node.attrs }
+          delete attrs[name]
+        }
+      }
+      if (attrs) {
+        if (Object.keys(attrs).length === 0) delete node.attrs
+        else node.attrs = attrs
+      }
+    }
+    node.content?.forEach(visit)
+  }
+  visit(json)
+  return json
+}
+
+/** Current document as ProseMirror JSON, default block attrs stripped (O(n); call on save, not per keystroke). */
 export function getDocJSON(): JSONContent {
   const ed = live()
-  if (ed) return ed.getJSON()
-  return structuredClone(pending ?? EMPTY_DOC)
+  if (ed) return stripDefaultBlockAttrs(ed.getJSON(), ed.schema)
+  return stripDefaultBlockAttrs(structuredClone(pending ?? EMPTY_DOC), schemaForValidation())
 }
 
 /**
