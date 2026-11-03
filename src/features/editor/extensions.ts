@@ -13,6 +13,7 @@ import Underline from '@tiptap/extension-underline'
 import { UndoRedo } from '@tiptap/extensions'
 import { BlockFormat, BLOCK_FORMAT_TYPES } from './toolbar/block-format'
 import { FindHighlight } from './find/plugin'
+import { BlockStyles } from './styles/block-styles'
 
 /**
  * Phase 1 base schema.
@@ -57,5 +58,12 @@ export function createEditorExtensions(): Extensions {
     // Search-result highlighting + Mod-f (open find) / Escape (close find).
     FindHighlight,
     // --- end task 4 -----------------------------------------------------------------------
+
+    // --- Paragraph and chapter styles (Phase 2): additive only ----------------------------
+    // paragraph/heading `styleId` (rendered as data-style; null = Body, or Chapter Title for H1,
+    // Subheading for H2/H3), data-break-before decorations, setBlockStyle / clearDirectFormatting,
+    // Enter chaining, Mod-Alt-0 Body, Mod-Alt-1 Chapter Title, Mod-\ clear direct formatting.
+    BlockStyles,
+    // --- end styles -----------------------------------------------------------------------
   ]
 }

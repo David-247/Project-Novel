@@ -1,6 +1,10 @@
-/* Minimal structural rendering for the base schema (Tailwind preflight resets
-   these). Not "paragraph styles" — those are out of Phase 1 scope. */
+/* Structural rendering for the base schema (Tailwind preflight resets these). Paragraph and
+   heading typography comes from the generated style sheet (BookStyleSheet: one rule per
+   paragraph/chapter style, keyed by data-style), not from tag selectors here. */
 .novel-writing-surface .novel-editor-content {
+  /* One book point on this surface. The continuous writing view scales book points so Body
+     (11 pt) shows at the Phase 1 reading size (18px); page surfaces set their own value. */
+  --nv-pt: calc(1.125rem / 11);
   min-height: 60vh;
   outline: none;
   font-size: 1.125rem;
@@ -13,23 +17,11 @@
   outline-offset: 4px;
   border-radius: 4px;
 }
-.novel-writing-surface .novel-editor-content p {
-  margin: 0 0 0.75em;
-}
-.novel-writing-surface .novel-editor-content h1 {
-  font-size: 2em;
-  font-weight: 700;
-  margin: 0.67em 0;
-}
-.novel-writing-surface .novel-editor-content h2 {
-  font-size: 1.5em;
-  font-weight: 700;
-  margin: 0.75em 0;
-}
-.novel-writing-surface .novel-editor-content h3 {
-  font-size: 1.25em;
-  font-weight: 700;
-  margin: 0.83em 0;
+/* Zero specificity: the generated style rules always win. */
+:where(.novel-editor-content) :where(p, h1, h2, h3) {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
 }
 .novel-writing-surface .novel-editor-content ul {
   list-style: disc;

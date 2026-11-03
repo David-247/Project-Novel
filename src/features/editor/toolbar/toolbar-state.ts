@@ -4,6 +4,7 @@ import { Selection } from '@tiptap/pm/state'
 import type { EditorState } from '@tiptap/pm/state'
 import { primaryFontFamily } from '../fonts'
 import { inListItem } from './block-format'
+import { effectiveStyleId, STYLED_BLOCK_TYPES } from '../styles/block-styles'
 import { MAX_INDENT } from './presets'
 
 export type Alignment = 'left' | 'center' | 'right' | 'justify'
@@ -25,6 +26,8 @@ export interface ToolbarState {
   firstLineIndent: string
   canIndent: boolean
   canOutdent: boolean
+  /** Effective paragraph/chapter style of the block at the selection head, '' outside styled blocks. */
+  styleId: string
 }
 
 export const IDLE_TOOLBAR_STATE: ToolbarState = {
@@ -42,6 +45,7 @@ export const IDLE_TOOLBAR_STATE: ToolbarState = {
   firstLineIndent: '',
   canIndent: false,
   canOutdent: false,
+  styleId: '',
 }
 
 function str(v: unknown): string {
@@ -108,5 +112,6 @@ export function readToolbarState(editor: Editor | null): ToolbarState {
     firstLineIndent: str(block.attrs.firstLineIndent),
     canIndent: inList ? editor.can().sinkListItem('listItem') : indent < MAX_INDENT,
     canOutdent: inList || indent > 0,
+    styleId: (STYLED_BLOCK_TYPES as readonly string[]).includes(block.type.name) ? effectiveStyleId(block) : '',
   }
 }
