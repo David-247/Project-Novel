@@ -23,7 +23,15 @@ import {
   serializeProjectMeta,
   type ProjectMeta,
 } from './format'
-import { pathExists, readRecentRaw, readTextFile, setRecentMenu, writeFileAtomic, writeRecentRaw } from './ipc'
+import {
+  pathExists,
+  readRecentRaw,
+  readTextFile,
+  setProjectRoot,
+  setRecentMenu,
+  writeFileAtomic,
+  writeRecentRaw,
+} from './ipc'
 import { addRecent, flagMissing, parseRecentFile, serializeRecent } from './recent'
 import type { RevisionKind } from './schema'
 
@@ -98,11 +106,30 @@ async function activate(folder: string, meta: ProjectMeta, doc: DocJSON, index: 
   await rememberRecent({ path: folder, name: meta.title, openedAt: new Date().toISOString() })
 }
 
+/**
+ * Confine Rust file access to `folder` while `fn` runs. If `fn` fails, the
+ * previous project's folder is restored so the open project can still save.
+ */
+async function withProjectRoot(folder: string, fn: () => Promise<void>): Promise<void> {
+  const previous = getCurrentProjectPath()
+  await setProjectRoot(folder)
+  try {
+    await fn()
+  } catch (e) {
+    await setProjectRoot(previous).catch((err) => console.warn('Restoring the project folder failed:', err))
+    throw e
+  }
+}
+
 /** Create a new project in an existing folder, initialised with `doc`. Throws ProjectError. */
 export async function createProjectAt(folder: string, doc: DocJSON = emptyDoc()): Promise<void> {
   if (!(await pathExists(folder))) {
     throw new ProjectError('missing-folder', `The folder could not be found:\n${folder}`)
   }
+  await withProjectRoot(folder, () => createProjectIn(folder, doc))
+}
+
+async function createProjectIn(folder: string, doc: DocJSON): Promise<void> {
   if (await pathExists(joinPath(folder, PROJECT_FILE))) {
     throw new ProjectError(
       'already-exists',
@@ -121,6 +148,10 @@ export async function openProjectAt(folder: string): Promise<void> {
   if (!(await pathExists(folder))) {
     throw new ProjectError('missing-folder', `The project folder could not be found:\n${folder}`)
   }
+  await withProjectRoot(folder, () => openProjectIn(folder))
+}
+
+async function openProjectIn(folder: string): Promise<void> {
   let metaText: string
   try {
     metaText = await readTextFile(joinPath(folder, PROJECT_FILE), PROJECT_FILE)
@@ -279,6 +310,7 @@ export async function openProject(folder?: string): Promise<boolean> {
 /** Close the open project (no prompt; call confirmUnsavedChanges first). */
 export async function closeProject(): Promise<void> {
   await closeIndex()
+  await setProjectRoot(null).catch((e) => console.warn('Clearing the project folder failed:', e))
   currentMeta = null
   lastSaveDoneAt = 0
   actions().projectClosed()

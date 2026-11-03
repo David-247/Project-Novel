@@ -4,7 +4,12 @@ import { useStore } from '@/shared/store'
 import { initialProjectState } from '@/shared/store/project-slice'
 
 // ---- Fake Tauri backend ------------------------------------------------------
-const fs = vi.hoisted(() => ({ files: new Map<string, string>(), dirs: new Set<string>(), writes: [] as string[] }))
+const fs = vi.hoisted(() => ({
+  files: new Map<string, string>(),
+  dirs: new Set<string>(),
+  writes: [] as string[],
+  root: null as string | null,
+}))
 const recentFile = vi.hoisted(() => ({ text: null as string | null, menu: [] as unknown[] }))
 const dialog = vi.hoisted(() => ({
   pick: null as string | null,
@@ -18,13 +23,20 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string, args: Record<string, unknown> = {}) => {
     const path = args.path as string
     const parent = (p: string) => p.slice(0, p.lastIndexOf('/'))
+    const inRoot = (p: string) => fs.root !== null && p.startsWith(fs.root + '/')
     switch (cmd) {
+      case 'storage_set_project_root':
+        if (path !== null && !fs.dirs.has(path)) throw { kind: 'not_found', message: `${path}: not found` }
+        fs.root = path
+        return null
       case 'storage_path_exists':
         return fs.files.has(path) || fs.dirs.has(path)
       case 'storage_read_text_file':
+        if (!inRoot(path)) throw { kind: 'outside_project', message: 'outside' }
         if (!fs.files.has(path)) throw { kind: 'not_found', message: `${path}: not found` }
         return fs.files.get(path)
       case 'storage_write_file_atomic':
+        if (!inRoot(path)) throw { kind: 'outside_project', message: 'outside' }
         if (!fs.dirs.has(parent(path))) throw { kind: 'not_found', message: 'Folder does not exist' }
         fs.files.set(path, args.contents as string)
         fs.writes.push(path)
@@ -93,6 +105,7 @@ beforeEach(async () => {
   fs.files.clear()
   fs.dirs.clear()
   fs.writes.length = 0
+  fs.root = null
   recentFile.text = null
   recentFile.menu = []
   dialog.pick = null
@@ -186,6 +199,20 @@ describe('project storage', () => {
     expect(recentFile.menu).toEqual([expect.objectContaining({ missing: true })])
     expect(await openProject('/books/novel')).toBe(false)
     expect(dialog.messages[0].text).toMatch(/could not be found/)
+  })
+
+  it('confines file access to the chosen project folder and restores it after a failed open', async () => {
+    await createProjectAt('/books/novel')
+    expect(fs.root).toBe('/books/novel')
+    fs.dirs.add('/books/broken')
+    fs.files.set('/books/broken/project.json', '{oops')
+    expect(await openProject('/books/broken')).toBe(false)
+    expect(fs.root).toBe('/books/novel')
+    editor.update(textDoc('still saves'))
+    expect(await saveProject()).toBe(true)
+    const { closeProject } = await import('./index')
+    await closeProject()
+    expect(fs.root).toBeNull()
   })
 
   it('refuses to create a project over an existing one', async () => {

@@ -6,9 +6,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .manage(storage::RecentMenuState::default())
+        .manage(storage::ProjectRoot::default())
         .menu(|app| storage::build_menu(app, &[]))
         .on_menu_event(|app, event| storage::handle_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
+            storage::storage_set_project_root,
             storage::storage_write_file_atomic,
             storage::storage_read_text_file,
             storage::storage_path_exists,

@@ -4,7 +4,7 @@
 //! The frontend (src/features/storage) owns the project format; Rust only
 //! provides safe primitives. No network access, no secrets.
 
-use std::fs::{self, File};
+use std::fs;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -36,7 +36,7 @@ pub const EVENT_SAVE: &str = "menu://save";
 /// Error returned to the frontend: a machine-readable kind plus a message.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct StorageError {
-    /// "not_found" | "invalid_path" | "io"
+    /// "not_found" | "invalid_path" | "outside_project" | "symlink" | "io"
     pub kind: &'static str,
     pub message: String,
 }
@@ -48,6 +48,12 @@ impl StorageError {
     }
     fn invalid(message: impl Into<String>) -> Self {
         StorageError { kind: "invalid_path", message: message.into() }
+    }
+    fn outside(path: &Path) -> Self {
+        StorageError {
+            kind: "outside_project",
+            message: format!("{} is outside the open project folder", path.display()),
+        }
     }
 }
 
@@ -61,9 +67,17 @@ fn absolute(path: &str) -> Result<PathBuf> {
     Ok(p)
 }
 
-/// Atomically replace `target` with `contents`: write `<target>.tmp` in the
-/// same directory, fsync it, then rename it over the target. A crash at any
-/// point leaves either the old file or the new file, never a partial one.
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false)
+}
+
+/// Atomically replace `target` with `contents`.
+///
+/// The data goes to a temp file with a random name, created exclusively
+/// (O_EXCL / CREATE_NEW, so a planted file or symlink is never followed) in the
+/// same folder; it is fsynced, then renamed over the target. A crash leaves
+/// either the old file or the new one, never a partial file. A target that is
+/// a symlink is refused.
 pub fn write_atomic(target: &Path, contents: &[u8]) -> Result<()> {
     let file_name = target
         .file_name()
@@ -77,43 +91,115 @@ pub fn write_atomic(target: &Path, contents: &[u8]) -> Result<()> {
             message: format!("Folder does not exist: {}", dir.display()),
         });
     }
-    let mut tmp_name = file_name.to_os_string();
-    tmp_name.push(".tmp");
-    let tmp = dir.join(tmp_name);
+    if is_symlink(target) {
+        return Err(StorageError {
+            kind: "symlink",
+            message: format!("Refusing to overwrite a symbolic link: {}", target.display()),
+        });
+    }
+    let mut prefix = std::ffi::OsString::from(".");
+    prefix.push(file_name);
+    prefix.push(".");
+    let mut tmp = tempfile::Builder::new()
+        .prefix(&prefix)
+        .suffix(".tmp")
+        .tempfile_in(dir)
+        .map_err(|e| StorageError::io(dir, e))?;
+    // On any error below, dropping `tmp` deletes the temp file.
+    tmp.write_all(contents).map_err(|e| StorageError::io(target, e))?;
+    tmp.as_file().sync_all().map_err(|e| StorageError::io(target, e))?;
+    tmp.persist(target).map_err(|e| StorageError::io(target, e.error))?;
+    // Persist the rename itself (directory entry). Not supported on Windows.
+    #[cfg(unix)]
+    if let Ok(d) = fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    Ok(())
+}
 
-    let write = || -> std::io::Result<()> {
-        let mut f = File::create(&tmp)?;
-        f.write_all(contents)?;
-        f.sync_all()?;
-        drop(f);
-        fs::rename(&tmp, target)?;
-        // Persist the rename itself (directory entry). Not supported on Windows.
-        #[cfg(unix)]
-        if let Ok(d) = File::open(dir) {
-            let _ = d.sync_all();
-        }
-        Ok(())
-    };
-    write().map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        StorageError::io(target, e)
+/// The canonical folder of the open project. File commands that take a path
+/// from the webview may only touch files inside it.
+#[derive(Default)]
+pub struct ProjectRoot(pub Mutex<Option<PathBuf>>);
+
+fn lock_err<E: std::fmt::Display>(e: E) -> StorageError {
+    StorageError { kind: "io", message: e.to_string() }
+}
+
+fn current_root(state: &ProjectRoot) -> Result<PathBuf> {
+    state.0.lock().map_err(lock_err)?.clone().ok_or_else(|| StorageError {
+        kind: "outside_project",
+        message: "No project folder is open".into(),
     })
 }
 
-/// Atomically write a UTF-8 text file (absolute path; parent folder must exist).
-#[tauri::command]
-pub fn storage_write_file_atomic(path: String, contents: String) -> Result<()> {
-    write_atomic(&absolute(&path)?, contents.as_bytes())
+/// Resolve `path` for writing: canonicalize its parent folder (resolving `..`
+/// and links) and require it to be inside `root` (already canonical).
+pub fn resolve_for_write(root: &Path, path: &str) -> Result<PathBuf> {
+    let p = absolute(path)?;
+    let name = p
+        .file_name()
+        .ok_or_else(|| StorageError::invalid(format!("No file name in {path:?}")))?;
+    let parent = p
+        .parent()
+        .ok_or_else(|| StorageError::invalid(format!("No parent folder in {path:?}")))?;
+    let parent = fs::canonicalize(parent).map_err(|e| StorageError::io(parent, e))?;
+    if !parent.starts_with(root) {
+        return Err(StorageError::outside(&p));
+    }
+    Ok(parent.join(name))
 }
 
-/// Read a UTF-8 text file (absolute path).
+/// Resolve an existing `path` for reading (following links) and require it to be inside `root`.
+pub fn resolve_for_read(root: &Path, path: &str) -> Result<PathBuf> {
+    let p = absolute(path)?;
+    let canon = fs::canonicalize(&p).map_err(|e| StorageError::io(&p, e))?;
+    if !canon.starts_with(root) {
+        return Err(StorageError::outside(&p));
+    }
+    Ok(canon)
+}
+
+/// Canonicalize a folder chosen as project root.
+pub fn canonical_root(path: &str) -> Result<PathBuf> {
+    let abs = absolute(path)?;
+    let canon = fs::canonicalize(&abs).map_err(|e| StorageError::io(&abs, e))?;
+    if !canon.is_dir() {
+        return Err(StorageError::invalid(format!("Not a folder: {}", abs.display())));
+    }
+    Ok(canon)
+}
+
+/// Set (or clear, with `None`) the folder the file commands are confined to.
+/// The frontend calls it with the folder the user picked in a native dialog
+/// (or from Open Recent) before reading or writing project files.
 #[tauri::command]
-pub fn storage_read_text_file(path: String) -> Result<String> {
-    let p = absolute(&path)?;
+pub fn storage_set_project_root(state: State<'_, ProjectRoot>, path: Option<String>) -> Result<()> {
+    let root = path.as_deref().map(canonical_root).transpose()?;
+    *state.0.lock().map_err(lock_err)? = root;
+    Ok(())
+}
+
+/// Atomically write a UTF-8 text file inside the open project folder.
+#[tauri::command]
+pub fn storage_write_file_atomic(
+    state: State<'_, ProjectRoot>,
+    path: String,
+    contents: String,
+) -> Result<()> {
+    let root = current_root(&state)?;
+    write_atomic(&resolve_for_write(&root, &path)?, contents.as_bytes())
+}
+
+/// Read a UTF-8 text file inside the open project folder.
+#[tauri::command]
+pub fn storage_read_text_file(state: State<'_, ProjectRoot>, path: String) -> Result<String> {
+    let root = current_root(&state)?;
+    let p = resolve_for_read(&root, &path)?;
     fs::read_to_string(&p).map_err(|e| StorageError::io(&p, e))
 }
 
-/// True when `path` is an existing file or folder.
+/// True when `path` is an existing file or folder (read-only existence check).
 #[tauri::command]
 pub fn storage_path_exists(path: String) -> Result<bool> {
     Ok(absolute(&path)?.exists())
@@ -288,16 +374,37 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("novel-storage-{}-{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        dir
+        fs::canonicalize(dir).unwrap()
+    }
+
+    fn entries(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    fn s(p: PathBuf) -> String {
+        p.to_string_lossy().into_owned()
+    }
+
+    /// Try to create a file symlink; false if the OS refuses (e.g. Windows without privilege).
+    fn try_symlink(src: &Path, link: &Path) -> bool {
+        #[cfg(unix)]
+        return std::os::unix::fs::symlink(src, link).is_ok();
+        #[cfg(windows)]
+        return std::os::windows::fs::symlink_file(src, link).is_ok();
     }
 
     #[test]
-    fn atomic_write_creates_file_and_leaves_no_tmp() {
+    fn atomic_write_creates_file_and_leaves_no_temp() {
         let dir = temp_dir("create");
         let target = dir.join("manuscript.json");
         write_atomic(&target, b"{\"type\":\"doc\"}").unwrap();
         assert_eq!(fs::read_to_string(&target).unwrap(), "{\"type\":\"doc\"}");
-        assert!(!dir.join("manuscript.json.tmp").exists());
+        assert_eq!(entries(&dir), vec!["manuscript.json"]);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -308,18 +415,53 @@ mod tests {
         fs::write(&target, "old contents that are longer than the new ones").unwrap();
         write_atomic(&target, b"new").unwrap();
         assert_eq!(fs::read_to_string(&target).unwrap(), "new");
-        assert!(!dir.join("project.json.tmp").exists());
+        assert_eq!(entries(&dir), vec!["project.json"]);
         fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn atomic_write_overwrites_stale_tmp_file() {
-        let dir = temp_dir("stale");
-        let target = dir.join("project.json");
-        fs::write(dir.join("project.json.tmp"), "garbage from a crash").unwrap();
+    fn atomic_write_uses_random_temp_name_not_predictable_tmp() {
+        let dir = temp_dir("random");
+        let target = dir.join("manuscript.json");
+        // A planted file at the old predictable name is neither used nor touched.
+        let planted = dir.join("manuscript.json.tmp");
+        fs::write(&planted, "planted").unwrap();
         write_atomic(&target, b"fresh").unwrap();
         assert_eq!(fs::read_to_string(&target).unwrap(), "fresh");
-        assert!(!dir.join("project.json.tmp").exists());
+        assert_eq!(fs::read_to_string(&planted).unwrap(), "planted");
+        assert_eq!(entries(&dir), vec!["manuscript.json", "manuscript.json.tmp"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn planted_tmp_symlink_does_not_redirect_write() {
+        let dir = temp_dir("tmp-link");
+        let victim = dir.join("victim.txt");
+        fs::write(&victim, "precious").unwrap();
+        if !try_symlink(&victim, &dir.join("manuscript.json.tmp")) {
+            eprintln!("skipping: cannot create symlinks here");
+            fs::remove_dir_all(dir).unwrap();
+            return;
+        }
+        write_atomic(&dir.join("manuscript.json"), b"doc").unwrap();
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "precious");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_symlink_target() {
+        let dir = temp_dir("target-link");
+        let victim = dir.join("victim.txt");
+        fs::write(&victim, "precious").unwrap();
+        let target = dir.join("manuscript.json");
+        if !try_symlink(&victim, &target) {
+            eprintln!("skipping: cannot create symlinks here");
+            fs::remove_dir_all(dir).unwrap();
+            return;
+        }
+        let err = write_atomic(&target, b"doc").unwrap_err();
+        assert_eq!(err.kind, "symlink");
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "precious");
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -334,20 +476,49 @@ mod tests {
     }
 
     #[test]
-    fn commands_reject_relative_paths() {
-        assert_eq!(storage_read_text_file("relative.json".into()).unwrap_err().kind, "invalid_path");
+    fn writes_and_reads_are_confined_to_the_project_root() {
+        let base = temp_dir("scope");
+        fs::create_dir_all(base.join("project").join("sub")).unwrap();
+        let root = canonical_root(&s(base.join("project"))).unwrap();
+
+        assert!(resolve_for_write(&root, &s(root.join("manuscript.json"))).is_ok());
+        assert!(resolve_for_write(&root, &s(root.join("sub").join("x.json"))).is_ok());
         assert_eq!(
-            storage_write_file_atomic("relative.json".into(), "x".into()).unwrap_err().kind,
-            "invalid_path"
+            resolve_for_write(&root, &s(base.join("evil.json"))).unwrap_err().kind,
+            "outside_project"
         );
+        assert_eq!(
+            resolve_for_write(&root, &s(root.join("..").join("evil.json"))).unwrap_err().kind,
+            "outside_project"
+        );
+        assert_eq!(resolve_for_write(&root, "relative.json").unwrap_err().kind, "invalid_path");
+
+        fs::write(base.join("secret.txt"), "s").unwrap();
+        fs::write(root.join("manuscript.json"), "{}").unwrap();
+        assert!(resolve_for_read(&root, &s(root.join("manuscript.json"))).is_ok());
+        assert_eq!(
+            resolve_for_read(&root, &s(root.join("..").join("secret.txt"))).unwrap_err().kind,
+            "outside_project"
+        );
+        assert_eq!(resolve_for_read(&root, &s(root.join("missing.json"))).unwrap_err().kind, "not_found");
+        assert_eq!(canonical_root("relative").unwrap_err().kind, "invalid_path");
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
-    fn read_missing_file_reports_not_found() {
-        let dir = temp_dir("read");
-        let p = dir.join("manuscript.json");
-        let err = storage_read_text_file(p.to_string_lossy().into_owned()).unwrap_err();
-        assert_eq!(err.kind, "not_found");
-        fs::remove_dir_all(dir).unwrap();
+    fn reads_through_a_symlink_leaving_the_root_are_refused() {
+        let base = temp_dir("read-link");
+        fs::create_dir_all(base.join("project")).unwrap();
+        let root = canonical_root(&s(base.join("project"))).unwrap();
+        fs::write(base.join("secret.txt"), "s").unwrap();
+        let link = root.join("manuscript.json");
+        if !try_symlink(&base.join("secret.txt"), &link) {
+            eprintln!("skipping: cannot create symlinks here");
+            fs::remove_dir_all(base).unwrap();
+            return;
+        }
+        assert_eq!(resolve_for_read(&root, &s(link)).unwrap_err().kind, "outside_project");
+        fs::remove_dir_all(base).unwrap();
     }
 }
+

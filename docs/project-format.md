@@ -78,9 +78,13 @@ A `comments` table is planned for a later schema version.
 
 ## Saving
 
-Every file is written atomically by the Rust command `storage_write_file_atomic`: the new contents go to
-`<name>.tmp` in the same folder, the temp file is fsynced, then renamed over the original. A crash leaves either the
-old or the new file, never a partial one. A leftover `*.tmp` file is safe to delete.
+Every file is written atomically by the Rust command `storage_write_file_atomic`: the new contents go to a temp file
+with a random name (`.<name>.XXXXXX.tmp`, created exclusively so an existing file or symlink is never followed) in
+the same folder, the temp file is fsynced, then renamed over the original. A crash leaves either the old or the new
+file, never a partial one. A leftover `*.tmp` file is safe to delete.
+
+Safety rules enforced in Rust: reads and writes are confined to the open project folder (paths are canonicalized,
+so `..` and symlinks cannot escape it), and a project file that is itself a symbolic link is never overwritten.
 
 Save order: `manuscript.json`, then `project.json` (`updatedAt`), then a `revisions` row.
 

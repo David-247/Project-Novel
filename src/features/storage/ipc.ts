@@ -3,6 +3,7 @@ import { ProjectError } from './format'
 
 /** Command names (src-tauri/src/storage.rs). */
 export const COMMANDS = {
+  setProjectRoot: 'storage_set_project_root',
   writeFileAtomic: 'storage_write_file_atomic',
   readTextFile: 'storage_read_text_file',
   pathExists: 'storage_path_exists',
@@ -21,7 +22,7 @@ export const MENU_EVENTS = {
 
 /** Error shape returned by the Rust storage commands. */
 interface RustStorageError {
-  kind: 'not_found' | 'invalid_path' | 'io'
+  kind: 'not_found' | 'invalid_path' | 'outside_project' | 'symlink' | 'io'
   message: string
 }
 
@@ -34,11 +35,29 @@ function toProjectError(e: unknown, fileLabel: string): ProjectError {
   if (isRustError(e) && e.kind === 'not_found') {
     return new ProjectError('missing-file', `${fileLabel} could not be found.`, { cause: e })
   }
+  if (isRustError(e) && e.kind === 'symlink') {
+    return new ProjectError('io', `${fileLabel} is a symbolic link; Novel will not overwrite it.`, { cause: e })
+  }
+  if (isRustError(e) && e.kind === 'outside_project') {
+    return new ProjectError('io', `${fileLabel} is outside the project folder, so Novel will not touch it.`, { cause: e })
+  }
   const detail = isRustError(e) ? e.message : String(e)
   return new ProjectError('io', `${fileLabel} could not be accessed (${detail}).`, { cause: e })
 }
 
-/** Atomically write a text file: temp file in the same folder, fsync, rename. */
+/**
+ * Confine the file commands to `folder` (the user-chosen project folder), or
+ * clear with null. Reads and writes outside it are refused by Rust.
+ */
+export async function setProjectRoot(folder: string | null): Promise<void> {
+  try {
+    await invoke(COMMANDS.setProjectRoot, { path: folder })
+  } catch (e) {
+    throw toProjectError(e, folder ?? 'project folder')
+  }
+}
+
+/** Atomically write a text file inside the project root: random temp file in the same folder, fsync, rename. */
 export async function writeFileAtomic(path: string, contents: string, fileLabel = path): Promise<void> {
   try {
     await invoke(COMMANDS.writeFileAtomic, { path, contents })
