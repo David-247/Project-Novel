@@ -7,9 +7,11 @@ import Italic from '@tiptap/extension-italic'
 import { BulletList, ListItem, OrderedList } from '@tiptap/extension-list'
 import Paragraph from '@tiptap/extension-paragraph'
 import Text from '@tiptap/extension-text'
-import { FontFamily, TextStyle } from '@tiptap/extension-text-style'
+import TextAlign from '@tiptap/extension-text-align'
+import { FontFamily, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
 import { UndoRedo } from '@tiptap/extensions'
+import { BlockFormat, BLOCK_FORMAT_TYPES } from './toolbar/block-format'
 
 /**
  * Phase 1 base schema.
@@ -33,5 +35,13 @@ export function createEditorExtensions(): Extensions {
     TextStyle,
     FontFamily,
     UndoRedo,
+
+    // --- Formatting toolbar (task 3): additive only ---
+    // textStyle.fontSize; paragraph/heading textAlign (Mod-Shift-l/e/r/j);
+    // paragraph/heading lineHeight, paragraphSpacing, indent (Mod-] / Mod-[).
+    FontSize,
+    TextAlign.configure({ types: [...BLOCK_FORMAT_TYPES], alignments: ['left', 'center', 'right', 'justify'] }),
+    BlockFormat,
+    // --- end formatting toolbar ---
   ]
 }

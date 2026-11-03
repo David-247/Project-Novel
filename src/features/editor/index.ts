@@ -10,8 +10,8 @@
 //     const v = getDocVersion(); const doc = getDocJSON(); await save(doc); markClean(v)
 //   Dirty is cleared only if no edit happened since `v`; markClean() with no argument always clears.
 export { NovelEditor } from './NovelEditor'
-export { FontFamilyPicker } from './FontFamilyPicker'
-export type { FontFamilyPickerProps } from './FontFamilyPicker'
+export { FontFamilyPicker, Toolbar, ToolbarItem, TOOLBAR_CONTROLS } from './toolbar'
+export type { FontFamilyPickerProps, ToolbarProps, ToolbarControlMeta, ToolbarControlKey } from './toolbar'
 export {
   getDocJSON,
   setDocJSON,

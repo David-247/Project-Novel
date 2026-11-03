@@ -1,5 +1,5 @@
 import { AppShell } from '@/features/app-shell'
-import { FontFamilyPicker, NovelEditor } from '@/features/editor'
+import { NovelEditor, Toolbar } from '@/features/editor'
 import { useThemeFollow } from '@/shared/theme'
 
 /** Composition root: the only place that wires slices together. */
@@ -10,7 +10,7 @@ export function App() {
       toolbar={
         <>
           <span className="px-1 text-ui font-semibold">Novel</span>
-          <FontFamilyPicker />
+          <Toolbar />
         </>
       }
       editor={<NovelEditor />}
