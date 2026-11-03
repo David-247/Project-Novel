@@ -3,6 +3,7 @@ import type { Ref, SelectHTMLAttributes } from 'react'
 import { Select } from '@/shared/ui'
 import { fontFamilyCss, listSystemFonts } from '../fonts'
 import { TOOLBAR_CONTROLS } from './controls'
+import { markChain } from './mark-chain'
 import { useMountedEditor } from './use-mounted-editor'
 import { useToolbarState } from './use-toolbar-state'
 
@@ -38,8 +39,7 @@ function useSystemFonts(loadFonts: () => Promise<string[]>): string[] {
  * Font family control (toolbar `toolbar.fontFamily`). Applies the chosen installed OS font
  * to the selection (or the stored marks at the caret) via TextStyle + FontFamily;
  * "System default" removes it. Falls back to only "System default" when the OS font list
- * is unavailable. Keeps focus on the control so keyboard users can keep browsing values
- * (Escape in the toolbar returns to the text).
+ * is unavailable. Focus handling: see `markChain`.
  */
 export function FontFamilyPicker({ loadFonts = listSystemFonts, disabled, ...rest }: FontFamilyPickerProps) {
   const fonts = useSystemFonts(loadFonts)
@@ -52,8 +52,8 @@ export function FontFamilyPicker({ loadFonts = listSystemFonts, disabled, ...res
 
   const onChange = (value: string) => {
     if (!editor) return
-    if (value === SYSTEM_DEFAULT) editor.chain().unsetFontFamily().run()
-    else editor.chain().setFontFamily(fontFamilyCss(value)).run()
+    if (value === SYSTEM_DEFAULT) markChain(editor).unsetFontFamily().run()
+    else markChain(editor).setFontFamily(fontFamilyCss(value)).run()
   }
 
   return (

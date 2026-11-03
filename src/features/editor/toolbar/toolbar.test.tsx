@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { Profiler } from 'react'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { IconButton } from '@/shared/ui'
 import { getEditor, NovelEditor, setDocJSON, Toolbar, TOOLBAR_CONTROLS, ToolbarItem } from '../index'
 import type { Editor } from '../index'
@@ -103,6 +104,21 @@ describe('Toolbar structure', () => {
     await waitFor(() => expect(document.activeElement).toBe(ed.view.dom))
   })
 
+  it('leaves Escape alone for slot content that is not a toolbar item, or already handled', () => {
+    const ed = setup({
+      extraGroups: <input aria-label="Find text" data-testid="find" />,
+    })
+    const find = screen.getByTestId('find')
+    act(() => find.focus())
+    act(() => void fireEvent.keyDown(find, { key: 'Escape' }))
+    expect(document.activeElement).toBe(find)
+    const bold = ctl('toolbar.bold')
+    bold.addEventListener('keydown', (e) => e.preventDefault())
+    act(() => bold.focus())
+    act(() => void fireEvent.keyDown(bold, { key: 'Escape' }))
+    expect(document.activeElement).not.toBe(ed.view.dom)
+  })
+
   it('renders leading/extra group slots inside the roving focus group', async () => {
     setup({
       leadingGroups: (
@@ -163,6 +179,48 @@ describe('Toolbar marks', () => {
     expect(document.activeElement).toBe(bold)
     act(() => void fireEvent.click(bold, { detail: 1 }))
     await waitFor(() => expect(document.activeElement).toBe(ed.view.dom))
+  })
+
+  it('font size picked at a bare caret applies to the text typed next', async () => {
+    const ed = setup()
+    run(() => ed.commands.insertContent('Plain '))
+    choose('toolbar.fontSize', '18pt')
+    // Focus returns to the text (selection unchanged), so the stored mark survives.
+    await waitFor(() => expect(document.activeElement).toBe(ed.view.dom))
+    expect(ctl('toolbar.fontSize')).toHaveValue('18pt')
+    run(() => ed.view.dispatch(ed.state.tr.insertText('big')))
+    const runs = ed.getJSON().content![0].content!
+    expect(runs.at(-1)).toEqual({
+      type: 'text',
+      text: 'big',
+      marks: [{ type: 'textStyle', attrs: { fontFamily: null, fontSize: '18pt' } }],
+    })
+    expect(runs[0].marks).toBeUndefined()
+  })
+
+  it('font family picked at a bare caret applies to the text typed next', async () => {
+    render(
+      <>
+        <Toolbar loadFonts={async () => ['Georgia']} />
+        <NovelEditor />
+      </>,
+    )
+    const ed = getEditor()!
+    await screen.findByRole('option', { name: 'Georgia' })
+    run(() => ed.commands.insertContent('Plain '))
+    choose('toolbar.fontFamily', 'Georgia')
+    await waitFor(() => expect(document.activeElement).toBe(ed.view.dom))
+    run(() => ed.view.dispatch(ed.state.tr.insertText('serif')))
+    expect(ed.getJSON().content![0].content!.at(-1)!.marks![0].attrs!.fontFamily).toContain('Georgia')
+  })
+
+  it('a range shows a mark as active only when both ends carry it', () => {
+    const ed = setup()
+    run(() => ed.chain().insertContent('aaa bbb ccc').setTextSelection({ from: 1, to: 4 }).toggleBold().run())
+    run(() => ed.commands.setTextSelection({ from: 1, to: 12 }))
+    expect(ctl('toolbar.bold')).toHaveAttribute('aria-pressed', 'false')
+    run(() => ed.commands.setTextSelection({ from: 2, to: 4 }))
+    expect(ctl('toolbar.bold')).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('applies and clears font size as a TextStyle attribute', () => {
@@ -291,6 +349,14 @@ describe('Toolbar blocks', () => {
     expect(firstBlock(ed).attrs.indent).toBe(7)
   })
 
+  it('increase indent is disabled on a first list item that cannot nest', () => {
+    const ed = setup()
+    run(() => ed.chain().insertContent('one').toggleBulletList().run())
+    expect(ctl('toolbar.indentIncrease')).toBeDisabled()
+    run(() => ed.chain().splitListItem('listItem').insertContent('two').run())
+    expect(ctl('toolbar.indentIncrease')).toBeEnabled()
+  })
+
   it('indent inside a list nests the list item', () => {
     const ed = setup()
     run(() => ed.chain().insertContent('one').toggleBulletList().run())
@@ -362,15 +428,82 @@ describe('Keyboard shortcuts', () => {
 })
 
 describe('Toolbar state cost', () => {
-  it('reads state from the selection, independent of document size', () => {
+  it('reads state in O(depth): no document or range scan, caret near the end of a big doc', () => {
     const ed = setup()
     const para = (i: number) => ({ type: 'paragraph', content: [{ type: 'text', text: `paragraph ${i} `.repeat(20) }] })
     run(() => setDocJSON({ type: 'doc', content: Array.from({ length: 5000 }, (_, i) => para(i)) }))
-    run(() => ed.commands.setTextSelection(10))
-    readToolbarState(ed)
-    const t0 = performance.now()
-    for (let i = 0; i < 500; i++) readToolbarState(ed)
-    const per = (performance.now() - t0) / 500
-    expect(per).toBeLessThan(1)
+    const end = ed.state.doc.content.size - 3
+    const spy = vi.spyOn(ed.state.doc, 'nodesBetween') // selection changes keep the same doc
+    for (const sel of [end, { from: 1, to: end }]) {
+      run(() => ed.commands.setTextSelection(sel))
+      readToolbarState(ed)
+      const t0 = performance.now()
+      for (let i = 0; i < 500; i++) readToolbarState(ed)
+      const per = (performance.now() - t0) / 500
+      expect(spy).not.toHaveBeenCalled()
+      expect(per).toBeLessThan(0.2)
+    }
+  })
+
+  it('does not re-render the toolbar on a keystroke that leaves its state unchanged', () => {
+    let renders = 0
+    render(
+      <>
+        <Profiler id="tb" onRender={() => void renders++}>
+          <Toolbar loadFonts={noFonts} />
+        </Profiler>
+        <NovelEditor />
+      </>,
+    )
+    const ed = getEditor()!
+    run(() => ed.commands.insertContent('abc'))
+    const before = renders
+    run(() => ed.commands.insertContent('d'))
+    run(() => ed.commands.insertContent('e'))
+    expect(renders).toBe(before)
+    run(() => ed.chain().selectAll().toggleBold().run())
+    expect(renders).toBeGreaterThan(before)
+  })
+})
+
+describe('Legacy and hostile documents', () => {
+  it('loads a legacy doc without block attributes, with defaults and no inline style', () => {
+    const ed = setup()
+    run(() =>
+      setDocJSON({
+        type: 'doc',
+        content: [
+          { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Old' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'doc' }] },
+        ],
+      }),
+    )
+    ed.state.doc.forEach((n) =>
+      expect(n.attrs).toMatchObject({ textAlign: null, lineHeight: null, paragraphSpacing: null, indent: 0, firstLineIndent: null }),
+    )
+    for (const el of ed.view.dom.querySelectorAll('h2, p')) expect(el.getAttribute('style')).toBeNull()
+    expect(ctl('toolbar.alignLeft')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('renders no style for hostile or malformed attribute values', () => {
+    const ed = setup()
+    const evil = 'red; background: url(https://example.invalid/x)'
+    run(() =>
+      setDocJSON({
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            attrs: { lineHeight: evil, paragraphSpacing: '1em;color:red', firstLineIndent: 'expression(alert(1))', indent: 'x' },
+            content: [{ type: 'text', text: 'x', marks: [{ type: 'textStyle', attrs: { fontSize: '1px; color: red' } }] }],
+          },
+        ],
+      }),
+    )
+    const p = ed.view.dom.querySelector('p')!
+    expect(p.getAttribute('style')).toBeNull()
+    expect(p.hasAttribute('data-indent')).toBe(false)
+    expect(ed.view.dom.innerHTML).not.toContain('url(')
+    expect(ed.view.dom.innerHTML).not.toContain('color')
   })
 })
