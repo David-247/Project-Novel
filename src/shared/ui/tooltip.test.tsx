@@ -286,6 +286,17 @@ describe('Tooltip', () => {
     )
     expect(screen.getByRole('button', { name: 'Mystery' })).not.toHaveAttribute('aria-describedby')
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('x.unknown'))
+    // Once per id, however often it renders.
+    render(
+      <TooltipProvider lookup={lookup}>
+        <Tooltip>
+          <IconButton label="Mystery again" data-control-id="x.unknown">
+            ?
+          </IconButton>
+        </Tooltip>
+      </TooltipProvider>,
+    )
+    expect(warn.mock.calls.filter(([m]) => String(m).includes('x.unknown'))).toHaveLength(1)
     warn.mockRestore()
   })
 })

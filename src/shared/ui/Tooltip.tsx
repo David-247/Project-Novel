@@ -110,6 +110,8 @@ const RADIX_TOOLTIP_OPEN_EVENT = 'tooltip.open'
 
 // Number of tooltips open right now (normally 0 or 1).
 let openTooltips = 0
+/** Control ids already reported as unregistered (dev warning). */
+const warnedUnregistered = new Set<string>()
 
 function tabbedRecently(): boolean {
   return performance.now() - lastTabAt < KEYBOARD_FOCUS_WINDOW_MS
@@ -197,7 +199,11 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
   }, [open])
 
   if (!resolved) {
-    if (import.meta.env.DEV && id && env.hasLookup) console.warn(`Tooltip: no copy registered for control "${id}"`)
+    if (import.meta.env.DEV && id && env.hasLookup && !warnedUnregistered.has(id)) {
+      // Once per id: a render loop must not flood the console.
+      warnedUnregistered.add(id)
+      console.warn(`Tooltip: no copy registered for control "${id}"`)
+    }
     return cloneElement(children, forwarded)
   }
 
