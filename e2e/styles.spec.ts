@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { launch, newProject, openRecent, readFile, saveStatus } from './helpers'
+import { launch, newProject, openRecent, readFile, saveStatus, seedProject } from './helpers'
 
 const ctl = (page: Page, id: string) => page.locator(`[data-control-id="${id}"]`)
 const picker = (page: Page) => ctl(page, 'styles.picker')
@@ -182,9 +182,51 @@ test('a deleted style brought back by redo renders like Body and shows as missin
   await letter.click()
   await settle(page)
   await page.keyboard.press('ControlOrMeta+Shift+z')
-  await expect(letter).toHaveAttribute('data-style', 'custom-1')
-  await expect(letter).toHaveCSS('text-indent', bodyIndent)
+  // The document holds custom-1 again (the picker says so), but it renders as Body.
   await expect(picker(page).locator('option:checked')).toHaveText('Body (missing style)')
+  await expect(letter).toHaveAttribute('data-style', 'body')
+  await expect(letter).toHaveCSS('text-indent', bodyIndent)
+})
+
+test('dangling ids render as Body / Chapter Title / Subheading; a style based on nothing gets nothing from Body', async ({ page }) => {
+  await launch(page)
+  const doc = {
+    type: 'doc',
+    content: [
+      { type: 'heading', attrs: { level: 1, styleId: 'gone' }, content: [{ type: 'text', text: 'Title' }] },
+      { type: 'heading', attrs: { level: 3, styleId: 'gone' }, content: [{ type: 'text', text: 'Sub' }] },
+      { type: 'paragraph', attrs: { styleId: 'gone' }, content: [{ type: 'text', text: 'Lost style.' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Plain body.' }] },
+    ],
+  }
+  await seedProject(page, '/projects/Dangling', 'Dangling', doc)
+  await openRecent(page, '/projects/Dangling')
+  const ed = manuscript(page)
+  const [title, sub, lost, body] = [0, 1, 2, 3].map((i) => ed.locator(':scope > *').nth(i))
+  await expect(title).toHaveAttribute('data-style', 'chapter-title')
+  await expect(title).toHaveAttribute('data-break-before', 'page')
+  await expect(title).toHaveCSS('text-align', 'center')
+  await expect(sub).toHaveAttribute('data-style', 'subheading')
+  await expect(sub).toHaveCSS('font-weight', '600')
+  await expect(lost).toHaveAttribute('data-style', 'body')
+  const bodyIndent = await body.evaluate((el) => getComputedStyle(el).textIndent)
+  expect(px(bodyIndent)).toBeGreaterThan(0)
+  await expect(lost).toHaveCSS('text-indent', bodyIndent)
+
+  // A custom style based on nothing: none of Body's settings (no first-line indent).
+  await body.click()
+  await settle(page)
+  await createCustomStyle(page, 'body', 'Plain')
+  await picker(page).selectOption({ label: 'Plain' })
+  await expect(body).toHaveAttribute('data-style', 'custom-1')
+  await ctl(page, 'styles.edit').click()
+  const modify = page.getByRole('dialog', { name: 'Modify style: Plain' })
+  await modify.locator('[data-control-id="styles.field.basedOn"]').selectOption('')
+  await modify.locator('[data-control-id="styles.modify.save"]').click()
+  await expect(modify).toBeHidden()
+  await expect(body).toHaveCSS('text-indent', '0px')
+  const sheet = await page.getByTestId('book-styles').evaluate((el) => el.textContent ?? '')
+  expect(sheet).toContain('[data-style="custom-1"] {  }')
 })
 
 test('custom styles and a modified Chapter Title persist through save, close and reopen (book.json)', async ({ page }) => {

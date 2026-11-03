@@ -4,6 +4,8 @@ import { TextSelection } from '@tiptap/pm/state'
 import { useStore } from '@/shared/store'
 import { getDocJSON, getEditor, NovelEditor, setDocJSON, Toolbar } from '../index'
 import { readToolbarState } from '../toolbar/toolbar-state'
+import { renderedStyleId, styleIdsKey } from './block-styles'
+import { getResolvedStyles } from './resolved'
 import type { Editor, JSONContent } from '../index'
 import { installLayoutPolyfills } from '../jsdom-polyfills.test-util'
 import { createStyle, deleteStyle, duplicateStyle, renameStyle, saveStyle, getStyleDefinition, ownDef } from './actions'
@@ -200,17 +202,71 @@ describe('missing styles', () => {
     run(() => ed.commands.undo())
     run(() => deleteStyle(id))
     run(() => ed.commands.redo())
-    expect(blocks(ed)[0].dataset.style).toBe(id)
+    // The document keeps the dangling id; the block renders as Body.
+    expect(ed.state.doc.child(0).attrs.styleId).toBe(id)
+    expect(blocks(ed)[0].dataset.style).toBe('body')
     expect(readToolbarState(ed)).toMatchObject({ styleId: id, fallbackStyleId: 'body' })
     const picker = document.querySelector<HTMLSelectElement>('[data-control-id="styles.picker"]')!
     expect(picker.value).toBe(id)
     expect(picker.selectedOptions[0].textContent).toBe('Body (missing style)')
     const sheet = document.querySelector('[data-testid="book-styles"]')!.textContent!
-    // The Body fallback applies to it: the deleted id is neither excluded nor given its own rule.
-    expect(sheet.split('\n')[0]).toMatch(/^\.novel-editor-content :where\(p\[data-style\]:not\(.*\)\) \{ font-size: calc\(11 /)
     expect(sheet).not.toContain(`[data-style="${id}"]`)
-    const fallback = sheet.split('\n')[0].slice(0, sheet.split('\n')[0].indexOf(' {')).replace('.novel-editor-content ', '')
-    expect(blocks(ed)[0].matches(fallback)).toBe(true)
+    // Defining the id again (createStyle reuses the free id) renders the block with it again, with
+    // no document change.
+    const doc = ed.state.doc
+    run(() => expect(createStyle('epigraph', 'Letter again')).toBe(id))
+    expect(blocks(ed)[0].dataset.style).toBe(id)
+    expect(ed.state.doc).toBe(doc)
+  })
+
+  it('dangling ids on headings render as Chapter Title (H1) / Subheading (H2, H3); defined styles render as themselves', () => {
+    const ed = mount([h(1, 'A', { styleId: 'gone' }), h(3, 'B', { styleId: 'gone' }), p('C', { styleId: 'gone' }), p('D')])
+    expect(blocks(ed).map((b) => b.dataset.style)).toEqual(['chapter-title', 'subheading', 'body', 'body'])
+    expect(blocks(ed)[0].getAttribute('data-break-before')).toBe('page')
+    // Typing in a block keeps its rendered style; an edit that renames nothing sends no full recompute.
+    caretAtEndOf(ed, 2)
+    run(() => ed.commands.insertContent('!'))
+    expect(blocks(ed)[2].dataset.style).toBe('body')
+    // A custom chapter style based on nothing renders as itself (and so gets nothing from Body).
+    let id = ''
+    run(() => (id = createStyle('body', 'Bare')))
+    run(() =>
+      saveStyle(id, { name: 'Bare', kind: 'chapter', outlineLevel: 1 }),
+    )
+    caretAtEndOf(ed, 3)
+    run(() => ed.commands.setBlockStyle(id))
+    expect(blocks(ed)[3].tagName).toBe('H1')
+    expect(blocks(ed)[3].dataset.style).toBe(id)
+    expect(document.querySelector('[data-testid="book-styles"]')!.textContent).toContain(`[data-style="${id}"] {  }`)
+    // Structural edits (split, join across blocks, set type) keep exactly one correct decoration per
+    // block, as a full recompute would give.
+    const consistent = () => {
+      const styles = getResolvedStyles()
+      const decos = styleIdsKey.getState(ed.state)!.decorations.find()
+      expect(decos).toHaveLength(ed.state.doc.childCount)
+      ed.state.doc.forEach((node, offset, i) => {
+        expect(blocks(ed)[i].dataset.style, `block ${i}`).toBe(renderedStyleId(node, styles))
+        expect(decos.some((d) => d.from === offset && d.to === offset + node.nodeSize), `deco ${i}`).toBe(true)
+      })
+    }
+    consistent()
+    caretAtEndOf(ed, 0)
+    key(ed, 'Enter')
+    consistent()
+    run(() => ed.commands.deleteRange({ from: 2, to: ed.state.doc.child(0).nodeSize + 3 }))
+    consistent()
+    caretAtEndOf(ed, 1)
+    run(() => ed.commands.setBlockStyle('chapter-title'))
+    run(() => ed.commands.undo())
+    run(() => ed.commands.redo())
+    consistent()
+    // A many-step transaction (like Replace All) takes the full-recompute path.
+    run(() => {
+      const tr = ed.state.tr
+      for (let i = 0; i < 40; i++) tr.insertText('x', 2)
+      ed.view.dispatch(tr.split(3))
+    })
+    consistent()
   })
 
   it('locks the Kind of a custom style while paragraphs use it', () => {

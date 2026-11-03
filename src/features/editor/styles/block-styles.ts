@@ -139,12 +139,29 @@ interface BreakState {
 
 export const styleBreaksKey = new PluginKey<BreakState>('nvStyleBreaks')
 
+/** The set of defined style ids (which ids render as themselves, see `renderedStyleId`). */
+function idsSignature(styles: ResolvedStyles): string {
+  return [...styles.keys()].join('|')
+}
+
 function breakSignature(styles: ResolvedStyles): string {
   let sig = ''
   for (const s of styles.values()) {
     if ((s.breakBefore && s.breakBefore !== 'none') || s.nextStyle) sig += `${s.id}:${s.breakBefore ?? ''}:${s.nextStyle ?? ''}|`
   }
-  return sig
+  // Which ids are defined also decides breaks (an undefined id renders as its fallback).
+  return `${sig}#${idsSignature(styles)}`
+}
+
+/**
+ * The style a block is rendered and paginated with: its `styleId` when that names a defined style,
+ * otherwise the migration default for its type (Body for a paragraph, Chapter Title for H1,
+ * Subheading for H2/H3). A dangling id (style deleted, then brought back by undo/redo; pasted; an
+ * out-of-sync book.json) stays in the document unchanged and renders like the fallback.
+ */
+export function renderedStyleId(node: PMNode, styles: ResolvedStyles): string {
+  const id = effectiveStyleId(node)
+  return styles.has(id) ? id : defaultStyleIdFor(node.attrs, node.type.name)
 }
 
 /**
@@ -156,7 +173,7 @@ function computeBreaks(doc: PMNode, styles: ResolvedStyles): DecorationSet {
   const decos: Decoration[] = []
   let prev: string | null = null
   doc.forEach((node, offset) => {
-    const id = isStyledType(node) ? effectiveStyleId(node) : null
+    const id = isStyledType(node) ? renderedStyleId(node, styles) : null
     const b = id ? styles.get(id)?.breakBefore : undefined
     if (id && (b === 'page' || b === 'recto') && !continuesHeadingGroup(prev, id, styles)) {
       decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': b }))
@@ -213,11 +230,97 @@ function breaksPlugin(): Plugin<BreakState> {
   })
 }
 
+// ---- data-style: the rendered (resolved) style id --------------------------------------------
+
+interface StyleIdState {
+  decorations: DecorationSet
+  /** Defined ids the decorations were computed for. */
+  signature: string
+}
+
+export const styleIdsKey = new PluginKey<StyleIdState>('nvStyleIds')
+
+/** Above this many steps a transaction recomputes all data-style decorations instead. */
+const INCREMENTAL_MAX_STEPS = 16
+
+function styleIdDeco(node: PMNode, pos: number, styles: ResolvedStyles): Decoration {
+  return Decoration.node(pos, pos + node.nodeSize, { 'data-style': renderedStyleId(node, styles) })
+}
+
+function computeStyleIds(doc: PMNode, styles: ResolvedStyles): DecorationSet {
+  const decos: Decoration[] = []
+  doc.descendants((node, pos) => {
+    if (!isStyledType(node)) return true
+    decos.push(styleIdDeco(node, pos, styles))
+    return false
+  })
+  return DecorationSet.create(doc, decos)
+}
+
+/**
+ * Every paragraph/heading carries a node decoration `data-style="<renderedStyleId>"`, overriding the
+ * attribute renderHTML writes (which stays the raw id, for the clipboard). Every block has one, so a
+ * decoration is only ever changed, never removed, while its block exists (removing one would also
+ * remove the attribute). Recomputed in full only when the set of defined ids changes; a document
+ * change re-derives just the blocks it touched.
+ */
+function styleIdsPlugin(): Plugin<StyleIdState> {
+  return new Plugin<StyleIdState>({
+    key: styleIdsKey,
+    state: {
+      init: (_, state) => {
+        const styles = getResolvedStyles()
+        return { decorations: computeStyleIds(state.doc, styles), signature: idsSignature(styles) }
+      },
+      apply: (tr, value) => {
+        const meta = tr.getMeta(STYLES_META) as ResolvedStyles | undefined
+        if (meta) {
+          const signature = idsSignature(meta)
+          return signature === value.signature ? value : { decorations: computeStyleIds(tr.doc, meta), signature }
+        }
+        if (!tr.docChanged) return value
+        const styles = getResolvedStyles()
+        // Mapping each step's range through the later steps is O(steps^2): for a big transaction
+        // (Replace All: thousands of steps) one O(blocks) recompute is far cheaper.
+        if (tr.steps.length > INCREMENTAL_MAX_STEPS) return { ...value, decorations: computeStyleIds(tr.doc, styles) }
+        let set = value.decorations.map(tr.mapping, tr.doc)
+        const size = tr.doc.content.size
+        tr.mapping.maps.forEach((map, i) => {
+          const rest = tr.mapping.slice(i + 1)
+          map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+            const from = Math.max(0, rest.map(newStart, -1))
+            const to = Math.min(size, rest.map(newEnd, 1))
+            // Re-derive the styled blocks the change overlaps: drop every decoration overlapping each
+            // (after a join or split a mapped one may cover only part of it; mapping may also have
+            // dropped it) and add a fresh one. Untouched neighbours keep theirs (they only touch);
+            // deleted blocks lost theirs in the mapping.
+            const stale: Decoration[] = []
+            const fresh: Decoration[] = []
+            tr.doc.nodesBetween(from, to, (node, pos) => {
+              if (!isStyledType(node)) return true
+              const end = pos + node.nodeSize
+              for (const d of set.find(pos, end)) if (d.from < end && d.to > pos) stale.push(d)
+              fresh.push(styleIdDeco(node, pos, styles))
+              return false
+            })
+            if (fresh.length) set = set.remove(stale).add(tr.doc, fresh)
+          })
+        })
+        return { ...value, decorations: set }
+      },
+    },
+    props: {
+      decorations: (state: EditorState) => styleIdsKey.getState(state)?.decorations,
+    },
+  })
+}
+
 /**
  * Paragraph and chapter styles on blocks.
  * - `styleId` attribute on paragraph/heading (default null = migration default, see
- *   `defaultStyleIdFor`), rendered as `data-style="<effective id>"`: the generated stylesheet
- *   (`BookStyleSheet`) styles blocks by it, so editing a style never changes the document.
+ *   `defaultStyleIdFor`). Blocks show `data-style="<renderedStyleId>"` (a node decoration: the id
+ *   if defined, else the fallback); the generated stylesheet (`BookStyleSheet`, one rule per defined
+ *   style) styles blocks by it, so editing a style never changes the document.
  * - `data-break-before` node decorations for pagination (see `computeBreaks`).
  * - Commands `setBlockStyle`, `clearDirectFormatting`; Enter chaining (`nextStyle`).
  * - Shortcuts: Mod-Alt-0 Body, Mod-Alt-1 Chapter Title (replacing Tiptap's paragraph / H1
@@ -311,7 +414,7 @@ export const BlockStyles = Extension.create({
   },
 
   addProseMirrorPlugins() {
-    return [breaksPlugin()]
+    return [styleIdsPlugin(), breaksPlugin()]
   },
 })
 

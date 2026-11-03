@@ -104,41 +104,22 @@ describe('generated stylesheet', () => {
     const before = buildStyleSheetCSS(resolveStyleSheet({}), SCOPE).split('\n')
     const after = buildStyleSheetCSS(resolveStyleSheet({ 'chapter-title': { fontSize: 30 } }), SCOPE).split('\n')
     const changed = after.filter((l, i) => l !== before[i])
-    // The Chapter Title rule, and the H1 fallback (for unknown ids) that reuses its declarations.
-    expect(changed).toHaveLength(2)
-    expect(changed[0]).toMatch(/^\.ed :where\(h1\[data-style\]:not\(/)
-    expect(changed[1]).toContain('[data-style="chapter-title"]')
-    expect(changed[1]).toContain('calc(30 * var(--nv-pt, 1pt))')
+    expect(changed).toHaveLength(1)
+    expect(changed[0]).toContain('[data-style="chapter-title"]')
+    expect(changed[0]).toContain('calc(30 * var(--nv-pt, 1pt))')
   })
 
-  it('starts with fallback rules for unknown ids only (Body for paragraphs, the migration default for headings)', () => {
-    const lines = buildStyleSheetCSS(resolveStyleSheet({}), SCOPE).split('\n')
-    expect(lines[0]).toMatch(/^\.ed :where\(p\[data-style\]:not\(\[data-style="body"\], \[data-style="first-paragraph"\], .*\)\) \{ font-size: calc\(11 \* var\(--nv-pt, 1pt\)\);.*text-indent: 1\.5em;/)
-    expect(lines[1]).toMatch(/^\.ed :where\(h1\[data-style\]:not\(.*\)\) \{ font-size: calc\(20 /)
-    expect(lines[2]).toMatch(/^\.ed :where\(h2\[data-style\]:not\(.*\), h3\[data-style\]:not\(.*\)\) \{ font-size: calc\(13 /)
-  })
-
-  it('a defined style never matches a fallback; a dangling id does', () => {
-    // A custom chapter style based on nothing, and a custom paragraph style based on nothing.
+  it('has exactly one rule per defined style, no fallback rules; a style based on nothing gets nothing from Body', () => {
     const sheet = resolveStyleSheet({
       'custom-1': { name: 'Plain', kind: 'paragraph', builtIn: false },
       'custom-2': { name: 'Bare heading', kind: 'chapter', builtIn: false },
     })
-    const css = buildStyleSheetCSS(sheet, SCOPE)
-    expect(css).toContain('.ed [data-style="custom-1"] {  }')
-    const fallbackSelectors = css.split('\n').slice(0, 3).map((l) => l.slice(0, l.indexOf(' {')))
-    const root = document.createElement('div')
-    root.className = 'ed'
-    root.innerHTML =
-      '<p data-style="custom-1">a</p><p data-style="body">b</p><h1 data-style="custom-2">c</h1>' +
-      '<h1 data-style="chapter-title">d</h1><p data-style="custom-9">e</p><h1 data-style="gone">f</h1><h3 data-style="gone">g</h3>'
-    document.body.append(root)
-    const matched = (sel: string) => Array.from(root.querySelectorAll(sel.replace(/^\.ed /, '')), (el) => el.textContent)
-    try {
-      expect(fallbackSelectors.map(matched)).toEqual([['e'], ['f'], ['g']])
-    } finally {
-      root.remove()
-    }
+    const lines = buildStyleSheetCSS(sheet, SCOPE).split('\n')
+    const perId = lines.filter((l) => /^\.ed \[data-style="[^"]+"\] \{/.test(l))
+    expect(perId).toHaveLength(sheet.size)
+    expect(lines.some((l) => l.includes(':where(') || l.includes(':not('))).toBe(false)
+    expect(lines).toContain('.ed [data-style="custom-1"] {  }')
+    expect(lines).toContain('.ed [data-style="custom-2"] {  }')
   })
 
   it('sanitizes font names (no CSS injection from book.json)', () => {
