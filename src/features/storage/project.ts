@@ -324,7 +324,7 @@ async function saveAsNewProjectUnguarded(): Promise<boolean> {
     provider()
     const folder = await pickProjectFolder('Choose a folder for your project')
     if (!folder) return false
-    await inGrantedRoot(() => createProjectAt(folder, null))
+    await whileOpening(() => inGrantedRoot(() => createProjectAt(folder, null)))
     return true
   } catch (e) {
     await showError('Could not save', e)
@@ -365,6 +365,19 @@ function fallbackConfirm(text: string): boolean {
   }
 }
 
+/**
+ * Run a create/open step with the "Opening…" state on (status bar; editor read-only), on every
+ * path: New Project, Save As, Open Project, Open Recent, Reopen after a crash.
+ */
+async function whileOpening(fn: () => Promise<void>): Promise<void> {
+  actions().openStarted()
+  try {
+    await fn()
+  } finally {
+    actions().openFinished()
+  }
+}
+
 /** Menu action: File > New Project. */
 export function newProject(): Promise<boolean> {
   return exclusiveFolderFlow(newProjectUnguarded)
@@ -376,7 +389,7 @@ async function newProjectUnguarded(): Promise<boolean> {
     provider()
     const folder = await pickProjectFolder('Choose a folder for the new project')
     if (!folder) return false
-    await inGrantedRoot(() => createProjectAt(folder, emptyDoc()))
+    await whileOpening(() => inGrantedRoot(() => createProjectAt(folder, emptyDoc())))
     return true
   } catch (e) {
     await showError('Could not create project', e)
@@ -401,12 +414,7 @@ async function openProjectUnguarded(folder?: string): Promise<boolean> {
     else target = await pickProjectFolder('Open a Novel project folder')
     if (!target) return false
     const granted = target
-    actions().openStarted()
-    try {
-      await inGrantedRoot(() => openProjectAt(granted))
-    } finally {
-      actions().openFinished()
-    }
+    await whileOpening(() => inGrantedRoot(() => openProjectAt(granted)))
     return true
   } catch (e) {
     if (target && e instanceof ProjectError && (e.code === 'missing-folder' || e.code === 'not-a-project')) {

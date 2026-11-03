@@ -54,6 +54,20 @@ describe('NovelEditor', () => {
     expect(SYSTEM_FONT_STACK).toMatch(/^system-ui, -apple-system, "Segoe UI"/)
   })
 
+  it('is read-only (aria-busy) while a project is opening, and editable again afterwards', () => {
+    const ed = mount()
+    act(() => useStore.getState().projectActions.openStarted())
+    expect(ed.isEditable).toBe(false)
+    expect(screen.getByTestId('writing-surface')).toHaveAttribute('aria-busy', 'true')
+    act(() => useStore.getState().projectActions.openFinished())
+    expect(ed.isEditable).toBe(true)
+    // A closed project never leaves it stuck read-only.
+    act(() => useStore.getState().projectActions.openStarted())
+    act(() => useStore.getState().projectActions.projectClosed())
+    expect(ed.isEditable).toBe(true)
+    expect(screen.getByTestId('writing-surface')).not.toHaveAttribute('aria-busy')
+  })
+
   it('defines the Phase 1 base schema', () => {
     const ed = mount()
     const nodes = Object.keys(ed.schema.nodes)

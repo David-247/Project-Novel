@@ -1,5 +1,6 @@
 import { EditorContent, useEditor } from '@tiptap/react'
 import { useEffect, useState } from 'react'
+import { useStore } from '@/shared/store'
 import { attachEditor } from './controller'
 import { createEditorExtensions } from './extensions'
 import { SYSTEM_FONT_STACK } from './fonts'
@@ -33,11 +34,19 @@ export function NovelEditor() {
 
   useEffect(() => (editor ? attachEditor(editor) : undefined), [editor])
 
+  // While a project is being opened (reading + loading a possibly large manuscript), typing would
+  // be thrown away by the load: the editor is read-only until opening finished or failed.
+  const opening = useStore((s) => s.project.opening)
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.setEditable(!opening, false)
+  }, [editor, opening])
+
   return (
     <div
       className="novel-writing-surface mx-auto w-full max-w-[72ch] px-6 py-10"
       style={{ fontFamily: SYSTEM_FONT_STACK }}
       data-testid="writing-surface"
+      aria-busy={opening || undefined}
     >
       <EditorContent editor={editor} />
     </div>

@@ -54,6 +54,36 @@ beforeEach(async () => {
 afterEach(() => unregister())
 
 describe('project storage', () => {
+  it('every open path shows "Opening…" while it runs and clears it after (New, Save As, Open, Open Recent, failure)', async () => {
+    const seen: boolean[] = []
+    const unsubscribe = useStore.subscribe((s, p) => {
+      if (s.project.opening !== p.project.opening) seen.push(s.project.opening)
+    })
+    const expectOpeningCycle = () => {
+      expect(seen).toEqual([true, false])
+      seen.length = 0
+    }
+    await createAt('/books/a') // New Project
+    expectOpeningCycle()
+    await closeProject()
+    editor.update(textDoc('draft'))
+    backend.dirs.add('/books/b')
+    backend.pick = '/books/b'
+    expect(await saveProject()).toBe(true) // Save As (no project open)
+    expectOpeningCycle()
+    backend.pick = '/books/a'
+    expect(await openProject()).toBe(true) // Open Project
+    expectOpeningCycle()
+    await loadRecentProjects()
+    expect(await openProject('/books/b')).toBe(true) // Open Recent / Reopen after a crash
+    expectOpeningCycle()
+    backend.dirs.add('/books/empty')
+    backend.pick = '/books/empty'
+    expect(await openProject()).toBe(false) // not a project: still cleared
+    expectOpeningCycle()
+    unsubscribe()
+  })
+
   it('creates, saves, reopens from recent with identical content', async () => {
     const opened = vi.fn()
     onProjectOpened(opened)
