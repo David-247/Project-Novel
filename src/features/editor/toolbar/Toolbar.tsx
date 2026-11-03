@@ -11,7 +11,7 @@ import { markChain } from './mark-chain'
 import * as I from './icons'
 import { FIRST_LINE_INDENTS, FONT_SIZES, LINE_SPACINGS, PARAGRAPH_SPACINGS, withCurrent } from './presets'
 import type { Alignment } from './toolbar-state'
-import { useMountedEditor } from './use-mounted-editor'
+import { useMountedEditor } from '../use-mounted-editor'
 import { useToolbarState } from './use-toolbar-state'
 
 export interface ToolbarProps {

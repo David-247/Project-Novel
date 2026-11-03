@@ -17,8 +17,3 @@ export const FIND_CONTROLS = {
   caseSensitive: { id: 'find.caseSensitive', label: 'Match case' },
   wholeWord: { id: 'find.wholeWord', label: 'Whole word' },
 } as const satisfies Record<string, ToolbarControlMeta>
-
-export const HISTORY_CONTROLS = {
-  undo: { id: 'history.undo', label: 'Undo', shortcut: 'Mod-z' },
-  redo: { id: 'history.redo', label: 'Redo', shortcut: ['Mod-Shift-z', 'Mod-y'] },
-} as const satisfies Record<string, ToolbarControlMeta>

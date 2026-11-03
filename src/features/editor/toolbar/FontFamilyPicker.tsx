@@ -4,7 +4,7 @@ import { Select } from '@/shared/ui'
 import { fontFamilyCss, loadSystemFonts } from '../fonts'
 import { TOOLBAR_CONTROLS } from './controls'
 import { markChain } from './mark-chain'
-import { useMountedEditor } from './use-mounted-editor'
+import { useMountedEditor } from '../use-mounted-editor'
 import { useToolbarState } from './use-toolbar-state'
 
 export interface FontFamilyPickerProps

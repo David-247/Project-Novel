@@ -36,5 +36,6 @@ export { HistoryButtons } from './history/HistoryButtons'
 export type { HistoryButtonsProps } from './history/HistoryButtons'
 export { HISTORY_DEPTH } from './extensions'
 // Control identities + names + shortcut specs (the tooltips registry derives from these)
-export { FIND_CONTROLS, HISTORY_CONTROLS } from './find/controls'
+export { FIND_CONTROLS } from './find/controls'
+export { HISTORY_CONTROLS } from './history/controls'
 export type { Editor, JSONContent } from '@tiptap/core'
