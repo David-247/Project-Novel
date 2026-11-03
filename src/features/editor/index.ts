@@ -12,6 +12,9 @@
 // - markDirty(): flag the current content as unsaved (bumps the version, no onDocChange), e.g.
 //   after restoring crash-recovery data.
 export { NovelEditor } from './NovelEditor'
+export type { NovelEditorProps } from './NovelEditor'
+// The mounted editor (re-renders when it mounts/unmounts, not per transaction), for hosts such as pagination.
+export { useMountedEditor } from './use-mounted-editor'
 export { FontFamilyPicker, Toolbar, ToolbarItem, TOOLBAR_CONTROLS } from './toolbar'
 export type { FontFamilyPickerProps, ToolbarProps, ToolbarControlMeta, ToolbarControlKey } from './toolbar'
 export {

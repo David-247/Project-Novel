@@ -22,6 +22,7 @@ import {
   SaveStatusIndicator,
   useStorageIntegration,
 } from '@/features/storage'
+import { PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, TooltipProvider } from '@/shared/ui'
@@ -79,7 +80,9 @@ export function App() {
             <div className="pointer-events-none sticky top-0 z-10 flex h-0 items-start justify-end px-2 sm:px-4">
               <FindReplacePanel className="pointer-events-auto mt-2" />
             </div>
-            <NovelEditor />
+            <PaginatedView>
+              <NovelEditor paged />
+            </PaginatedView>
           </>
         }
         statusBar={
@@ -88,6 +91,8 @@ export function App() {
             <RecoveryStatus />
             <span className="flex-1" />
             <NoProjectActions />
+            <PageIndicator />
+            <ZoomControls />
           </>
         }
       />

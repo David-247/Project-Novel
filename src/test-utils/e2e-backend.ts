@@ -15,7 +15,12 @@
  * and folder picker through `window.__nvE2E` (see e2e/helpers.ts).
  */
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { getEditor } from '@/features/editor'
+import { getPaginationDebug, invalidatePagination, registerBottomReservation } from '@/features/pagination'
 import { autosaveNow } from '@/features/storage'
+import { useStore } from '@/shared/store'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
 
@@ -144,8 +149,64 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     countControls: () => document.body.querySelectorAll(CONTROL_SELECTOR).length,
     /** Take a crash-recovery snapshot now, as the 30 s autosave timer would (perf: autosave mid-typing). */
     autosaveNow: () => autosaveNow(),
+    // ---- Pagination (Phase 2) ----
+    /** The engine has laid out the current document and no reflow is pending. */
+    paginationSettled: () => getPaginationDebug().settled,
+    /** Px reserved at the bottom of each page. */
+    paginationReserved: () => getPaginationDebug().reserved,
+    /** The published layout model (store `layout` slice). */
+    layout: () => {
+      const l = useStore.getState().layout
+      return {
+        pageCount: l.pageCount,
+        pages: l.pages,
+        currentPage: l.currentPage,
+        visibleSpread: l.visibleSpread,
+        effectiveView: l.effectiveView,
+        scale: l.scale,
+        layoutVersion: l.layoutVersion,
+      }
+    },
+    /** Book settings without the settings UI (owned by the book settings ticket). */
+    setTrimSize: (id: string) => useStore.getState().bookActions.setTrimSize(id),
+    setBookView: (view: 'spread' | 'single') => useStore.getState().bookActions.setView(view),
+    /**
+     * Emit `data-break-before` on top-level blocks, as style definitions will: `match` selects
+     * blocks by node type (and heading level). Call with `null` to remove.
+     */
+    breakBeforeBlocks: (match: { type: string; level?: number } | null, value: 'page' | 'recto' = 'page') => {
+      const ed = getEditor()
+      if (!ed) return
+      ed.unregisterPlugin(E2E_BREAK_KEY)
+      if (match) {
+        ed.registerPlugin(
+          new Plugin({
+            key: E2E_BREAK_KEY,
+            props: {
+              decorations: (state) => {
+                const decos: Decoration[] = []
+                state.doc.forEach((node, pos) => {
+                  if (node.type.name === match.type && (match.level === undefined || node.attrs.level === match.level))
+                    decos.push(Decoration.node(pos, pos + node.nodeSize, { 'data-break-before': value }))
+                })
+                return DecorationSet.create(state.doc, decos)
+              },
+            },
+          }),
+        )
+      }
+      invalidatePagination()
+    },
+    /** Reserve `px` at the bottom of every page whose range contains `pos` (footnote stand-in); null removes. */
+    reserveBottom: (pos: number | null, px = 0) => {
+      e2eReservation?.()
+      e2eReservation = pos === null ? null : registerBottomReservation('e2e', (p) => (p.from <= pos && pos < p.to ? px : 0))
+    },
   }
 }
+
+const E2E_BREAK_KEY = new PluginKey('e2e-break-before')
+let e2eReservation: (() => void) | null = null
 
 declare global {
   interface Window {

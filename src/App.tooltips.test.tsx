@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, setDocJSON, TOOLBAR_CONTROLS } from '@/features/editor'
+import { PAGINATION_CONTROLS } from '@/features/pagination'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
 import { useStore } from '@/shared/store'
 import { IconButton, Tooltip } from '@/shared/ui'
@@ -49,8 +50,13 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     const { container } = await renderFullApp()
     const rendered = Array.from(container.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
     // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel
-    // controls, and the no-project New / Open actions in the status bar).
-    const expected = [...Object.values(TOOLBAR_CONTROLS), ...Object.values(HISTORY_CONTROLS), ...Object.values(FIND_CONTROLS)]
+    // controls, the no-project New / Open actions and the page view controls in the status bar).
+    const expected = [
+      ...Object.values(TOOLBAR_CONTROLS),
+      ...Object.values(HISTORY_CONTROLS),
+      ...Object.values(FIND_CONTROLS),
+      ...Object.values(PAGINATION_CONTROLS),
+    ]
     expect(new Set(rendered)).toEqual(new Set([...expected.map((m) => m.id), 'file.new_project', 'file.open_project']))
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
@@ -76,7 +82,11 @@ describe('tooltip coverage (every control in the app has a registered, wired too
   it('covers the no-project state: New / Open, and Save as project once text was typed', async () => {
     const { container } = await renderFullApp()
     const statusBar = container.querySelector('footer[aria-label="Status bar"]')!
-    const ids = () => Array.from(statusBar.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
+    // Project actions (the page view controls always follow them).
+    const ids = () =>
+      Array.from(statusBar.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id')).filter(
+        (id) => !id!.startsWith('pagination.'),
+      )
     expect(ids()).toEqual(['file.new_project', 'file.open_project'])
     expect(statusBar).toHaveTextContent('No project open')
     act(() => {

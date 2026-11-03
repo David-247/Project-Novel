@@ -6,12 +6,20 @@ import { createEditorExtensions } from './extensions'
 import { SYSTEM_FONT_STACK } from './fonts'
 import './editor.css'
 
+export interface NovelEditorProps {
+  /**
+   * Paged layout: render the bare view (no centered column, no surface padding) for a host that
+   * lays it out as pages (the pagination slice's PaginatedView). Typography then comes from the host.
+   */
+  paged?: boolean
+}
+
 /**
  * Continuous-scroll writing surface. Scrolling is provided by the host
  * (AppShell's editor slot scrolls); this renders a centered text column.
  * React does not re-render on transactions (typing latency budget).
  */
-export function NovelEditor() {
+export function NovelEditor({ paged = false }: NovelEditorProps = {}) {
   const [extensions] = useState(createEditorExtensions)
   const editor = useEditor({
     extensions,
@@ -43,7 +51,7 @@ export function NovelEditor() {
 
   return (
     <div
-      className="novel-writing-surface mx-auto w-full max-w-[72ch] px-6 py-10"
+      className={paged ? 'novel-paged-surface' : 'novel-writing-surface mx-auto w-full max-w-[72ch] px-6 py-10'}
       style={{ fontFamily: SYSTEM_FONT_STACK }}
       data-testid="writing-surface"
       aria-busy={opening || undefined}

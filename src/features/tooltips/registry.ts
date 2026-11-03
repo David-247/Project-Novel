@@ -13,6 +13,7 @@
  */
 import { FIND_CONTROLS, HISTORY_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import type { ToolbarControlMeta } from '@/features/editor'
+import { PAGINATION_CONTROLS } from '@/features/pagination'
 import type { TooltipCopy } from '@/shared/ui'
 
 function fromMeta<K extends string>(
@@ -132,8 +133,16 @@ const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
 }
 
+const PAGINATION_DESCRIPTIONS: Record<keyof typeof PAGINATION_CONTROLS, string> = {
+  zoomOut: 'Make the pages smaller on screen. The book itself does not change.',
+  zoom: 'Fit the whole spread, fit the page width, or pick a size. Only changes how the pages look on screen.',
+  zoomIn: 'Make the pages larger on screen. The book itself does not change.',
+  spreadView: 'Show facing pages side by side like an open book, or one page at a time.',
+}
+
 export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.freeze({
   ...fromMeta(TOOLBAR_CONTROLS, TOOLBAR_DESCRIPTIONS),
+  ...fromMeta(PAGINATION_CONTROLS, PAGINATION_DESCRIPTIONS),
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
   ...FILE_TOOLTIPS,
