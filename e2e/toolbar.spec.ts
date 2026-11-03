@@ -18,6 +18,14 @@ test('formatting toolbar: shortcuts, active state and roving keyboard focus', as
   await page.keyboard.press('ControlOrMeta+Shift+e')
   await expect(editor.locator('p').first()).toHaveCSS('text-align', 'center')
   await expect(toolbar.locator('[data-control-id="toolbar.alignCenter"]')).toHaveAttribute('aria-pressed', 'true')
+  // Align right shares its combo with hard reload; the reload guard (on in e2e builds) must let the
+  // editor handle it, and the page must not reload (the text is still there).
+  await page.keyboard.press('ControlOrMeta+Shift+r')
+  await expect(editor.locator('p').first()).toHaveCSS('text-align', 'right')
+  await expect(toolbar.locator('[data-control-id="toolbar.alignRight"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(editor).toContainText('Hello bold')
+  await page.keyboard.press('ControlOrMeta+Shift+e')
+  await expect(editor.locator('p').first()).toHaveCSS('text-align', 'center')
 
   // Keyboard: focus a control, arrows move within the toolbar, Enter activates, Escape returns.
   await bold.focus()

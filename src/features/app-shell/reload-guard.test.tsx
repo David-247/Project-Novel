@@ -62,6 +62,19 @@ describe('useReloadGuard', () => {
     return e
   }
 
+  it('runs after app handlers (bubble phase) and leaves keys they already handled alone', () => {
+    renderHook(() => useReloadGuard(true))
+    // An app handler that runs first (e.g. ProseMirror's keymap on the editor) sees the key unprevented.
+    let seenPrevented: boolean | null = null
+    const app = (e: KeyboardEvent) => {
+      seenPrevented = e.defaultPrevented
+    }
+    document.body.addEventListener('keydown', app)
+    expect(press({ key: 'R', ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(true)
+    expect(seenPrevented).toBe(false)
+    document.body.removeEventListener('keydown', app)
+  })
+
   it('prevents the default of reload / navigation keys at window level, but lets them propagate', () => {
     renderHook(() => useReloadGuard(true))
     let seen = 0
