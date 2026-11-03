@@ -60,6 +60,49 @@ one means the default.
 On open, the file must be valid JSON with this shape; otherwise Novel shows an error dialog ("manuscript.json is
 damaged...") and does not open the project. The editor applies its own schema on load.
 
+### Paragraph and chapter styles in the manuscript
+
+Paragraphs and headings may carry `attrs.styleId`, the id of a style in `book.json` → `styles` (lowercase letters,
+digits and dashes). It is written only when set. Chapter styles (`kind: "chapter"`) are stored as `heading` nodes
+at the style's `outlineLevel`; paragraph styles as `paragraph` nodes. Body on a paragraph is stored as no `styleId`.
+
+**Phase 1 migration rule (rendering mapping, no rewrite):** a block without `styleId` uses **Body** if it is a
+paragraph, **Chapter Title** if it is a level-1 heading and **Subheading** if it is a level-2 or level-3 heading.
+The mapping happens when the block is rendered, so a Phase 1 `manuscript.json` loads and saves byte-for-byte
+unchanged until the user applies a style. A `styleId` naming a style that no longer exists (for example brought back
+by undo after a delete, pasted, or from an out-of-sync book.json) renders like Body on a paragraph, or like the
+heading's migration default, and shows as "Body (missing style)" (or the heading default) in the picker. Deleting a
+style in the app re-maps its blocks first.
+
+### Styles in book.json (`styles`)
+
+`styles` maps a style id to a record. It holds only what the user changed: `{}` means every built-in style at its
+default. Unknown keys in a record are preserved.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Display name (custom styles; a built-in may override it) |
+| `kind` | `"paragraph"` \| `"chapter"` | Custom styles only |
+| `basedOn` | style id | Unset formatting comes from this style (custom styles only) |
+| `outlineLevel` | 1–3 | Heading level for chapter styles (default 1) |
+| `nextStyle` | style id | Style of the paragraph Enter creates at the end of this one (default: same style) |
+| `fontFamily` | string | Family name |
+| `fontSize` | number, pt | |
+| `fontWeight` | 100–900 | |
+| `italic` | boolean | |
+| `align` | `left` \| `center` \| `right` \| `justify` | |
+| `lineHeight` | number | Multiple of the font size |
+| `spaceBefore`, `spaceAfter` | number, pt | |
+| `firstLineIndent`, `indentLeft`, `indentRight`, `letterSpacing` | number, em | |
+| `textTransform` | `none` \| `uppercase` \| `lowercase` \| `capitalize` \| `small-caps` | |
+| `breakBefore` | `none` \| `page` \| `recto` | Start a new page / right-hand page |
+| `builtIn` | `false` | Written on custom styles |
+
+For a built-in id the record is a partial override: a key equal to the built-in value is dropped, and `null` means
+"unset" where the built-in sets a value (inherit from the parent instead). A custom style stores its full
+definition. Built-ins: `body`, `first-paragraph`, `chapter-number`, `chapter-title`, `part-title`, `subheading`,
+`scene-break`, `block-quote`, `epigraph`, `dedication` (defaults documented in `src/shared/book/styles.ts`).
+
 ## book.json
 
 Book-level layout settings, written next to manuscript.json (Phase 2). Pretty-printed UTF-8 JSON, written atomically

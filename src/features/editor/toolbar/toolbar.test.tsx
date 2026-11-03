@@ -58,7 +58,8 @@ describe('Toolbar structure', () => {
     }
     const ids = Object.values(TOOLBAR_CONTROLS).map((m) => m.id)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(ids.every((id) => id.startsWith('toolbar.'))).toBe(true)
+    // The Styles group uses the 'styles.' namespace (spec ids, e.g. styles.picker).
+    expect(ids.every((id) => id.startsWith('toolbar.') || id.startsWith('styles.'))).toBe(true)
   })
 
   it('uses roving focus: one tab stop, arrow keys move between controls', async () => {
@@ -75,7 +76,7 @@ describe('Toolbar structure', () => {
     act(() => void fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' }))
     await waitFor(() => expect(document.activeElement).toBe(bold))
     act(() => void fireEvent.keyDown(bold, { key: 'End' }))
-    await waitFor(() => expect(document.activeElement).toBe(ctl('toolbar.indentIncrease')))
+    await waitFor(() => expect(document.activeElement).toBe(ctl('styles.clearFormatting')))
     act(() => void fireEvent.keyDown(document.activeElement!, { key: 'Home' }))
     await waitFor(() => expect(document.activeElement).toBe(ctl('toolbar.fontFamily')))
     // Tabbing back into the toolbar lands on the last-focused control.
@@ -140,7 +141,7 @@ describe('Toolbar structure', () => {
     const ids = Array.from(bar.querySelectorAll('[data-control-id]')).map((e) => e.getAttribute('data-control-id'))
     expect(ids[0]).toBe('history.undo')
     expect(ids.at(-1)).toBe('find.open')
-    const last = ctl('toolbar.indentIncrease')
+    const last = ctl('styles.clearFormatting')
     act(() => last.focus())
     act(() => void fireEvent.keyDown(last, { key: 'ArrowRight' }))
     await waitFor(() => expect(document.activeElement).toBe(ctl('find.open')))

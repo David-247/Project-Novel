@@ -4,6 +4,7 @@ import { useStore } from '@/shared/store'
 import { attachEditor } from './controller'
 import { createEditorExtensions } from './extensions'
 import { SYSTEM_FONT_STACK } from './fonts'
+import { BookStyleSheet } from './styles/BookStyleSheet'
 import './editor.css'
 
 /**
@@ -48,6 +49,7 @@ export function NovelEditor() {
       data-testid="writing-surface"
       aria-busy={opening || undefined}
     >
+      <BookStyleSheet />
       <EditorContent editor={editor} />
     </div>
   )

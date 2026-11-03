@@ -13,6 +13,7 @@ import { FIRST_LINE_INDENTS, FONT_SIZES, LINE_SPACINGS, PARAGRAPH_SPACINGS, with
 import type { Alignment } from './toolbar-state'
 import { useMountedEditor } from '../use-mounted-editor'
 import { useToolbarState } from './use-toolbar-state'
+import { StylesGroup } from '../styles/StylesGroup'
 
 export interface ToolbarProps {
   /** Rendered before the built-in groups (e.g. undo/redo). Wrap focusable items in `ToolbarItem`. */
@@ -187,6 +188,15 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFont
         {action('indentDecrease', s.canOutdent, (c) => c.outdentBlock(), <I.IndentDecreaseIcon />)}
         {action('indentIncrease', s.canIndent, (c) => c.indentBlock(), <I.IndentIncreaseIcon />)}
       </ToolbarGroup>
+      <ToolbarSeparator />
+
+      <StylesGroup
+        editor={editor}
+        disabled={disabled}
+        styleId={s.styleId}
+        fallbackStyleId={s.fallbackStyleId}
+        item={(control) => <ToolbarItem disabled={disabled}>{control}</ToolbarItem>}
+      />
 
       {extraGroups ? (
         <>
