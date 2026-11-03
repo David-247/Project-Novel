@@ -14,6 +14,8 @@ export interface StylesGroupProps {
   disabled: boolean
   /** Effective style of the block at the selection ('' outside styled blocks). */
   styleId: string
+  /** What the block renders like when `styleId` names no defined style. */
+  fallbackStyleId: string
   /** Wraps one focusable control as a toolbar item (roving focus). */
   item: (control: ReactElement) => ReactNode
 }
@@ -51,14 +53,18 @@ const ClearIcon = () => (
  * Toolbar "Styles" group: style picker (current block's style, applies on change), Modify style,
  * Manage styles and Clear direct formatting, plus the two dialogs.
  */
-export function StylesGroup({ editor, disabled, styleId, item }: StylesGroupProps) {
+export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }: StylesGroupProps) {
   const styles = useResolvedStyles()
   const [modifying, setModifying] = useState<string | null>(null)
   const [managing, setManaging] = useState(false)
   const [sample, setSample] = useState<string | undefined>()
 
   const options: SelectOption[] = [...styles.values()].map((s) => ({ value: s.id, label: s.name }))
-  if (styleId && !styles.has(styleId)) options.push({ value: styleId, label: 'Missing style' })
+  if (styleId && !styles.has(styleId)) {
+    // A deleted or unknown style renders like its fallback (see buildStyleSheetCSS); say so.
+    const fallback = styles.get(fallbackStyleId)?.name ?? 'Body'
+    options.unshift({ value: styleId, label: `${fallback} (missing style)` })
+  }
   if (!styleId) options.unshift({ value: '', label: 'No style' })
 
   const currentText = () => editor?.state.selection.$from.parent.textContent.slice(0, 280)
@@ -92,7 +98,7 @@ export function StylesGroup({ editor, disabled, styleId, item }: StylesGroupProp
             disabled={disabled}
             onClick={() => {
               setSample(currentText())
-              setModifying(styles.has(styleId) ? styleId : DEFAULT_STYLE_ID)
+              setModifying(styles.has(styleId) ? styleId : fallbackStyleId || DEFAULT_STYLE_ID)
             }}
           >
             <ModifyIcon />

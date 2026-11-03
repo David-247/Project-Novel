@@ -194,6 +194,7 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFont
         editor={editor}
         disabled={disabled}
         styleId={s.styleId}
+        fallbackStyleId={s.fallbackStyleId}
         item={(control) => <ToolbarItem disabled={disabled}>{control}</ToolbarItem>}
       />
 

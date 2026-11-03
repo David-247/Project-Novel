@@ -386,6 +386,8 @@ export function styleDeclarations(s: StyleFormat): Array<[property: string, valu
   return d
 }
 
+const declarationText = (s: StyleFormat) => styleDeclarations(s).map(([p, v]) => `${p}: ${v};`).join(' ')
+
 /**
  * True when a block of style `id` directly after a block of style `prevId` continues a heading
  * group: the previous style breaks, names this one as its next style, and this one breaks too
@@ -408,10 +410,21 @@ const isBreaking = (s: StyleFormat) => s.breakBefore === 'page' || s.breakBefore
  */
 export function buildStyleSheetCSS(styles: ResolvedStyles, scope: string): string {
   const rules: string[] = []
+  // Fallbacks first, for a data-style naming no defined style (deleted then brought back by undo or
+  // redo, pasted, or an out-of-sync book.json): paragraphs look like Body, headings like their
+  // migration default. Same specificity as the per-id rules below, which come later and win.
+  const fallbacks: Array<[string, string]> = [
+    [':where(p)', DEFAULT_STYLE_ID],
+    [':where(h1)', STYLE_IDS.chapterTitle],
+    [':where(h2, h3)', STYLE_IDS.subheading],
+  ]
+  for (const [selector, id] of fallbacks) {
+    const s = styles.get(id)
+    if (s) rules.push(`${scope} ${selector}[data-style] { ${declarationText(s)} }`)
+  }
   for (const s of styles.values()) {
     if (!STYLE_ID_PATTERN.test(s.id)) continue
-    const decls = styleDeclarations(s).map(([p, v]) => `${p}: ${v};`).join(' ')
-    rules.push(`${scope} [data-style="${s.id}"] { ${decls} }`)
+    rules.push(`${scope} [data-style="${s.id}"] { ${declarationText(s)} }`)
   }
   for (const prev of styles.values()) {
     if (prev.nextStyle && continuesHeadingGroup(prev.id, prev.nextStyle, styles)) {

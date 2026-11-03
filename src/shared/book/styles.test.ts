@@ -104,9 +104,20 @@ describe('generated stylesheet', () => {
     const before = buildStyleSheetCSS(resolveStyleSheet({}), SCOPE).split('\n')
     const after = buildStyleSheetCSS(resolveStyleSheet({ 'chapter-title': { fontSize: 30 } }), SCOPE).split('\n')
     const changed = after.filter((l, i) => l !== before[i])
-    expect(changed).toHaveLength(1)
-    expect(changed[0]).toContain('[data-style="chapter-title"]')
-    expect(changed[0]).toContain('calc(30 * var(--nv-pt, 1pt))')
+    // The Chapter Title rule, and the H1 fallback that reuses its declarations.
+    expect(changed).toHaveLength(2)
+    expect(changed[0]).toMatch(/^\.ed :where\(h1\)\[data-style\] \{/)
+    expect(changed[1]).toContain('[data-style="chapter-title"]')
+    expect(changed[1]).toContain('calc(30 * var(--nv-pt, 1pt))')
+  })
+
+  it('starts with fallback rules for unknown ids (Body for paragraphs, the migration default for headings)', () => {
+    const lines = buildStyleSheetCSS(resolveStyleSheet({}), SCOPE).split('\n')
+    expect(lines[0]).toMatch(/^\.ed :where\(p\)\[data-style\] \{ font-size: calc\(11 \* var\(--nv-pt, 1pt\)\);.*text-indent: 1\.5em;/)
+    expect(lines[1]).toMatch(/^\.ed :where\(h1\)\[data-style\] \{ font-size: calc\(20 /)
+    expect(lines[2]).toMatch(/^\.ed :where\(h2, h3\)\[data-style\] \{ font-size: calc\(13 /)
+    // Per-id rules come after the fallbacks (same specificity, so they win).
+    expect(lines.findIndex((l) => l.includes('[data-style="body"]'))).toBeGreaterThan(2)
   })
 
   it('sanitizes font names (no CSS injection from book.json)', () => {
