@@ -1,5 +1,15 @@
+import { defaultBookSettings, type BookSettings } from '@/shared/book'
 import { emptyDoc, getDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { useStore, type RecentProject } from '@/shared/store'
+import {
+  BOOK_FILE,
+  bookWarningText,
+  currentBookSettings,
+  getBookVersion,
+  isBookDirty,
+  parseBook,
+  serializeBook,
+} from './book-file'
 import { openProjectIndex, recordRevision, type ProjectIndex } from './db'
 import { askUnsavedChanges, showError } from './dialogs'
 import {
@@ -78,6 +88,65 @@ function provider(): DocumentProvider {
 }
 
 const actions = () => useStore.getState().projectActions
+const bookActions = () => useStore.getState().bookActions
+
+/** Unsaved changes in the manuscript OR the book settings (both count as "the project is unsaved"). */
+function isProjectDirty(p: DocumentProvider): boolean {
+  return p.isDirty() || isBookDirty()
+}
+
+/**
+ * Read book.json: a missing file (Phase 1 project) gives defaults silently; a damaged or unreadable one
+ * gives defaults plus a status warning. manuscript.json is never touched.
+ */
+async function readBookFile(folder: string): Promise<{
+  settings: BookSettings
+  warning: string | null
+  guard: BookGuard | null
+}> {
+  let text: string
+  try {
+    text = await readTextFile(joinPath(folder, BOOK_FILE), BOOK_FILE)
+  } catch (e) {
+    if (e instanceof ProjectError && e.code === 'missing-file') {
+      return { settings: defaultBookSettings(), warning: null, guard: null }
+    }
+    console.warn('Reading book.json failed:', e)
+    // The real file may be fine (antivirus / sync lock): never replace it with defaults on a text-only save.
+    return {
+      settings: defaultBookSettings(),
+      warning: bookWarningText(['the whole file'], true),
+      guard: { original: null },
+    }
+  }
+  const { settings, warnings } = parseBook(text)
+  const whole = warnings.length === 1 && warnings[0] === 'the whole file'
+  return {
+    settings,
+    warning: warnings.length ? bookWarningText(warnings, whole) : null,
+    guard: whole ? { original: text } : null,
+  }
+}
+
+/**
+ * book.json was unreadable or wholly damaged when opened: saves leave it alone until the user changes a book
+ * setting. `original` is its text if it could be read (null: read failed, retried before the first overwrite).
+ */
+interface BookGuard {
+  original: string | null
+}
+let bookGuard: BookGuard | null = null
+
+/** Copy the damaged/unreadable book.json aside as `book.damaged-<timestamp>.json`. Best effort; never throws. */
+async function keepDamagedBook(folder: string, guard: BookGuard): Promise<void> {
+  try {
+    const original = guard.original ?? (await readTextFile(joinPath(folder, BOOK_FILE), BOOK_FILE))
+    const stamp = new Date().toISOString().replace(/[^0-9A-Za-z-]/g, '-')
+    await writeFileAtomic(joinPath(folder, `book.damaged-${stamp}.json`), original, 'book.json copy')
+  } catch (e) {
+    console.warn('Keeping a copy of the damaged book.json failed:', e)
+  }
+}
 
 /** Absolute path of the open project folder, or null. */
 export function getCurrentProjectPath(): string | null {
@@ -139,6 +208,7 @@ async function switchIndex(folder: string): Promise<ProjectIndex | null> {
 async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex | null) {
   currentMeta = meta
   currentIndex = index
+  bookGuard = null
   lastSaveDoneAt = 0
   setPendingRecovery(null)
   suppressSnapshotsAt(null)
@@ -162,7 +232,7 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
     )
   }
   // Never overwrite leftovers of a project whose project.json is gone.
-  for (const file of [MANUSCRIPT_FILE, INDEX_FILE]) {
+  for (const file of [MANUSCRIPT_FILE, BOOK_FILE, INDEX_FILE]) {
     if (await pathExists(joinPath(folder, file))) {
       throw new ProjectError(
         'already-exists',
@@ -175,9 +245,18 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   const content = doc ?? p.getDocJSON()
   const meta = newProjectMeta(baseName(folder))
   await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), serializeManuscript(content), MANUSCRIPT_FILE)
+  // A new project starts with default book settings; Save As keeps the current ones.
+  const book = doc ? defaultBookSettings() : currentBookSettings()
+  const bookVersion = getBookVersion()
+  await writeFileAtomic(joinPath(folder, BOOK_FILE), serializeBook(book), BOOK_FILE)
   await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(meta), PROJECT_FILE)
-  if (doc) loadDocument(p, doc)
-  else p.markClean(version)
+  if (doc) {
+    loadDocument(p, doc)
+    bookActions().loadBook(book)
+  } else {
+    p.markClean(version)
+    bookActions().markBookClean(bookVersion)
+  }
   await activate(folder, meta, await switchIndex(folder))
 }
 
@@ -203,9 +282,13 @@ export async function openProjectAt(folder: string): Promise<void> {
     }
     throw e
   }
+  const book = await readBookFile(folder)
   loadDocument(p, parseManuscript(docText))
+  bookActions().loadBook(book.settings)
   await activate(folder, meta, await switchIndex(folder))
-  await detectRecovery(folder, meta, docText)
+  bookGuard = book.guard
+  actions().setBookWarning(book.warning)
+  await detectRecovery(folder, meta, docText, book.settings)
 }
 
 /**
@@ -244,7 +327,7 @@ export function saveProject(opts: SaveOptions = {}): Promise<boolean> {
   }
   const p = getDocumentProvider()
   if (!p) return Promise.resolve(false)
-  if (kind === 'manual' && !p.isDirty() && Date.now() - lastSaveDoneAt < SAVE_COALESCE_MS) {
+  if (kind === 'manual' && !isProjectDirty(p) && Date.now() - lastSaveDoneAt < SAVE_COALESCE_MS) {
     return Promise.resolve(true)
   }
   inFlightSave = writeProject(folder, currentMeta, p, kind, opts.silent ?? false).finally(() => {
@@ -271,15 +354,25 @@ async function writeProject(
     // edits made during the async write keep the doc dirty.
     const version = p.getDocVersion()
     const text = serializeManuscript(p.getDocJSON())
+    const bookVersion = getBookVersion()
+    const bookText = serializeBook(currentBookSettings())
     // The write lock keeps this from overlapping an autosave snapshot.
     await withWriteLock(async () => {
       await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), text, MANUSCRIPT_FILE)
+      // An unreadable / damaged book.json is only replaced once the user changed a book setting.
+      if (!bookGuard || isBookDirty()) {
+        if (bookGuard) await keepDamagedBook(folder, bookGuard)
+        await writeFileAtomic(joinPath(folder, BOOK_FILE), bookText, BOOK_FILE)
+        bookGuard = null
+        actions().setBookWarning(null)
+      }
       const updated: ProjectMeta = { ...meta, updatedAt: new Date().toISOString() }
       await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
       if (currentMeta === meta) currentMeta = updated
       p.markClean(version)
+      bookActions().markBookClean(bookVersion)
       // A clean save makes any crash-recovery snapshot obsolete.
-      if (!p.isDirty()) await clearRecoveryUnlocked(folder)
+      if (!isProjectDirty(p)) await clearRecoveryUnlocked(folder)
     })
     if (currentIndex) {
       const byteSize = new TextEncoder().encode(text).length
@@ -338,7 +431,7 @@ async function saveAsNewProjectUnguarded(): Promise<boolean> {
  */
 export async function confirmUnsavedChanges(action = 'continuing'): Promise<boolean> {
   const p = getDocumentProvider()
-  if (!p || !p.isDirty()) return true
+  if (!p || !isProjectDirty(p)) return true
   try {
     const choice = await askUnsavedChanges(useStore.getState().project.title, action)
     if (choice === 'save') {
@@ -432,6 +525,8 @@ export async function closeProject(): Promise<void> {
   currentMeta = null
   lastSaveDoneAt = 0
   pendingRecovery = null
+  bookGuard = null
+  bookActions().resetBook()
   actions().projectClosed()
 }
 
@@ -496,7 +591,7 @@ export function clearRecoveryData(): Promise<void> {
 
 /** "Don't Save": drop recovery data and do not snapshot the discarded content again. */
 async function discardUnsavedForRecovery(p: DocumentProvider): Promise<void> {
-  suppressSnapshotsAt(p.getDocVersion())
+  suppressSnapshotsAt(p.getDocVersion(), getBookVersion())
   await clearRecoveryData()
 }
 
@@ -517,12 +612,22 @@ async function setAsideUnlocked(folder: string, snapshot: RecoverySnapshot, text
  * A damaged snapshot is left in place. Never throws: recovery must not stop a
  * project from opening.
  */
-async function detectRecovery(folder: string, meta: ProjectMeta, manuscriptText: string): Promise<void> {
-  await judgeFoundRecovery(folder, meta, manuscriptText)
+async function detectRecovery(
+  folder: string,
+  meta: ProjectMeta,
+  manuscriptText: string,
+  savedBook: BookSettings,
+): Promise<void> {
+  await judgeFoundRecovery(folder, meta, manuscriptText, savedBook)
   await noteUnrestoredFiles(folder)
 }
 
-async function judgeFoundRecovery(folder: string, meta: ProjectMeta, manuscriptText: string): Promise<void> {
+async function judgeFoundRecovery(
+  folder: string,
+  meta: ProjectMeta,
+  manuscriptText: string,
+  savedBook: BookSettings,
+): Promise<void> {
   try {
     const text = await readRecoveryFile(folder)
     if (text === null) return
@@ -531,7 +636,7 @@ async function judgeFoundRecovery(folder: string, meta: ProjectMeta, manuscriptT
       console.warn('Ignoring unreadable recovery data in', recoveryFilePath(folder))
       return
     }
-    const verdict = judgeRecovery(snapshot, meta, manuscriptText)
+    const verdict = judgeRecovery(snapshot, meta, manuscriptText, savedBook)
     if (verdict === 'identical') {
       await withWriteLock(() => clearRecoveryUnlocked(folder, true))
     } else if (verdict === 'unrelated') {
@@ -579,6 +684,8 @@ export async function restoreRecovery(): Promise<boolean> {
     const p = provider()
     loadDocument(p, pending.snapshot.doc)
     p.markDirty()
+    // Unsaved book settings come back with the text (snapshots from before book settings have none).
+    if (pending.snapshot.book) bookActions().restoreBook(pending.snapshot.book)
     setPendingRecovery(null)
     // The editor content is exactly what the recovery file holds: it is backed up.
     const savedAt = Date.parse(pending.snapshot.savedAt)
@@ -677,6 +784,7 @@ export async function __resetStorageForTests(): Promise<void> {
   lastSaveDoneAt = 0
   pendingRecovery = null
   folderFlowBusy = false
+  bookGuard = null
   suppressSnapshotsAt(null)
   openedListeners.clear()
 }

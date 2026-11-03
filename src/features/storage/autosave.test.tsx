@@ -86,6 +86,7 @@ async function launch() {
   await __resetStorageForTests()
   __resetWriteLockForTests()
   useStore.setState({ project: initialProjectState })
+  useStore.getState().bookActions.resetBook()
   unregister()
   editor = createMemoryDocumentProvider()
   unregister = registerDocumentProvider(editor)
@@ -131,7 +132,7 @@ describe('autosave cadence', () => {
     expect(backend.files.get(MANUSCRIPT)).toBe(manuscriptBefore)
     expect(backend.dirs.has(`${ROOT}/.recovery`)).toBe(true)
     const snap = parseRecovery(backend.files.get(RECOVERY)!)!
-    expect(snap).toMatchObject({ format: 'novel-recovery', version: 1, docVersion: editor.getDocVersion() })
+    expect(snap).toMatchObject({ format: 'novel-recovery', version: 2, docVersion: editor.getDocVersion() })
     expect(project().lastBackupAt).not.toBeNull()
     expect(editor.isDirty()).toBe(true)
   })

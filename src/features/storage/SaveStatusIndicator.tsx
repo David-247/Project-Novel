@@ -31,7 +31,7 @@ export function SaveStatusIndicator() {
   const path = useStore((s) => s.project.path)
   const title = useStore((s) => s.project.title)
   // Unsaved changes: the editor slice's flag is the single source of truth.
-  const dirty = useStore((s) => s.editor.dirty)
+  const dirty = useStore((s) => s.editor.dirty || s.book.dirty)
   const saveStatus = useStore((s) => s.project.saveStatus)
   const lastBackupAt = useStore((s) => s.project.lastBackupAt)
   const warning = useStore((s) => s.project.backupWarning)

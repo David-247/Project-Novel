@@ -15,6 +15,7 @@ import {
   Toolbar,
   ToolbarItem,
 } from '@/features/editor'
+import { TrimSizePicker } from '@/features/book-settings'
 import {
   NoProjectActions,
   RecoveryDialog,
@@ -72,6 +73,12 @@ export function App() {
                   <ToolbarSeparator />
                   <ToolbarGroup label="Paper">
                     <SurfacePicker wrap={(button) => <ToolbarItem>{button}</ToolbarItem>} />
+                  </ToolbarGroup>
+                  <ToolbarSeparator />
+                  <ToolbarGroup label="Book layout">
+                    <ToolbarItem>
+                      <TrimSizePicker />
+                    </ToolbarItem>
                   </ToolbarGroup>
                 </>
               }
