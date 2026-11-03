@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { lineStart } from './helpers'
 
 test('formatting toolbar: shortcuts, active state and roving keyboard focus', async ({ page }) => {
   await page.goto('/')
@@ -12,7 +13,7 @@ test('formatting toolbar: shortcuts, active state and roving keyboard focus', as
   await page.keyboard.type('bold')
   await expect(editor.locator('strong')).toHaveText('bold')
   await expect(bold).toHaveAttribute('aria-pressed', 'true')
-  await page.keyboard.press('Home')
+  await lineStart(page)
   await expect(bold).toHaveAttribute('aria-pressed', 'false')
 
   await page.keyboard.press('ControlOrMeta+Shift+e')

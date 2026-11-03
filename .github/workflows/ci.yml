@@ -10,7 +10,7 @@ permissions:
 
 env:
   # Playwright starts its own server (no reuse) and enables retries + the HTML report.
-  CI: '1'
+  CI: 'true'
 
 jobs:
   checks:
