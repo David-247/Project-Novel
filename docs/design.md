@@ -102,19 +102,49 @@ native props and `ref` (React 19 ref-as-prop), and each has a visible focus ring
 | `StatusText` | `tone: 'muted' \| 'default' \| 'success' \| 'warning' \| 'danger'`, `live?` | Status-bar items. `live` makes it an `aria-live="polite"` region. |
 | `cn`, `focusRing`, `controlBase`, `fieldBase` | none | Class helpers for custom controls that need to match |
 
-Tooltips: the constraints require a tooltip on every interactive control. Wrap these primitives with the
-tooltips slice's component (`@/features/tooltips`) at the call site. `shared/ui` does not depend on any
-feature slice.
+| `Tooltip` | one control as `children`; `controlId?` (defaults to the child's `data-control-id`), `copy?`, `side?`, `wrap?` | Hover + keyboard-focus tooltip: title, one-line description, platform shortcut hint. See below. |
+| `TooltipProvider` | `lookup(controlId)`, `delayDuration?` (500), `skipDelayDuration?` (300), `platform?` | Mounted once in `App.tsx` with the tooltips registry as `lookup` |
+| `formatShortcut`, `ariaKeyshortcut` | a spec such as `"Mod-b"` or `"Mod+Shift+Z"` | `⌘B` / `Ctrl+B` and `Meta+B` / `Control+B` from one spec |
+
+### Tooltips
+
+Every interactive control has a tooltip. Wrap it in `<Tooltip>` at the call site and give it a
+`data-control-id`. The text comes from the registry in the tooltips slice
+(`src/features/tooltips/registry.ts`, the one file to edit for copy). The composition root passes it to
+`<TooltipProvider lookup={getTooltipCopy}>`, so `shared/ui` and the editor never import the tooltips slice.
+Titles and shortcuts are taken from the editor's control metadata (`TOOLBAR_CONTROLS`,
+`HISTORY_CONTROLS`, `FIND_CONTROLS`), which also supplies the accessible names, so they cannot drift apart.
+
+- A tooltip opens on hover (500 ms, then instant while moving along the toolbar) and on keyboard focus.
+  Text fields show it only when reached with Tab, and it hides as soon as you type.
+- Escape closes it without consuming the key, so the toolbar's Escape-to-editor and the find panel's
+  Escape-to-close run on the same press.
+- The description and shortcut are always linked through `aria-describedby` (a hidden element), so
+  screen readers get them without hovering. Shortcuts are also exposed as `aria-keyshortcuts`.
+  On touch, a long-press (`contextmenu`) shows the tooltip. The essentials (the control's name and its
+  icon) never depend on it.
+- `wrap` anchors the hover area to an inline wrapper, which is used for a checkbox with its label.
+- `Tooltip` forwards unknown props and `ref` to the control, so it can sit inside `ToolbarItem`.
+- Visuals: `surface-raised` with a `border` hairline and `shadow-raised`, using `text` and `text-muted`.
+  These pairs are already in `CONTRAST_PAIRS`.
+- `src/App.tooltips.test.tsx` renders the whole app with the find panel open and fails if any
+  button, select, checkbox or text field lacks a registered, wired tooltip (`auditTooltipCoverage`).
+- Native OS menu items (File > New/Open/Open Recent/Save) can't show web tooltips. Their labels and
+  accelerators are the hint, and their copy is registered under the `file.*` ids for any future in-app
+  equivalent.
 
 Example toolbar:
 
 ```tsx
 <ToolbarGroup label="Text formatting">
-  <ToggleButton label="Bold" pressed={isBold} onPressedChange={() => toggleBold()}><BoldIcon /></ToggleButton>
-  <ToggleButton label="Italic" pressed={isItalic} onPressedChange={() => toggleItalic()}><ItalicIcon /></ToggleButton>
+  <Tooltip>
+    <ToggleButton label="Bold" data-control-id="toolbar.bold" pressed={isBold} onPressedChange={() => toggleBold()}><BoldIcon /></ToggleButton>
+  </Tooltip>
 </ToolbarGroup>
 <ToolbarSeparator />
-<IconButton label="Find" onClick={openFind}><SearchIcon /></IconButton>
+<Tooltip>
+  <IconButton label="Find and replace" data-control-id="find.open" onClick={openFind}><SearchIcon /></IconButton>
+</Tooltip>
 ```
 
 ## App shell

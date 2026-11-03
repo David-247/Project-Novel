@@ -1,0 +1,119 @@
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
+import { useStore } from '@/shared/store'
+import { IconButton, Tooltip } from '@/shared/ui'
+import { App } from './App'
+
+// Rendered as the web build (not inside Tauri): Tauri-only wiring (menu events, OS theme, close
+// prompt) is skipped by the app itself, and none of it renders controls.
+
+beforeAll(() => {
+  const rect = { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, toJSON: () => ({}) }
+  const emptyRects = () => Object.assign([], { item: () => null }) as unknown as DOMRectList
+  Range.prototype.getClientRects ??= emptyRects
+  Range.prototype.getBoundingClientRect ??= () => rect as DOMRect
+  Element.prototype.getClientRects ??= emptyRects
+  document.elementFromPoint ??= () => null
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+})
+
+afterEach(() => {
+  act(() => useStore.getState().findActions.closePanel())
+  cleanup()
+})
+
+/** Renders the whole app with every conditional control surface (find panel) open. */
+async function renderFullApp(extra?: React.ReactNode) {
+  const utils = render(
+    <>
+      <App />
+      {extra}
+    </>,
+  )
+  await waitFor(() => expect(getEditor()).not.toBeNull())
+  act(() => useStore.getState().findActions.openPanel('night'))
+  await screen.findByRole('textbox', { name: FIND_CONTROLS.query.label })
+  return utils
+}
+
+describe('tooltip coverage (every control in the app has a registered, wired tooltip)', () => {
+  it('finds no control without a tooltip in the full app', async () => {
+    const { container } = await renderFullApp()
+    const rendered = Array.from(container.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
+    // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel controls).
+    const expected = [...Object.values(TOOLBAR_CONTROLS), ...Object.values(HISTORY_CONTROLS), ...Object.values(FIND_CONTROLS)]
+    expect(new Set(rendered)).toEqual(new Set(expected.map((m) => m.id)))
+    const problems = auditTooltipCoverage(document.body)
+    expect(problems, formatCoverageProblems(problems)).toEqual([])
+  })
+
+  it('NEGATIVE: fails for a button with no tooltip entry', async () => {
+    await renderFullApp(
+      <>
+        <button type="button">Mystery action</button>
+        <button type="button" data-control-id="nowhere.registered">
+          Unregistered
+        </button>
+        {/* Registered id, but the call site forgot to wrap it in <Tooltip>. */}
+        <IconButton label="Bold again" data-control-id={TOOLBAR_CONTROLS.bold.id}>
+          B
+        </IconButton>
+        {/* Wrapped, but the id is unknown: Tooltip renders the bare control. */}
+        <Tooltip>
+          <IconButton label="Wrapped unknown" data-control-id="nowhere.either">
+            ?
+          </IconButton>
+        </Tooltip>
+      </>,
+    )
+    const problems = auditTooltipCoverage(document.body)
+    expect(problems.map((p) => [p.reason, p.controlId])).toEqual([
+      ['missing-id', null],
+      ['unregistered', 'nowhere.registered'],
+      ['not-wired', TOOLBAR_CONTROLS.bold.id],
+      ['unregistered', 'nowhere.either'],
+    ])
+  })
+
+  it('every rendered control id resolves through the provider lookup', async () => {
+    const { container } = await renderFullApp()
+    for (const el of Array.from(container.querySelectorAll('[data-control-id]'))) {
+      expect(getTooltipCopy(el.getAttribute('data-control-id')!), el.outerHTML.slice(0, 80)).toBeDefined()
+    }
+  })
+})
+
+describe('tooltip registry', () => {
+  it('has a title and a one-line description for every entry', () => {
+    for (const [id, copy] of Object.entries(TOOLTIP_REGISTRY)) {
+      expect(copy.title, id).toMatch(/\S/)
+      expect(copy.description, id).toMatch(/^[^\n]+\.$/)
+      expect(copy.description!.length, id).toBeLessThanOrEqual(100)
+    }
+  })
+
+  it('derives titles and shortcuts from the editor control metadata (one source of truth)', () => {
+    for (const meta of [
+      ...Object.values(TOOLBAR_CONTROLS),
+      ...Object.values(HISTORY_CONTROLS),
+      ...Object.values(FIND_CONTROLS),
+    ]) {
+      const copy = getTooltipCopy(meta.id)!
+      expect(copy.title).toBe(meta.label)
+      expect(copy.shortcut).toEqual('shortcut' in meta ? meta.shortcut : undefined)
+    }
+  })
+
+  it('pre-registers the native File menu actions and the recovery dialog buttons', () => {
+    for (const id of ['file.new_project', 'file.open_project', 'file.open_recent', 'file.save', 'recovery.restore', 'recovery.discard']) {
+      expect(getTooltipCopy(id), id).toBeDefined()
+    }
+    expect(getTooltipCopy('constructor')).toBeUndefined()
+  })
+})

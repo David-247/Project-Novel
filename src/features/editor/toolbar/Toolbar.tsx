@@ -2,7 +2,7 @@ import * as RToolbar from '@radix-ui/react-toolbar'
 import type { ChainedCommands } from '@tiptap/core'
 import { Fragment } from 'react'
 import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from 'react'
-import { cn, Select, ToggleButton, IconButton, ToolbarGroup, ToolbarSeparator } from '@/shared/ui'
+import { cn, Select, ToggleButton, IconButton, ToolbarGroup, ToolbarSeparator, Tooltip } from '@/shared/ui'
 import { listSystemFonts } from '../fonts'
 import { TOOLBAR_CONTROLS } from './controls'
 import type { ToolbarControlKey } from './controls'
@@ -62,19 +62,21 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFont
     const meta = TOOLBAR_CONTROLS[key]
     return (
       <ToolbarItem disabled={disabled}>
-        <ToggleButton
-          label={meta.label}
-          data-control-id={meta.id}
-          pressed={pressed}
-          disabled={disabled}
-          onPressedChange={() => {}}
-          onClick={(e) => {
-            e.preventDefault()
-            if (editor) run(chainFrom(editor.chain(), e)).run()
-          }}
-        >
-          {icon}
-        </ToggleButton>
+        <Tooltip>
+          <ToggleButton
+            label={meta.label}
+            data-control-id={meta.id}
+            pressed={pressed}
+            disabled={disabled}
+            onPressedChange={() => {}}
+            onClick={(e) => {
+              e.preventDefault()
+              if (editor) run(chainFrom(editor.chain(), e)).run()
+            }}
+          >
+            {icon}
+          </ToggleButton>
+        </Tooltip>
       </ToolbarItem>
     )
   }
@@ -83,16 +85,18 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFont
     const meta = TOOLBAR_CONTROLS[key]
     return (
       <ToolbarItem disabled={disabled || !enabled}>
-        <IconButton
-          label={meta.label}
-          data-control-id={meta.id}
-          disabled={disabled || !enabled}
-          onClick={(e) => {
-            if (editor) run(chainFrom(editor.chain(), e)).run()
-          }}
-        >
-          {icon}
-        </IconButton>
+        <Tooltip>
+          <IconButton
+            label={meta.label}
+            data-control-id={meta.id}
+            disabled={disabled || !enabled}
+            onClick={(e) => {
+              if (editor) run(chainFrom(editor.chain(), e)).run()
+            }}
+          >
+            {icon}
+          </IconButton>
+        </Tooltip>
       </ToolbarItem>
     )
   }
@@ -101,15 +105,17 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFont
     const meta = TOOLBAR_CONTROLS[key]
     return (
       <ToolbarItem disabled={disabled}>
-        <Select
-          aria-label={meta.label}
-          data-control-id={meta.id}
-          wrapperClassName={width}
-          options={withCurrent(presets, value)}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => apply(e.target.value)}
-        />
+        <Tooltip>
+          <Select
+            aria-label={meta.label}
+            data-control-id={meta.id}
+            wrapperClassName={width}
+            options={withCurrent(presets, value)}
+            value={value}
+            disabled={disabled}
+            onChange={(e) => apply(e.target.value)}
+          />
+        </Tooltip>
       </ToolbarItem>
     )
   }
@@ -140,7 +146,9 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = listSystemFont
 
       <ToolbarGroup label="Font" className="gap-1">
         <ToolbarItem disabled={disabled}>
-          <FontFamilyPicker loadFonts={loadFonts} disabled={disabled} />
+          <Tooltip controlId={TOOLBAR_CONTROLS.fontFamily.id}>
+            <FontFamilyPicker loadFonts={loadFonts} disabled={disabled} />
+          </Tooltip>
         </ToolbarItem>
         {select('fontSize', s.fontSize, FONT_SIZES, (v) => {
           if (!editor) return

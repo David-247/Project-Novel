@@ -1,6 +1,7 @@
 import type { IconButtonProps } from '@/shared/ui'
 import { useStore } from '@/shared/store'
-import { IconButton } from '@/shared/ui'
+import { IconButton, Tooltip } from '@/shared/ui'
+import { FIND_CONTROLS } from './controls'
 import { openFind } from './engine'
 import { FIND_PANEL_ID } from './FindReplacePanel'
 import { SearchIcon } from './icons'
@@ -15,19 +16,20 @@ export type FindButtonProps = Partial<Omit<IconButtonProps, 'label' | 'children'
 export function FindButton({ onClick, ...rest }: FindButtonProps) {
   const open = useStore((s) => s.find.open)
   return (
-    <IconButton
-      {...rest}
-      label="Find and replace"
-      data-control-id="find.open"
-      aria-keyshortcuts={modShortcut('F')}
-      aria-expanded={open}
-      aria-controls={open ? FIND_PANEL_ID : undefined}
-      onClick={(e) => {
-        onClick?.(e)
-        if (!e.defaultPrevented) openFind()
-      }}
-    >
-      <SearchIcon />
-    </IconButton>
+    <Tooltip {...rest}>
+      <IconButton
+        label={FIND_CONTROLS.open.label}
+        data-control-id={FIND_CONTROLS.open.id}
+        aria-keyshortcuts={modShortcut('F')}
+        aria-expanded={open}
+        aria-controls={open ? FIND_PANEL_ID : undefined}
+        onClick={(e) => {
+          onClick?.(e)
+          if (!e.defaultPrevented) openFind()
+        }}
+      >
+        <SearchIcon />
+      </IconButton>
+    </Tooltip>
   )
 }

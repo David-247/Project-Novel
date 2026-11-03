@@ -5,8 +5,10 @@
  */
 export interface ToolbarControlMeta {
   id: string
+  /** Accessible name; also the tooltip title (the tooltips registry derives it from here). */
   label: string
-  shortcut?: string
+  /** One or more shortcut specs; rendered per platform by the tooltip. */
+  shortcut?: string | readonly string[]
 }
 
 export const TOOLBAR_CONTROLS = {
