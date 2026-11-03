@@ -1,6 +1,7 @@
 //! Installed OS font enumeration (editor ticket). Uses `fontdb` (MIT).
 
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
 
 /// Turns raw family names into a sorted (case-insensitive), de-duplicated list,
 /// skipping blanks and hidden system families (names starting with `.`).
@@ -24,28 +25,37 @@ where
     out
 }
 
+/// Scans the system fonts. Takes only each face's first family name
+/// (fontdb puts the English US name first), so localized aliases are not duplicated.
 fn enumerate_system_families() -> Vec<String> {
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
     let names: Vec<String> = db
         .faces()
-        .flat_map(|face| face.families.iter().map(|(name, _)| name.clone()))
+        .filter_map(|face| face.families.first().map(|(name, _)| name.clone()))
         .collect();
     normalize_families(names)
+}
+
+static FONT_CACHE: OnceLock<Vec<String>> = OnceLock::new();
+
+/// Cached for the app's lifetime: the scan runs once, on first call.
+fn cached_system_families() -> Vec<String> {
+    FONT_CACHE.get_or_init(enumerate_system_families).clone()
 }
 
 /// Returns the installed OS font family names, sorted and de-duplicated.
 /// Runs off the main thread; returns an empty list if enumeration fails.
 #[tauri::command]
 pub async fn list_system_fonts() -> Vec<String> {
-    tauri::async_runtime::spawn_blocking(enumerate_system_families)
+    tauri::async_runtime::spawn_blocking(cached_system_families)
         .await
         .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{enumerate_system_families, normalize_families};
+    use super::{cached_system_families, enumerate_system_families, normalize_families};
 
     #[test]
     fn sorts_dedupes_and_skips_hidden() {
@@ -54,10 +64,11 @@ mod tests {
     }
 
     #[test]
-    fn enumerates_without_panicking() {
+    fn enumerates_sorted_and_cached() {
         let fonts = enumerate_system_families();
         let mut sorted = fonts.clone();
         sorted.sort_by_key(|a| a.to_lowercase());
         assert_eq!(fonts, sorted);
+        assert_eq!(cached_system_families(), cached_system_families());
     }
 }

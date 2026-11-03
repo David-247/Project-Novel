@@ -1,6 +1,6 @@
 import { useEditorState } from '@tiptap/react'
 import { useEffect, useId, useState, useSyncExternalStore } from 'react'
-import { getEditor, subscribeEditor } from './controller'
+import { getEditor, getLoadCount, subscribeDocLoad, subscribeEditor } from './controller'
 import { fontFamilyCss, listSystemFonts, primaryFontFamily } from './fonts'
 
 export interface FontFamilyPickerProps {
@@ -20,6 +20,9 @@ export function FontFamilyPicker({ loadFonts = listSystemFonts }: FontFamilyPick
   const id = useId()
   const [fonts, setFonts] = useState<string[]>([])
   const editor = useSyncExternalStore(subscribeEditor, getEditor, () => null)
+  // Whole-doc loads swap EditorState without a transaction. Subscribing re-renders the picker on
+  // load, and the inline selector below is re-run on every render.
+  useSyncExternalStore(subscribeDocLoad, getLoadCount, getLoadCount)
 
   useEffect(() => {
     let cancelled = false
@@ -38,8 +41,10 @@ export function FontFamilyPicker({ loadFonts = listSystemFonts }: FontFamilyPick
   const current =
     useEditorState({
       editor,
-      selector: ({ editor: ed }) =>
-        ed ? primaryFontFamily(ed.getAttributes('textStyle').fontFamily as string | undefined) : SYSTEM_DEFAULT,
+      // Read the closure `editor`, not the snapshot's: the snapshot keeps a stale (null)
+      // editor until the first transaction after mount.
+      selector: () =>
+        editor ? primaryFontFamily(editor.getAttributes('textStyle').fontFamily as string | undefined) : SYSTEM_DEFAULT,
     }) ?? SYSTEM_DEFAULT
 
   const options = current && !fonts.includes(current) ? [current, ...fonts] : fonts

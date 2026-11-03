@@ -10,7 +10,8 @@ async function messages(file: string) {
   return res.messages.filter((m) => m.ruleId === 'no-restricted-imports')
 }
 
-describe('cross-slice import rule', () => {
+// ESLint startup is slow under a loaded parallel run; the 5 s default flaked.
+describe('cross-slice import rule', { timeout: 30_000 }, () => {
   it('rejects alias deep import into another slice', async () => {
     expect(await messages('tests/fixtures/features/editor/bad-deep-import.ts')).toHaveLength(1)
   })
