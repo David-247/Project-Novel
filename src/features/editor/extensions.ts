@@ -12,13 +12,17 @@ import { FontFamily, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
 import { UndoRedo } from '@tiptap/extensions'
 import { BlockFormat, BLOCK_FORMAT_TYPES } from './toolbar/block-format'
+import { FindHighlight } from './find/plugin'
 
 /**
  * Phase 1 base schema.
  * Nodes: doc, paragraph, heading (1-3), text, hardBreak, bulletList, orderedList, listItem.
  * Marks: bold, italic, underline, textStyle (carries fontFamily).
- * Plus undo/redo history (Mod-z / Mod-Shift-z) and the FontFamily attribute.
+ * Plus undo/redo history (Mod-z / Mod-Shift-z / Mod-y), find highlighting and the FontFamily attribute.
  */
+/** Undo history depth: effectively unlimited (see the task 4 block below). */
+export const HISTORY_DEPTH = Number.MAX_SAFE_INTEGER
+
 export function createEditorExtensions(): Extensions {
   return [
     Document,
@@ -34,7 +38,6 @@ export function createEditorExtensions(): Extensions {
     Underline,
     TextStyle,
     FontFamily,
-    UndoRedo,
 
     // --- Formatting toolbar (task 3): additive only ---
     // textStyle.fontSize; paragraph/heading textAlign (Mod-Shift-l/e/r/j);
@@ -43,5 +46,16 @@ export function createEditorExtensions(): Extensions {
     TextAlign.configure({ types: [...BLOCK_FORMAT_TYPES], alignments: ['left', 'center', 'right', 'justify'] }),
     BlockFormat,
     // --- end formatting toolbar ---
+
+    // --- History + find/replace (task 4) ---------------------------------------------------
+    // Undo depth is effectively unlimited (spec: no cap). Memory grows with the number of
+    // undo events in the session (each holds its steps + inverted maps, roughly proportional
+    // to the text changed); it is released when a document is loaded (setDocJSON resets
+    // history). Typing is grouped into events by `newGroupDelay` (500 ms default).
+    // Shortcuts (from UndoRedo): Mod-z undo; Mod-Shift-z and Mod-y redo.
+    UndoRedo.configure({ depth: HISTORY_DEPTH }),
+    // Search-result highlighting + Mod-f (open find) / Escape (close find).
+    FindHighlight,
+    // --- end task 4 -----------------------------------------------------------------------
   ]
 }

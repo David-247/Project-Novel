@@ -1,0 +1,314 @@
+import type { Editor } from '@tiptap/core'
+import type { Node as PMNode } from '@tiptap/pm/model'
+import { closeHistory } from '@tiptap/pm/history'
+import { TextSelection } from '@tiptap/pm/state'
+import type { EditorState, Transaction } from '@tiptap/pm/state'
+import type { DecorationSet } from '@tiptap/pm/view'
+import { useStore } from '@/shared/store'
+import { getEditor, subscribeEditor } from '../controller'
+import {
+  buildCurrentDecoration,
+  buildMatchDecorations,
+  clearFindDecorations,
+  CURRENT_CLASS,
+  findMatchesKey,
+  setFindDecorations,
+} from './plugin'
+import { findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
+import type { FindOptions, MatchRange } from './search'
+
+/**
+ * Find engine: owns the match list (document positions never enter the store) and keeps
+ * the ProseMirror decorations and the store counters in sync.
+ *
+ * Performance (100k-word budget):
+ * - Only runs while the panel is open (`startFindEngine` is called by the panel on open and
+ *   stopped on close, which also clears highlights). Closed panel = zero per-keystroke work.
+ * - Query/option changes re-scan after QUERY_DEBOUNCE_MS; document edits only map the existing
+ *   decorations (cheap) and re-scan after DOC_DEBOUNCE_MS of quiet.
+ * - Explicit actions (next/previous/replace) re-scan synchronously only if the doc or query
+ *   changed since the last scan (checked by doc identity, O(1)).
+ */
+
+export const QUERY_DEBOUNCE_MS = 120
+export const DOC_DEBOUNCE_MS = 250
+/** Longest selection that pre-fills the query on Mod-f. */
+const MAX_PREFILL = 200
+/**
+ * Matches highlighted on each side of the current one. Scanning is cheap (~10 ms for 60k
+ * matches in 100k words) but every highlight is a DOM span, so a very common query ("e") would
+ * otherwise create tens of thousands of them. The count in the panel is always exact; the
+ * highlight window slides when navigation leaves it.
+ */
+export const HIGHLIGHT_WINDOW = 1000
+
+let matches: MatchRange[] = []
+let current = -1
+let scannedDoc: PMNode | null = null
+let scannedKey = ''
+let winStart = 0
+let winEnd = 0
+let timer: ReturnType<typeof setTimeout> | null = null
+let running = false
+
+function findState() {
+  return useStore.getState().find
+}
+
+function searchParams(): { query: string; options: FindOptions; key: string } {
+  const f = findState()
+  const options = { caseSensitive: f.caseSensitive, wholeWord: f.wholeWord }
+  return { query: f.query, options, key: `${f.caseSensitive ? 1 : 0}${f.wholeWord ? 1 : 0}:${f.query}` }
+}
+
+function publish() {
+  useStore.getState().findActions.setResults(matches.length, current)
+}
+
+function clearTimer() {
+  if (timer !== null) {
+    clearTimeout(timer)
+    timer = null
+  }
+}
+
+function isFresh(ed: Editor): boolean {
+  return scannedDoc === ed.state.doc && scannedKey === searchParams().key
+}
+
+interface ScanOptions {
+  /** Current match = first match starting at/after this position (default: selection start). */
+  anchor?: number
+  /** Select and scroll to the current match (query changes, explicit navigation). */
+  reveal?: boolean
+  /** Close the undo group so later typing is not merged into a preceding replace. */
+  closeUndoGroup?: boolean
+}
+
+/** Scan the whole document now and refresh highlights + counters. */
+export function scanNow(opts: ScanOptions = {}): void {
+  clearTimer()
+  const ed = getEditor()
+  if (!ed) {
+    matches = []
+    current = -1
+    scannedDoc = null
+    publish()
+    return
+  }
+  const { query, options, key } = searchParams()
+  const state = ed.state
+  matches = findMatches(state.doc, query, options)
+  scannedDoc = state.doc
+  scannedKey = key
+  current = indexAtOrAfter(matches, opts.anchor ?? state.selection.from)
+  const tr = setFindDecorations(state.tr, {
+    matches: windowDecorations(state, false),
+    current: buildCurrentDecoration(state, matches[current]),
+  })
+  if (opts.closeUndoGroup) closeHistory(tr)
+  const reveal = opts.reveal && current >= 0
+  if (reveal) selectMatch(tr, matches[current])
+  ed.view.dispatch(tr)
+  if (reveal) revealCurrent(ed)
+  publish()
+}
+
+/**
+ * Decorations for the highlight window around `current`, or undefined when the highlighted
+ * ranges already on screen (mapped through edits) are identical, so a re-scan after typing that
+ * did not add/remove a match costs no DOM work.
+ */
+function windowDecorations(state: EditorState, force: boolean): DecorationSet | undefined {
+  const c = Math.max(current, 0)
+  winStart = Math.max(0, c - HIGHLIGHT_WINDOW)
+  winEnd = Math.min(matches.length, c + HIGHLIGHT_WINDOW + 1)
+  const slice = matches.slice(winStart, winEnd)
+  if (!force) {
+    const shown = findMatchesKey.getState(state)?.find() ?? []
+    if (shown.length === slice.length) {
+      shown.sort((a, b) => a.from - b.from)
+      if (shown.every((d, i) => d.from === slice[i].from && d.to === slice[i].to)) return undefined
+    }
+  }
+  return buildMatchDecorations(state, slice)
+}
+
+function selectMatch(tr: Transaction, m: MatchRange) {
+  tr.setSelection(TextSelection.create(tr.doc, m.from, m.to)).scrollIntoView()
+}
+
+/**
+ * ProseMirror only scrolls to the selection when the DOM selection is inside the editor, which
+ * is not the case while typing in the find field, so scroll the current highlight ourselves.
+ */
+function revealCurrent(ed: Editor) {
+  const el = ed.view.dom.querySelector(`.${CURRENT_CLASS}`)
+  if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center', inline: 'nearest' })
+}
+
+function scheduleScan(delay: number, opts: ScanOptions = {}) {
+  clearTimer()
+  timer = setTimeout(() => {
+    timer = null
+    const ed = getEditor()
+    if (ed && isFresh(ed)) return
+    scanNow(opts)
+  }, delay)
+}
+
+/** Make the current match `index`: move the "current" highlight, select it and scroll to it. */
+function goTo(ed: Editor, index: number) {
+  current = index
+  const m = matches[index]
+  const slide = index < winStart || index >= winEnd
+  const tr = setFindDecorations(ed.state.tr, {
+    current: buildCurrentDecoration(ed.state, m),
+    matches: slide ? windowDecorations(ed.state, true) : undefined,
+  })
+  if (m) selectMatch(tr, m)
+  ed.view.dispatch(tr)
+  if (m) revealCurrent(ed)
+  publish()
+}
+
+function sameRange(a: MatchRange | undefined, from: number, to: number) {
+  return !!a && a.from === from && a.to === to
+}
+
+/** Move to the next match (wraps). Bound to Enter in the find field. */
+export function findNext(): void {
+  const ed = getEditor()
+  if (!ed) return
+  if (!isFresh(ed)) {
+    scanNow()
+    const { from, to } = ed.state.selection
+    if (matches.length === 0) return
+    // Rescanned: the current match is at/after the caret. Skip it if it is the selection itself.
+    let i = current
+    if (sameRange(matches[i], from, to)) i = (i + 1) % matches.length
+    goTo(ed, i)
+    return
+  }
+  if (matches.length === 0) return
+  goTo(ed, current < 0 ? 0 : (current + 1) % matches.length)
+}
+
+/** Move to the previous match (wraps). Bound to Shift+Enter in the find field. */
+export function findPrevious(): void {
+  const ed = getEditor()
+  if (!ed) return
+  if (!isFresh(ed)) {
+    scanNow()
+    if (matches.length === 0) return
+    const from = ed.state.selection.from
+    let i = indexAtOrAfter(matches, from)
+    // indexAtOrAfter wraps to 0; the previous match is the one just before the caret.
+    i = matches[i].from >= from ? i - 1 : matches.length - 1
+    goTo(ed, i < 0 ? matches.length - 1 : i)
+    return
+  }
+  if (matches.length === 0) return
+  goTo(ed, current <= 0 ? matches.length - 1 : current - 1)
+}
+
+/** Replace the current match, then move to the next one. Returns true if something was replaced. */
+export function replaceCurrent(): boolean {
+  const ed = getEditor()
+  if (!ed) return false
+  if (!isFresh(ed)) scanNow()
+  const m = matches[current]
+  if (!m) return false
+  const replacement = findState().replacement
+  const tr = replaceRange(ed.state.tr, ed.schema, m, replacement)
+  closeHistory(clearFindDecorations(tr))
+  ed.view.dispatch(tr)
+  scanNow({ anchor: m.from + replacement.length, reveal: true, closeUndoGroup: true })
+  return true
+}
+
+/**
+ * Replace every match in a single transaction (one undo step restores all of them).
+ * Returns the number of replacements.
+ */
+export function replaceAll(): number {
+  const ed = getEditor()
+  if (!ed) return 0
+  if (!isFresh(ed)) scanNow()
+  const count = matches.length
+  if (count === 0) return 0
+  const tr = replaceAllRanges(ed.state.tr, ed.schema, matches, findState().replacement)
+  closeHistory(clearFindDecorations(tr))
+  ed.view.dispatch(tr)
+  scanNow({ closeUndoGroup: true })
+  return count
+}
+
+/** Snapshot of the current matches (tests / diagnostics). */
+export function getMatches(): readonly MatchRange[] {
+  return matches
+}
+
+function clearHighlights() {
+  clearTimer()
+  matches = []
+  current = -1
+  scannedDoc = null
+  scannedKey = ''
+  winStart = winEnd = 0
+  const ed = getEditor()
+  if (ed) {
+    const empty = buildMatchDecorations(ed.state, [])
+    ed.view.dispatch(setFindDecorations(ed.state.tr, { matches: empty, current: empty }))
+  }
+}
+
+/**
+ * Start scanning (called when the panel opens). Scans immediately, then follows query/option
+ * changes (debounced), document changes (debounced) and editor mount. Returns stop, which
+ * clears all highlights and timers.
+ */
+export function startFindEngine(): () => void {
+  running = true
+  scanNow({ reveal: findState().query.length > 0 })
+  const unsubStore = useStore.subscribe((s, prev) => {
+    if (!running) return
+    const f = s.find
+    const p = prev.find
+    if (f.query !== p.query || f.caseSensitive !== p.caseSensitive || f.wholeWord !== p.wholeWord) {
+      scheduleScan(QUERY_DEBOUNCE_MS, { reveal: true })
+    } else if (s.editor.docVersion !== prev.editor.docVersion) {
+      scheduleScan(DOC_DEBOUNCE_MS)
+    }
+  })
+  const unsubEditor = subscribeEditor(() => {
+    if (running) scheduleScan(0)
+  })
+  return () => {
+    running = false
+    unsubStore()
+    unsubEditor()
+    clearHighlights()
+    publish()
+  }
+}
+
+/** Open (or re-focus) the panel, pre-filling the query from a short single-block selection. */
+export function openFind(): void {
+  const ed = getEditor()
+  let prefill: string | undefined
+  if (ed) {
+    const { from, to, $from, $to, empty } = ed.state.selection
+    if (!empty && $from.sameParent($to) && to - from <= MAX_PREFILL) {
+      const text = ed.state.doc.textBetween(from, to, '\n', '\n')
+      if (text.trim().length > 0 && !text.includes('\n')) prefill = text
+    }
+  }
+  useStore.getState().findActions.openPanel(prefill)
+}
+
+/** Close the panel (stops the engine via the panel) and optionally return focus to the editor. */
+export function closeFind({ focusEditor = true }: { focusEditor?: boolean } = {}): void {
+  useStore.getState().findActions.closePanel()
+  if (focusEditor) getEditor()?.commands.focus()
+}
