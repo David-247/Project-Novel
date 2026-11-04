@@ -256,5 +256,24 @@ describe('footnote editor (nested view, unified undo)', () => {
     expect(document.activeElement).toBe(done)
     expect(getFootnoteEditing()).not.toBeNull()
   })
+
+  it('REGRESSION: Escape and Tab during an IME composition belong to the IME (the note stays open, focus stays)', async () => {
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const box = await openOn(ed, 2)
+    // The nested view is composing, so its own keymap steps aside (as in a browser); the popover must too.
+    Object.defineProperty(activeFootnoteView()!, 'composing', { configurable: true, get: () => true })
+    box.focus()
+    const press = (init: KeyboardEventInit & { keyCode?: number }) =>
+      act(() => void box.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })))
+    press({ key: 'Escape', isComposing: true })
+    expect(getFootnoteEditing()).not.toBeNull()
+    press({ key: 'Tab', isComposing: true })
+    expect(document.activeElement).toBe(box)
+    // WebKit and older engines report composition keys as keyCode 229 (isComposing may be false).
+    press({ key: 'Escape', keyCode: 229 })
+    press({ key: 'Tab', keyCode: 229 })
+    expect(getFootnoteEditing()).not.toBeNull()
+    expect(document.activeElement).toBe(box)
+  })
 })
 
