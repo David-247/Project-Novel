@@ -6,6 +6,7 @@ import {
   getDocJSON,
   getDocVersion,
   HistoryButtons,
+  InsertMenu,
   isDirty,
   markClean,
   markDirty,
@@ -68,6 +69,12 @@ export function App() {
                   <ToolbarGroup label="Find">
                     <ToolbarItem>
                       <FindButton />
+                    </ToolbarItem>
+                  </ToolbarGroup>
+                  <ToolbarSeparator />
+                  <ToolbarGroup label="Insert">
+                    <ToolbarItem>
+                      <InsertMenu />
                     </ToolbarItem>
                   </ToolbarGroup>
                   <ToolbarSeparator />
