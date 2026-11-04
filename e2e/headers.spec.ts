@@ -333,7 +333,7 @@ test('REGRESSION: Chapter Number then a Duplicate of Chapter Title break once: t
   await page.setViewportSize({ width: 1400, height: 900 })
   await launch(page)
   const doc = manuscript(1800)
-  const firstTitle = doc.content.findIndex((b) => b.type === 'heading')
+  const firstTitle = doc.content.findIndex((b) => (b as { type: string }).type === 'heading')
   doc.content.splice(firstTitle, 0, { type: 'heading', attrs: { level: 1, styleId: 'chapter-number' }, content: [{ type: 'text', text: 'One' }] } as never)
   await seedProject(page, '/projects/Numbered', 'Numbered', doc)
   await openRecent(page, '/projects/Numbered')
