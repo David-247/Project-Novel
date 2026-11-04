@@ -77,3 +77,10 @@ export { INSERT_CONTROLS, INSERT_ITEMS, INSERT_MENU_CONTROL } from './breaks/con
 export type { InsertControlMeta, InsertItem } from './breaks/controls'
 export { mapPastedHtml } from './breaks/paste'
 export { SCENE_ORNAMENTS } from './breaks/nodes'
+// Footnotes (Phase 2). Node `footnote` (inline atom; its content is the note text). Numbers are
+// derived: getFootnotes() lists the references in order with their labels; onFootnotesChange(cb)
+// fires after an update that changed the list. FOOTNOTE_NODE is the node type name.
+export { FOOTNOTE_NODE, onFootnotesChange, collectFootnotes } from './footnote/numbering'
+export type { FootnoteRef, FootnotesListener } from './footnote/numbering'
+export { getFootnotes } from './footnote/api'
+export { FOOTNOTE_EDITOR_CONTROLS } from './footnote/controls'

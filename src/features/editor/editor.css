@@ -74,3 +74,35 @@
   user-select: none;
   white-space: pre;
 }
+
+/* ---- Footnote references (footnotes ticket) ----------------------------------------------------
+   The mark is a pseudo-element (the derived number comes from a decoration, data-fn-num), raised by
+   relative positioning so it never makes its line taller (pagination measures line boxes). The
+   ::before box is the 32 x 32 px press / tap target around the small mark, out of flow. */
+.novel-editor-content .nv-fn-ref {
+  position: relative;
+  top: -0.45em;
+  vertical-align: baseline;
+  font-size: 0.72em;
+  line-height: 0;
+  padding: 0 0.08em;
+  cursor: pointer;
+  border-radius: 2px;
+  user-select: none;
+}
+.novel-editor-content .nv-fn-ref::after {
+  content: attr(data-fn-num);
+}
+.novel-editor-content .nv-fn-ref::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+}
+.novel-editor-content .nv-fn-ref.ProseMirror-selectednode {
+  outline: 2px solid var(--page-focus-ring);
+  outline-offset: 1px;
+}

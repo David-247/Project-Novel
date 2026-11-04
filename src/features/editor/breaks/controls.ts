@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/core'
 import type { ToolbarControlMeta } from '../toolbar/controls'
 import type { ChaptersStartOn } from './chapter-start'
 import { SCENE_ORNAMENTS } from './nodes'
+import { FOOTNOTE_INSERT } from '../footnote/controls'
 
 export interface InsertControlMeta extends ToolbarControlMeta {
   /** One line for the tooltip. */
@@ -45,6 +46,7 @@ export const INSERT_ITEMS: readonly InsertItem[] = [
     description: 'Add a centred ornament between scenes. Typing *** or ### on a line does the same.',
     run: (editor) => editor.chain().focus().insertSceneBreak().run(),
   },
+  { ...FOOTNOTE_INSERT, run: (editor) => editor.chain().focus().insertFootnote().run() },
 ]
 
 /** "Chapters start on" radio items (a book setting: rewrites the Chapter Title style). */

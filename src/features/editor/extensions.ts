@@ -15,6 +15,7 @@ import { BlockFormat, BLOCK_FORMAT_TYPES } from './toolbar/block-format'
 import { FindHighlight } from './find/plugin'
 import { BlockStyles } from './styles/block-styles'
 import { BookBreaks } from './breaks/nodes'
+import { Footnotes } from './footnote/node'
 
 /**
  * Phase 1 base schema.
@@ -69,5 +70,10 @@ export function createEditorExtensions(): Extensions {
     // Mod-Shift-Enter, Mod-Alt-Enter, the *** / ### input rules and the page-break / <hr> paste mapping.
     BookBreaks,
     // --- end styles -----------------------------------------------------------------------
+
+    // --- Footnotes (Phase 2): additive only. The inline `footnote` atom (its content is the note
+    // text), derived numbering (book.footnotes), Insert Footnote (Mod-Alt-f), Enter edits a selected
+    // reference.
+    Footnotes,
   ]
 }

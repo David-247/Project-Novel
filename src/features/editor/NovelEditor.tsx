@@ -5,6 +5,7 @@ import { attachEditor } from './controller'
 import { createEditorExtensions } from './extensions'
 import { SYSTEM_FONT_STACK } from './fonts'
 import { BookStyleSheet } from './styles/BookStyleSheet'
+import { FootnoteEditor } from './footnote/FootnoteEditor'
 import './editor.css'
 
 export interface NovelEditorProps {
@@ -59,6 +60,7 @@ export function NovelEditor({ paged = false }: NovelEditorProps = {}) {
     >
       <BookStyleSheet />
       <EditorContent editor={editor} />
+      <FootnoteEditor />
     </div>
   )
 }
