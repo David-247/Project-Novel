@@ -282,6 +282,39 @@ describe('missing styles', () => {
     expect(document.querySelector('[data-testid="hint-kind"]')!.textContent).toBe('Fixed while 1 paragraph uses this style.')
   })
 
+  it('REGRESSION: a chapter heading style says whether it opens chapters, next to Based on, and follows the draft', () => {
+    render(<Toolbar loadFonts={async () => []} />)
+    const ed = mount([p('Prologue')])
+    let id = ''
+    run(() => (id = createStyle('body', 'Prologue heading'))) // paragraph style: no hint
+    caretAtEndOf(ed, 0)
+    run(() => ed.commands.setBlockStyle(id))
+    run(() => saveStyle(id, { ...ownDef(getStyleDefinition(id)!), kind: 'chapter', outlineLevel: 1 })) // made from scratch
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="styles.edit"]')!))
+    const basedOn = document.querySelector<HTMLSelectElement>('[data-control-id="styles.field.basedOn"]')!
+    const hint = () => document.querySelector('[data-testid="hint-basedOn"]')
+    expect(hint()!.textContent).toBe("Won't start chapters: base it on Chapter Title to open a chapter.")
+    // Linked to the control, next to the tooltip's own description.
+    expect(basedOn.getAttribute('aria-describedby')!.split(' ')).toContain(hint()!.id)
+    act(() => void fireEvent.change(basedOn, { target: { value: 'chapter-title' } }))
+    expect(hint()!.textContent).toBe('Opens a chapter (based on Chapter Title).')
+    act(() => void fireEvent.change(basedOn, { target: { value: 'chapter-number' } }))
+    expect(hint()!.textContent).toBe('Numbers the chapter whose title follows it (based on Chapter Number).')
+    act(() => void fireEvent.change(basedOn, { target: { value: '' } }))
+    expect(hint()!.textContent).toBe("Won't start chapters: base it on Chapter Title to open a chapter.")
+  })
+
+  it('a paragraph style shows no chapter hint', () => {
+    render(<Toolbar loadFonts={async () => []} />)
+    const ed = mount([p('Dear Mara,')])
+    let id = ''
+    run(() => (id = createStyle('block-quote', 'Letter')))
+    caretAtEndOf(ed, 0)
+    run(() => ed.commands.setBlockStyle(id))
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="styles.edit"]')!))
+    expect(document.querySelector('[data-testid="hint-basedOn"]')).toBeNull()
+  })
+
   it('REGRESSION: the proof sample is the paragraph without the text of its footnotes', () => {
     render(<Toolbar loadFonts={async () => []} />)
     const ed = mount([

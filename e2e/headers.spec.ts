@@ -329,6 +329,56 @@ test('REGRESSION: a Duplicate of Chapter Title opens chapters (running head, num
     .toBe(title2)
 })
 
+test('REGRESSION: Chapter Number then a Duplicate of Chapter Title break once: the number stays on the title page', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await launch(page)
+  const doc = manuscript(1800)
+  const firstTitle = doc.content.findIndex((b) => (b as { type: string }).type === 'heading')
+  doc.content.splice(firstTitle, 0, { type: 'heading', attrs: { level: 1, styleId: 'chapter-number' }, content: [{ type: 'text', text: 'One' }] } as never)
+  await seedProject(page, '/projects/Numbered', 'Numbered', doc)
+  await openRecent(page, '/projects/Numbered')
+  await expect(saveStatus(page)).toHaveText('Numbered: All changes saved')
+  await ctl(page, 'book.headerFooter').click()
+  await ctl(page, 'book.headerFooter.verso').selectOption('chapter')
+  await ctl(page, 'book.headerFooter.recto').selectOption('chapter')
+  await ctl(page, 'book.headerFooter.done').click()
+  await expect(dialog(page)).toHaveCount(0)
+  await waitForLayout(page)
+  const before = await layout(page)
+  const opening = (l: typeof before) => l.pages.find((p) => p.chapterIndex === 0)!
+
+  // Built-in Number + built-in Title: one break, the number opens the chapter page.
+  expect(before.pages.filter((p) => p.startsBlockType === 'heading')).toHaveLength(3)
+
+  // Give the title a Duplicate of Chapter Title (identical look): the pages must not change.
+  await ctl(page, 'styles.manage').click()
+  const manage = page.getByRole('dialog', { name: 'Manage styles' })
+  await manage.locator('[data-style-row="chapter-title"]').click()
+  await manage.locator('[data-control-id="styles.manage.duplicate"]').click()
+  await expect(manage.locator('[data-style-row="custom-1"]')).toHaveText(/Chapter Title copy/)
+  await manage.locator('[data-control-id="dialog.close"]').click()
+  await expect(manage).toBeHidden()
+  const title = editor(page).locator('h1[data-style="chapter-title"]').first()
+  const titleText = (await title.textContent())!
+  await clickBlockStart(page, title)
+  await ctl(page, 'styles.picker').selectOption({ label: 'Chapter Title copy' })
+  await expect(editor(page).locator('h1[data-style="custom-1"]')).toHaveText(titleText)
+  // The title does not break again after the number.
+  await expect(editor(page).locator('h1[data-style="custom-1"]')).not.toHaveAttribute('data-break-before', /./)
+  await expect(editor(page).locator('h1[data-style="chapter-number"]')).toHaveAttribute('data-break-before', 'page')
+
+  await waitForLayout(page)
+  const after = await layout(page)
+  expect(after.pages.length).toBe(before.pages.length)
+  expect(after.pages.filter((p) => p.startsBlockType === 'heading')).toHaveLength(3)
+  expect(opening(after).index).toBe(opening(before).index)
+  // The page after the opening is chapter 1's second page, with its title in the head.
+  const got = await shown(page)
+  const second = got.find((g) => g.index === opening(after).index + 1)
+  expect(second, 'the page after chapter 1 opens is rendered').toBeDefined()
+  expect(second).toMatchObject({ header: titleText, footerNumber: '2' })
+})
+
 test('running heads are not document content: find, select-all + copy and the document never see them', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await openBook(page, 'NotContent', 'Ada Quill', 1500)

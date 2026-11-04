@@ -136,6 +136,21 @@ describe('generated stylesheet', () => {
     expect(continuesHeadingGroup(STYLE_IDS.partTitle, STYLE_IDS.chapterTitle, r)).toBe(false)
     expect(continuesHeadingGroup(STYLE_IDS.chapterTitle, STYLE_IDS.firstParagraph, r)).toBe(false)
   })
+
+  it('REGRESSION: a chapter number style then a chapter title style is a group, duplicates included', () => {
+    const copy = (basedOn: string) => ({ builtIn: false, name: `${basedOn} copy`, kind: 'chapter', outlineLevel: 1, basedOn })
+    const r = resolveStyleSheet({ 'num-copy': copy('chapter-number'), 'title-copy': copy('chapter-title'), 'part-copy': copy('part-title') })
+    for (const n of ['chapter-number', 'num-copy']) {
+      for (const t of ['chapter-title', 'title-copy']) expect(continuesHeadingGroup(n, t, r), `${n} + ${t}`).toBe(true)
+    }
+    expect(continuesHeadingGroup('title-copy', 'num-copy', r)).toBe(false)
+    expect(continuesHeadingGroup('num-copy', 'part-copy', r)).toBe(false)
+    const css = buildStyleSheetCSS(r, SCOPE)
+    expect(css).toContain('.ed [data-style="chapter-number"] + [data-style="title-copy"] { margin-top: 0; }')
+    expect(css).toContain('.ed [data-style="num-copy"] + [data-style="title-copy"] { margin-top: 0; }')
+    expect(css).toContain('.ed [data-style="num-copy"] + [data-style="chapter-title"] { margin-top: 0; }')
+    expect(css.split('\n').filter((l) => l.includes('"chapter-number"] + [data-style="chapter-title"]'))).toHaveLength(1)
+  })
 })
 
 describe('chapter roles', () => {

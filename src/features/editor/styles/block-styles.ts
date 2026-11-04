@@ -5,6 +5,7 @@ import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import {
+  chapterRoleSignature,
   continuesHeadingGroup,
   DEFAULT_STYLE_ID,
   STYLE_ID_PATTERN,
@@ -149,8 +150,9 @@ function breakSignature(styles: ResolvedStyles): string {
   for (const s of styles.values()) {
     if ((s.breakBefore && s.breakBefore !== 'none') || s.nextStyle) sig += `${s.id}:${s.breakBefore ?? ''}:${s.nextStyle ?? ''}|`
   }
-  // Which ids are defined also decides breaks (an undefined id renders as its fallback).
-  return `${sig}#${idsSignature(styles)}`
+  // Which ids are defined also decides breaks (an undefined id renders as its fallback), and so do
+  // chapter roles (a chapter number then a chapter title break once: continuesHeadingGroup).
+  return `${sig}#${idsSignature(styles)}#${chapterRoleSignature(styles)}`
 }
 
 /**

@@ -331,9 +331,11 @@ export function openFind({ prefill: usePrefill = true }: { prefill?: boolean } =
     const { from, to, $from, $to, empty } = ed.state.selection
     // A selection holding a footnote reference is not prefilled: textBetween would run the note text
     // into the sentence, and a match never spans a reference anyway (search.ts blockText).
+    // Cheap checks first; the note scan only runs on a short single-block selection.
     let hasNote = false
-    if (!empty) ed.state.doc.nodesBetween(from, to, (n) => !(hasNote ||= n.type.name === FOOTNOTE_NODE))
-    if (!empty && !hasNote && $from.sameParent($to) && to - from <= MAX_PREFILL) {
+    const short = !empty && $from.sameParent($to) && to - from <= MAX_PREFILL
+    if (short) ed.state.doc.nodesBetween(from, to, (n) => !(hasNote ||= n.type.name === FOOTNOTE_NODE))
+    if (short && !hasNote) {
       const text = ed.state.doc.textBetween(from, to, '\n', '\n')
       if (text.trim().length > 0 && !text.includes('\n')) prefill = text
     }
