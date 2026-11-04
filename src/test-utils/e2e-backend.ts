@@ -139,7 +139,16 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     listFiles: () => [...state.files.keys()].sort(),
     /** Add a folder to the Rust-owned recent list (as if opened before). */
     addRecent: (path: string, name: string) => core.seedRecent(path, name),
-    recentMenu: () => state.menu,
+    /** Labels of File > Open Recent in the last native menu snapshot (menu_set). */
+    recentMenu: () => {
+      type Node = { kind: string; label?: string; items?: Node[] }
+      const file = state.menu?.menus.find((m) => m.id === 'file')
+      const recent = (file?.items as Node[] | undefined)?.find((n) => n.kind === 'submenu' && n.label === 'Open Recent')
+      return (recent?.items ?? []).map((n) => n.label ?? '')
+    },
+    /** The last native menu snapshot (menu_set), as Rust would build it. */
+    nativeMenu: () => state.menu,
+    fullscreen: () => state.fullscreen,
     exits: () => state.exits,
     /** auditTooltipCoverage over the whole page incl. portals (the fake native dialog excluded). */
     auditTooltips: () =>

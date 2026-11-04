@@ -10,6 +10,8 @@ vi.mock('@tauri-apps/plugin-sql', async () => (await import('@/test-utils/fake-t
 
 import {
   closeProject,
+  closeProjectInteractive,
+  saveProjectCopy,
   confirmUnsavedChanges,
   getCurrentProjectPath,
   loadRecentProjects,
@@ -20,6 +22,7 @@ import {
   updateProjectDetails,
 } from './index'
 import { __resetStorageForTests } from './project'
+import { recentCommands } from './commands'
 
 const textDoc = (text: string): DocJSON => ({
   type: 'doc',
@@ -110,7 +113,9 @@ describe('project storage', () => {
     await freshSession()
     const recent = await loadRecentProjects()
     expect(recent.map((r) => r.path)).toEqual(['/books/novel'])
-    expect(backend.menu).toEqual([{ path: '/books/novel', label: 'novel (/books/novel)', missing: false }])
+    // File > Open Recent renders from the store's list (storage commands).
+    expect(useStore.getState().project.recent).toEqual([expect.objectContaining({ path: '/books/novel', name: 'novel' })])
+    expect(recentCommands(useStore.getState().project.recent).map((c) => c.label)).toEqual(['novel'])
 
     expect(await openProject(recent[0].path)).toBe(true)
     expect(editor.getDocJSON()).toEqual(content)
@@ -168,7 +173,9 @@ describe('project storage', () => {
     await freshSession()
     const recent = await loadRecentProjects()
     expect(recent[0].missing).toBe(true)
-    expect(backend.menu).toEqual([expect.objectContaining({ missing: true })])
+    const [item] = recentCommands(useStore.getState().project.recent)
+    expect(item.label).toBe('novel (missing)')
+    expect(item.isEnabled!()).toBe(false)
     expect(await openProject('/books/novel')).toBe(false)
     expect(backend.messages[0].text).toMatch(/could not be found/)
   })
@@ -448,5 +455,57 @@ describe('book details (title and author)', () => {
     backend.pick = '/books/old'
     expect(await openProject()).toBe(true)
     expect(useStore.getState().project.author).toBe('')
+  })
+})
+
+describe('Save a Copy and Close Project (File menu)', () => {
+  it('Save a Copy writes the project as it is now to another folder and stays in the open one', async () => {
+    await createAt('/books/novel')
+    backend.files.set('/books/novel/notes.json', '{"keep":true}')
+    editor.update(textDoc('Unsaved words.'))
+    backend.dirs.add('/books/copy')
+    backend.pick = '/books/copy'
+    expect(await saveProjectCopy()).toBe(true)
+    expect(json('/books/copy/manuscript.json')).toEqual(textDoc('Unsaved words.'))
+    expect(json('/books/copy/notes.json')).toEqual({ keep: true })
+    expect(json('/books/copy/book.json')).toEqual(json('/books/novel/book.json'))
+    const copy = json('/books/copy/project.json')
+    const original = json('/books/novel/project.json')
+    expect(copy.title).toBe(original.title)
+    expect(copy.id).not.toBe(original.id)
+    // Still in the original project, whose root is granted again; its unsaved state is untouched.
+    expect(getCurrentProjectPath()).toBe('/books/novel')
+    expect(backend.active).toBe('/books/novel')
+    expect(editor.isDirty()).toBe(true)
+    expect(await saveProject()).toBe(true)
+    expect(json('/books/novel/manuscript.json')).toEqual(textDoc('Unsaved words.'))
+  })
+
+  it('Save a Copy refuses a folder that already holds a project, and the open project itself', async () => {
+    await createAt('/books/other')
+    await createAt('/books/novel')
+    backend.pick = '/books/other'
+    expect(await saveProjectCopy()).toBe(false)
+    expect(backend.messages.at(-1)!.text).toMatch(/already contains project\.json/)
+    backend.pick = '/books/novel'
+    expect(await saveProjectCopy()).toBe(false)
+    expect(backend.messages.at(-1)!.text).toMatch(/This is the open project/)
+    expect(backend.active).toBe('/books/novel')
+  })
+
+  it('Close Project runs the unsaved-changes guard, then leaves an empty untitled manuscript', async () => {
+    await createAt('/books/novel')
+    editor.update(textDoc('Unsaved words.'))
+    backend.answer = 'Cancel'
+    expect(await closeProjectInteractive()).toBe(false)
+    expect(getCurrentProjectPath()).toBe('/books/novel')
+    expect(backend.messages.at(-1)!.text).toMatch(/before closing the project/)
+    backend.answer = 'Save'
+    expect(await closeProjectInteractive()).toBe(true)
+    expect(json('/books/novel/manuscript.json')).toEqual(textDoc('Unsaved words.'))
+    expect(getCurrentProjectPath()).toBeNull()
+    expect(backend.active).toBeNull()
+    expect(editor.getDocJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+    expect(editor.isDirty()).toBe(false)
   })
 })

@@ -1,5 +1,6 @@
 //! Project storage commands: atomic file writes, project file reads,
-//! the recent-projects file in the app config dir, and the native File menu.
+//! and the recent-projects file in the app config dir. (The native menu lives
+//! in menu.rs and is built from the frontend's command registry.)
 //!
 //! The frontend (src/features/storage) owns the project format; Rust only
 //! provides safe primitives. No network access, no secrets.
@@ -10,30 +11,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::{
-    Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
-};
-use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 
 /// File name of the recent-projects list inside the app config dir.
 pub const RECENT_FILE_NAME: &str = "recent-projects.json";
 
-/// Menu item ids.
-pub const MENU_NEW_PROJECT: &str = "file.new_project";
-pub const MENU_OPEN_PROJECT: &str = "file.open_project";
-pub const MENU_OPEN_RECENT: &str = "file.open_recent";
-pub const MENU_OPEN_RECENT_ITEM_PREFIX: &str = "file.open_recent.";
-pub const MENU_OPEN_RECENT_EMPTY: &str = "file.open_recent.empty";
-pub const MENU_SAVE: &str = "file.save";
-pub const MENU_QUIT: &str = "app.quit";
-
-/// Events emitted to the frontend when menu items are chosen.
-pub const EVENT_NEW_PROJECT: &str = "menu://new-project";
-pub const EVENT_OPEN_PROJECT: &str = "menu://open-project";
-/// Payload: the project folder path (string).
-pub const EVENT_OPEN_RECENT: &str = "menu://open-recent";
-pub const EVENT_SAVE: &str = "menu://save";
-/// Quit requested (our Quit menu item / Cmd+Q, or an exit request held by
+/// Quit requested (the Quit command / Cmd+Q, or an exit request held by
 /// `allow_exit`): the frontend runs its unsaved-changes flow and then calls
 /// `storage_exit_app`. macOS Dock > Quit, logoff and Windows shutdown never get
 /// here (they bypass `ExitRequested`); crash recovery covers them (<= 30 s lost).
@@ -649,143 +632,6 @@ pub fn storage_remember_recent<R: Runtime>(
     }
     write_atomic(&p, json.as_bytes())?;
     Ok(json)
-}
-
-/// One entry of the File > Open Recent submenu.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecentMenuEntry {
-    pub path: String,
-    pub label: String,
-    #[serde(default)]
-    pub missing: bool,
-}
-
-/// Paths currently shown in Open Recent, indexed by menu item suffix.
-#[derive(Default)]
-pub struct RecentMenuState(pub Mutex<Vec<String>>);
-
-fn build_recent_submenu<R: Runtime>(
-    app: &AppHandle<R>,
-    entries: &[RecentMenuEntry],
-) -> tauri::Result<Submenu<R>> {
-    let mut b = SubmenuBuilder::with_id(app, MENU_OPEN_RECENT, "Open Recent");
-    if entries.is_empty() {
-        let empty = MenuItemBuilder::with_id(MENU_OPEN_RECENT_EMPTY, "No Recent Projects")
-            .enabled(false)
-            .build(app)?;
-        b = b.item(&empty);
-    }
-    for (i, e) in entries.iter().enumerate() {
-        let label = if e.missing { format!("{} (missing)", e.label) } else { e.label.clone() };
-        let item = MenuItemBuilder::with_id(format!("{MENU_OPEN_RECENT_ITEM_PREFIX}{i}"), label)
-            .enabled(!e.missing)
-            .build(app)?;
-        b = b.item(&item);
-    }
-    b.build()
-}
-
-/// Build the application menu: File (New, Open, Open Recent, Save, Quit),
-/// plus the app and Edit menus macOS needs for standard shortcuts.
-pub fn build_menu<R: Runtime>(
-    app: &AppHandle<R>,
-    recent: &[RecentMenuEntry],
-) -> tauri::Result<Menu<R>> {
-    let new_project = MenuItemBuilder::with_id(MENU_NEW_PROJECT, "New Project...")
-        .accelerator("CmdOrCtrl+Shift+N")
-        .build(app)?;
-    let open_project = MenuItemBuilder::with_id(MENU_OPEN_PROJECT, "Open Project...")
-        .accelerator("CmdOrCtrl+O")
-        .build(app)?;
-    let save = MenuItemBuilder::with_id(MENU_SAVE, "Save").accelerator("CmdOrCtrl+S").build(app)?;
-    // Custom Quit (not PredefinedMenuItem::quit) so it runs the unsaved-changes flow.
-    let quit = MenuItemBuilder::with_id(MENU_QUIT, "Quit Novel").accelerator("CmdOrCtrl+Q").build(app)?;
-    let recent_menu = build_recent_submenu(app, recent)?;
-
-    let file_builder = SubmenuBuilder::new(app, "File")
-        .item(&new_project)
-        .item(&open_project)
-        .item(&recent_menu)
-        .separator()
-        .item(&save)
-        .separator()
-        .item(&PredefinedMenuItem::close_window(app, None)?);
-    #[cfg(not(target_os = "macos"))]
-    let file_builder = file_builder.item(&quit);
-    let file = file_builder.build()?;
-
-    let mut menu = MenuBuilder::new(app);
-    #[cfg(target_os = "macos")]
-    {
-        let app_menu = SubmenuBuilder::new(app, "Novel")
-            .about(None)
-            .separator()
-            .services()
-            .separator()
-            .hide()
-            .hide_others()
-            .show_all()
-            .separator()
-            .item(&quit)
-            .build()?;
-        let edit = SubmenuBuilder::new(app, "Edit")
-            .undo()
-            .redo()
-            .separator()
-            .cut()
-            .copy()
-            .paste()
-            .select_all()
-            .build()?;
-        menu = menu.item(&app_menu).item(&file).item(&edit);
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        menu = menu.item(&file);
-    }
-    menu.build()
-}
-
-/// Rebuild File > Open Recent from the frontend's list.
-#[tauri::command]
-pub fn storage_set_recent_menu<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, RecentMenuState>,
-    entries: Vec<RecentMenuEntry>,
-) -> std::result::Result<(), String> {
-    *state.0.lock().map_err(|e| e.to_string())? = entries.iter().map(|e| e.path.clone()).collect();
-    let menu = build_menu(&app, &entries).map_err(|e| e.to_string())?;
-    app.set_menu(menu).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Route a menu click to a frontend event.
-pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    let result = match id {
-        MENU_NEW_PROJECT => app.emit(EVENT_NEW_PROJECT, ()),
-        MENU_OPEN_PROJECT => app.emit(EVENT_OPEN_PROJECT, ()),
-        MENU_SAVE => app.emit(EVENT_SAVE, ()),
-        MENU_QUIT => app.emit(EVENT_QUIT, ()),
-        _ => match id.strip_prefix(MENU_OPEN_RECENT_ITEM_PREFIX).and_then(|i| i.parse::<usize>().ok()) {
-            Some(index) => {
-                let path = app
-                    .state::<RecentMenuState>()
-                    .0
-                    .lock()
-                    .ok()
-                    .and_then(|paths| paths.get(index).cloned());
-                match path {
-                    Some(path) => app.emit(EVENT_OPEN_RECENT, path),
-                    None => Ok(()),
-                }
-            }
-            None => Ok(()),
-        },
-    };
-    if let Err(e) = result {
-        eprintln!("failed to emit menu event {id}: {e}");
-    }
 }
 
 #[cfg(test)]

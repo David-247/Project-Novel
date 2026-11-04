@@ -67,7 +67,7 @@ export function isSaveShortcut(
 }
 
 /**
- * Wire storage into the running app: Mod-S, native File menu
+ * Wire storage into the running app: autosave, the storage menu
  * events, the recent-projects list, and the unsaved-changes prompt on close.
  * Call once from the composition root. Tauri-only parts are skipped in a
  * plain browser (e.g. `pnpm dev`, Playwright).
@@ -75,14 +75,7 @@ export function isSaveShortcut(
 export function useStorageIntegration(): void {
   useEffect(() => {
     const disposers: (() => void)[] = []
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!isSaveShortcut(e)) return
-      e.preventDefault()
-      void saveProject()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    disposers.push(() => window.removeEventListener('keydown', onKeyDown))
+    // Mod-S and the File menu are storage commands (registerStorageCommands), bound by the menu slice.
     const stopAutosaveTimer = startAutosave()
     disposers.push(() => void stopAutosaveTimer())
 

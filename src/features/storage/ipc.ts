@@ -14,13 +14,15 @@ export const COMMANDS = {
   removeFile: 'storage_remove_file',
   readRecent: 'storage_read_recent',
   rememberRecent: 'storage_remember_recent',
-  setRecentMenu: 'storage_set_recent_menu',
   exitApp: 'storage_exit_app',
   probeRecentRecovery: 'storage_probe_recent_recovery',
   listDir: 'storage_list_dir',
 } as const
 
-/** Events emitted by the native File menu. `OPEN_RECENT` carries the folder path. */
+/**
+ * Storage events (still honoured). The native menu itself sends `menu://command` with a command id
+ * (menu slice); Rust sends QUIT for an exit request it held. `OPEN_RECENT` carries the folder path.
+ */
 export const MENU_EVENTS = {
   NEW_PROJECT: 'menu://new-project',
   OPEN_PROJECT: 'menu://open-project',
@@ -185,15 +187,6 @@ export function rememberRecentRaw(name: string, openedAt: string): Promise<strin
   return invoke<string>(COMMANDS.rememberRecent, { name, openedAt })
 }
 
-export interface RecentMenuEntry {
-  path: string
-  label: string
-  missing: boolean
-}
-
-export function setRecentMenu(entries: RecentMenuEntry[]): Promise<void> {
-  return invoke(COMMANDS.setRecentMenu, { entries })
-}
 
 /** project.json + `.recovery/manuscript.json` of a recent project (raw text; null = missing). */
 export interface RecoveryProbe {

@@ -64,6 +64,9 @@ export { REVISION_KINDS, INDEX_SCHEMA_VERSION, type RevisionKind } from './schem
 
 // App wiring
 export { useStorageIntegration } from './integration'
+// File menu commands (New, Open, Open Recent, Close Project, Save, Save a Copy, Quit): shared registry.
+export { registerStorageCommands, recentCommandId } from './commands'
+export { closeProjectInteractive, saveProjectCopy } from './project'
 export { SaveStatusIndicator } from './SaveStatusIndicator'
 export { RecoveryDialog } from './RecoveryDialog'
 export { NoProjectActions, RecoveryStatus } from './ProjectStatusControls'
