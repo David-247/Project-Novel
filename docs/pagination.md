@@ -107,13 +107,16 @@ layer behind the editor.
 
 | Measure (budget) | chromium | webkit |
 |---|---|---|
-| Trim reflow, worst of 6 × 9 / 5 × 8 / A5 / 5.5 × 8.5 (< 1000 ms) | 265 ms | 506 ms |
-| Typing at a line end mid-manuscript, median / p95 (< 50 ms median) | 19.2 / 28.5 ms | 47 / 79 ms |
-| Typing inside a paragraph split across two pages, median / p95 | 25.3 / 32.4 ms | 45 / 56 ms |
-| Phase 1 `perf.spec.ts` typing (now paginated), median / p95 | 15.8 / 23.2 ms | 38 / 58 ms |
-| Phase 1 hot path (find on "the" + autosave), median / p95 | 21.5 / 29.4 ms | 45 / 61 ms |
-| Chapter Title restyle: style sheet swap (< 100 ms) / repaginated (< 1000 ms) | CSS_C / REPAG_C | CSS_W / REPAG_W |
+| Trim reflow complete, worst of 6 × 9 / 5 × 8 / A5 / 5.5 × 8.5 (< 1000 ms) | 161–254 ms | 341–499 ms (quieter host); 602–1306 ms under background load |
+| … every off-screen block drawn as well (reported, < 3000 ms) | 342–537 ms | 658–935 ms (quieter); up to 2066 ms under load |
+| Typing at a line end mid-manuscript, median / p95 (< 50 ms median) | 18.1 / 27.7 ms | 47–52 / 76–98 ms |
+| Typing inside a paragraph split across two pages, median / p95 | 22.1 / 32.3 ms | 44–50 / 54–61 ms |
+| Phase 1 `perf.spec.ts` typing (now paginated), median / p95 | 14.1 / 25.4 ms | 38–48 / 58–90 ms |
+| Phase 1 hot path (find on "the" + autosave), median / p95 | 17.9 / 30.7 ms | 42–46 / 61–80 ms |
+| Chapter Title restyle: style sheet swap (< 100 ms) / repaginated (< 1000 ms) | 23.5–37 / 139–385 ms | 71–87 / 437–774 ms (1247 under load) |
 
+Windows 11, Playwright 1.64, measured while other processes kept the CPU between ~30 % and ~90 %
+busy (not under our control); the ranges are the runs of this round. CI on macOS is the arbiter.
 Measured after merging the book settings, styles and paper surfaces tickets (book styles, textured
 paper). 440 pages at 5.5 × 8.5 in. A keystroke's pass costs 1–3 ms (one block measured, two element
 boxes read, decorations untouched unless a line moved between pages). Playwright's WebKit on Windows
