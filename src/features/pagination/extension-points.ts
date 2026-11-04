@@ -1,6 +1,7 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import type { ReactNode } from 'react'
 import { useSyncExternalStore } from 'react'
+import { getChapters } from '@/features/editor'
 import type { PageInfo } from '@/shared/store'
 import type { PageGeometry } from './geometry'
 
@@ -8,7 +9,7 @@ import type { PageGeometry } from './geometry'
  * Extension points other slices fill (docs/pagination.md, "Extension points"):
  *  (a) page slots: render-props for the header and footer regions inside each page's margins;
  *  (b) bottom reservations: px a page keeps free at its bottom (footnotes), pushing body text on;
- *  (c) the chapter predicate that numbers `PageInfo.chapterIndex`.
+ *  (c) the chapter model that numbers `PageInfo.chapterIndex` (default: the editor's getChapters).
  * Registries are module-level (one editor per window). Every register* returns its unregister.
  */
 
@@ -106,21 +107,32 @@ export function totalReservation(page: ReservationPage): number {
 
 // ---- (c) Chapters ----------------------------------------------------------------------------
 
-/** Whether a top-level block opens a chapter. Default: a level-1 heading. */
+/** Whether a top-level block opens a chapter (an override of the default chapter model). */
 export type ChapterPredicate = (node: PMNode) => boolean
 
-export const defaultChapterPredicate: ChapterPredicate = (node) => node.type.name === 'heading' && node.attrs.level === 1
+/**
+ * Default chapter model: the editor's `getChapters` (breaks ticket). A chapter opens at a Chapter
+ * Title block (an unstyled level-1 heading is one), or at the Chapter Number directly before it.
+ * Content before the first opening is front matter (chapterIndex -1).
+ */
+export const defaultChapterOpenings = (doc: PMNode): number[] => getChapters(doc).map((c) => c.from)
 
-let chapterPredicate: ChapterPredicate = defaultChapterPredicate
+let chapterPredicate: ChapterPredicate | null = null
 
-/** Replace the chapter predicate (the chapters ticket); `null` restores the default. Reflows. */
+/** Replace the chapter model by a per-block predicate; `null` restores the default model. Re-breaks. */
 export function setChapterPredicate(predicate: ChapterPredicate | null): void {
-  chapterPredicate = predicate ?? defaultChapterPredicate
+  chapterPredicate = predicate
   relayoutPagination()
 }
 
-export function isChapterStart(node: PMNode): boolean {
-  return chapterPredicate(node)
+/** Positions of the top-level blocks that open a chapter, in document order. */
+export function chapterOpenings(doc: PMNode): number[] {
+  if (!chapterPredicate) return defaultChapterOpenings(doc)
+  const out: number[] = []
+  doc.forEach((node, pos) => {
+    if (chapterPredicate!(node)) out.push(pos)
+  })
+  return out
 }
 
 // ---- Invalidation ----------------------------------------------------------------------------

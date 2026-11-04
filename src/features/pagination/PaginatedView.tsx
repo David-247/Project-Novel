@@ -178,6 +178,7 @@ export function PaginatedView({ children }: PaginatedViewProps) {
 
 /** PageUp / PageDown: caret to the first page of the previous / next spread, scrolled to the top. */
 function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement: Placement, scrollToRow: (row: number) => void): boolean {
+  freshSnapshot()
   const pages = useStore.getState().layout.pages
   if (!pages.length) return false
   // A native caret move just before (arrow keys) may not be read yet: take it in first.
@@ -206,6 +207,13 @@ function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement:
   if (!extend) caretToPageStart(view, page.from)
   scrollToRow(row)
   return true
+}
+
+/** The engine's layout, after running a pass that is still pending (the snapshot would be stale). */
+function freshSnapshot() {
+  const engine = getEngine()
+  if (engine?.pending) engine.flush()
+  return engine?.getSnapshot() ?? null
 }
 
 /**
@@ -249,16 +257,17 @@ function posAtPaintedPoint(view: EditorView, x: number, y: number): number | nul
  * Everywhere else the browser handles the key.
  */
 function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean): boolean {
-  const snap = getEngine()?.getSnapshot()
-  if (!snap || !view.state.selection.empty && !extend) return false
+  if (!view.state.selection.empty && !extend) return false
   ;(view as unknown as { domObserver?: { flush(): void } }).domObserver?.flush()
+  const snap = freshSnapshot()
+  if (!snap) return false
   const { pages, ranges, lines, offsets, placement } = snap
   const head = view.state.selection.head
   const p = pageAt(pages, head)
   const r = ranges[p]
   if (!r || r.endLine <= r.startLine) return false
   const root = view.dom as HTMLElement
-  const rect = root.getBoundingClientRect()
+  let rect = root.getBoundingClientRect()
   const s = root.offsetWidth ? rect.width / root.offsetWidth : 1
   let caret: { left: number; top: number; bottom: number }
   try {
@@ -279,6 +288,21 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean): bo
   const target = dir > 0 ? ranges[q].startLine : ranges[q].endLine - 1
   const ty = (lines[target].top + lines[target].bottom) / 2 + offsets[q].dy
   const x = (caret.left - rect.left) / s - placement.content(p).x + placement.content(q).x
+  // The browser only hit-tests inside the viewport: at fit-spread zoom the next row's verso is often
+  // below it. Scroll the target line into view first (the caret goes there anyway).
+  const scroller = scrollParent(root)
+  if (scroller) {
+    const view0 = scroller.getBoundingClientRect()
+    const cx = rect.left + x * s
+    const cy = rect.top + ty * s
+    const margin = 24
+    const dy = cy < view0.top + margin ? cy - view0.top - margin : cy > view0.bottom - margin ? cy - view0.bottom + margin + view0.height / 3 : 0
+    const dx = cx < view0.left + margin ? cx - view0.left - margin : cx > view0.right - margin ? cx - view0.right + margin : 0
+    if (dx || dy) {
+      scroller.scrollBy(dx, dy)
+      rect = root.getBoundingClientRect()
+    }
+  }
   const hit = posAtPaintedPoint(view, rect.left + x * s, rect.top + ty * s)
   if (hit === null) return false
   const $pos = view.state.doc.resolve(hit)
@@ -313,7 +337,7 @@ function caretToPageStart(view: EditorView, pageFrom: number) {
  */
 function placeCaretFromDesk(view: EditorView, e: MouseEvent): boolean {
   if (e.button !== 0 || !(e.target instanceof Node) || !view.dom.contains(e.target)) return false
-  const snap = getEngine()?.getSnapshot()
+  const snap = freshSnapshot()
   if (!snap || !snap.pages.length) return false
   const root = view.dom as HTMLElement
   const rect = root.getBoundingClientRect()

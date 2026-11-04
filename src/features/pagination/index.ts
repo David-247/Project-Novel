@@ -16,7 +16,7 @@ export {
   registerPageSlot,
   registerBottomReservation,
   setChapterPredicate,
-  defaultChapterPredicate,
+  defaultChapterOpenings,
   invalidatePagination,
   relayoutPagination,
 } from './extension-points'

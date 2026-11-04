@@ -4,7 +4,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { resolveStyleSheet, type BookView, type StyleSheetJSON } from '@/shared/book'
 import { useStore, type PageInfo } from '@/shared/store'
 import { breakPages, sideOf, type LineBox, type PageRange, type UnitInfo } from './breaker'
-import { hasReservations, isChapterStart, onInvalidate, onRelayout, totalReservation } from './extension-points'
+import { chapterOpenings, hasReservations, onInvalidate, onRelayout, totalReservation } from './extension-points'
 import { resolvePageGeometry, type PageGeometry } from './geometry'
 import { blockBreakBefore, lineStart, measureBlock, ownShift, scaleOf, SHIFT_ATTR, type BlockMetrics } from './measure'
 import { placePages, type Placement } from './placement'
@@ -162,7 +162,6 @@ export class PaginationEngine {
       }),
       onInvalidate(() => this.invalidate()),
       // Re-break only (reservations, data-break-before, chapters): measurements stay valid.
-      onRelayout(() => this.schedule()),
       onRelayout(() => this.schedule()),
     )
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts
@@ -428,7 +427,7 @@ export class PaginationEngine {
 
     const t3 = performance.now()
     // ---- 4. Page model.
-    const pages = this.pageModel(ranges, lines, units, unitRef, blockNodes, blockPos, unitNodes, posOfLine, doc.content.size)
+    const pages = this.pageModel(ranges, lines, units, unitRef, blockNodes, unitNodes, posOfLine, doc.content.size)
 
     const t4 = performance.now()
     this.lastKey = key
@@ -557,16 +556,12 @@ export class PaginationEngine {
     units: UnitInfo[],
     unitRef: { block: number; unit: number }[],
     blockNodes: PMNode[],
-    blockPos: number[],
     unitNodes: PMNode[],
     posOfLine: (li: number) => number,
     docSize: number,
   ): PageInfo[] {
     // Chapter openings (top-level block positions) in order.
-    const chapterPos: number[] = []
-    blockNodes.forEach((n, i) => {
-      if (isChapterStart(n)) chapterPos.push(blockPos[i])
-    })
+    const chapterPos = chapterOpenings(this.view.state.doc)
     const starts = ranges.map((r) => (r.startLine >= lines.length ? docSize : posOfLine(r.startLine)))
     if (starts.length) starts[0] = 0
     let ch = -1

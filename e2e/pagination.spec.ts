@@ -455,6 +455,94 @@ test('ArrowDown / ArrowUp across a page split keep the caret column', async ({ p
   expect(Math.abs((await caretInfo()).xInPage - start.xInPage)).toBeLessThan(30)
 })
 
+test('at fit-spread, ArrowDown on a recto last line reaches the next row verso below the viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 })
+  await paste(page, paragraphs(30, 100))
+  await expect(page.locator('[data-control-id="pagination.zoom"]')).toHaveValue('fit-spread')
+  await frame(page, 2).scrollIntoViewIfNeeded()
+  // The last painted line of page 3 (index 2, a recto).
+  const point = await page.evaluate(() => {
+    const fr = document.querySelector('.nv-frames .nv-page[data-page-index="2"]')!.getBoundingClientRect()
+    const r = document.createRange()
+    let best: DOMRect | null = null
+    const walker = document.createTreeWalker(document.querySelector('.ProseMirror')!, NodeFilter.SHOW_TEXT)
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      r.selectNodeContents(t)
+      for (const rc of Array.from(r.getClientRects()))
+        if (rc.width > 0 && rc.left >= fr.left && rc.right <= fr.right && rc.top >= fr.top && rc.bottom <= fr.bottom && (!best || rc.top > best.top)) best = rc
+    }
+    return { x: best!.left + Math.min(40, best!.width / 2), y: best!.top + best!.height / 2 }
+  })
+  await page.mouse.click(point.x, point.y)
+  await waitForLayout(page)
+  expect((await layout(page)).currentPage).toBe(2)
+  // The next page (index 3, verso of the next row) starts below the viewport.
+  const main = (await page.getByRole('main', { name: 'Editor' }).boundingBox())!
+  expect((await frame(page, 3).boundingBox())!.y + 100).toBeGreaterThan(main.y + main.height)
+
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(async () => (await layout(page)).currentPage).toBe(3)
+  // The caret is on page 4's first line, scrolled into view.
+  const caret = await page.evaluate(() => {
+    const s = getSelection()!
+    const r = document.createRange()
+    r.setStart(s.focusNode!, s.focusOffset)
+    const rc = r.getClientRects()[0] ?? r.getBoundingClientRect()
+    const fr = document.querySelector('.nv-frames .nv-page[data-page-index="3"]')!.getBoundingClientRect()
+    return { inFrame: rc.top >= fr.top && rc.bottom <= fr.top + fr.height / 3, top: rc.top, bottom: rc.bottom }
+  })
+  expect(caret.inFrame).toBe(true)
+  expect(caret.top).toBeGreaterThanOrEqual(main.y)
+  expect(caret.bottom).toBeLessThanOrEqual(main.y + main.height)
+})
+
+test('page break node: the next block starts a new page, and the break takes no line', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/')
+  await editor(page).click()
+  await page.keyboard.type('Opening text')
+  await page.keyboard.press('ControlOrMeta+Enter') // Insert > Page break
+  await page.keyboard.type('After the break')
+  await waitForLayout(page)
+  const l = await layout(page)
+  expect(l.pageCount).toBe(2)
+  expect(l.pages[1].startsBlockType).toBe('paragraph')
+  // The page break atom closes page 1 with zero height; the paragraph after it is painted on page 2.
+  expect(await editor(page).locator('[data-page-break]').evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(0)
+  const after = (await editor(page).locator('p', { hasText: 'After the break' }).boundingBox())!
+  const f1 = (await frame(page, 1).boundingBox())!
+  expect(after.x).toBeGreaterThan(f1.x)
+  expect(after.y).toBeGreaterThan(f1.y)
+  expect(after.y + after.height).toBeLessThan(f1.y + f1.height)
+})
+
+test('Chapters start on right-hand page: a New chapter lands on a recto, with a blank verso before it', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/')
+  await editor(page).click()
+  await page.keyboard.type('Front matter.')
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('ControlOrMeta+Shift+Enter') // Insert > New chapter
+  await page.keyboard.type('The Storm')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('It rained.')
+  await waitForLayout(page)
+  let l = await layout(page)
+  // Next page (the default): the chapter opens on page 2, a verso.
+  expect(l.pages.map((p) => (p.isBlank ? 'blank' : `${p.side}:${p.chapterIndex}`))).toEqual(['recto:-1', 'verso:0'])
+
+  await page.locator('[data-control-id="insert.menu"]').click()
+  await page.locator('[data-control-id="insert.chapterStart.recto"]').click()
+  await waitForLayout(page)
+  l = await layout(page)
+  expect(l.pages.map((p) => (p.isBlank ? 'blank' : `${p.side}:${p.chapterIndex}`))).toEqual(['recto:-1', 'blank', 'recto:0'])
+  expect(l.pages[2].startsBlockType).toBe('heading')
+  const h = (await editor(page).locator('h1').boundingBox())!
+  const f2 = (await frame(page, 2).boundingBox())!
+  expect(h.x).toBeGreaterThan(f2.x)
+  expect(h.y).toBeGreaterThan(f2.y)
+})
+
 test('PageDown on the last spread goes to the end of the book, PageUp on the first to its start', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await paste(page, paragraphs(12))

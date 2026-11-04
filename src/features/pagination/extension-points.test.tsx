@@ -6,12 +6,13 @@ import Heading from '@tiptap/extension-heading'
 import Paragraph from '@tiptap/extension-paragraph'
 import Text from '@tiptap/extension-text'
 import { Node } from '@tiptap/core'
+import { createEditorExtensions } from '@/features/editor'
 import { DEFAULT_MARGINS } from '@/shared/book'
 import type { PageInfo } from '@/shared/store'
 import {
-  defaultChapterPredicate,
+  chapterOpenings,
+  defaultChapterOpenings,
   hasReservations,
-  isChapterStart,
   invalidatePagination,
   onInvalidate,
   onRelayout,
@@ -134,16 +135,27 @@ describe('bottom reservations', () => {
 })
 
 describe('chapters and the breakBefore contract', () => {
-  it('a level-1 heading opens a chapter by default; the predicate is replaceable', () => {
-    const h1 = schema.nodes.heading.create({ level: 1 })
-    const h2 = schema.nodes.heading.create({ level: 2 })
-    expect(isChapterStart(h1)).toBe(true)
-    expect(isChapterStart(h2)).toBe(false)
-    setChapterPredicate((n) => n.type.name === 'pageBreakFixture')
-    expect(isChapterStart(h1)).toBe(false)
+  it('defaults to the editor chapter model (getChapters); a predicate replaces it', () => {
+    const ed = getSchema(createEditorExtensions())
+    const para = (text: string, styleId?: string) => ed.nodes.paragraph.create(styleId ? { styleId } : null, ed.text(text))
+    const doc = ed.nodes.doc.create(null, [
+      para('Front matter'),
+      para('One', 'chapter-number'),
+      ed.nodes.heading.create({ level: 1 }, ed.text('The first')), // unstyled H1 = Chapter Title
+      para('Body'),
+      ed.nodes.heading.create({ level: 2 }, ed.text('A subheading')),
+      ed.nodes.heading.create({ level: 1 }, ed.text('The second')),
+      para('Body'),
+    ])
+    const pos: number[] = []
+    doc.forEach((_n, p) => pos.push(p))
+    // Chapter Number + Title open one chapter at the number; the second H1 opens the next.
+    expect(chapterOpenings(doc)).toEqual([pos[1], pos[5]])
+    expect(defaultChapterOpenings(doc)).toEqual([pos[1], pos[5]])
+    setChapterPredicate((n) => n.type.name === 'heading' && n.attrs.level === 2)
+    expect(chapterOpenings(doc)).toEqual([pos[4]])
     setChapterPredicate(null)
-    expect(defaultChapterPredicate(h1)).toBe(true)
-    expect(isChapterStart(h1)).toBe(true)
+    expect(chapterOpenings(doc)).toEqual([pos[1], pos[5]])
   })
 
   it('reads the node attr first, then the data-break-before DOM attribute', () => {
