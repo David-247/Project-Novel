@@ -281,6 +281,16 @@ describe('missing styles', () => {
     expect(kind.disabled).toBe(true)
     expect(document.querySelector('[data-testid="hint-kind"]')!.textContent).toBe('Fixed while 1 paragraph uses this style.')
   })
+
+  it('REGRESSION: the proof sample is the paragraph without the text of its footnotes', () => {
+    render(<Toolbar loadFonts={async () => []} />)
+    const ed = mount([
+      { type: 'paragraph', content: [{ type: 'text', text: 'Dear Mara,' }, { type: 'footnote', content: [{ type: 'text', text: 'Mara Quill, 1871-1950.' }] }, { type: 'text', text: ' I write.' }] },
+    ])
+    caretAtEndOf(ed, 0)
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="styles.edit"]')!))
+    expect(document.querySelector('[data-testid="style-proof-sample"]')!.textContent).toBe('Dear Mara, I write.')
+  })
 })
 
 describe('style sheet and break exposure', () => {

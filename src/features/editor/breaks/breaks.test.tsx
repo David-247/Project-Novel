@@ -8,6 +8,10 @@ import { installLayoutPolyfills } from '../jsdom-polyfills.test-util'
 import { chapterIndexAt, getChapters } from './chapters'
 import { getChaptersStartOn, setChaptersStartOn } from './chapter-start'
 import { mapPastedHtml } from './paste'
+import { blockPlainText } from '../block-text'
+import { getFootnotes } from '../footnote/api'
+import { createStyle, duplicateStyle, getStyleDefinition, ownDef, saveStyle } from '../styles/actions'
+import { getResolvedStyles } from '../styles/resolved'
 
 beforeAll(installLayoutPolyfills)
 afterEach(() => {
@@ -84,6 +88,110 @@ describe('getChapters', () => {
     const ed = mount([p('only text')])
     expect(getChapters(ed.state.doc)).toEqual([])
     expect(chapterIndexAt([], 3)).toBe(-1)
+  })
+})
+
+const fn = (text: string): JSONContent => ({ type: 'footnote', content: [{ type: 'text', text }] })
+
+describe('blockPlainText (footnote text is not part of the text of a block)', () => {
+  it('skips footnote nodes, keeps the text around them', () => {
+    const ed = mount([h('', { styleId: 'chapter-title' })])
+    run(() =>
+      setDocJSON({ type: 'doc', content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'The Road' }, fn('First told in 1902.'), { type: 'text', text: ' Home' }] }, p('x')] }),
+    )
+    const title = ed.state.doc.child(0)
+    expect(title.textContent).toBe('The RoadFirst told in 1902. Home') // what leaked before
+    expect(blockPlainText(title)).toBe('The Road Home')
+    expect(blockPlainText(ed.state.doc.child(1))).toBe('x')
+  })
+
+  it('REGRESSION: a chapter title with a footnote has the title text only', () => {
+    const ed = mount([{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'One' }, fn('A note on one.')] }, p('a')])
+    expect(getChapters(ed.state.doc).map((c) => c.title)).toEqual(['One'])
+  })
+})
+
+describe('custom chapter styles (based on Chapter Title)', () => {
+  /** A duplicate of a built-in, as Manage styles makes it. */
+  const dup = (id: string) => {
+    let copy = ''
+    run(() => (copy = duplicateStyle(id)!))
+    return copy
+  }
+
+  it('REGRESSION: a block in a Duplicate of Chapter Title opens a chapter; a Chapter Number duplicate joins it', () => {
+    const title = dup('chapter-title')
+    const number = dup('chapter-number')
+    const ed = mount([
+      p('Front'),
+      h('One'),
+      p('a'),
+      h('Two', { styleId: title }),
+      p('b'),
+      h('3', { styleId: number }),
+      h('Three', { styleId: title }),
+      p('c'),
+    ])
+    const doc = ed.state.doc
+    const start = (i: number) => doc.content.content.slice(0, i).reduce((n, b) => n + b.nodeSize, 0)
+    expect(getChapters(doc).map((c) => [c.title, c.from])).toEqual([
+      ['One', start(1)],
+      ['Two', start(3)],
+      ['Three', start(5)],
+    ])
+  })
+
+  it('the rule: a chapter style at outline level 1 whose Based on chain reaches Chapter Title (or Chapter Number)', () => {
+    const viaChain = createStyle('chapter-title', 'Prologue Title') // based on Chapter Title
+    const level2 = createStyle('chapter-title', 'Chapter Subtitle')
+    run(() => saveStyle(level2, { ...ownDef(getStyleDefinition(level2)!), outlineLevel: 2 }))
+    const asParagraph = createStyle('chapter-title', 'Title-like paragraph')
+    run(() => saveStyle(asParagraph, { ...ownDef(getStyleDefinition(asParagraph)!), kind: 'paragraph' }))
+    const part = dup('part-title')
+    const ed = mount([
+      h('P', { styleId: viaChain }),
+      h('Sub', { level: 2, styleId: level2 }),
+      p('Para', { styleId: asParagraph }),
+      h('Part One', { styleId: part }),
+      h('Part Two', { styleId: 'part-title' }),
+    ])
+    expect(getChapters(ed.state.doc).map((c) => c.title)).toEqual(['P'])
+    // Re-pointing a style's Based on changes what it is, with no document change.
+    run(() => saveStyle(viaChain, { ...ownDef(getStyleDefinition(viaChain)!), basedOn: 'body' }))
+    expect(getChapters(ed.state.doc)).toEqual([])
+  })
+
+  it('REGRESSION: per-chapter footnote numbering restarts at a Duplicate of Chapter Title, and follows a style change', () => {
+    const title = dup('chapter-title')
+    run(() => useStore.getState().bookActions.setFootnotes((f) => ({ ...f, numbering: 'chapter' })))
+    const ed = mount([
+      h('One'),
+      { type: 'paragraph', content: [{ type: 'text', text: 'a' }, fn('n1'), fn('n2')] },
+      h('Two', { styleId: title }),
+      { type: 'paragraph', content: [{ type: 'text', text: 'b' }, fn('n3')] },
+    ])
+    expect(ed).toBeTruthy()
+    expect(getFootnotes().map((r) => r.label)).toEqual(['1', '2', '1'])
+    // The duplicate stops being a chapter style (no document change): numbering follows at once.
+    run(() => saveStyle(title, { ...ownDef(getStyleDefinition(title)!), basedOn: 'part-title' }))
+    expect(getFootnotes().map((r) => r.label)).toEqual(['1', '2', '3'])
+  })
+
+  it('REGRESSION: Chapters start on rewrites every chapter-opening style that breaks', () => {
+    const title = dup('chapter-title')
+    const quiet = createStyle('chapter-title', 'No break title')
+    run(() => saveStyle(quiet, { ...ownDef(getStyleDefinition(quiet)!), breakBefore: 'none' }))
+    const ed = mount([p('a'), h('One'), p('b'), h('Two', { styleId: title }), p('c'), h('Three', { styleId: quiet })])
+    act(() => setChaptersStartOn('recto'))
+    const styles = getResolvedStyles()
+    expect(styles.get('chapter-title')?.breakBefore).toBe('recto')
+    expect(styles.get(title)?.breakBefore).toBe('recto')
+    expect(styles.get(quiet)?.breakBefore).toBe('none')
+    expect(styles.get('part-title')?.breakBefore).toBe('recto')
+    expect(blocks(ed).map((b) => b.getAttribute('data-break-before'))).toEqual([null, 'recto', null, 'recto', null, null])
+    act(() => setChaptersStartOn('page'))
+    expect(getResolvedStyles().get(title)?.breakBefore).toBe('page')
+    expect(getResolvedStyles().get('part-title')?.breakBefore).toBe('recto')
   })
 })
 

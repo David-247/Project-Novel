@@ -6,6 +6,7 @@ import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { DecorationSet } from '@tiptap/pm/view'
 import { useStore } from '@/shared/store'
 import { getEditor, subscribeEditor } from '../controller'
+import { FOOTNOTE_NODE } from '../footnote/name'
 import {
   buildCurrentDecoration,
   buildMatchDecorations,
@@ -328,7 +329,11 @@ export function openFind({ prefill: usePrefill = true }: { prefill?: boolean } =
   let prefill: string | undefined
   if (ed && usePrefill) {
     const { from, to, $from, $to, empty } = ed.state.selection
-    if (!empty && $from.sameParent($to) && to - from <= MAX_PREFILL) {
+    // A selection holding a footnote reference is not prefilled: textBetween would run the note text
+    // into the sentence, and a match never spans a reference anyway (search.ts blockText).
+    let hasNote = false
+    if (!empty) ed.state.doc.nodesBetween(from, to, (n) => !(hasNote ||= n.type.name === FOOTNOTE_NODE))
+    if (!empty && !hasNote && $from.sameParent($to) && to - from <= MAX_PREFILL) {
       const text = ed.state.doc.textBetween(from, to, '\n', '\n')
       if (text.trim().length > 0 && !text.includes('\n')) prefill = text
     }

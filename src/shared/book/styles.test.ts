@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildStyleSheetCSS,
   builtInStyles,
+  chapterRole,
+  chapterRoles,
+  chapterRoleSignature,
   continuesHeadingGroup,
   newStyleId,
   registerBuiltInStyle,
@@ -132,5 +135,38 @@ describe('generated stylesheet', () => {
     expect(continuesHeadingGroup(STYLE_IDS.chapterNumber, STYLE_IDS.chapterTitle, r)).toBe(true)
     expect(continuesHeadingGroup(STYLE_IDS.partTitle, STYLE_IDS.chapterTitle, r)).toBe(false)
     expect(continuesHeadingGroup(STYLE_IDS.chapterTitle, STYLE_IDS.firstParagraph, r)).toBe(false)
+  })
+})
+
+describe('chapter roles', () => {
+  const custom = (def: Record<string, unknown>) => ({ builtIn: false, name: 'X', ...def })
+
+  it('Chapter Title and level-1 chapter styles based on it are titles; Chapter Number and its kin are numbers', () => {
+    const styles = resolveStyleSheet({
+      'dup-title': custom({ kind: 'chapter', outlineLevel: 1, basedOn: 'chapter-title' }),
+      'grand-title': custom({ kind: 'chapter', basedOn: 'dup-title' }), // outline level unset = 1
+      'dup-number': custom({ kind: 'chapter', outlineLevel: 1, basedOn: 'chapter-number' }),
+      subtitle: custom({ kind: 'chapter', outlineLevel: 2, basedOn: 'chapter-title' }),
+      'title-para': custom({ kind: 'paragraph', basedOn: 'chapter-title' }),
+      'dup-part': custom({ kind: 'chapter', outlineLevel: 1, basedOn: 'part-title' }),
+      'plain-chapter': custom({ kind: 'chapter', outlineLevel: 1, basedOn: 'body' }),
+    })
+    expect(Object.fromEntries(chapterRoles(styles))).toEqual({
+      'chapter-title': 'title',
+      'chapter-number': 'number',
+      'dup-title': 'title',
+      'grand-title': 'title',
+      'dup-number': 'number',
+    })
+    expect(chapterRole(styles, 'part-title')).toBeNull()
+    expect(chapterRole(styles, 'nope')).toBeNull()
+  })
+
+  it('the signature changes only when a role changes', () => {
+    const a = resolveStyleSheet({})
+    const b = resolveStyleSheet({ body: { fontSize: 12 } })
+    const c = resolveStyleSheet({ 'dup-title': custom({ kind: 'chapter', basedOn: 'chapter-title' }) })
+    expect(chapterRoleSignature(a)).toBe(chapterRoleSignature(b))
+    expect(chapterRoleSignature(c)).not.toBe(chapterRoleSignature(a))
   })
 })

@@ -63,9 +63,12 @@ export function trackChapterTitles(): () => void {
     if (frame || !usesChapterTitles(useStore.getState().book.headerFooter)) return
     frame = requestAnimationFrame(check)
   })
-  // Titles edited while no head showed them were not tracked: look again when one starts to.
+  // Titles edited while no head showed them were not tracked: look again when one starts to. Which
+  // blocks are chapter titles depends on the style sheet too (a style based on Chapter Title opens
+  // chapters): look again after a style change.
   const offStore = useStore.subscribe((s, prev) => {
-    if (s.book.headerFooter !== prev.book.headerFooter && usesChapterTitles(s.book.headerFooter) && !frame) {
+    const relevant = s.book.headerFooter !== prev.book.headerFooter || s.book.styles !== prev.book.styles
+    if (relevant && usesChapterTitles(s.book.headerFooter) && !frame) {
       frame = requestAnimationFrame(check)
     }
   })

@@ -410,6 +410,56 @@ export function continuesHeadingGroup(prevId: string | null, id: string, styles:
 
 const isBreaking = (s: StyleFormat) => s.breakBefore === 'page' || s.breakBefore === 'recto'
 
+// ---- chapter openings -------------------------------------------------------------------------
+
+/**
+ * What a style does for the chapter model: 'title' opens a chapter (its text is the chapter title),
+ * 'number' introduces the chapter whose title follows it directly; null: neither.
+ */
+export type ChapterRole = 'title' | 'number'
+
+const roleMemo = new WeakMap<ResolvedStyles, ReadonlyMap<string, ChapterRole>>()
+
+/**
+ * The rule (docs/design.md, "Chapters"): a style is a chapter title when it is a chapter style
+ * (`kind: 'chapter'`) at outline level 1 and its Based on chain reaches Chapter Title (Chapter Title
+ * itself included); likewise a chapter number when the chain reaches Chapter Number first. So Chapter
+ * Title, its duplicates (a duplicate is based on its source) and styles created from it open chapters;
+ * Part Title and styles based on it do not; a style based on Chapter Title but made a paragraph style or
+ * a level 2-3 heading (a subtitle, say) does not either. Memoized per resolved sheet: O(styles x depth).
+ */
+export function chapterRoles(styles: ResolvedStyles): ReadonlyMap<string, ChapterRole> {
+  let roles = roleMemo.get(styles)
+  if (roles) return roles
+  const out = new Map<string, ChapterRole>()
+  for (const s of styles.values()) {
+    if (s.kind !== 'chapter' || (s.outlineLevel ?? 1) !== 1) continue
+    for (let cur: ResolvedStyle | undefined = s, guard = 0; cur && guard < 64; cur = cur.basedOn ? styles.get(cur.basedOn) : undefined, guard++) {
+      if (cur.id === STYLE_IDS.chapterTitle) {
+        out.set(s.id, 'title')
+        break
+      }
+      if (cur.id === STYLE_IDS.chapterNumber) {
+        out.set(s.id, 'number')
+        break
+      }
+    }
+  }
+  roles = out
+  roleMemo.set(styles, roles)
+  return roles
+}
+
+/** The chapter role of style `id` in `styles` (null for none, or an unknown id). */
+export function chapterRole(styles: ResolvedStyles, id: string): ChapterRole | null {
+  return chapterRoles(styles).get(id) ?? null
+}
+
+/** Changes exactly when the chapter role of some style changes (for listeners that re-derive chapters). */
+export function chapterRoleSignature(styles: ResolvedStyles): string {
+  return [...chapterRoles(styles)].map(([id, role]) => `${id}:${role}`).join('|')
+}
+
 /**
  * The generated stylesheet: one rule per style keyed by `[data-style="<id>"]` under `scope`, so
  * editing a definition costs O(number of styles) and never touches the document. Inline styles

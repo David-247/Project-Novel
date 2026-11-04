@@ -275,6 +275,60 @@ test('a chapter title edit updates only the heads that show it: other pages keep
   expect(probe).toEqual({ same: true, connected: true, attr: 'kept', text: otherText })
 })
 
+test('REGRESSION: a Duplicate of Chapter Title opens chapters (running head, number restart), and a footnote in a title is not in the head', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await openBook(page, 'Copies', 'Ada Quill', 1800)
+  await ctl(page, 'book.headerFooter').click()
+  await ctl(page, 'book.headerFooter.verso').selectOption('chapter')
+  await ctl(page, 'book.headerFooter.recto').selectOption('chapter')
+  await ctl(page, 'book.headerFooter.done').click()
+  await expect(dialog(page)).toHaveCount(0)
+
+  // Manage styles > Duplicate Chapter Title, then give chapter 1's title that style.
+  await ctl(page, 'styles.manage').click()
+  const manage = page.getByRole('dialog', { name: 'Manage styles' })
+  await manage.locator('[data-style-row="chapter-title"]').click()
+  await manage.locator('[data-control-id="styles.manage.duplicate"]').click()
+  await expect(manage.locator('[data-style-row="custom-1"]')).toHaveText(/Chapter Title copy/)
+  await manage.locator('[data-control-id="dialog.close"]').click()
+  await expect(manage).toBeHidden()
+  const titles = editor(page).locator('h1')
+  const title1 = (await titles.nth(0).textContent())!
+  const title2 = (await titles.nth(1).textContent())!
+  await clickBlockStart(page, titles.nth(0))
+  await ctl(page, 'styles.picker').selectOption({ label: 'Chapter Title copy' })
+  await expect(editor(page).locator('h1[data-style="custom-1"]')).toHaveText(title1)
+
+  // Chapter 1 still opens the body: its pages show its title, and its second page is number 2.
+  await waitForLayout(page)
+  const l = await layout(page)
+  const openings = l.pages.filter((p) => p.startsBlockType === 'heading').map((p) => p.index)
+  expect(openings).toHaveLength(3)
+  expect(l.pages[openings[0]].chapterIndex).toBe(0)
+  await clickBlockStart(page, titles.nth(0))
+  const got = await shown(page)
+  const second = got.find((g) => g.index === openings[0] + 1)
+  expect(second, 'the page after chapter 1 opens is rendered').toBeDefined()
+  expect(second).toMatchObject({ header: title1, footerNumber: '2' })
+  expect(got.find((g) => g.index === openings[0])).toMatchObject({ header: '', footerNumber: '' })
+
+  // A footnote at the end of chapter 2's title: the heads show the title only.
+  await clickBlockStart(page, titles.nth(1))
+  await lineEnd(page)
+  await ctl(page, 'insert.menu').click()
+  await ctl(page, 'footnote.insert').click()
+  await expect(page.getByTestId('footnote-editor')).toBeFocused()
+  await page.keyboard.type('First published in 1902.')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('footnote-editor')).toHaveCount(0)
+  await waitForLayout(page)
+  const l2 = await layout(page)
+  const ch2 = l2.pages.find((p) => p.chapterIndex === 1 && !p.isBlank && p.startsBlockType !== 'heading')!
+  await expect
+    .poll(async () => (await shown(page)).find((g) => g.index === ch2.index)?.header, `head on page ${ch2.index}`)
+    .toBe(title2)
+})
+
 test('running heads are not document content: find, select-all + copy and the document never see them', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await openBook(page, 'NotContent', 'Ada Quill', 1500)
