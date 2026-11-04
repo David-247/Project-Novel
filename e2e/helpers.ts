@@ -148,3 +148,6 @@ export async function pressTab(page: Page, opts: { shift?: boolean } = {}): Prom
 /** Caret to start / end of line: Home/End elsewhere; on macOS those scroll, so Cmd+Left/Right. */
 export const lineStart = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowLeft' : 'Home')
 export const lineEnd = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowRight' : 'End')
+/** Caret to start / end of the document: Ctrl+Home/End elsewhere; Cmd+Up/Down on macOS. */
+export const docStart = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowUp' : 'Control+Home')
+export const docEnd = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowDown' : 'Control+End')

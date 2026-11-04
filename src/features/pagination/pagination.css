@@ -73,6 +73,11 @@
 .nv-text-layer .nv-shift {
   position: relative;
 }
+/* Not redrawn yet after a reflow (see "Reflow complete" in docs/pagination.md). */
+.nv-text-layer .novel-editor-content .nv-stale,
+.nv-text-layer .novel-editor-content .nv-stale * {
+  visibility: hidden;
+}
 .nv-text-layer ::selection {
   background: var(--page-selection-bg);
   color: var(--page-fg);

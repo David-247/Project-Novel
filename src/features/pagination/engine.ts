@@ -129,6 +129,8 @@ function usesStyle(dom: HTMLElement, ids: Set<string>): boolean {
 type SnapshotListener = (s: LayoutSnapshot) => void
 
 const SHIFT_CLASS = 'nv-shift'
+/** A block whose page offsets are not redrawn yet (progressive reflow): hidden until it is. */
+const STALE_CLASS = 'nv-stale'
 
 function shiftAttrs(dx: number, dy: number) {
   const x = round(dx)
@@ -248,6 +250,16 @@ export class PaginationEngine {
     return this.flushPending
   }
 
+  /** Only off-screen blocks of a progressive reflow are left to draw. */
+  get catchingUp() {
+    return this.flushPending && this.catchUpOnly
+  }
+
+  /** Run every pending pass now (a progressive reflow included), so all blocks are at their page. */
+  drain() {
+    for (let i = 0; this.flushPending && i < 64; i++) this.flush()
+  }
+
   /**
    * The page model is current and the pages in view are drawn; only off-screen blocks may still be
    * waiting for their offsets (progressive application after a full reflow).
@@ -307,11 +319,11 @@ export class PaginationEngine {
       this.schedule()
       return
     }
-    // Take in DOM changes the browser made but ProseMirror has not read yet (a Home / arrow key's
-    // native selection move whose selectionchange is still queued): dispatching on a stale state
-    // would write the old selection back into the DOM.
+    // DOM changes ProseMirror deliberately delayed (flushSoon) are taken in now. A DOM selection that
+    // differs from ProseMirror's (a native Home / arrow move whose selectionchange is still queued, or
+    // a stale DOM selection after a toolbar click on macOS) is never forced into the state: the pass
+    // waits for ProseMirror to settle it (a few frames at most), so neither side overwrites the other.
     internals.domObserver?.forceFlush?.()
-    internals.domObserver?.flush()
     if (this.deferrals < MAX_DEFERRALS && domSelectionPending(view)) {
       this.deferrals++
       this.schedule()
@@ -499,6 +511,7 @@ export class PaginationEngine {
         apply = near.concat(rest.slice(0, CHUNK))
         deferred = dirty.length - apply.length
       }
+      const applied = new Set(apply)
       let next: DecorationSet
       if (apply.length === dirty.length && (geometryChanged || dirty.length > 8)) {
         next = DecorationSet.create(doc, decos)
@@ -507,12 +520,27 @@ export class PaginationEngine {
         next = current
         const removed: Decoration[] = []
         const added: Decoration[] = []
+        const ours = (spec: unknown) => (spec as Partial<ShiftSpec>).nvShift !== undefined || (spec as { nvStale?: boolean }).nvStale === true
         for (const d of apply) {
-          for (const old of next.find(d.pos, d.pos + d.size, (spec) => (spec as Partial<ShiftSpec>).nvShift !== undefined))
-            if (old.from >= d.pos && old.to <= d.pos + d.size) removed.push(old)
+          for (const old of next.find(d.pos, d.pos + d.size, ours)) if (old.from >= d.pos && old.to <= d.pos + d.size) removed.push(old)
           for (let i = d.a; i < d.z; i++) added.push(decos[i])
         }
-        next = next.remove(removed).add(doc, added)
+        // Blocks not redrawn yet still carry their old offsets, which against the new placement can
+        // put them anywhere, including in view: hide them (visibility keeps layout and line metrics)
+        // until they are redrawn.
+        if (deferred) {
+          for (const d of dirty) {
+            if (applied.has(d)) continue
+            const has = next.find(d.pos, d.pos + d.size, (spec) => (spec as { nvStale?: boolean }).nvStale === true).some((o) => o.from === d.pos && o.to === d.pos + d.size)
+            if (!has) added.push(Decoration.node(d.pos, d.pos + d.size, { class: STALE_CLASS }, { nvStale: true }))
+          }
+        }
+        if (removed.length + added.length > 64) {
+          // Many blocks: rebuild from the kept decorations (DecorationSet.remove with large unsorted
+          // lists proved unreliable: some removed blocks lost their new decorations too).
+          const drop = new Set(removed)
+          next = DecorationSet.create(doc, next.find().filter((d) => !drop.has(d)).concat(added))
+        } else next = next.remove(removed).add(doc, added)
       }
       for (const d of apply) this.lastSigs.set(d.node, d.sig)
       const tr = view.state.tr.setMeta(paginationKey, next).setMeta('addToHistory', false)
@@ -706,6 +734,17 @@ export function createPaginationPlugin(handlers: {
     },
     props: {
       decorations: (state) => paginationKey.getState(state),
+      // Scrolling to the selection while off-screen blocks are still being redrawn would use a stale
+      // (hidden) position: finish the reflow first, then scroll.
+      handleScrollToSelection: (view) => {
+        const engine = getEngine()
+        if (!engine?.catchingUp) return false
+        queueMicrotask(() => {
+          engine.drain()
+          if (!view.isDestroyed) view.dispatch(view.state.tr.scrollIntoView().setMeta('addToHistory', false))
+        })
+        return true
+      },
       handleKeyDown: (view, e) => handlers.keyDown?.(view, e) ?? false,
       handleDOMEvents: {
         mousedown: (view, e) => handlers.mouseDown?.(view, e) ?? false,

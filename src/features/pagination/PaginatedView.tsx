@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Selection, TextSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
-import { useMountedEditor } from '@/features/editor'
+import { setFindRevealHook, useMountedEditor } from '@/features/editor'
 import { useStore } from '@/shared/store'
 import { createPaginationPlugin, getEngine, pageAt, paginationKey, selectionForPage } from './engine'
 import { resolvePageGeometry } from './geometry'
@@ -139,7 +139,10 @@ export function PaginatedView({ children }: PaginatedViewProps) {
       mouseDown: (v, e) => placeCaretFromDesk(v, e),
     })
     editor.registerPlugin(plugin)
+    // The find panel scrolls the current match by its DOM position: finish a reflow in progress first.
+    setFindRevealHook(() => getEngine()?.drain())
     return () => {
+      setFindRevealHook(null)
       if (!editor.isDestroyed) editor.unregisterPlugin(paginationKey)
       actions.resetLayout()
     }
@@ -213,7 +216,7 @@ function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement:
 function freshSnapshot() {
   const engine = getEngine()
   // Also finishes a progressive reflow: hit tests need every block at its page.
-  for (let i = 0; engine?.pending && i < 32; i++) engine.flush()
+  engine?.drain()
   return engine?.getSnapshot() ?? null
 }
 

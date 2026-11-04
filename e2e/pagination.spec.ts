@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { clickBlockStart, lineEnd, waitForLayout } from './helpers'
+import { clickBlockStart, docEnd, docStart, lineEnd, waitForLayout } from './helpers'
 
 /**
  * Paginated view (Phase 2, docs/pagination.md): one editor view laid out as book pages, in a
@@ -96,7 +96,7 @@ test('typing, selection across pages, undo and find work on any page; PageDown m
   await page.waitForTimeout(600)
 
   // PageDown: next spread (pages 2-3), caret on its first page and visible; the indicator follows.
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   await page.keyboard.press('PageDown')
   await expect.poll(async () => (await layout(page)).currentPage).toBe(1)
   await expect(indicator(page)).toHaveText(`Pages 2–3 of ${pageCount}`)
@@ -122,14 +122,14 @@ test('typing, selection across pages, undo and find work on any page; PageDown m
   // Type on page 2 (a few lines down: text typed at the very top of a page that starts mid-paragraph
   // may legitimately fit on the previous page's last line).
   for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowDown')
-  await page.keyboard.press('End')
+  await lineEnd(page)
   await page.keyboard.type(' Zebra')
   await expect(editor(page)).toContainText('Zebra')
   await waitForLayout(page)
   expect((await layout(page)).currentPage).toBe(1)
 
   // Find scrolls a match on a later page into view.
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   await page.keyboard.press('ControlOrMeta+f')
   await page.getByRole('textbox', { name: 'Find' }).fill('Zebra')
   await expect(page.getByTestId('find-status')).toHaveText('1 of 1')
@@ -142,7 +142,7 @@ test('typing, selection across pages, undo and find work on any page; PageDown m
   await expect(editor(page)).not.toContainText('Zebra')
 
   // A selection across a page boundary (Shift+PageDown) deletes as one range.
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   await page.keyboard.press('Shift+PageDown')
   await page.keyboard.press('Shift+PageDown')
   await page.keyboard.press('Delete')
@@ -207,7 +207,7 @@ test('a narrow window or book.view single shows one page at a time', async ({ pa
   await page.setViewportSize({ width: 500, height: 800 })
   await expect.poll(async () => (await layout(page)).effectiveView).toBe('single')
   await expect(page.locator('.nv-frames .nv-page').first()).toHaveAttribute('data-view', 'single')
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   await expect(indicator(page)).toHaveText(`Page 1 of ${pageCount}`)
   // Single pages stack vertically; text stays on its page.
   const [a, b] = [await frame(page, 0).boundingBox(), await frame(page, 1).boundingBox()]
@@ -290,7 +290,7 @@ test('trim size reflows; margins mirror on verso and recto; bottom reservations 
     return Math.round(x - f.x)
   }
   await editor(page).focus()
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   await page.keyboard.press('PageDown')
   await waitForLayout(page)
   expect(await leftOfText(1)).toBe(60)
@@ -341,7 +341,7 @@ test('Replace and Replace All on a later page reflow the book', async ({ page })
   await paste(page, paragraphs(40, 100))
   await page.waitForTimeout(600) // own undo group
   // A unique word on page 4 (index 3): two spreads down, a few lines in.
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   await page.keyboard.press('PageDown')
   await page.keyboard.press('PageDown')
   for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown')
@@ -351,7 +351,7 @@ test('Replace and Replace All on a later page reflow the book', async ({ page })
   expect((await layout(page)).currentPage).toBeGreaterThanOrEqual(3)
   const before = await layout(page)
 
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   await page.keyboard.press('ControlOrMeta+f')
   const panel = page.getByRole('region', { name: 'Find and replace' })
   await panel.getByRole('textbox', { name: 'Find' }).fill('Quokka')
@@ -543,12 +543,114 @@ test('Chapters start on right-hand page: a New chapter lands on a recto, with a 
   expect(h.y).toBeGreaterThan(f2.y)
 })
 
+for (const [trim, at] of [
+  ['us-6x9', 0.5],
+  ['us-5x8', 0.2],
+  ['us-6x9', 0.8],
+  ['us-5x8', 0.5],
+] as const) {
+  test(`progressive reflow never paints a block at a stale place (${trim}, scrolled to ${at * 100}%)`, async ({ page }) => {
+    test.setTimeout(90_000)
+    await page.setViewportSize({ width: 1400, height: 900 })
+    await paste(page, paragraphs(1000, 60))
+    const main = page.getByRole('main', { name: 'Editor' })
+    await main.evaluate((m, f) => (m.scrollTop = (m.scrollHeight - m.clientHeight) * f), at)
+    await waitForLayout(page)
+    const result = await page.evaluate(async (id) => {
+      const m = document.querySelector('main')!
+      const root = document.querySelector('.ProseMirror')!
+      // Canvas origin and zoom scale (fit-spread changes with the page height): positions are compared
+      // in unscaled canvas px.
+      const canvas = () => {
+        const el = document.querySelector<HTMLElement>('.nv-canvas')!
+        const r = el.getBoundingClientRect()
+        return { left: r.left, top: r.top, s: r.width / el.offsetWidth }
+      }
+      const seen = new Map<Element, { x: number; y: number }[]>()
+      let frames = 0
+      const sample = () => {
+        frames++
+        const v = m.getBoundingClientRect()
+        const c = canvas()
+        for (const el of Array.from(root.children)) {
+          const r = el.getBoundingClientRect()
+          if (r.bottom < v.top || r.top > v.bottom || r.height === 0) continue
+          if (getComputedStyle(el).visibility === 'hidden') continue
+          const list = seen.get(el) ?? []
+          list.push({ x: (r.left - c.left) / c.s, y: (r.top - c.top) / c.s })
+          seen.set(el, list)
+        }
+      }
+      window.__nvE2E.setTrimSize(id)
+      await new Promise<void>((resolve) => {
+        const tick = () => {
+          sample()
+          if (window.__nvE2E.paginationSettled()) resolve()
+          else requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })
+      await new Promise((r) => requestAnimationFrame(() => r(null)))
+      const c = canvas()
+      const stale: string[] = []
+      for (const [el, list] of seen) {
+        if (!el.isConnected) continue
+        const r = el.getBoundingClientRect()
+        const fin = { x: (r.left - c.left) / c.s, y: (r.top - c.top) / c.s }
+        for (const p of list) if (Math.abs(p.x - fin.x) > 1 || Math.abs(p.y - fin.y) > 1) stale.push(`${Math.round(p.y)}->${Math.round(fin.y)}`)
+      }
+      return { frames, checked: seen.size, stale }
+    }, trim)
+    expect(result.checked).toBeGreaterThan(0)
+    expect(result.stale, `stale paints over ${result.frames} frames`).toEqual([])
+  })
+}
+
+test('find during a progressive reflow scrolls to where the match is painted', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  const blocks = paragraphs(1000, 60)
+  blocks[900] = 'The Zanzibar paragraph near the end. ' + blocks[900]
+  await paste(page, blocks)
+  await docStart(page)
+  await waitForLayout(page)
+  await page.keyboard.press('ControlOrMeta+f')
+  const panel = page.getByRole('region', { name: 'Find and replace' })
+  // Change the trim, and search in the same task: the far match is not redrawn yet.
+  await page.evaluate(() => window.__nvE2E.setTrimSize('us-6x9'))
+  await panel.getByRole('textbox', { name: 'Find' }).fill('Zanzibar')
+  await expect(page.getByTestId('find-status')).toHaveText('1 of 1')
+  await waitForLayout(page)
+  // The current match is visible in the editor region, at its final place.
+  const box = (await page.locator('.nv-find-match-current').first().boundingBox())!
+  const main = (await page.getByRole('main', { name: 'Editor' }).boundingBox())!
+  expect(box.y).toBeGreaterThanOrEqual(main.y)
+  expect(box.y + box.height).toBeLessThanOrEqual(main.y + main.height)
+  await page.keyboard.press('Escape')
+  // Selection-driven scrolling (PM scrollIntoView) during a reflow: Mod-End right after a trim change.
+  await page.evaluate(() => window.__nvE2E.setTrimSize('us-5x8'))
+  await docStart(page)
+  await waitForLayout(page)
+  await page.evaluate(() => window.__nvE2E.setTrimSize('us-6x9'))
+  await docEnd(page)
+  await waitForLayout(page)
+  const caret = await page.evaluate(() => {
+    const s = getSelection()!
+    const r = document.createRange()
+    r.setStart(s.focusNode!, s.focusOffset)
+    const rc = r.getClientRects()[0] ?? r.getBoundingClientRect()
+    return { top: rc.top, bottom: rc.bottom }
+  })
+  expect(caret.top).toBeGreaterThanOrEqual(main.y)
+  expect(caret.bottom).toBeLessThanOrEqual(main.y + main.height)
+})
+
 test('PageDown on the last spread goes to the end of the book, PageUp on the first to its start', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await paste(page, paragraphs(12))
   const { pageCount } = await layout(page)
   // PageDown spread by spread to the top of the last spread, then once more: the end, not backwards.
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   const rows = Math.floor(pageCount / 2) // rows after the first (page 0 sits alone in row 0)
   for (let i = 0; i < rows; i++) await page.keyboard.press('PageDown')
   await expect.poll(async () => (await layout(page)).currentPage).toBe(2 * rows - 1)
@@ -563,7 +665,7 @@ test('PageDown on the last spread goes to the end of the book, PageUp on the fir
     })
   await expect.poll(textAfterCaret).toBe(0)
   expect((await layout(page)).currentPage).toBe(pageCount - 1)
-  await page.keyboard.press('ControlOrMeta+Home')
+  await docStart(page)
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('PageUp')
   await expect.poll(() => page.evaluate(() => getSelection()!.focusOffset)).toBe(0)

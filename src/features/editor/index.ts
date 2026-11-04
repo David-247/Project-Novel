@@ -32,6 +32,8 @@ export { createEditorExtensions } from './extensions'
 export { SYSTEM_FONT_STACK, listSystemFonts, fontFamilyCss, primaryFontFamily } from './fonts'
 // Find & replace + history (task 4)
 export { FindReplacePanel } from './find/FindReplacePanel'
+// Pagination: finish layout work before the find panel scrolls a match into view.
+export { setFindRevealHook } from './find/engine'
 export type { FindReplacePanelProps } from './find/FindReplacePanel'
 export { FindButton } from './find/FindButton'
 export type { FindButtonProps } from './find/FindButton'

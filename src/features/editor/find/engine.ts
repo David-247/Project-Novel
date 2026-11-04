@@ -138,11 +138,23 @@ function selectMatch(tr: Transaction, m: MatchRange) {
   tr.setSelection(TextSelection.create(tr.doc, m.from, m.to)).scrollIntoView()
 }
 
+let beforeReveal: (() => void) | null = null
+
+/**
+ * Hook run before the find panel scrolls the current match into view by its DOM position. A host
+ * that lays the editor out (pagination) uses it to finish pending layout work first, so the match is
+ * where it is painted. One hook; `null` removes it.
+ */
+export function setFindRevealHook(hook: (() => void) | null): void {
+  beforeReveal = hook
+}
+
 /**
  * ProseMirror only scrolls to the selection when the DOM selection is inside the editor, which
  * is not the case while typing in the find field, so scroll the current highlight ourselves.
  */
 function revealCurrent(ed: Editor) {
+  beforeReveal?.()
   const el = ed.view.dom.querySelector(`.${CURRENT_CLASS}`)
   if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center', inline: 'nearest' })
 }

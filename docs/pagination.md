@@ -154,7 +154,15 @@ offsets (in WebKit that frame cost 200–300 ms).
 
 **Reflow complete** means: the new page model (every page break of the book, `pages[]`,
 `pageCount`, `layoutVersion`) is published, and the pages in view are drawn at their new place and
-painted. Off-screen blocks may still carry their old offsets for a few frames; they are not visible.
+painted. Blocks not redrawn yet keep their old offsets for a few frames, and against the new
+placement those can land anywhere, the viewport included; so in the same dispatch every such block
+gets `.nv-stale` (`visibility: hidden`, which keeps layout and line metrics) until it is redrawn.
+An e2e test samples every frame after a trim change (two trims, two scroll positions, both engines)
+and fails if any visible block is painted anywhere but its final place. Scrolling to the selection
+(ProseMirror `scrollIntoView`, e.g. Mod-End) and the find panel's reveal of the current match
+finish the pending frames first (`handleScrollToSelection`, the editor's `setFindRevealHook`).
+Large document changes (Replace All of a common word, a restyle) take the same path: dirty blocks
+in view first, the rest progressively.
 Anything that needs them all (hit tests for the arrow keys and presses on the desk, PageUp/Down)
 finishes the pending frames first. `getPaginationDebug().modelSettled` is "reflow complete";
 `settled` is "every block drawn". The perf test asserts the first < 1 s and reports (and caps at 3 s)
@@ -253,7 +261,9 @@ The breaks ticket's `pageBreak` atom does not carry the break: the block after i
 closes, so it must not take a line there (that line could push the page's last text line to the next
 page, or leave a page holding only the break). It stays in the document and keeps its position
 (selectable, deletable with Backspace); on pages it is drawn as a dashed hairline with its label just
-below the last line, in the bottom margin, outside layout.
+below the last line, in the bottom margin, outside layout. Known limitation: with zero height it cannot
+be selected with the mouse, only with the keyboard (Backspace after it selects it, a second one
+deletes it).
 
 ### Invalidation
 

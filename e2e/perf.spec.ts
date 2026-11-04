@@ -252,16 +252,23 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
     const swapped = getComputedStyle(last).fontSize !== before[before.length - 1]
     void document.body.offsetHeight
     const cssMs = performance.now() - t0
-    // 2. Repagination: the engine re-measures the restyled blocks and republishes the page model.
+    // 2. Repagination, "reflow complete" (docs/pagination.md): the engine re-measured the restyled
+    //    blocks, published the new page model, and drew and painted the pages in view.
     await new Promise<void>((resolve) => {
       const check = () =>
-        window.__nvE2E.paginationSettled() && window.__nvE2E.layout().layoutVersion > v ? resolve() : requestAnimationFrame(check)
+        window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > v ? resolve() : requestAnimationFrame(check)
       requestAnimationFrame(check)
     })
     await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
     const repaginatedMs = performance.now() - t0
+    // Off-screen blocks follow in later frames: reported.
+    await new Promise<void>((resolve) => {
+      const check = () => (window.__nvE2E.paginationSettled() ? resolve() : requestAnimationFrame(check))
+      check()
+    })
+    const allDrawnMs = performance.now() - t0
     const changed = all.filter((el, i) => getComputedStyle(el).fontSize !== before[i]).length
-    return { cssMs, swapped, repaginatedMs, changed }
+    return { cssMs, swapped, repaginatedMs, allDrawnMs, changed }
   })
   const versionAfter = await page.evaluate(() => window.__nvE2E.docVersion())
 
@@ -270,11 +277,12 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
     openMs,
     restyleMs: +result.cssMs.toFixed(1),
     repaginatedMs: +result.repaginatedMs.toFixed(1),
+    allDrawnMs: +result.allDrawnMs.toFixed(1),
     chaptersRestyled: result.changed,
     docVersionChanged: versionAfter !== versionBefore,
     // The style sheet swap keeps the styles budget; the reflow it causes in the paginated view
     // (every page break can move) gets the reflow budget, like a trim change (docs/pagination.md).
-    budgets: { restyleMs: 100, repaginatedMs: 1000 },
+    budgets: { restyleMs: 100, repaginatedMs: 1000, allDrawnMs: 3000 },
   })
 
   expect(result.swapped).toBe(true)
@@ -282,4 +290,5 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
   expect(versionAfter).toBe(versionBefore)
   expect(result.cssMs).toBeLessThan(100)
   expect(result.repaginatedMs).toBeLessThan(1000)
+  expect(result.allDrawnMs).toBeLessThan(3000)
 })
