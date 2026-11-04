@@ -105,18 +105,25 @@ layer behind the editor.
 `CI=1 pnpm exec playwright test e2e/pagination-perf.spec.ts --project=perf-chromium --project=perf-webkit --no-deps --workers=1`
 (deterministic 100k-word, 30-chapter fixture, real app with ProseMirror, project opened from disk):
 
-| Measure (budget) | chromium | webkit |
-|---|---|---|
-| Trim reflow complete, worst of 6 × 9 / 5 × 8 / A5 / 5.5 × 8.5 (< 1000 ms) | 161–254 ms | 341–499 ms (quieter host); 602–1306 ms under background load |
-| … every off-screen block drawn as well (reported, < 3000 ms) | 342–537 ms | 658–935 ms (quieter); up to 2066 ms under load |
-| Typing at a line end mid-manuscript, median / p95 (< 50 ms median) | 18.1 / 27.7 ms | 47–52 / 76–98 ms |
-| Typing inside a paragraph split across two pages, median / p95 | 22.1 / 32.3 ms | 44–50 / 54–61 ms |
-| Phase 1 `perf.spec.ts` typing (now paginated), median / p95 | 14.1 / 25.4 ms | 38–48 / 58–90 ms |
-| Phase 1 hot path (find on "the" + autosave), median / p95 | 17.9 / 30.7 ms | 42–46 / 61–80 ms |
-| Chapter Title restyle: style sheet swap (< 100 ms) / repaginated (< 1000 ms) | 23.5–37 / 139–385 ms | 71–87 / 437–774 ms (1247 under load) |
+CI (GitHub Actions, run 41766944510, commit 5f3eeab) and a local Windows 11 run. macOS WebKit is
+the real WKWebView platform.
 
-Windows 11, Playwright 1.64, measured while other processes kept the CPU between ~30 % and ~90 %
-busy (not under our control); the ranges are the runs of this round. CI on macOS is the arbiter.
+| Measure (budget) | macOS WebKit | macOS Chromium | Windows WebKit | Windows Chromium |
+|---|---|---|---|---|
+| Trim reflow complete, worst of 4 trims (< 1000 ms) | 624 ms | 353 ms | 665 ms | 337 ms |
+| … all blocks drawn (reported, < 3000 ms) | 1703 ms | 766 ms | 1149 ms | 759 ms |
+| Typing at a line end, median / p95 (< 50 ms median) | 29 / 46 ms | 34 / 89 ms | 30 / 93 ms | 32 / 40 ms |
+| Typing in a split paragraph, median / p95 | 29 / 45 ms | 49 / 66 ms | 28 / 32 ms | 30 / 40 ms |
+| Phase 1 typing (paginated), median | 27 ms | 51 ms (headless, slow) | 26 ms | 23 ms |
+| Phase 1 hot path, median | 23 ms | 28 ms | 28 ms | 26 ms |
+| Replace All of 10,000 matches (< 2000 ms) | 830 ms | 428 ms | 982 ms | 483 ms |
+| Restyle: style sheet swap (< 100 ms) / reflow complete (< 1000 ms) | 80 / 413 ms | 43 / 202 ms | **136** / 630 ms | 44 / 227 ms |
+
+Local Windows (quieter host): WebKit trim 310–430 ms, typing 43–45 ms, Replace All 586 ms, restyle
+62 / 336 ms; Chromium trim 170–186 ms, typing 20–25 ms, Replace All 321 ms, restyle 23 / 115 ms.
+The style sheet swap is the browser's own style recalculation and layout of the whole paged book
+(no pagination code runs before it); it misses 100 ms only on the Windows WebKit runner.
+
 Measured after merging the book settings, styles and paper surfaces tickets (book styles, textured
 paper). 440 pages at 5.5 × 8.5 in. A keystroke's pass costs 1–3 ms (one block measured, two element
 boxes read, decorations untouched unless a line moved between pages). Playwright's WebKit on Windows
