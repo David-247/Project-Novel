@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { budget } from './budget'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
@@ -10,6 +11,9 @@ import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readF
  * see every chapter update; add a footnote and find it on its reference's page; turn page numbers on
  * and read them on specific pages; switch the Book, White, Dark and Auto paper; save, reopen, and
  * get identical settings and an identical layout.
+ *
+ * Runs in the serial projects (perf-chromium, perf-webkit; playwright.config.ts) so the reflow
+ * budgets are measured on a quiet CPU. Reflow numbers go to perf-results/acceptance-*.json (job summary).
  */
 
 const ctl = (page: Page, id: string) => page.locator(`[data-control-id="${id}"]`)
@@ -76,7 +80,7 @@ async function timeReflow(page: Page, selector: string): Promise<{ ms: number; a
   }, selector)
 }
 
-async function chooseTrim(page: Page, testInfo: TestInfo, id: string, label: RegExp) {
+async function chooseTrim(page: Page, id: string, label: RegExp) {
   await ctl(page, 'book.trimSize').click()
   await expect(page.getByRole('menuitemradio', { name: label })).toBeVisible()
   const before = (await layout(page)).pageCount
@@ -85,9 +89,24 @@ async function chooseTrim(page: Page, testInfo: TestInfo, id: string, label: Reg
   await waitForLayout(page)
   const l = await layout(page)
   console.info(`[acceptance] trim ${id}: reflow ${r.ms} ms, all drawn ${r.allDrawnMs} ms, ${before} -> ${l.pageCount} pages`)
-  budget(testInfo, `trim ${id}: reflow complete ms`, r.ms, 1000)
-  budget(testInfo, `trim ${id}: all blocks drawn ms`, r.allDrawnMs, 3000)
-  return { ...r, pages: l.pageCount }
+  return { trim: id, ...r, pages: l.pageCount }
+}
+
+/** Reflow numbers to perf-results/acceptance-<project>-<platform>.json (CI job summary). */
+function record(testInfo: TestInfo, reflows: { trim: string; ms: number; allDrawnMs: number; pages: number }[], styleEdit: { ms: number; allDrawnMs: number }) {
+  const out = {
+    scenario: 'acceptance',
+    browser: testInfo.project.name,
+    platform: process.platform,
+    reflows,
+    maxReflowMs: Math.max(...reflows.map((r) => r.ms)),
+    maxAllDrawnMs: Math.max(...reflows.map((r) => r.allDrawnMs)),
+    chapterStyleEdit: styleEdit,
+    budgets: { reflowMs: 1000, allDrawnMs: 3000 },
+    measuredAt: new Date().toISOString(),
+  }
+  mkdirSync('perf-results', { recursive: true })
+  writeFileSync(`perf-results/acceptance-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(out, null, 2))
 }
 
 /** Page index of the frame whose box holds the painted footnote reference `k`. */
@@ -165,7 +184,12 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
     ['us-5.5x8.5', /^Trade/],
   ]
   const counts: Record<string, number> = {}
-  for (const [id, label] of trims) counts[id] = (await chooseTrim(page, testInfo, id, label)).pages
+  const reflows: Awaited<ReturnType<typeof chooseTrim>>[] = []
+  for (const [id, label] of trims) {
+    const r = await chooseTrim(page, id, label)
+    reflows.push(r)
+    counts[id] = r.pages
+  }
   // Smaller pages hold less: the page count follows the trim, and coming back gives the same book.
   expect(counts['us-mass-market']).toBeGreaterThan(counts['us-6x9'])
   expect(counts['us-5.5x8.5']).toBe(l0.pageCount)
@@ -186,6 +210,12 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
   expect(sizeAfter).toHaveLength(fx.chapters)
   for (const [i, s] of sizeAfter.entries()) expect(s, `chapter ${i + 1}`).toBeCloseTo((sizeBefore[i] * 28) / 20, 0)
   expect(await page.evaluate(() => window.__nvE2E.docVersion())).toBe(docVersion)
+  // Budgets (decision afbe3475: blocking on the shipping pairs, warnings elsewhere), after recording.
+  record(testInfo, reflows, restyle)
+  for (const r of reflows) {
+    budget(testInfo, `trim ${r.trim}: reflow complete ms`, r.ms, 1000)
+    budget(testInfo, `trim ${r.trim}: all blocks drawn ms`, r.allDrawnMs, 3000)
+  }
   budget(testInfo, 'chapter style edit: reflow complete ms', restyle.ms, 1000)
   const l1 = await layout(page)
   expect(l1.pages.filter((p) => p.startsBlockType === 'heading')).toHaveLength(fx.chapters)

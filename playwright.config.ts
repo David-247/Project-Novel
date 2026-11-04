@@ -17,7 +17,9 @@ const desktop = (name: 'Desktop Chrome' | 'Desktop Safari') => {
 // PW_PORT overrides the port (use a unique one when several worktrees run e2e at once).
 const port = Number(process.env.PW_PORT ?? 4174)
 const baseURL = `http://127.0.0.1:${port}`
-const PERF = /perf\.spec\.ts$/
+// Serial (perf) projects: the perf specs, and the Phase 2 acceptance scenario, whose reflow budgets
+// (blocking on the shipping pairs) need a quiet CPU, not one shared with parallel functional tests.
+const PERF = /(perf|phase2-acceptance)\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',

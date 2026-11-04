@@ -105,7 +105,8 @@ Phase 2 (book layout) adds:
 
 - `e2e/phase2-acceptance.spec.ts`: the acceptance scenario end to end (paste the 100k-word fixture, several trim
   sizes, a Chapter Title style edit, a footnote, page numbers, the four paper surfaces, save and reopen with an
-  identical layout). `e2e/phase2-tooltips.spec.ts` audits every Phase 2 control's tooltip in the spread view with
+  identical layout); it runs in the serial perf projects so its reflow budgets get a quiet CPU (in CI: the perf
+  job). `e2e/phase2-tooltips.spec.ts` audits every Phase 2 control's tooltip in the spread view with
   each menu and dialog open; `e2e/phase2-contrast.spec.ts` measures WCAG AA contrast on the rendered spread for every
   paper surface in OS light and dark.
 - Perf (`e2e/perf.spec.ts`, `e2e/pagination-perf.spec.ts`): typing in the spread view with 200 footnotes, the find

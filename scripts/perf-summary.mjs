@@ -51,10 +51,10 @@ export function toMarkdown(results, dir = 'perf-results') {
   const trims = results.filter((r) => Array.isArray(r.reflows))
   if (trims.length) {
     md.push('#### Trim size reflow (reflow complete < 1000 ms; all blocks drawn < 3000 ms)', '')
-    md.push('| engine / OS | max reflow ms | max all drawn ms | per trim: reflow / all drawn ms (pages) |', '| --- | --- | --- | --- |')
+    md.push('| scenario | engine / OS | max reflow ms | max all drawn ms | per trim: reflow / all drawn ms (pages) |', '| --- | --- | --- | --- | --- |')
     for (const r of trims) {
       const per = r.reflows.map((x) => `${x.trim} ${x.ms} / ${x.allDrawnMs} (${x.pages})`).join('; ')
-      md.push(`| ${pair(r)} | ${cell(r, r.maxReflowMs, 1000)} | ${cell(r, r.maxAllDrawnMs, 3000)} | ${per} |`)
+      md.push(`| ${r.scenario} | ${pair(r)} | ${cell(r, r.maxReflowMs, 1000)} | ${cell(r, r.maxAllDrawnMs, 3000)} | ${per} |`)
     }
     md.push('')
   }
