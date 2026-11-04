@@ -240,16 +240,28 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
+          "== WebView2 / Edge policies"
+          foreach ($k in 'HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'HKLM:\SOFTWARE\WOW6432Node\Policies\Microsoft\Edge', 'HKCU:\Software\Policies\Microsoft\Edge') {
+            Get-ChildItem -Recurse $k -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name): $(($_.Property | ForEach-Object { $_ }) -join ', ')" }
+            Get-ItemProperty $k -ErrorAction SilentlyContinue | Out-String -Width 300
+          }
+          "== env WEBVIEW2_*"; Get-ChildItem env: | Where-Object Name -like 'WEBVIEW2*' | ForEach-Object { "$($_.Name)=$($_.Value)" }
+          function Probe($label, $port) {
+            $p = Start-Process -FilePath 'src-tauri\target\release\novel.exe' -PassThru
+            Start-Sleep -Seconds 20
+            "== $label: app exited: $($p.HasExited)"
+            Get-CimInstance Win32_Process -Filter "name='msedgewebview2.exe'" | Select-Object -First 1 |
+              ForEach-Object { "browser cmd: $($_.CommandLine)" }
+            try { "devtools: " + (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/json/version" -TimeoutSec 5).Content } catch { "devtools: $($_.Exception.Message)" }
+            Get-Process novel, msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep -Seconds 2
+          }
           $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9333'
-          $p = Start-Process -FilePath 'src-tauri\target\release\novel.exe' -PassThru
-          Start-Sleep -Seconds 25
-          "app exited: $($p.HasExited) code: $(if ($p.HasExited) { $p.ExitCode })"
-          "session: $([System.Diagnostics.Process]::GetCurrentProcess().SessionId) user: $env:USERNAME interactive: $([Environment]::UserInteractive)"
-          Get-CimInstance Win32_Process -Filter "name='msedgewebview2.exe' or name='novel.exe'" |
-            ForEach-Object { "$($_.Name) $($_.ProcessId) $($_.SessionId) :: $("$($_.CommandLine)".Substring(0, [Math]::Min(300, "$($_.CommandLine)".Length)))" }
-          Get-ChildItem -Recurse -Depth 3 "$env:LOCALAPPDATA\org.novel.app" -ErrorAction SilentlyContinue | Select-Object -First 30 FullName
-          Get-ChildItem -Recurse -Filter DevToolsActivePort "$env:LOCALAPPDATA\org.novel.app" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName): $(Get-Content $_.FullName -Raw)" }
-          try { (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9333/json/version -TimeoutSec 5).Content } catch { "devtools: $($_.Exception.Message)" }
-          Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 1,2; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction SilentlyContinue |
-            Select-Object -First 8 | ForEach-Object { "$($_.ProviderName): $("$($_.Message)".Substring(0, [Math]::Min(400, "$($_.Message)".Length)))" }
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Probe 'env var' 9333
+          Remove-Item env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+          # WebView2 per-app policy: AdditionalBrowserArguments keyed by the exe name.
+          $pol = 'HKCU:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+          New-Item -Force $pol | Out-Null
+          New-ItemProperty -Force -Path $pol -Name 'novel.exe' -Value '--remote-debugging-port=9334' | Out-Null
+          Probe 'registry policy' 9334
+          Remove-Item -Recurse -Force 'HKCU:\Software\Policies\Microsoft\Edge\WebView2'
