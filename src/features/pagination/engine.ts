@@ -8,6 +8,7 @@ import { chapterOpenings, hasReservations, onInvalidate, onInvalidateBlocks, onR
 import { resolvePageGeometry, type PageGeometry } from './geometry'
 import { blockBreakBefore, lineStart, measureBlock, ownShift, scaleOf, SHIFT_ATTR, type BlockMetrics } from './measure'
 import { placePages, type Placement } from './placement'
+import { restyledIds } from './restyle'
 
 /**
  * The pagination engine (ADR: docs/pagination.md). One ProseMirror view stays the only editor;
@@ -247,14 +248,13 @@ export class PaginationEngine {
     }
   }
 
-  /** Style ids whose resolved definition changed and whose blocks must be re-measured. */
+  /** Style ids whose blocks must be re-measured (definition or chapter role changed: `restyledIds`). */
   private restyled: Set<string> | null = null
 
   private stylesChanged(before: StyleSheetJSON, after: StyleSheetJSON) {
     const a = resolveStyleSheet(before)
     const b = resolveStyleSheet(after)
-    const ids = new Set<string>()
-    for (const id of new Set([...a.keys(), ...b.keys()])) if (JSON.stringify(a.get(id)) !== JSON.stringify(b.get(id))) ids.add(id)
+    const ids = restyledIds(a, b)
     if (ids.size === 0) return
     for (const id of this.restyled ?? []) ids.add(id)
     this.restyled = ids
