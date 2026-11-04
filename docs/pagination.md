@@ -290,8 +290,102 @@ deletes it).
 
 - `relayoutPagination()`: re-break the pages on the next frame from the measured lines (reservation
   answers, `data-break-before` decorations, a new chapter predicate). Cheap.
+- `invalidatePaginationAt(positions)`: re-measure only the top-level blocks holding these document
+  positions, then reflow (a decoration that changes a block's line boxes without a document change: a
+  footnote reference renumbered from "9" to "10"). About a keystroke per block.
 - `invalidatePagination()`: re-measure every block and reflow (metrics changed without a document or
   `book.styles` change, e.g. a style sheet injected by other code). About a trim change's cost.
+
+### (d) The reserved region and stateful reservations
+
+`registerPageSlot({ region: 'reserved', ... })` renders over the text block of every non-blank page,
+behind the text (paper layer): content drawn in the space a bottom reservation keeps free. It must be
+anchored at the bottom of the region and be no taller than what the page reserved.
+
+Reservation contract additions (footnotes ticket, `breaker.ts`):
+
+- **The last call for a page is with its final range.** A reservation may keep per-page state (footnotes
+  continue from page to page): the answer to the last call for page *i* is the page's final answer, and
+  pages are asked in order, starting at page 0. Before this, a page that hit the iteration cap ended on a
+  range that was never asked.
+- **Over-reserved space is given back.** When the grow loop ends with a need below the reservation (the
+  lines that needed the space moved to the next page: a footnote reference on the last line), a bounded
+  bisection (8 steps) on the available height finds the fullest valid page. Without it, the page left by
+  such a line kept its note's height empty.
+- **Inline nodes with content** (the footnote reference) never take inline decorations: ProseMirror
+  passes those to the node's content. The engine gives such a node a node decoration with the same page
+  offset as the lines around it (`decorateBlock`). Without it, a reference on a line continued on the
+  next page stayed painted on the first page.
+
+## Footnotes
+
+Ticket "Footnotes rendered at the bottom of their page". Editor slice: the node, numbering and the
+footnote editor (`src/features/editor/footnote/`). Footnotes slice (`src/features/footnotes/`): the
+bottom reservation, the footnote area and the Footnote options dialog.
+
+### Model
+
+- `footnote`: an inline atom (`group: inline`, `content: text*`, marks allowed on it and inside) at the
+  reference point. Its content is the note text, so the note travels with copy/paste, undo, find &
+  replace, save and recovery, and deleting the reference deletes the note in the same step. Additive to
+  the schema: Phase 1 and earlier Phase 2 manuscripts load unchanged. Plain-text copies drop the note.
+- **Numbers are derived, never stored**: a plugin numbers the references in document order (per book, or
+  restarting in each chapter of `getChapters`; arabic or `*, †, ‡, §, ‖, ¶`, then doubled) and draws the
+  mark as a node decoration (`data-fn-num`, shown by a pseudo-element raised by relative positioning, so
+  the line never gets taller). Unchanged blocks are cached by node identity: O(top-level blocks) per edit.
+  A reference whose label changed while its block did not is re-measured with `invalidatePaginationAt`.
+
+### Page layout
+
+Notes are set in the Footnote Text style (9 pt, line height 1.3: 15.6 px lines) with an exact line
+height, so a note's size is a whole number of lines and a split falls between two lines. Each note is
+measured once (cached by node, label and style; all unmeasured notes in one hidden contained element).
+A page's area holds: the rest of notes continued from earlier pages, then the notes referenced on the
+page, up to 60 % of the text block (the last page: all of it); what does not fit continues in the next
+page's area (full-width rule above a continuation, a third-width rule otherwise; the rule can be turned
+off). Area height = 12 px (9 pt; 8 px without the rule) + lines × line height.
+
+The reservation answers that height. It is monotone (fewer lines on a page, fewer references, never a
+taller area), so the engine's loop converges; the pathological case (a reference on the last line whose
+note pushes that line on) ends with the line and its note on the next page and the page before filled up
+to the line before (regression tests: `footnotes/convergence.test.ts` with the real breaker, and
+`e2e/footnotes.spec.ts`). The reservation is registered only while the manuscript has footnotes, so a
+book without any pays nothing. The areas are published after the breaking run (a microtask, before the
+frame is painted) and drawn in the `reserved` slot; an area is redrawn only when its notes changed.
+
+### Decision: how footnote text is edited (spike)
+
+Options: (A) a nested-editor NodeView in place, as in the ProseMirror footnote example, positioned in the
+page's footnote area; (B) an anchored popover holding the same nested editor.
+
+**Chosen: B, the anchored popover.** Findings of the spike:
+
+- In the shifted stream a node's DOM lives inside its paragraph, in the text layer. Showing a nested
+  editor at the page bottom means an absolutely positioned island inside a moved line (offsets per page,
+  per zoom, redrawn with the line), and a note continued on the next page would need its one DOM in two
+  places: not possible. The footnote area is therefore display only (paper layer, behind the text).
+- A `contenteditable=false` island holding a second `contenteditable` inside the manuscript's lines is
+  where WebKit and Chromium caret and selection handling differ most; the popover keeps the nested view
+  outside the manuscript DOM, so the manuscript's measurement and typing path are untouched.
+- Cost: none while not editing (the popover does not exist). Typing in the main text with 200 footnotes
+  at 100k words: see the perf table below (budget < 50 ms median).
+
+How it meets the requirements:
+
+- **Unified undo.** The popover's view edits a document that *is* the footnote node; each of its
+  transactions is forwarded to the manuscript as steps mapped into the footnote (`StepMap.offset`), so the
+  manuscript stays the only source of truth and its history the only history. Mod-z / Mod-Shift-z / Mod-y
+  in the note run the manuscript's undo / redo; changes from outside are mirrored back into the note.
+- **Escape returns to the reference** (so do Enter and Done): caret right after the reference, focus in the
+  manuscript. Moving focus elsewhere just closes the popover.
+- **Keyboard and touch.** Insert > Footnote or Mod-Alt-f inserts after the selection and opens the note;
+  arrowing onto a reference selects it and Enter opens it; a click or tap on the reference opens it (32 ×
+  32 px target around the mark, out of flow). The popover sits under the reference (above it near the
+  window bottom), follows it on scroll, zoom and reflow, and has a Done button.
+
+Known limitations: find & replace does not search inside notes (a note is one atom in the find text);
+notes are not edited from the footnote area itself (press the reference); a note longer than the whole
+last page is clipped.
 
 ## View, zoom and keys
 
@@ -322,6 +416,11 @@ deletes it).
   composing); PageUp/PageDown incl. the first and last spread; ArrowUp/Down across a split;
   `breakBefore` page / recto; narrow fallback and the spread toggle; zoom; trim reflow, mirrored margins
   and bottom reservations (re-break without re-measuring); presses on margins.
+- Footnotes: `footnotes/layout.test.ts` (areas, splits, monotonicity), `footnotes/convergence.test.ts`
+  (reservations through the real breaker, the last-line regression), `editor/footnote/footnotes.test.tsx`
+  (schema, numbering, commands, the nested editor's unified undo); `e2e/footnotes.spec.ts` (insert, edit,
+  Escape, same-page placement, continuation, no overlap by bounding rects, the last-line case, save /
+  reopen, recovery, copy / paste, options dialog); perf: the 200-footnote typing test in `e2e/perf.spec.ts`.
 - Guard (`pm-internals.test.ts`): fails if the prosemirror-view internals the engine uses disappear
   (prosemirror-view is pinned with `pnpm.overrides`).
 - Perf (`e2e/pagination-perf.spec.ts`, serial perf projects): trim reflow and typing latency.

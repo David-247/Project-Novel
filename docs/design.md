@@ -275,6 +275,26 @@ live region. Colours are existing token pairs only (selected row `accent` on `ac
 - **Editor look.** A page break is a dashed rule with a "Page break" label on a paper-coloured plate (`--page-muted-fg` on `--page-bg`, the existing AA pair); selected, it gets the page focus ring. No new colours.
 - **Paste.** `page-break-before/after` and `break-before/after: page|always|left|right|recto|verso` become page break nodes; `<hr>` becomes a scene break. Limitation: left/right/recto/verso are not distinguished, they all become a plain page break (never a recto break). Only paste is wired (`transformPastedHTML`); an import path would call the exported `mapPastedHtml` itself.
 
+## Footnotes (Phase 2)
+
+- **Reference.** A small raised number (0.72 em, raised 0.45 em by relative positioning, so lines keep
+  their height) in the text colour. Selected (arrow onto it), it gets the page focus ring. The press /
+  tap target is a 32 × 32 px box around the mark, out of flow.
+- **Footnote area.** At the bottom of the text block, in the Footnote Text style (9 pt on 11.7 pt, flush
+  left), `--page-fg` on the paper: the same AA pair as body text. Each note starts with its raised mark.
+  A third-width hairline rule sets the notes off; a page whose area starts with the rest of a note gets a
+  full-width rule (the printer's continuation rule). The rule is decorative (75 % opacity) and can be
+  turned off. No new colours.
+- **Footnote editor.** An anchored popover (`surface-raised`, `border`, `shadow-raised`, the panel
+  radius) under the reference, flipping above it near the window bottom: header "Footnote 3", the hint
+  "Esc returns to the text" in `text-muted`, a Done button, and a field-styled editable line in the UI
+  font (writing there should read as editing, not as typesetting). Escape, Enter or Done go back to the
+  text after the reference. Width min(28 rem, window − 1 rem), so it fits phones.
+- **Footnote options.** A "Footnotes" ghost text button in the Insert toolbar group opens a standard
+  `Dialog`: two native selects (Numbering, Number format) and a checkbox (Separator line), each with a
+  visible label and a registry tooltip; changes apply at once; Done (primary) closes, focus returns to
+  the button.
+
 ## Pages and spreads (Phase 2, pagination)
 
 The writing surface is now a desk with book pages on it (`src/features/pagination`, docs/pagination.md).

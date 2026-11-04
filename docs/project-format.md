@@ -60,6 +60,18 @@ one means the default.
 On open, the file must be valid JSON with this shape; otherwise Novel shows an error dialog ("manuscript.json is
 damaged...") and does not open the project. The editor applies its own schema on load.
 
+### Footnotes in the manuscript
+
+A footnote is an inline node at its reference point, inside a paragraph or heading. Its content is the note text
+(text nodes, with marks). Footnote numbers are not stored: they follow from document order and `book.json` →
+`footnotes`.
+
+```json
+{"type":"paragraph","content":[{"type":"text","text":"A claim"},{"type":"footnote","content":[{"type":"text","text":"Smith, 1999, p. 4."}]},{"type":"text","text":" and more."}]}
+```
+
+An empty note is `{"type":"footnote"}`. Marks may sit on the footnote node itself and on its text.
+
 ### Paragraph and chapter styles in the manuscript
 
 Paragraphs and headings may carry `attrs.styleId`, the id of a style in `book.json` → `styles` (lowercase letters,
@@ -117,7 +129,7 @@ the file is created at the next save.
 | `margins`      | object  | `{ top, bottom, inside, outside }` in points (1/72 in), each a number from 0 to 7200. Default `{ 54, 54, 63, 45 }`. `inside` is the binding side, `outside` the fore-edge. |
 | `styles`       | object  | Style definitions keyed by style id. Owned by the styles feature; default `{}`.               |
 | `headerFooter` | object  | Running heads and page numbers. Owned by the headers/footers feature; default `{}`.           |
-| `footnotes`    | object  | Footnote options. Owned by the footnotes feature; default `{}`.                               |
+| `footnotes`    | object  | Footnote options (below). Owned by the footnotes feature; default `{}`.                       |
 | `surface`      | string  | Paper surface: `"auto"` (default), `"book"`, `"white"` or `"dark"`.                           |
 | `view`         | string  | `"spread"` (default) or `"single"`.                                                           |
 
@@ -134,6 +146,17 @@ the file is created at the next save.
   "view": "spread"
 }
 ```
+
+**Footnote options** (`footnotes`, every field optional; `{}` = the defaults; unknown keys are kept):
+
+| Field       | Values                    | Default    | Meaning                                                    |
+| ----------- | ------------------------- | ---------- | ---------------------------------------------------------- |
+| `numbering` | `"book"`, `"chapter"`     | `"book"`   | Number through the whole book, or restart in each chapter. |
+| `format`    | `"arabic"`, `"symbols"`   | `"arabic"` | 1, 2, 3 or `*`, `†`, `‡`, `§`, `‖`, `¶`, then `**`, `††`, ... |
+| `separator` | boolean                   | `true`     | A short rule above the footnotes of each page.            |
+
+An invalid value means the default (and is replaced at the next change of the options). The note text style is the
+built-in Footnote Text style in `styles` (`footnote-text`).
 
 **Trim sizes** (id: size): `us-5x8` (5 x 8 in), `us-5.25x8` (5.25 x 8 in), `us-5.5x8.5` (5.5 x 8.5 in, the default),
 `us-6x9` (6 x 9 in), `us-mass-market` (4.25 x 6.87 in), `uk-a5` (148 x 210 mm), `uk-b-format` (129 x 198 mm),
