@@ -208,9 +208,13 @@ jobs:
       # The web bundle tauri build embedded (beforeBuildCommand `pnpm build` -> dist/) must not
       # contain the e2e-only fake Tauri backend either.
       - run: pnpm verify:prod-bundle
-      # Real-app smoke (Windows only: tauri-driver has no macOS WKWebView driver). Informational:
-      # WebView2 / msedgedriver version skew on the runner image must not fail the build.
-      # msedgedriver comes preinstalled on GitHub's Windows images (EDGEWEBDRIVER).
+      # Real-app smoke (Windows only: tauri-driver has no macOS WKWebView driver). NON-BLOCKING:
+      # it passes on a Windows desktop (tauri-driver and attach modes, WebView2 156), but on GitHub's
+      # Windows runners WebView2 ignores both WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS and the
+      # AdditionalBrowserArguments policy (checked: the browser command line has only wry's own
+      # arguments), so no DevTools port opens and msedgedriver fails with "DevToolsActivePort file
+      # doesn't exist". Versions match (msedgedriver is preinstalled, EDGEWEBDRIVER). Making it
+      # blocking would need the app to add --remote-debugging-port to its own WebView2 arguments.
       - name: WebView2 runtime and msedgedriver versions
         if: runner.os == 'Windows'
         continue-on-error: true
@@ -235,33 +239,3 @@ jobs:
         if: runner.os == 'Windows'
         continue-on-error: true
         run: node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe
-      - name: WebView2 diagnostics (does the app start its webview on the runner?)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          "== WebView2 / Edge policies"
-          foreach ($k in 'HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'HKLM:\SOFTWARE\WOW6432Node\Policies\Microsoft\Edge', 'HKCU:\Software\Policies\Microsoft\Edge') {
-            Get-ChildItem -Recurse $k -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name): $(($_.Property | ForEach-Object { $_ }) -join ', ')" }
-            Get-ItemProperty $k -ErrorAction SilentlyContinue | Out-String -Width 300
-          }
-          "== env WEBVIEW2_*"; Get-ChildItem env: | Where-Object Name -like 'WEBVIEW2*' | ForEach-Object { "$($_.Name)=$($_.Value)" }
-          function Probe($label, $port) {
-            $p = Start-Process -FilePath 'src-tauri\target\release\novel.exe' -PassThru
-            Start-Sleep -Seconds 20
-            "== $($label) - app exited: $($p.HasExited)"
-            Get-CimInstance Win32_Process -Filter "name='msedgewebview2.exe'" | Select-Object -First 1 |
-              ForEach-Object { "browser cmd: $($_.CommandLine)" }
-            try { "devtools: " + (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/json/version" -TimeoutSec 5).Content } catch { "devtools: $($_.Exception.Message)" }
-            Get-Process novel, msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force
-            Start-Sleep -Seconds 2
-          }
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9333'
-          Probe 'env var' 9333
-          Remove-Item env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
-          # WebView2 per-app policy: AdditionalBrowserArguments keyed by the exe name.
-          $pol = 'HKCU:\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
-          New-Item -Force $pol | Out-Null
-          New-ItemProperty -Force -Path $pol -Name 'novel.exe' -Value '--remote-debugging-port=9334' | Out-Null
-          Probe 'registry policy' 9334
-          Remove-Item -Recurse -Force 'HKCU:\Software\Policies\Microsoft\Edge\WebView2'

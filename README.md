@@ -125,7 +125,9 @@ Real-app smoke (Windows/Linux only; WebDriver does not exist for macOS WKWebView
 `tauri-driver` (`cargo install tauri-driver`) and an msedgedriver matching your WebView2 version
 (`EDGEWEBDRIVER` may point at it or its folder), build the app, then
 `node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe`. On Windows it tries tauri-driver first, then
-`--mode attach`: it starts the app with a WebView2 DevTools port and attaches msedgedriver to it.
+`--mode attach`: it starts the app with a WebView2 DevTools port and attaches msedgedriver to it. CI runs it
+non-blocking: on GitHub's Windows runners WebView2 ignores the extra browser arguments both modes rely on (see the
+comment in `.github/workflows/ci.yml`).
 
 ## Architecture
 

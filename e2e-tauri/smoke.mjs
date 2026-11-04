@@ -9,9 +9,10 @@
 //  - attach (Windows): start the app ourselves with a DevTools port for its WebView2
 //    (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=N) and attach msedgedriver to
 //    it (ms:edgeOptions.debuggerAddress), Microsoft's documented way to drive a running WebView2 app.
-//  - auto (default on Windows): tauri-driver, then attach when the session cannot be created. On
-//    GitHub's Windows runners msedgedriver launching the app fails with "DevToolsActivePort file
-//    doesn't exist" (it never finds the port file), although the same versions work on a desktop.
+//  - auto (default on Windows): tauri-driver, then attach when the session cannot be created.
+//    Both pass on a Windows desktop. On GitHub's Windows runners both fail: WebView2 there ignores
+//    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS (and the AdditionalBrowserArguments policy), so no DevTools
+//    port opens; msedgedriver reports "DevToolsActivePort file doesn't exist". CI keeps it non-blocking.
 //
 // Plain WebDriver over HTTP (no client library). Exit code 0 = pass.
 import { spawn } from 'node:child_process'
