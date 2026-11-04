@@ -30,9 +30,9 @@ const SPREADS: ReadonlyArray<{ caption: string; pages: readonly [number, number]
   { caption: 'Inside the chapter', pages: [3, 4] },
 ]
 
-const PREVIEW_PAGE_WIDTH = 164
+const PREVIEW_PAGE_WIDTH = 140
 /** Type in the preview is drawn this much larger than true to scale, so the words can be read. */
-const TEXT_BOOST = 1.6
+const TEXT_BOOST = 2.2
 
 export interface HeaderFooterPreviewProps {
   settings: HeaderFooterSettings

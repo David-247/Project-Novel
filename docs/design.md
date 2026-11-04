@@ -293,3 +293,31 @@ The writing surface is now a desk with book pages on it (`src/features/paginatio
 - **Fit spread is the default zoom**: the whole spread fits the window, like holding the book open.
   Narrow windows fall back to single pages (touch-tolerant; no hover-only actions). A press on a margin
   or the desk puts the caret on the nearest line of that page.
+
+## Headers, footers and page numbers (Phase 2)
+
+Slice `src/features/header-footer/`. They are drawn on the page, not written in the manuscript: through the
+pagination slice's header / footer slots (`registerPageSlot`), in the top and bottom margin, behind the text layer.
+They never take part in find, selection, the undo history or pagination, and the margin box is the limit: a long
+running head is clipped (one line, `overflow: hidden`, ellipsis) and can never move the text block.
+
+- **What a page shows** is decided by one pure function, `resolveHeaderFooter(page, pages, chapters, settings, meta)`
+  (`src/shared/book/header-footer.ts`), used by the pages and by the dialog preview. Defaults are the trade-fiction
+  convention: author on left-hand (verso) pages, book title on right-hand (recto) pages, arabic numbers centred in
+  the footer starting at 1 on the first chapter; nothing on chapter-opening and blank pages; front matter (before the
+  first chapter) has no running head and no number (or lower-case Roman numerals when asked). Blank pages are
+  counted but show nothing.
+- **Type**: the built-in **Running Head** style (9 pt, centred, based on Body). Editing the style in Manage styles
+  restyles every head; margins and indents of the style are ignored (the head is a box in the margin). Colour is
+  `--page-muted-fg` through `.nv-page-muted`, which meets AA on the four paper surfaces (`SURFACE_CONTRAST_PAIRS`).
+- **Incremental**: each slot component selects only its own resolved strings from the store (shallow compare), the
+  chapter list is re-derived when the layout is republished, and a chapter title edit (checked once per frame, only
+  while a head shows chapter titles) re-renders just the heads whose text changed. No layout pass is requested.
+- **Dialog "Headers & page numbers"** (toolbar button `book.headerFooter`, or a double-click on any header or footer
+  region; Escape closes). Changes apply to the pages at once; there is no OK / Cancel to remember. A live mini preview
+  of two spreads (chapter opening, inside the chapter) is drawn with the real resolver and the real Running Head
+  style at a larger-than-true type scale so it can be read. "Book details..." opens the small dialog for the book
+  title and author (project.json); it is disabled until the project has been saved once.
+- **Touch and keyboard**: the toolbar button is the keyboard route (no hover-only access); every field is a native
+  select, text field or checkbox with a visible label and a registry tooltip.
+

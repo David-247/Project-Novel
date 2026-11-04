@@ -248,7 +248,15 @@ registerPageSlot({
 `render` is called for every rendered page (blank ones too: check `page.isBlank`). Its region is the
 text-block width wide and the top (bottom) margin tall, aligned with the text block, so it mirrors
 with the margins. Slots render in the paper layer behind the text: display only, not interactive.
-Frames are virtualised: slots run only for pages near the viewport.
+Frames are virtualised: slots run only for pages near the viewport. Keep `render` cheap and return
+a memoised component that selects its own data (the headers/footers slice does): `render` runs for
+every rendered page on every republished layout, i.e. on most keystrokes.
+
+An optional `onDoubleClick(page)` makes the region respond to a double-click: the paper is behind the
+text layer, so the view hit-tests the region itself (`PaginatedView`, from the canvas coordinates).
+It is for pointer users only: give the same action a keyboard route elsewhere (the headers/footers
+slice has a toolbar button). The region never changes the text block: body pagination is identical
+with slots registered or not.
 
 ### (b) Bottom reservations
 

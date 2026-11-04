@@ -32,6 +32,16 @@ describe('project.json', () => {
     expect(meta).toMatchObject({ format: 'novel-project', schemaVersion: PROJECT_SCHEMA_VERSION })
   })
 
+  it('a project.json without an author (every older project) reads it as an empty string; an author round-trips', () => {
+    expect(meta.author).toBe('')
+    const { author: _a, ...older } = meta
+    void _a
+    expect(parseProjectMeta(JSON.stringify(older)).author).toBe('')
+    expect(parseProjectMeta(JSON.stringify({ ...meta, author: 7 })).author).toBe('')
+    const withAuthor = { ...meta, author: 'Ada Quill' }
+    expect(parseProjectMeta(serializeProjectMeta(withAuthor)).author).toBe('Ada Quill')
+  })
+
   it('rejects invalid JSON as corrupt', () => {
     expectProjectError(() => parseProjectMeta('{"format": "novel-pro'), 'corrupt-file')
   })
