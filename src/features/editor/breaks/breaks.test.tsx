@@ -217,6 +217,23 @@ describe('custom chapter styles (based on Chapter Title)', () => {
     expect(getResolvedStyles().get(title)?.breakBefore).toBe('page')
     expect(getResolvedStyles().get('part-title')?.breakBefore).toBe('recto')
   })
+
+  it('REGRESSION: Chapters start on keeps an inherited break inherited (no explicit copy written)', () => {
+    const inherits = createStyle('chapter-title', 'Inheriting title') // no breakBefore of its own
+    const grand = createStyle(inherits, 'Grand title') // inherits through a chain that is rewritten
+    const title = dup('chapter-title') // own copied breakBefore: rewritten
+    expect(getStyleDefinition(inherits)?.breakBefore).toBeUndefined()
+    act(() => setChaptersStartOn('recto'))
+    expect(getStyleDefinition(inherits)?.breakBefore).toBeUndefined()
+    expect(getStyleDefinition(grand)?.breakBefore).toBeUndefined()
+    expect(getStyleDefinition(title)?.breakBefore).toBe('recto')
+    expect(getResolvedStyles().get(inherits)?.breakBefore).toBe('recto')
+    expect(getResolvedStyles().get(grand)?.breakBefore).toBe('recto')
+    // Later edits to Chapter Title still reach it.
+    act(() => setChaptersStartOn('page'))
+    expect(getResolvedStyles().get(inherits)?.breakBefore).toBe('page')
+    expect(getStyleDefinition(inherits)?.breakBefore).toBeUndefined()
+  })
 })
 
 describe('page break', () => {
