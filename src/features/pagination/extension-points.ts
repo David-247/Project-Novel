@@ -127,9 +127,11 @@ export function totalReservation(page: ReservationPage): number {
 export type ChapterPredicate = (node: PMNode) => boolean
 
 /**
- * Default chapter model: the editor's `getChapters` (breaks ticket). A chapter opens at a Chapter
- * Title block (an unstyled level-1 heading is one), or at the Chapter Number directly before it.
- * Content before the first opening is front matter (chapterIndex -1).
+ * Default chapter model: the editor's `getChapters` (breaks ticket). A chapter opens at a block whose
+ * style is a chapter title style (Chapter Title, an unstyled level-1 heading, or a level-1 chapter
+ * style based on Chapter Title such as its duplicate: `chapterRoles` in @/shared/book), or at the
+ * chapter number block (Chapter Number or a style based on it) directly before it. It follows
+ * book.styles. Content before the first opening is front matter (chapterIndex -1).
  */
 export const defaultChapterOpenings = (doc: PMNode): number[] => getChapters(doc).map((c) => c.from)
 
