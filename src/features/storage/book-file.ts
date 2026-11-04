@@ -1,7 +1,9 @@
 import {
   DEFAULT_MARGINS,
   defaultBookSettings,
+  headerFooterToJSON,
   isTrimSizeId,
+  parseHeaderFooter,
   type BookSettings,
   type BookView,
   type Margins,
@@ -67,7 +69,9 @@ export function normalizeBook(data: unknown): BookParseResult {
   }
   settings.margins = normalizeMargins(data.margins, warnings)
   settings.styles = normalizeRecord(data.styles, 'the styles', warnings) as BookSettings['styles']
-  settings.headerFooter = normalizeRecord(data.headerFooter, 'the headers and footers', warnings)
+  const hf = parseHeaderFooter(data.headerFooter)
+  settings.headerFooter = hf.settings
+  if (hf.repaired) warnings.push('the headers and footers')
   settings.footnotes = normalizeRecord(data.footnotes, 'the footnote settings', warnings)
   if (data.surface !== undefined) {
     if (SURFACES.includes(data.surface as PaperSurface)) settings.surface = data.surface as PaperSurface
@@ -119,7 +123,7 @@ export function bookToJSON(b: BookSettings): Record<string, unknown> {
     trimSize: known.trimSize,
     margins: known.margins,
     styles: known.styles,
-    headerFooter: known.headerFooter,
+    headerFooter: headerFooterToJSON(known.headerFooter),
     footnotes: known.footnotes,
     surface: known.surface,
     view: known.view,

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import { Selection, TextSelection } from '@tiptap/pm/state'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import type { EditorView } from '@tiptap/pm/view'
@@ -8,6 +8,7 @@ import { useStore } from '@/shared/store'
 import { createPaginationPlugin, getEngine, pageAt, paginationKey, selectionForPage } from './engine'
 import { resolvePageGeometry } from './geometry'
 import { effectiveView, placePages, resolveScale, type Placement } from './placement'
+import { doubleClickSlots } from './extension-points'
 import { PageFrames } from './PageFrames'
 import './pagination.css'
 
@@ -58,6 +59,7 @@ export function PaginatedView({ children }: PaginatedViewProps) {
   const placement = useMemo(() => placePages(pageCount, geometry, view), [pageCount, geometry, view])
 
   const hostRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
   const sizerRef = useRef<HTMLDivElement>(null)
   const scrollerRef = useRef<HTMLElement | null>(null)
   const [viewport, setViewport] = useState<Viewport>({ width: 0, height: 0, top: 0, canvasTop: 0 })
@@ -151,6 +153,50 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     }
   }, [editor, actions])
 
+  // The selection before the first press of a click sequence: a press in a margin moves the caret to
+  // the nearest line, which a double-click on a header / footer should not leave behind.
+  const selectionBeforePress = useRef<{ anchor: number; head: number } | null>(null)
+  const onMouseDownCapture = (e: ReactMouseEvent) => {
+    if (e.detail !== 1 || !editor || editor.isDestroyed) return
+    const { anchor, head } = editor.state.selection
+    selectionBeforePress.current = { anchor, head }
+  }
+
+  // Double-click on a header / footer region (slots are drawn behind the text layer, which covers them).
+  const onDoubleClick = (e: ReactMouseEvent) => {
+    const canvas = canvasRef.current
+    if (!canvas || pages.length === 0) return
+    const rect = canvas.getBoundingClientRect()
+    const k = placement.canvasWidth ? rect.width / placement.canvasWidth : 1
+    const x = (e.clientX - rect.left) / k
+    const y = (e.clientY - rect.top) / k
+    const [a, b] = placement.pagesInRow(placement.rowAtY(y))
+    for (let i = a; i <= Math.min(b, pages.length - 1); i++) {
+      const f = placement.frame(i)
+      const c = placement.content(i)
+      if (x < c.x || x > c.x + geometry.contentWidth) continue
+      const region = y >= f.y && y < f.y + geometry.margins.top ? 'header' : y >= f.y + f.height - geometry.margins.bottom && y <= f.y + f.height ? 'footer' : null
+      if (!region) continue
+      const slot = doubleClickSlots(region)[0]
+      if (!slot) return
+      e.preventDefault()
+      const before = selectionBeforePress.current
+      if (before && editor && !editor.isDestroyed) {
+        const { doc } = editor.state
+        const size = doc.content.size
+        const at = (n: number) => Math.min(Math.max(0, n), size)
+        try {
+          const sel = TextSelection.between(doc.resolve(at(before.anchor)), doc.resolve(at(before.head)))
+          if (!sel.eq(editor.state.selection)) editor.view.dispatch(editor.state.tr.setSelection(sel))
+        } catch {
+          // Document changed since: leave the selection as it is.
+        }
+      }
+      slot.onDoubleClick!(pages[i])
+      return
+    }
+  }
+
   const canvasStyle = {
     width: placement.canvasWidth,
     height: placement.canvasHeight,
@@ -167,7 +213,7 @@ export function PaginatedView({ children }: PaginatedViewProps) {
         className="nv-sizer"
         style={{ width: placement.canvasWidth * scale, height: placement.canvasHeight * scale }}
       >
-        <div className="nv-canvas" style={canvasStyle}>
+        <div ref={canvasRef} className="nv-canvas" style={canvasStyle} onMouseDownCapture={onMouseDownCapture} onDoubleClick={onDoubleClick}>
           <PageFrames
             placement={placement}
             pages={pages}

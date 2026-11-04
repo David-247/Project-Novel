@@ -34,6 +34,11 @@ export interface PageSlot {
   render: (ctx: PageSlotContext) => ReactNode
   /** Lower first when several slots share a region (default 0). */
   order?: number
+  /**
+   * Double-click (or double-tap) on this slot's region of a page. Slots render behind the text and
+   * are not interactive themselves: the view hit-tests the region. Keep a keyboard route elsewhere.
+   */
+  onDoubleClick?: (page: PageInfo) => void
 }
 
 let slots: readonly PageSlot[] = []
@@ -52,6 +57,11 @@ export function registerPageSlot(slot: PageSlot): () => void {
 function subscribeSlots(cb: () => void) {
   slotListeners.add(cb)
   return () => slotListeners.delete(cb)
+}
+
+/** Registered slots of a region that handle a double-click (internal: the view's hit test). */
+export function doubleClickSlots(region: PageSlotRegion): readonly PageSlot[] {
+  return slots.filter((s) => s.region === region && s.onDoubleClick)
 }
 
 /** All registered slots (re-renders when the registry changes). */

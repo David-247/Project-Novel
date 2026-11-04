@@ -248,7 +248,15 @@ registerPageSlot({
 `render` is called for every rendered page (blank ones too: check `page.isBlank`). Its region is the
 text-block width wide and the top (bottom) margin tall, aligned with the text block, so it mirrors
 with the margins. Slots render in the paper layer behind the text: display only, not interactive.
-Frames are virtualised: slots run only for pages near the viewport.
+Frames are virtualised: slots run only for pages near the viewport. Keep `render` cheap and return
+a memoised component that selects its own data (the headers/footers slice does): `render` runs for
+every rendered page on every republished layout, i.e. on most keystrokes.
+
+An optional `onDoubleClick(page)` makes the region respond to a double-click: the paper is behind the
+text layer, so the view hit-tests the region itself (`PaginatedView`, from the canvas coordinates).
+It is for pointer users only: give the same action a keyboard route elsewhere (the headers/footers
+slice has a toolbar button). The region never changes the text block: body pagination is identical
+with slots registered or not.
 
 ### (b) Bottom reservations
 
@@ -274,6 +282,11 @@ chapter opens at a Chapter Title block (an unstyled level-1 heading is one), or 
 directly before it; content before the first opening is front matter (−1).
 `defaultChapterOpenings(doc)` gives those positions. `setChapterPredicate((node) => boolean)`
 replaces the model with a per-block predicate; `null` restores the default. Both re-break only.
+
+**Two chapter models.** `PageInfo.chapterIndex` follows `setChapterPredicate` when one is set; chapter *titles* and
+positions used by other slices (running heads, `getChapters`) always come from the editor's `getChapters`. With a
+custom predicate the two can disagree: the headers/footers slice resolves the chapter of a page from the `getChapters` list and the page's
+position, ignoring `chapterIndex`, so its titles, openings and numbering stay consistent with each other.
 
 ### Page break node
 

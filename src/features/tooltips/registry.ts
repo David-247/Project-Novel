@@ -13,6 +13,7 @@
  */
 import { FIND_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import type { ToolbarControlMeta } from '@/features/editor'
+import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
 import { SURFACE_CONTROLS } from '@/shared/theme'
 import { TRIM_SIZES } from '@/shared/book'
@@ -207,6 +208,29 @@ const BOOK_TOOLTIPS: Record<string, TooltipCopy> = {
   ),
 }
 
+/** Headers & page numbers dialog, its toolbar button and the Book details dialog (header-footer slice). */
+const HEADER_FOOTER_DESCRIPTIONS: Record<keyof typeof HEADER_FOOTER_CONTROLS, string> = {
+  open: 'Set the page headers and page numbers. Double-clicking a header or footer opens this too.',
+  verso: 'What the top of every left-hand page says: title, author, chapter title, your text, or nothing.',
+  versoText: 'The words printed at the top of every left-hand page.',
+  recto: 'What the top of every right-hand page says: title, author, chapter title, your text, or nothing.',
+  rectoText: 'The words printed at the top of every right-hand page.',
+  numberPosition: 'Where page numbers go: bottom centre, or the outside corner at the bottom or top. Or none.',
+  numberFormat: 'Count the pages as 1, 2, 3 or as i, ii, iii.',
+  numberStart: 'The number shown on the first page counted. Usually 1.',
+  frontMatter: 'Number the pages before the first chapter in small Roman numerals, or leave them blank.',
+  restart: 'Count from 1 at the first chapter, so title pages do not use up numbers.',
+  suppressHeader: 'Leave the header off pages where a chapter begins, as in printed novels.',
+  suppressNumber: 'Leave the page number off pages where a chapter begins.',
+  suppressBlank: 'Leave headers and numbers off blank pages. They still count in the numbering.',
+  details: 'Edit the book title and author used in the page headers.',
+  done: 'Close this dialog. Changes are already applied to the pages.',
+  detailsTitle: 'The title of the book, used in the project and in headers that show the book title.',
+  detailsAuthor: 'Your name, as it appears in headers that show the author.',
+  detailsSave: 'Save the title and author in the project.',
+  detailsCancel: 'Go back without changing the title and author.',
+}
+
 /** Insert menu: the button, its items and the chapter-start / ornament options (editor slice INSERT_CONTROLS). */
 const INSERT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   INSERT_CONTROLS.map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: c.shortcut }]),
@@ -227,6 +251,7 @@ const PAGINATION_DESCRIPTIONS: Record<keyof typeof PAGINATION_CONTROLS, string> 
 export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.freeze({
   ...fromMeta(TOOLBAR_CONTROLS, TOOLBAR_DESCRIPTIONS),
   ...fromMeta(PAGINATION_CONTROLS, PAGINATION_DESCRIPTIONS),
+  ...fromMeta(HEADER_FOOTER_CONTROLS, HEADER_FOOTER_DESCRIPTIONS),
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
   ...fromMeta(STYLE_DIALOG_CONTROLS, STYLE_DIALOG_DESCRIPTIONS),

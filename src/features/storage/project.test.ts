@@ -17,6 +17,7 @@ import {
   onProjectOpened,
   openProject,
   saveProject,
+  updateProjectDetails,
 } from './index'
 import { __resetStorageForTests } from './project'
 
@@ -349,5 +350,46 @@ describe('project storage', () => {
       expect(await openProject()).toBe(false)
       expect(getCurrentProjectPath()).toBe('/books/novel')
     })
+  })
+})
+
+describe('book details (title and author)', () => {
+  it('writes project.json at once, updates the store, keeps the id, and survives the next save and a reopen', async () => {
+    await createAt('/books/novel')
+    expect(useStore.getState().project.author).toBe('')
+    const id = json('/books/novel/project.json').id
+    expect(await updateProjectDetails({ title: '  The Long Road ', author: ' Ada Quill ' })).toBe(true)
+    expect(json('/books/novel/project.json')).toMatchObject({ id, title: 'The Long Road', author: 'Ada Quill' })
+    expect(useStore.getState().project).toMatchObject({ title: 'The Long Road', author: 'Ada Quill' })
+    expect(backend.recent[0].name).toBe('The Long Road')
+    // A later save keeps the new details (it rewrites project.json from the latest metadata).
+    editor.update(textDoc('words'))
+    expect(await saveProject()).toBe(true)
+    expect(json('/books/novel/project.json')).toMatchObject({ title: 'The Long Road', author: 'Ada Quill' })
+    await closeProject()
+    backend.pick = '/books/novel'
+    expect(await openProject()).toBe(true)
+    expect(useStore.getState().project).toMatchObject({ title: 'The Long Road', author: 'Ada Quill' })
+  })
+
+  it('a blank title keeps the old one; an unchanged call writes nothing; no project open is a no-op', async () => {
+    expect(await updateProjectDetails({ title: 'x' })).toBe(false)
+    await createAt('/books/novel')
+    expect(await updateProjectDetails({ title: '   ', author: 'A' })).toBe(true)
+    expect(json('/books/novel/project.json')).toMatchObject({ title: 'novel', author: 'A' })
+    const before = backend.files.get('/books/novel/project.json')
+    expect(await updateProjectDetails({ author: 'A' })).toBe(true)
+    expect(backend.files.get('/books/novel/project.json')).toBe(before)
+  })
+
+  it('a project.json without author opens with an empty author', async () => {
+    await createAt('/books/old')
+    const meta = json('/books/old/project.json')
+    delete meta.author
+    backend.files.set('/books/old/project.json', JSON.stringify(meta))
+    await closeProject()
+    backend.pick = '/books/old'
+    expect(await openProject()).toBe(true)
+    expect(useStore.getState().project.author).toBe('')
   })
 })

@@ -15,6 +15,7 @@ export {
   loadRecentProjects,
   getCurrentProjectPath,
   getCurrentProjectMeta,
+  updateProjectDetails,
   onProjectOpened,
   createProjectAt,
   openProjectAt,
