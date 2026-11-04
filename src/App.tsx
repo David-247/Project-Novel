@@ -17,6 +17,7 @@ import {
   ToolbarItem,
 } from '@/features/editor'
 import { TrimSizePicker } from '@/features/book-settings'
+import { HeaderFooter, HeaderFooterButton } from '@/features/header-footer'
 import {
   NoProjectActions,
   RecoveryDialog,
@@ -87,6 +88,9 @@ export function App() {
                     <ToolbarItem>
                       <TrimSizePicker />
                     </ToolbarItem>
+                    <ToolbarItem>
+                      <HeaderFooterButton />
+                    </ToolbarItem>
                   </ToolbarGroup>
                 </>
               }
@@ -117,6 +121,8 @@ export function App() {
           </>
         }
       />
+      {/* Running heads / page numbers in the page margins, and their dialogs (portal). */}
+      <HeaderFooter />
       {/* Crash-recovery prompts (portal). */}
       <RecoveryDialog />
     </TooltipProvider>

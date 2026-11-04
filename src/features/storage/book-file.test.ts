@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_MARGINS, defaultBookSettings } from '@/shared/book'
+import { DEFAULT_MARGINS, defaultBookSettings, defaultHeaderFooter } from '@/shared/book'
 import { bookWarningText, normalizeBook, parseBook, serializeBook } from './book-file'
 
 describe('book.json format', () => {
@@ -9,7 +9,12 @@ describe('book.json format', () => {
       trimSize: 'uk-royal',
       margins: { top: 50, bottom: 51, inside: 52, outside: 53 },
       styles: { body: { fontSize: 11, future: { a: [1, 2] } } },
-      headerFooter: { runningHead: 'title' },
+      headerFooter: {
+        ...defaultHeaderFooter(),
+        verso: { kind: 'custom' as const, text: 'Chapter ink' },
+        frontMatter: 'roman' as const,
+        extra: { sectionsLater: [1] },
+      },
       footnotes: { restart: 'chapter' },
       surface: 'dark' as const,
       view: 'single' as const,

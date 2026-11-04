@@ -1,4 +1,7 @@
+import { defaultHeaderFooter, type HeaderFooterSettings } from './header-footer'
+
 // Shared book-level types (Phase 2 contract). Pure types/data only; no slice imports.
+// Running head / page number settings: shape, validation and per-page resolution in ./header-footer.
 // The trim size catalog and page geometry helpers (trim-sizes.ts) are added by the
 // "Book settings" ticket and re-exported from here.
 
@@ -15,8 +18,6 @@ export interface Margins {
 
 /** Style definitions keyed by style id. Shape owned by the styles ticket. */
 export type StyleSheetJSON = Record<string, Record<string, unknown>>
-/** Running head / page number settings. Shape owned by the headers/footers ticket. */
-export type HeaderFooterSettings = Record<string, unknown>
 /** Footnote numbering settings. Shape owned by the footnotes ticket. */
 export type FootnoteSettings = Record<string, unknown>
 
@@ -45,13 +46,14 @@ export const DEFAULT_TRIM_SIZE: TrimSizeId = 'us-5.5x8.5'
 export const DEFAULT_MARGINS: Margins = { top: 54, bottom: 54, inside: 63, outside: 45 }
 
 export * from './trim-sizes'
+export * from './header-footer'
 
 export function defaultBookSettings(): BookSettings {
   return {
     trimSize: DEFAULT_TRIM_SIZE,
     margins: { ...DEFAULT_MARGINS },
     styles: {},
-    headerFooter: {},
+    headerFooter: defaultHeaderFooter(),
     footnotes: {},
     surface: 'auto',
     view: 'spread',
