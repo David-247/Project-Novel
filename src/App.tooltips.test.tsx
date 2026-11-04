@@ -171,6 +171,40 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     act(() => useStore.getState().bookActions.resetBook())
   })
 
+  it('covers the Headers & page numbers dialog (custom header text fields included)', async () => {
+    await renderFullApp()
+    act(() => useStore.getState().findActions.closePanel())
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="book.headerFooter"]')!))
+    const dialog = await screen.findByRole('dialog', { name: 'Headers & page numbers' })
+    for (const sel of ['book.headerFooter.verso', 'book.headerFooter.recto']) {
+      act(() => void fireEvent.change(dialog.querySelector(`[data-control-id="${sel}"]`)!, { target: { value: 'custom' } }))
+    }
+    const ids = Array.from(dialog.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
+    for (const id of [
+      'book.headerFooter.verso',
+      'book.headerFooter.versoText',
+      'book.headerFooter.recto',
+      'book.headerFooter.rectoText',
+      'book.headerFooter.numberPosition',
+      'book.headerFooter.numberFormat',
+      'book.headerFooter.numberStart',
+      'book.headerFooter.frontMatter',
+      'book.headerFooter.restart',
+      'book.headerFooter.suppressHeader',
+      'book.headerFooter.suppressNumber',
+      'book.headerFooter.suppressBlank',
+      'book.details',
+      'book.headerFooter.done',
+    ]) {
+      expect(ids, id).toContain(id)
+    }
+    const problems = auditTooltipCoverage(document.body)
+    expect(problems, formatCoverageProblems(problems)).toEqual([])
+    act(() => void fireEvent.click(dialog.querySelector('[data-control-id="book.headerFooter.done"]')!))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Headers & page numbers' })).toBeNull())
+    act(() => useStore.getState().bookActions.resetBook())
+  })
+
   it('NEGATIVE: fails for a button with no tooltip entry', async () => {
     await renderFullApp(
       <>
