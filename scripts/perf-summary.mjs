@@ -59,12 +59,19 @@ export function toMarkdown(results, dir = 'perf-results') {
     md.push('')
   }
 
-  const styles = results.filter((r) => r.restyleMs !== undefined)
+  // The perf spec measures the sheet swap and the repagination separately; the acceptance scenario
+  // (e2e/phase2-acceptance.spec.ts) times the same edit through the Modify style dialog, end to end.
+  const styles = results.filter((r) => r.restyleMs !== undefined || r.chapterStyleEdit)
   if (styles.length) {
     md.push('#### Chapter Title style edit (style sheet swap < 100 ms; reflow complete < 1000 ms)', '')
-    md.push('| engine / OS | sheet swap ms | reflow complete ms | all drawn ms | chapters restyled |', '| --- | --- | --- | --- | --- |')
+    md.push('| scenario | engine / OS | sheet swap ms | reflow complete ms | all drawn ms | chapters restyled |', '| --- | --- | --- | --- | --- | --- |')
     for (const r of styles) {
-      md.push(`| ${pair(r)} | ${cell(r, r.restyleMs, 100)} | ${cell(r, r.repaginatedMs, 1000)} | ${cell(r, r.allDrawnMs, 3000)} | ${v(r.chaptersRestyled)} |`)
+      if (r.restyleMs !== undefined) {
+        md.push(`| ${r.scenario} | ${pair(r)} | ${cell(r, r.restyleMs, 100)} | ${cell(r, r.repaginatedMs, 1000)} | ${cell(r, r.allDrawnMs, 3000)} | ${v(r.chaptersRestyled)} |`)
+      } else {
+        const e = r.chapterStyleEdit
+        md.push(`| ${r.scenario} | ${pair(r)} | – | ${cell(r, e.ms, 1000)} | ${cell(r, e.allDrawnMs, 3000)} | – |`)
+      }
     }
     md.push('')
   }
