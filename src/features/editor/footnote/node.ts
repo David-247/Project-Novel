@@ -17,8 +17,9 @@ declare module '@tiptap/core' {
 
 /**
  * Footnote: an inline atom at the reference point. Its content (text with marks) is the note text,
- * so the note travels with its reference through copy/paste, undo, find & replace, save and
- * recovery, and deleting the reference deletes the note in the same step. The reference shows only
+ * so the note travels with its reference through copy/paste, undo, save and recovery, and find &
+ * replace searches and replaces it (find/search.ts); deleting the reference deletes the note in the
+ * same step. The reference shows only
  * its derived number (numbering.ts); the text is drawn at the bottom of the page by the footnotes
  * slice and edited in the anchored footnote editor.
  *

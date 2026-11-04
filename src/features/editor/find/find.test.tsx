@@ -427,3 +427,45 @@ describe('performance at 100k words', () => {
     expect(typeMs).toBeLessThan(200)
   }, 60_000)
 })
+
+describe('find & replace inside footnotes (note text travels with find)', () => {
+  const fn = (text: string): JSONContent => ({ type: 'footnote', content: [t(text)] })
+  const noted = { type: 'doc', content: [para(t('A cat'), fn('Source: the cat book.'), t(' sat.'))] }
+  const opts = (caseSensitive = false, wholeWord = false) => ({ caseSensitive, wholeWord })
+
+  it('searches note text, 1:1 with document positions; a match never spans the reference boundary', () => {
+    const ed = mountAll(noted)
+    const doc = ed.state.doc
+    const matches = findMatches(doc, 'cat', opts())
+    expect(matches.map((m) => doc.textBetween(m.from, m.to))).toEqual(['cat', 'cat'])
+    // The second is inside the note: its parent is the footnote node.
+    expect(doc.resolve(matches[1].from).parent.type.name).toBe('footnote')
+    // Joining body text and note text across the reference never matches.
+    expect(findMatches(doc, 'catSource', opts())).toEqual([])
+    expect(findMatches(doc, 'book. sat', opts())).toEqual([])
+    // Whole word: the reference is a boundary.
+    expect(findMatches(doc, 'Source', opts(true, true))).toHaveLength(1)
+  })
+
+  it('a current match inside a note selects and highlights its reference', () => {
+    const ed = mountAll(noted)
+    act(() => useStore.getState().findActions.openPanel('book'))
+    act(() => scanNow({ reveal: true }))
+    expect(getMatches()).toHaveLength(1)
+    expect(ed.state.selection.toJSON()).toEqual({ type: 'node', anchor: 6 })
+    const ref = ed.view.dom.querySelector('[data-footnote-ref]')!
+    expect(ref.classList.contains(CURRENT_CLASS)).toBe(true)
+  })
+
+  it('Replace All replaces in notes and body in one undo step', () => {
+    const ed = mountAll(noted)
+    act(() => useStore.getState().findActions.openPanel('cat'))
+    act(() => useStore.getState().findActions.setReplacement('dog'))
+    act(() => scanNow())
+    act(() => void replaceAll())
+    expect(ed.state.doc.textContent).toBe('A dogSource: the dog book. sat.')
+    expect(ed.state.doc.firstChild!.child(1).type.name).toBe('footnote')
+    act(() => void ed.commands.undo())
+    expect(ed.state.doc.firstChild!.child(1).textContent).toBe('Source: the cat book.')
+  })
+})
