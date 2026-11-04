@@ -204,11 +204,16 @@ export class PaginationEngine {
         prev = s
         // Geometry: lay out now, in the same task, so the browser never renders (lays out and paints
         // the whole book) one frame at the new width with the old page offsets.
-        if (s.book.trimSize !== p.book.trimSize || s.book.margins !== p.book.margins) this.runNow()
+        const geometry = s.book.trimSize !== p.book.trimSize || s.book.margins !== p.book.margins
+        const styles = s.book.styles !== p.book.styles
+        if (geometry) this.runNow()
         // Style definitions change block metrics (and data-break-before) without a doc change:
-        // re-measure the blocks that use a style whose resolved definition changed.
-        else if (s.book.styles !== p.book.styles) this.stylesChanged(p.book.styles, s.book.styles)
-        else if (s.layout.effectiveView !== p.layout.effectiveView) this.schedule()
+        // re-measure the blocks that use a style whose resolved definition changed. Checked even
+        // after a geometry pass: loading a project replaces trim, margins and styles at once, and
+        // that pass ran before React rendered the new style sheet (its measurements are stale for
+        // the restyled blocks).
+        if (styles) this.stylesChanged(p.book.styles, s.book.styles)
+        if (!geometry && !styles && s.layout.effectiveView !== p.layout.effectiveView) this.schedule()
       }),
       onInvalidate(() => this.invalidate()),
       // Re-break only (reservations, data-break-before, chapters): measurements stay valid.
