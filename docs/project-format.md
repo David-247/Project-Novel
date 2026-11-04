@@ -133,7 +133,7 @@ the file is created at the next save.
 | Field          | Type    | Notes                                                                                         |
 | -------------- | ------- | --------------------------------------------------------------------------------------------- |
 | `format`       | string  | Always `"novel-book"`.                                                                        |
-| `version`      | integer | Format version. Current: `1`.                                                                 |
+| `version`      | integer | Format version. Current: `1`. A higher version (a newer Novel's file) is read as far as this version understands it and guarded; see "Validation on open". |
 | `trimSize`     | string  | Trim size id from the list below. Default `"us-5.5x8.5"`.                                     |
 | `margins`      | object  | `{ top, bottom, inside, outside }` in points (1/72 in), each a number from 0 to 7200. Default `{ 54, 54, 63, 45 }`. `inside` is the binding side, `outside` the fore-edge. |
 | `styles`       | object  | Style definitions keyed by style id. Owned by the styles feature; default `{}`.               |
@@ -202,12 +202,21 @@ built-in Footnote Text style in `styles` (`footnote-text`).
   before the first overwrite, the original is copied to `book.damaged-<timestamp>.json` in the project folder (best
   effort; an unreadable file is read again at that moment). Novel never deletes these copies. Creating a project
   (New Project, Save As) always writes book.json. The warning clears when book.json is written or the project closes.
+- A `version` higher than this Novel's (an integer above `1`): the file was written by a newer Novel. Its fields are
+  read as usual (invalid ones fall back to defaults, unknown top-level keys are kept), and the status bar warns
+  "book.json was saved by a newer version of Novel ...". The file is then guarded exactly like a damaged one: saves
+  do not write it until the user changes a book setting, and just before the first overwrite the original is copied
+  to `book.newer-<timestamp>.json`. That overwrite is written as version `1`.
 - A field with an invalid value (unknown `trimSize`, a margin that is not a number from 0 to 7200, `styles`,
   `headerFooter` or `footnotes` that is not an object, unknown `surface` or `view`) falls back to its default. The
   other fields are kept, the status bar lists what was replaced, and the next save rewrites the file. A missing field is simply the default, with no
   warning.
 - **Unknown top-level keys are kept** and written back on save, so a newer Novel's additions survive. The contents of
   `styles`, `headerFooter` and `footnotes` are opaque to this part of Novel and are preserved as they are.
+- **Nested unknown keys are not preserved, except where noted:** an unknown key inside `margins` is dropped when
+  book.json is next written. The exceptions are the records in `styles` (unknown keys of a style record are kept),
+  the top level of `headerFooter` (kept; not inside `verso`, `recto` or `pageNumber`) and `footnotes` (kept). This is
+  why a newer file is copied aside before it is first replaced.
 
 Unsaved settings count as unsaved changes: the save status, the unsaved-changes prompts on close and quit, autosave
 and crash recovery treat them exactly like unsaved text.

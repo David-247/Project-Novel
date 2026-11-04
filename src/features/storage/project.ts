@@ -97,7 +97,8 @@ function isProjectDirty(p: DocumentProvider): boolean {
 
 /**
  * Read book.json: a missing file (Phase 1 project) gives defaults silently; a damaged or unreadable one
- * gives defaults plus a status warning. manuscript.json is never touched.
+ * gives defaults plus a status warning; one from a newer Novel gives its settings (as far as they are
+ * understood) plus a warning, and is guarded like a damaged one. manuscript.json is never touched.
  */
 async function readBookFile(folder: string): Promise<{
   settings: BookSettings
@@ -116,35 +117,45 @@ async function readBookFile(folder: string): Promise<{
     return {
       settings: defaultBookSettings(),
       warning: bookWarningText(['the whole file'], true),
-      guard: { original: null },
+      guard: { original: null, kind: 'damaged' },
     }
   }
-  const { settings, warnings } = parseBook(text)
+  const { settings, warnings, newerVersion } = parseBook(text)
+  if (newerVersion !== undefined) {
+    // Written by a newer Novel: rewriting it would drop what this version does not know (nested keys
+    // included), so it is only replaced once the user changes a book setting, after a copy is kept.
+    return { settings, warning: bookWarningText(warnings, true, newerVersion), guard: { original: text, kind: 'newer' } }
+  }
   const whole = warnings.length === 1 && warnings[0] === 'the whole file'
   return {
     settings,
     warning: warnings.length ? bookWarningText(warnings, whole) : null,
-    guard: whole ? { original: text } : null,
+    guard: whole ? { original: text, kind: 'damaged' } : null,
   }
 }
 
 /**
- * book.json was unreadable or wholly damaged when opened: saves leave it alone until the user changes a book
- * setting. `original` is its text if it could be read (null: read failed, retried before the first overwrite).
+ * book.json was unreadable, wholly damaged, or from a newer Novel when opened: saves leave it alone until the
+ * user changes a book setting. `original` is its text if it could be read (null: read failed, retried before
+ * the first overwrite). `kind` names the copy kept aside (`book.damaged-*` / `book.newer-*`).
  */
 interface BookGuard {
   original: string | null
+  kind: 'damaged' | 'newer'
 }
 let bookGuard: BookGuard | null = null
 
-/** Copy the damaged/unreadable book.json aside as `book.damaged-<timestamp>.json`. Best effort; never throws. */
-async function keepDamagedBook(folder: string, guard: BookGuard): Promise<void> {
+/**
+ * Copy the guarded book.json aside as `book.damaged-<timestamp>.json` (damaged / unreadable) or
+ * `book.newer-<timestamp>.json` (from a newer Novel). Best effort; never throws.
+ */
+async function keepGuardedBook(folder: string, guard: BookGuard): Promise<void> {
   try {
     const original = guard.original ?? (await readTextFile(joinPath(folder, BOOK_FILE), BOOK_FILE))
     const stamp = new Date().toISOString().replace(/[^0-9A-Za-z-]/g, '-')
-    await writeFileAtomic(joinPath(folder, `book.damaged-${stamp}.json`), original, 'book.json copy')
+    await writeFileAtomic(joinPath(folder, `book.${guard.kind}-${stamp}.json`), original, 'book.json copy')
   } catch (e) {
-    console.warn('Keeping a copy of the damaged book.json failed:', e)
+    console.warn(`Keeping a copy of the ${guard.kind} book.json failed:`, e)
   }
 }
 
@@ -393,9 +404,9 @@ async function writeProject(
     // The write lock keeps this from overlapping an autosave snapshot.
     await withWriteLock(async () => {
       await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), text, MANUSCRIPT_FILE)
-      // An unreadable / damaged book.json is only replaced once the user changed a book setting.
+      // An unreadable / damaged / newer book.json is only replaced once the user changed a book setting.
       if (!bookGuard || isBookDirty()) {
-        if (bookGuard) await keepDamagedBook(folder, bookGuard)
+        if (bookGuard) await keepGuardedBook(folder, bookGuard)
         await writeFileAtomic(joinPath(folder, BOOK_FILE), bookText, BOOK_FILE)
         bookGuard = null
         actions().setBookWarning(null)

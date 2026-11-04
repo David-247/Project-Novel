@@ -224,6 +224,31 @@ describe('an unreadable or damaged book.json is not silently overwritten', () =>
     expect(asides()).toEqual([])
   })
 
+  it('a book.json from a newer Novel loads with a warning, is left alone until a book change, then is copied aside', async () => {
+    await createProject()
+    const newer = JSON.stringify({ format: 'novel-book', version: 2, trimSize: 'uk-a5', surface: 'dark', margins: { top: 50, gutterMirror: true } })
+    backend.files.set(BOOK, newer)
+    await launch()
+    await reopen()
+    expect(book()).toMatchObject({ trimSize: 'uk-a5', surface: 'dark' })
+    expect(useStore.getState().project.bookWarning).toMatch(/newer version of Novel.*left as it is/)
+    const newerAsides = () => [...backend.files.keys()].filter((k) => k.startsWith(`${ROOT}/book.newer-`))
+    // A text-only save (and an autosave snapshot) never rewrites it.
+    editor.update(textDoc('typed'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(BOOK)).toBe(newer)
+    expect(newerAsides()).toEqual([])
+    // A book change: the original is kept aside first, then the file is written by this version.
+    bookActions().setView('single')
+    expect(await saveProject()).toBe(true)
+    expect(newerAsides()).toHaveLength(1)
+    expect(backend.files.get(newerAsides()[0])).toBe(newer)
+    expect(onDisk()).toMatchObject({ version: 1, trimSize: 'uk-a5', surface: 'dark', view: 'single' })
+    expect(asides()).toEqual([])
+    expect(useStore.getState().project.bookWarning).toBeNull()
+  })
+
   it('the warning survives a later set-aside note and clears when the project closes', async () => {
     await createProject()
     backend.files.set(BOOK, 'garbage')

@@ -29,6 +29,12 @@ export interface BookParseResult {
   settings: BookSettings
   /** Plain-language notes about values that were replaced by defaults (empty when all was fine). */
   warnings: string[]
+  /**
+   * The file's `version` when it is higher than `BOOK_VERSION` (written by a newer Novel). Its settings
+   * are still read as far as this version knows them; storage then treats the file like a damaged one:
+   * left untouched until a book setting changes, and copied aside before it is replaced.
+   */
+  newerVersion?: number
 }
 
 function normalizeMargins(v: unknown, warnings: string[]): Margins {
@@ -84,6 +90,8 @@ export function normalizeBook(data: unknown): BookParseResult {
   const extra: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(data)) if (!KNOWN_KEYS.has(k)) extra[k] = v
   if (Object.keys(extra).length > 0) settings.extra = extra
+  const v = data.version
+  if (typeof v === 'number' && Number.isInteger(v) && v > BOOK_VERSION) return { settings, warnings, newerVersion: v }
   return { settings, warnings }
 }
 
@@ -100,9 +108,17 @@ export function parseBook(text: string): BookParseResult {
 
 /**
  * One status-bar sentence for the parts of book.json that were replaced by defaults. `keptOnDisk` is true
- * when the file is left untouched until the user changes a book setting (unreadable or wholly damaged file).
+ * when the file is left untouched until the user changes a book setting (unreadable or wholly damaged file,
+ * or a file from a newer Novel: `newerVersion`).
  */
-export function bookWarningText(warnings: string[], keptOnDisk = false): string {
+export function bookWarningText(warnings: string[], keptOnDisk = false, newerVersion?: number): string {
+  if (newerVersion !== undefined) {
+    return (
+      `${BOOK_FILE} was saved by a newer version of Novel (format version ${newerVersion}), so its settings are used ` +
+      `as far as this version understands them. Your manuscript was not changed. The file is left as it is until you ` +
+      `change a book setting; a copy is kept before it is replaced.`
+    )
+  }
   const whole = warnings.length === 1 && warnings[0] === 'the whole file'
   const what = whole
     ? `${BOOK_FILE} is damaged or could not be read`
