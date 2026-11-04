@@ -11,7 +11,7 @@
  * Shortcut specs use Tiptap notation ("Mod" = Cmd on macOS, Ctrl elsewhere) and are rendered per
  * platform by the shared Tooltip.
  */
-import { FIND_CONTROLS, HISTORY_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { SURFACE_CONTROLS } from '@/shared/theme'
 import { TRIM_SIZES } from '@/shared/book'
@@ -206,6 +206,11 @@ const BOOK_TOOLTIPS: Record<string, TooltipCopy> = {
   ),
 }
 
+/** Insert menu: the button, its items and the chapter-start / ornament options (editor slice INSERT_CONTROLS). */
+const INSERT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  INSERT_CONTROLS.map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: c.shortcut }]),
+)
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -219,6 +224,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...SURFACE_TOOLTIPS,
   ...FILE_TOOLTIPS,
   ...BOOK_TOOLTIPS,
+  ...INSERT_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
 })

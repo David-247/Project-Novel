@@ -14,6 +14,7 @@ import { UndoRedo } from '@tiptap/extensions'
 import { BlockFormat, BLOCK_FORMAT_TYPES } from './toolbar/block-format'
 import { FindHighlight } from './find/plugin'
 import { BlockStyles } from './styles/block-styles'
+import { BookBreaks } from './breaks/nodes'
 
 /**
  * Phase 1 base schema.
@@ -64,6 +65,9 @@ export function createEditorExtensions(): Extensions {
     // Subheading for H2/H3), data-break-before decorations, setBlockStyle / clearDirectFormatting,
     // Enter chaining, Mod-Alt-0 Body, Mod-Alt-1 Chapter Title, Mod-\ clear direct formatting.
     BlockStyles,
+    // Chapter, page and scene breaks: pageBreak / sceneBreak atoms, New chapter, Mod-Enter,
+    // Mod-Shift-Enter, Mod-Alt-Enter, the *** / ### input rules and the page-break / <hr> paste mapping.
+    BookBreaks,
     // --- end styles -----------------------------------------------------------------------
   ]
 }

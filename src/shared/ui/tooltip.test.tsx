@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Button, Checkbox, Dialog, IconButton, TextInput, Tooltip, TooltipProvider } from '.'
@@ -196,6 +196,28 @@ describe('Tooltip', () => {
     const button = renderBold()
     fireEvent.contextMenu(button)
     expect(screen.getByRole('tooltip')).toBeInTheDocument()
+  })
+
+  it('a long-press tooltip stays open after a touch pointerleave, a mouse leave closes it', () => {
+    vi.useFakeTimers()
+    try {
+      const button = renderBold()
+      const leave = (pointerType: string) => {
+        const ev = createEvent.pointerOut(button)
+        Object.defineProperty(ev, 'pointerType', { value: pointerType })
+        fireEvent(button, ev)
+      }
+      fireEvent.contextMenu(button)
+      expect(screen.getByRole('tooltip')).toBeInTheDocument()
+      leave('touch')
+      act(() => void vi.advanceTimersByTime(200))
+      expect(screen.getByRole('tooltip')).toBeInTheDocument()
+      leave('mouse')
+      act(() => void vi.advanceTimersByTime(200))
+      expect(screen.queryByRole('tooltip')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('only one tooltip is open at a time', () => {
