@@ -10,6 +10,11 @@ export function getPaginationDebug() {
   return {
     /** An engine is mounted, has laid out at least once, and no pass is pending. */
     settled: !!engine && !!snap && !engine.pending,
+    /**
+     * "Reflow complete": the page model is published for the current document and geometry and the
+     * pages in view are drawn; off-screen blocks may still be receiving their offsets.
+     */
+    modelSettled: !!engine && engine.modelCurrent,
     /** Run a pending pass now. */
     flush: () => engine?.flush(),
     /** Px reserved at the bottom of each page (bottom reservations). */

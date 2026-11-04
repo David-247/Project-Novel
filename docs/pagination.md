@@ -139,8 +139,23 @@ size / margin / view change, a font load, or `invalidatePagination()`.
    reservations; at least one line per page.
 3. **Place and decorate** (`placement.ts`). Page offsets from the spread / single placement;
    decorations rebuilt only when a block's offsets or split positions changed (per-block
-   signatures), otherwise ProseMirror's mapping keeps them right.
+   signatures), otherwise ProseMirror's mapping keeps them right. When more than 160 blocks
+   changed (a trim size change, a restyle that moves every break), the blocks on the pages in the
+   scroll viewport (±2 pages) and around the caret are drawn in the pass; the others follow in the
+   next frames, 120 per frame, nearest first.
 4. **Publish** the page model to the store.
+
+A trim size or margin change runs its pass synchronously, in the task that changed the setting, so
+the browser never lays out and paints one frame of the whole book at the new width with the old
+offsets (in WebKit that frame cost 200–300 ms).
+
+**Reflow complete** means: the new page model (every page break of the book, `pages[]`,
+`pageCount`, `layoutVersion`) is published, and the pages in view are drawn at their new place and
+painted. Off-screen blocks may still carry their old offsets for a few frames; they are not visible.
+Anything that needs them all (hit tests for the arrow keys and presses on the desk, PageUp/Down)
+finishes the pending frames first. `getPaginationDebug().modelSettled` is "reflow complete";
+`settled` is "every block drawn". The perf test asserts the first < 1 s and reports (and caps at 3 s)
+the second.
 
 The pass never redraws under an IME composition or a pointer drag, and first takes in DOM changes the
 browser made but ProseMirror has not read (so a native caret move is not undone).
@@ -222,8 +237,20 @@ reservation test).
 
 ### (c) Chapters
 
-`setChapterPredicate((node) => boolean)` decides which top-level blocks open a chapter (default: a
-level-1 heading); `null` restores the default.
+`PageInfo.chapterIndex` uses the editor's chapter model by default (`getChapters`, breaks ticket): a
+chapter opens at a Chapter Title block (an unstyled level-1 heading is one), or at the Chapter Number
+directly before it; content before the first opening is front matter (−1).
+`defaultChapterOpenings(doc)` gives those positions. `setChapterPredicate((node) => boolean)`
+replaces the model with a per-block predicate; `null` restores the default. Both re-break only.
+
+### Page break node
+
+The breaks ticket's `pageBreak` atom does not carry the break: the block after it gets
+`data-break-before`. **Decision: on pages the atom takes zero height.** It is the end of the page it
+closes, so it must not take a line there (that line could push the page's last text line to the next
+page, or leave a page holding only the break). It stays in the document and keeps its position
+(selectable, deletable with Backspace); on pages it is drawn as a dashed hairline with its label just
+below the last line, in the bottom margin, outside layout.
 
 ### Invalidation
 

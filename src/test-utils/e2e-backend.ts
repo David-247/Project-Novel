@@ -152,6 +152,8 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     // ---- Pagination (Phase 2) ----
     /** The engine has laid out the current document and no reflow is pending. */
     paginationSettled: () => getPaginationDebug().settled,
+    /** Page model current and the pages in view drawn (off-screen offsets may still be applying). */
+    paginationModelSettled: () => getPaginationDebug().modelSettled,
     /** Px reserved at the bottom of each page. */
     paginationReserved: () => getPaginationDebug().reserved,
     /** Engine internals for diagnostics: line count and the line range of each page. */

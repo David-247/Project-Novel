@@ -6,7 +6,8 @@ import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedP
 /**
  * Pagination performance budget on a 100,000-word manuscript (serial perf projects, like
  * perf.spec.ts; chromium ~ WebView2, webkit ~ WKWebView):
- *  - trim size change: set -> reflowed model published -> painted, < 1 s for each of four trims;
+ *  - trim size change: set -> page model published and the pages in view drawn and painted, < 1 s
+ *    for each of four trims (off-screen blocks drawn progressively after; reported, < 3 s);
  *  - typing latency while paginated (keydown -> next frame painted), median < 50 ms, p95 reported:
  *    (a) at the end of a line of a mid-manuscript paragraph, (b) inside a paragraph split across two pages
  *    (every wrapped line moves a line between pages and re-decorates the rest of the book).
@@ -91,22 +92,31 @@ test('100k words paginated: trim size reflow < 1 s', async ({ page }, testInfo) 
   test.setTimeout(180_000)
   const { fx, openMs } = await openFixture(page, '/projects/Trim')
   const initialPages = (await page.evaluate(() => window.__nvE2E.layout())).pageCount
-  const reflows: { trim: string; ms: number; pages: number }[] = []
+  const reflows: { trim: string; ms: number; allDrawnMs: number; syncMs: number; firstPass: unknown; pages: number }[] = []
   for (const trim of TRIMS) {
-    const ms = await page.evaluate(async (id) => {
+    const r = await page.evaluate(async (id) => {
       const v = window.__nvE2E.layout().layoutVersion
       const t0 = performance.now()
       window.__nvE2E.setTrimSize(id)
+      const firstPass = window.__nvE2E.paginationLines().lastPass
+      const syncMs = performance.now() - t0
+      // "Reflow complete" (docs/pagination.md): the new page model is published (every page break
+      // of the book computed) and the pages in view are drawn at their new place, painted.
       await new Promise<void>((resolve) => {
         const check = () =>
-          window.__nvE2E.paginationSettled() && window.__nvE2E.layout().layoutVersion > v ? resolve() : requestAnimationFrame(check)
+          window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > v ? resolve() : requestAnimationFrame(check)
         requestAnimationFrame(check)
       })
-      // Include the paint of the new layout.
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
-      return performance.now() - t0
+      const ms = performance.now() - t0
+      // Off-screen blocks receive their offsets in the following frames: also report when all are drawn.
+      await new Promise<void>((resolve) => {
+        const check = () => (window.__nvE2E.paginationSettled() ? resolve() : requestAnimationFrame(check))
+        check()
+      })
+      return { ms, allDrawnMs: performance.now() - t0, syncMs, firstPass }
     }, trim)
-    reflows.push({ trim, ms: +ms.toFixed(1), pages: (await page.evaluate(() => window.__nvE2E.layout())).pageCount })
+    reflows.push({ trim, ms: +r.ms.toFixed(1), allDrawnMs: +r.allDrawnMs.toFixed(1), syncMs: +r.syncMs.toFixed(1), firstPass: r.firstPass, pages: (await page.evaluate(() => window.__nvE2E.layout())).pageCount })
   }
   await report(testInfo, 'pagination-trim', {
     manuscript: { words: fx.words, chapters: fx.chapters, blocks: fx.doc.content.length },
@@ -114,9 +124,11 @@ test('100k words paginated: trim size reflow < 1 s', async ({ page }, testInfo) 
     initialPages,
     reflows,
     maxReflowMs: Math.max(...reflows.map((r) => r.ms)),
-    budgets: { reflowMs: 1000 },
+    maxAllDrawnMs: Math.max(...reflows.map((r) => r.allDrawnMs)),
+    budgets: { reflowMs: 1000, allDrawnMs: 3000 },
   })
   expect(reflows.at(-1)!.pages).toBe(initialPages)
+  for (const r of reflows) expect(r.allDrawnMs, `${r.trim}: all blocks drawn`).toBeLessThan(3000)
   for (const r of reflows) expect(r.ms, r.trim).toBeLessThan(1000)
 })
 

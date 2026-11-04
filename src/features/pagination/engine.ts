@@ -73,6 +73,24 @@ function domSelectionPending(view: EditorView): boolean {
   }
 }
 
+/** Above this many changed blocks, decorations are applied progressively (view first). */
+const PROGRESSIVE_MIN = 160
+/** Off-screen blocks drawn per follow-up frame. */
+const CHUNK = 120
+
+interface DirtyBlock {
+  /** Range of the block's decorations in the pass's list. */
+  a: number
+  z: number
+  pos: number
+  size: number
+  node: PMNode
+  sig: string
+  /** First and last page holding the block's lines. */
+  p0: number
+  p1: number
+}
+
 /** Spec carried by this slice's decorations (also identifies them). */
 interface ShiftSpec {
   nvShift: string
@@ -146,6 +164,8 @@ export class PaginationEngine {
   private destroyed = false
   private scrollAfterPass = false
   private deferrals = 0
+  /** The scheduled pass only finishes drawing off-screen blocks (nothing else changed). */
+  private catchUpOnly = false
 
   constructor(private view: EditorView) {
     currentEngine = this // eslint-disable-line @typescript-eslint/no-this-alias
@@ -154,7 +174,9 @@ export class PaginationEngine {
       useStore.subscribe((s) => {
         const p = prev
         prev = s
-        if (s.book.trimSize !== p.book.trimSize || s.book.margins !== p.book.margins) this.schedule()
+        // Geometry: lay out now, in the same task, so the browser never renders (lays out and paints
+        // the whole book) one frame at the new width with the old page offsets.
+        if (s.book.trimSize !== p.book.trimSize || s.book.margins !== p.book.margins) this.runNow()
         // Style definitions change block metrics (and data-break-before) without a doc change:
         // re-measure the blocks that use a style whose resolved definition changed.
         else if (s.book.styles !== p.book.styles) this.stylesChanged(p.book.styles, s.book.styles)
@@ -194,15 +216,24 @@ export class PaginationEngine {
   }
 
   /** Run a pass on the next animation frame (before paint). */
-  schedule(scrollIntoView = false) {
+  schedule(scrollIntoView = false, catchUp = false) {
     if (scrollIntoView) this.scrollAfterPass = true
+    if (!catchUp) this.catchUpOnly = false
     if (this.frame || this.destroyed) return
+    this.catchUpOnly = catchUp
     this.flushPending = true
     this.frame = requestAnimationFrame(() => {
       this.frame = 0
       this.flushPending = false
       this.run()
     })
+  }
+
+  /** Run a pass now, cancelling a scheduled one. */
+  private runNow() {
+    if (this.destroyed) return
+    this.scrollAfterPass = false
+    this.flush()
   }
 
   /** Run a pending pass now (tests, and callers that need the model synchronously). */
@@ -215,6 +246,31 @@ export class PaginationEngine {
 
   get pending() {
     return this.flushPending
+  }
+
+  /**
+   * The page model is current and the pages in view are drawn; only off-screen blocks may still be
+   * waiting for their offsets (progressive application after a full reflow).
+   */
+  get modelCurrent() {
+    return !!this.snapshot && (!this.flushPending || this.catchUpOnly)
+  }
+
+  /** Pages to draw first: those in the scroll viewport (new placement), ±2. */
+  private viewWindow(root: HTMLElement, scale: number, placement: Placement): [number, number] {
+    let lo = 0
+    let hi = 3
+    let scroller: HTMLElement | null = root.parentElement
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+    if (scroller) {
+      const top = root.getBoundingClientRect().top
+      const v = scroller.getBoundingClientRect()
+      const [a] = placement.pagesInRow(placement.rowAtY((v.top - top) / scale))
+      const [, b] = placement.pagesInRow(placement.rowAtY((v.bottom - top) / scale))
+      lo = a
+      hi = b
+    }
+    return [lo - 2, hi + 2]
   }
 
   getSnapshot(): LayoutSnapshot | null {
@@ -395,9 +451,8 @@ export class PaginationEngine {
     const decos: Decoration[] = []
     const current = paginationKey.getState(view.state) ?? DecorationSet.empty
     const geometryChanged = key !== this.lastKey
-    let changed = geometryChanged
-    // Blocks whose decorations differ from what is drawn: [start in `decos`, end, pos, node size].
-    const dirty: [number, number, number, number][] = []
+    // Blocks whose decorations differ from what is drawn.
+    const dirty: DirtyBlock[] = []
     let lineCursor = 0
     for (let bi = 0; bi < blockNodes.length; bi++) {
       const m = blockMetrics[bi]
@@ -410,19 +465,16 @@ export class PaginationEngine {
       const start = decos.length
       this.decorateBlock(node, pos, first, m, pageOfLine, offsets, (li) => posOfLine(li), decos, sigParts)
       const sig = sigParts.join(',')
-      if (!geometryChanged) {
-        // An unchanged node compares with its last signature; an edited one with the decorations
-        // ProseMirror mapped through the edit (usually still right: then nothing is redrawn).
-        // A node instance used more than once in the document (not in prevTops) has no single last
-        // signature: compare with what is drawn at this position.
-        const known = this.prevTops.has(node) ? this.lastSigs.get(node) : undefined
-        const last = known ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1)
-        if (last !== sig) {
-          changed = true
-          dirty.push([start, decos.length, pos, node.nodeSize])
-        }
+      // An unchanged node compares with its last applied signature; an edited one (or a node instance
+      // used twice) with the decorations ProseMirror mapped through the edit.
+      const known = !geometryChanged && this.prevTops.has(node) ? this.lastSigs.get(node) : undefined
+      const last = geometryChanged ? null : (known ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1))
+      if (last !== sig) {
+        const lastLine = Math.max(first, first + nLines - 1)
+        dirty.push({ a: start, z: decos.length, pos, size: node.nodeSize, node, sig, p0: pageOfLine[first] ?? 0, p1: pageOfLine[lastLine] ?? 0 })
+        // Recorded as applied only once it is drawn (below).
+        this.lastSigs.delete(node)
       }
-      this.lastSigs.set(node, sig)
     }
 
     const t3 = performance.now()
@@ -431,21 +483,44 @@ export class PaginationEngine {
 
     const t4 = performance.now()
     this.lastKey = key
-    if (changed) {
-      // Few blocks changed (typing moved a split point): patch the drawn set, so ProseMirror redraws
-      // only those blocks. Otherwise (a line moved between pages, geometry) rebuild it.
+    let deferred = 0
+    if (dirty.length) {
+      // Apply the blocks on the pages in view (and around the caret) now; on a long book, the rest
+      // in later frames, CHUNK blocks at a time, nearest first (see "Reflow complete", pagination.md).
+      const win = this.viewWindow(root, scale, placement)
+      const caretPage = pageAt(pages, view.state.selection.head)
+      const inWin = (d: DirtyBlock) => (d.p1 >= win[0] && d.p0 <= win[1]) || (d.p1 >= caretPage - 1 && d.p0 <= caretPage + 1)
+      let apply = dirty
+      if (dirty.length > PROGRESSIVE_MIN) {
+        const near = dirty.filter(inWin)
+        const rest = dirty.filter((d) => !inWin(d))
+        const centre = (win[0] + win[1]) / 2
+        rest.sort((x, y) => Math.abs(x.p0 - centre) - Math.abs(y.p0 - centre))
+        apply = near.concat(rest.slice(0, CHUNK))
+        deferred = dirty.length - apply.length
+      }
       let next: DecorationSet
-      if (!geometryChanged && dirty.length <= 8) {
+      if (apply.length === dirty.length && (geometryChanged || dirty.length > 8)) {
+        next = DecorationSet.create(doc, decos)
+      } else {
+        // Patch the drawn set block by block, so ProseMirror redraws only those blocks.
         next = current
-        for (const [a, z, pos, size] of dirty) {
-          next = next.remove(next.find(pos, pos + size, (spec) => (spec as Partial<ShiftSpec>).nvShift !== undefined).filter((d) => d.from >= pos && d.to <= pos + size))
-          next = next.add(doc, decos.slice(a, z))
+        const removed: Decoration[] = []
+        const added: Decoration[] = []
+        for (const d of apply) {
+          for (const old of next.find(d.pos, d.pos + d.size, (spec) => (spec as Partial<ShiftSpec>).nvShift !== undefined))
+            if (old.from >= d.pos && old.to <= d.pos + d.size) removed.push(old)
+          for (let i = d.a; i < d.z; i++) added.push(decos[i])
         }
-      } else next = DecorationSet.create(doc, decos)
+        next = next.remove(removed).add(doc, added)
+      }
+      for (const d of apply) this.lastSigs.set(d.node, d.sig)
       const tr = view.state.tr.setMeta(paginationKey, next).setMeta('addToHistory', false)
       if (this.scrollAfterPass && view.hasFocus()) tr.scrollIntoView()
       view.dispatch(tr)
+      if (deferred) this.schedule(false, true)
     }
+    const changed = dirty.length > 0
     this.scrollAfterPass = false
     const t5 = performance.now()
 
@@ -467,6 +542,7 @@ export class PaginationEngine {
       totalMs: t6 - t0,
       redecorated: changed,
       dirtyBlocks: dirty.length,
+      deferredBlocks: deferred,
       geometryChanged,
     }
   }

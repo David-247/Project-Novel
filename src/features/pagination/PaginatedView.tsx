@@ -212,7 +212,8 @@ function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement:
 /** The engine's layout, after running a pass that is still pending (the snapshot would be stale). */
 function freshSnapshot() {
   const engine = getEngine()
-  if (engine?.pending) engine.flush()
+  // Also finishes a progressive reflow: hit tests need every block at its page.
+  for (let i = 0; engine?.pending && i < 32; i++) engine.flush()
   return engine?.getSnapshot() ?? null
 }
 
