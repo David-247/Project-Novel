@@ -9,7 +9,8 @@ import { installLayoutPolyfills } from '../jsdom-polyfills.test-util'
 import { closeFootnoteEditor, getFootnoteEditing } from './editing'
 import { footnotesOf } from './numbering'
 import { getFootnotes } from './api'
-import { activeFootnoteView } from './FootnoteEditor'
+import { activeFootnoteView, flattenPasted } from './FootnoteEditor'
+import { Fragment, Slice } from '@tiptap/pm/model'
 
 beforeAll(installLayoutPolyfills)
 afterEach(() => {
@@ -191,6 +192,69 @@ describe('footnote editor (nested view, unified undo)', () => {
     await openOn(ed, 2)
     act(() => void ed.view.dispatch(ed.state.tr.delete(2, 2 + ed.state.doc.firstChild!.child(1).nodeSize)))
     expect(getFootnoteEditing()).toBeNull()
+  })
+
+  it('CRITICAL: a document load closes the note editor; its edits never reach another document', async () => {
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    await openOn(ed, 2)
+    const inner = activeFootnoteView()!
+    // Open / recent / new / recovery all load through setDocJSON.
+    act(() => setDocJSON({ type: 'doc', content: [p(text('Another book entirely.'))] }))
+    expect(getFootnoteEditing()).toBeNull()
+    // Even a stale nested view (a load the editor missed) forwards nothing.
+    act(() => void inner.dispatch(inner.state.tr.insertText('X', 1)))
+    expect(ed.state.doc.textContent).toBe('Another book entirely.')
+  })
+
+  it('forwards nothing when the manuscript no longer holds this note (state replaced without a transaction)', async () => {
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    await openOn(ed, 2)
+    const inner = activeFootnoteView()!
+    const other = ed.state.apply(ed.state.tr.insertText('zz', 1))
+    act(() => ed.view.updateState(other))
+    act(() => void inner.dispatch(inner.state.tr.insertText('X', 1)))
+    expect(ed.state.doc.textContent).toBe('zzanoteb')
+    expect(getFootnoteEditing()).toBeNull()
+  })
+
+  it('the first Mod-z after inserting a footnote undoes only the typing in it', async () => {
+    const ed = mount([p(text('Hello'))])
+    act(() => void ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, 6))))
+    act(() => void ed.commands.insertFootnote())
+    await flush()
+    await screen.findByTestId('footnote-editor')
+    const inner = activeFootnoteView()!
+    act(() => void inner.dispatch(inner.state.tr.insertText('typed', 0)))
+    expect(ed.state.doc.firstChild!.child(1).textContent).toBe('typed')
+    act(() => {
+      inner.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    expect(ed.state.doc.firstChild!.childCount).toBe(2)
+    expect(ed.state.doc.firstChild!.child(1).type.name).toBe('footnote')
+    expect(ed.state.doc.firstChild!.child(1).textContent).toBe('')
+  })
+
+  it('pasted paragraphs become one run of text joined by spaces', () => {
+    const ed = mount([p(text('x'))])
+    const schema = ed.schema
+    const slice = new Slice(Fragment.from([schema.nodes.paragraph.create(null, schema.text('One.')), schema.nodes.paragraph.create(null, schema.text('Two.'))]), 0, 0)
+    const flat = flattenPasted(slice, schema)
+    expect(flat.content.textBetween(0, flat.content.size)).toBe('One. Two.')
+    expect(flat.openStart).toBe(0)
+  })
+
+  it('Tab and Shift-Tab cycle between the note and Done (never out of the popover)', async () => {
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const box = await openOn(ed, 2)
+    const done = document.querySelector<HTMLElement>('[data-control-id="footnote.done"]')!
+    box.focus()
+    fireEvent.keyDown(box, { key: 'Tab' })
+    expect(document.activeElement).toBe(done)
+    fireEvent.keyDown(done, { key: 'Tab' })
+    expect(document.activeElement).toBe(box)
+    fireEvent.keyDown(box, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(done)
+    expect(getFootnoteEditing()).not.toBeNull()
   })
 })
 

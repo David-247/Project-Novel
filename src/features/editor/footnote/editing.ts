@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { subscribeDocLoad, subscribeEditor } from '../controller'
 
 /**
  * Which footnote's text is being edited (the anchored footnote editor, FootnoteEditor.tsx).
@@ -16,7 +17,18 @@ const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
 
 /** Open the footnote editor on the footnote node at `pos`. */
+let guarded = false
+
 export function openFootnoteEditor(pos: number): void {
+  if (!guarded) {
+    // A document load (open, open recent, new project, recovery restore: each replaces the editor
+    // state without a transaction) or another editor instance invalidates the open note: close it,
+    // so it can never send its edits into a different document. (Subscribed on first use: the
+    // controller module imports this one through the extensions.)
+    guarded = true
+    subscribeDocLoad(closeFootnoteEditor)
+    subscribeEditor(closeFootnoteEditor)
+  }
   current = { pos, seq: ++seq }
   emit()
 }
