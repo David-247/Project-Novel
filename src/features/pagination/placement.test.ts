@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_MARGINS } from '@/shared/book'
-import { LOCAL_TRIM_IDS, resolvePageGeometry } from './geometry'
+import { resolvePageGeometry } from './geometry'
 import { DESK_PAD, effectiveView, placePages, resolveScale, ROW_GAP, stepZoom } from './placement'
 
 const g = resolvePageGeometry('us-5.5x8.5', DEFAULT_MARGINS)
 
-describe('resolvePageGeometry (local adapter)', () => {
+describe('resolvePageGeometry (book settings pageBox)', () => {
   it('converts the trim to px at 96/in and margins from points at 96/72', () => {
     expect(g.pageWidth).toBe(528)
     expect(g.pageHeight).toBe(816)
@@ -14,11 +14,9 @@ describe('resolvePageGeometry (local adapter)', () => {
     expect(g.contentHeight).toBe(816 - 144)
   })
 
-  it('knows the catalog ids and falls back for unknown ones', () => {
-    for (const id of ['us-5x8', 'us-5.25x8', 'us-5.5x8.5', 'us-6x9', 'us-mass-market', 'a5', 'b-format', 'royal', 'demy'])
-      expect(LOCAL_TRIM_IDS).toContain(id)
+  it('uses the catalog and falls back for unknown ids', () => {
     expect(resolvePageGeometry('us-6x9', DEFAULT_MARGINS)).toMatchObject({ pageWidth: 576, pageHeight: 864 })
-    expect(resolvePageGeometry('a5', DEFAULT_MARGINS).pageWidth).toBeCloseTo((148 / 25.4) * 96, 1)
+    expect(resolvePageGeometry('uk-a5', DEFAULT_MARGINS).pageWidth).toBeCloseTo((148 / 25.4) * 96, 1)
     expect(resolvePageGeometry('nope', DEFAULT_MARGINS)).toEqual(g)
   })
 

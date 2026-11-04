@@ -146,6 +146,8 @@ export class PaginationEngine {
         const p = prev
         prev = s
         if (s.book.trimSize !== p.book.trimSize || s.book.margins !== p.book.margins) this.schedule()
+        // Style definitions change block metrics (and data-break-before) without a doc change.
+        else if (s.book.styles !== p.book.styles) this.invalidate()
         else if (s.layout.effectiveView !== p.layout.effectiveView) this.schedule()
       }),
       onInvalidate(() => this.invalidate()),

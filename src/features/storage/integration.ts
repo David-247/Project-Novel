@@ -3,6 +3,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { startAutosave, stopAutosave } from './autosave'
+import { isBookDirty } from './book-file'
 import { exitApp, MENU_EVENTS } from './ipc'
 import {
   clearRecoveryData,
@@ -31,7 +32,7 @@ export function prepareToExit(action: 'closing' | 'quitting'): Promise<boolean> 
     try {
       if (!(await confirmUnsavedChanges(action))) return false
       await stopAutosave()
-      if (!hasPendingRecovery() && !getDocumentProvider()?.isDirty()) await clearRecoveryData()
+      if (!hasPendingRecovery() && !getDocumentProvider()?.isDirty() && !isBookDirty()) await clearRecoveryData()
       return true
     } finally {
       exitFlow = null

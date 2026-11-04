@@ -28,6 +28,11 @@ export const TOOLBAR_CONTROLS = {
   firstLineIndent: { id: 'toolbar.firstLineIndent', label: 'First-line indent' },
   indentDecrease: { id: 'toolbar.indentDecrease', label: 'Decrease indent', shortcut: 'Mod-[' },
   indentIncrease: { id: 'toolbar.indentIncrease', label: 'Increase indent', shortcut: 'Mod-]' },
+  // Styles group (paragraph and chapter styles)
+  stylePicker: { id: 'styles.picker', label: 'Paragraph style', shortcut: ['Mod-Alt-0', 'Mod-Alt-1'] },
+  styleEdit: { id: 'styles.edit', label: 'Modify style' },
+  styleManage: { id: 'styles.manage', label: 'Manage styles' },
+  clearFormatting: { id: 'styles.clearFormatting', label: 'Clear direct formatting', shortcut: 'Mod-\\' },
 } as const satisfies Record<string, ToolbarControlMeta>
 
 export type ToolbarControlKey = keyof typeof TOOLBAR_CONTROLS

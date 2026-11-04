@@ -230,12 +230,11 @@ level-1 heading); `null` restores the default.
 - **PageUp / PageDown** move the caret to the first page of the previous / next spread and scroll that
   spread to the top (Shift extends the selection).
 - **Status bar**: "Pages 12–13 of 384" ("Page 1 of 384" for a single page).
-- **Paper**: page elements use only `--page-bg`, `--page-fg`, `--page-shadow`, `--desk-bg`,
-  `--spine-shadow`, each with a neutral fallback (white page, soft shadow, transparent desk). The paper
-  surfaces ticket defines them in `src/shared/theme`.
-- **Geometry**: `resolvePageGeometry(trimSize, margins)` (`geometry.ts`) is the single function that
-  turns book settings into px (96 px per inch, margins in points × 96/72). It is a temporary local
-  adapter until the book settings ticket's `pageBox` lands; swap it there.
+- **Paper**: page frames use the paper surfaces contract classes (`.nv-page`, `.nv-page--verso` /
+  `--recto` in a spread, `.nv-page-muted` for slots; tokens on `<html data-surface>`); the slice adds
+  geometry only. The page surface sets `--nv-pt` to 96/72 px (one point at 100 %), for style sizes.
+- **Geometry**: `resolvePageGeometry(trimSize, margins)` (`geometry.ts`) wraps the book settings
+  catalog's `pageBox` (96 px per inch, margins in points x 96/72).
 
 ## Tests and fixtures
 
@@ -249,7 +248,7 @@ level-1 heading); `null` restores the default.
   reservations; presses on margins.
 - Perf (`e2e/pagination-perf.spec.ts`, serial perf projects): trim reflow and typing latency.
 - Cross-engine fixture (`e2e/pagination-fixture.spec.ts`): the deterministic manuscript
-  (`e2e/fixtures/pagination-manuscript.ts`) in the bundled OFL font (`e2e/fixtures/fonts`, Libre
+  (`e2e/fixtures/pagination-manuscript.ts`) in the bundled OFL font, chapters breaking in `page` and `recto` mode, (`e2e/fixtures/fonts`, Libre
   Baskerville, `OFL.txt`) for every catalog trim size; writes total pages and chapter opening page
   indexes to `perf-results/pagination-fixture-<browser>-<platform>.json` for the acceptance
   comparison (tolerance: total ≤ max(2, 1 %), openings ± 1).

@@ -1,3 +1,7 @@
 export { useThemeFollow, applyThemeAttribute } from './use-theme-follow'
-export { contrastRatio, relativeLuminance, CONTRAST_PAIRS } from './contrast'
+export { resolveSurface, applySurfaceAttribute, useSurfaceFollow, SURFACE_CONTROLS, SURFACE_OPTIONS } from './surface'
+export type { ResolvedSurface } from './surface'
+export { SurfacePicker } from './SurfacePicker'
+export type { SurfacePickerProps } from './SurfacePicker'
+export { contrastRatio, relativeLuminance, CONTRAST_PAIRS, SURFACE_CONTRAST_PAIRS } from './contrast'
 export type { ContrastPair } from './contrast'

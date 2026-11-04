@@ -155,24 +155,127 @@ Example toolbar:
 ## App shell
 
 `AppShell` paints the toolbar header and status footer on `bg`, separated from the editor by a `border`
+hairline. The editor `<main>` is the desk: `bg-desk text-text` (`--desk-bg` of the current paper surface).
+Document content is the editor slice's job, and the page lying on the desk is described next.
+
+## Paper surfaces (Phase 2)
+
+The writing surface is a sheet of paper on a desk, chosen per project with `book.surface`
+(`auto | book | white | dark`; the book slice owns state and persistence).
+
+**Choices.**
+- *White*: a classic word-processor page (`#ffffff`, ink `#1b1d1f`) with a crisp 1px edge and a two-layer
+  shadow on a neutral grey desk (`#d6d9dd`).
+- *Dark*: a charcoal page (`#202327`, text `#e7e9eb`) on a near-black desk (`#0e1012`).
+- *Book*: aged cream paper (`#f4ead2`, ink `#2a2016`) on a walnut-brown desk (`#bfb29a`). The paper has
+  a top-lit gradient, a faint laid-paper grain (both CSS gradients, no bitmaps), shaded inner edges, and
+  a soft shadow toward the gutter of each page. In dark mode it becomes warm dark paper (`#2b2520`,
+  text `#eadfc9`) on `#16120f`. Book never turns into a plain white or dark page: it has two variants.
+- *Auto* (default): white when the OS is light, dark when it is dark, switching live. It reuses
+  `useThemeFollow` / `app.colorScheme`.
+- Why not default cream everywhere: only Book is warm. White and Dark stay neutral so a writer
+  can choose between "a printed book" and "a document" on purpose.
+- The picker is a segmented radio group (`book.surface`, options `book.surface.auto|book|white|dark`).
+  Each option has a swatch painted with the real tokens, a miniature page or, for Book, an open spread;
+  Auto is a white and dark page split on the diagonal. Labels show from the `lg` breakpoint up.
+
+**How it is applied.** `useSurfaceFollow()` (once, in `App.tsx`) writes the resolved surface to
+`<html data-surface="book|white|dark">`; `resolveSurface(surface, colorScheme)` does the Auto logic.
+`src/shared/theme/surfaces.css` defines the tokens per surface (Book also reads `<html data-theme>` for its
+light/dark variant). Switching changes colours, shadows and background images only: no widths,
+paddings, borders or font properties, so nothing reflows.
+
+**Token contract** (all on `<html>`; consume only these, never raw colours):
+
+| Token | Use |
+|---|---|
+| `--page-bg`, `--page-fg`, `--page-muted-fg` | Page fill, body text, secondary text (page numbers, running heads) |
+| `--page-selection-bg` | `::selection` on a page (text stays `--page-fg`) |
+| `--page-find-bg`, `--page-find-current-bg`, `--page-find-ring` | Find matches, the current match, and its outline |
+| `--page-focus-ring` | Focus outline around the page, drawn on the desk |
+| `--desk-bg` | Background behind the pages (Tailwind `bg-desk`) |
+| `--page-shadow`, `--page-edge` | Drop shadow and inner edge shading (box-shadow lists) |
+| `--page-texture` | Background-image layers for the paper (`none` on White and Dark) |
+| `--spine-shadow`, `--spine-width` | Gutter shading colour and extent (transparent / 0% except Book) |
+
+**Class contract for page elements (pagination).**
+- `.nv-page`: one rendered page. It already gets background, text colour, texture, edge shading, shadow and
+  selection colours. Add no colours of your own.
+- `.nv-page--verso` (left page) / `.nv-page--recto` (right page), or `.nv-page[data-page-side="verso|recto"]`:
+  adds the spine gradient on the gutter side. `.page--verso` / `.page--recto` are accepted aliases.
+  A single-page view omits them.
+- `.nv-page-muted`: secondary text on a page.
+- Find highlights use the `.nv-find-match` / `.nv-find-match-current` classes (find.css), which read the
+  tokens above, so they work on any page.
+- Until pagination lands, `.novel-writing-surface` (the continuous editor column) is styled as one long
+  `.nv-page`.
+
+**Contrast.** `parseSurfaceTokens` and `SURFACE_CONTRAST_PAIRS` (`src/shared/theme/contrast.ts`) check, for
+each of the four token sets (white, dark, book-light, book-dark): body and muted text on the page,
+`--page-fg` on selection and both find fills (4.5:1), and the find ring and focus ring (3:1). Texture
+and edge shading are kept faint enough that the flat `--page-bg` ratios stay valid.
+
 hairline. The editor `<main>` uses `bg-surface text-text`, and that is all the shell styles there:
 document content is the editor slice's job, and paper/book surfaces and page spreads are Phase 2.
+
+## Paragraph and chapter styles (Phase 2)
+
+**Rendering.** Styles are one generated `<style>` element (`BookStyleSheet`), one rule per style keyed by
+`[data-style="<id>"]` under `.novel-editor-content`. Editing a style rewrites that text only: O(number of styles),
+no document transaction (measured: 40 chapters in a 100k-word manuscript restyle in ~20 ms in Chromium, ~60 ms in
+WebKit). Direct formatting from the toolbar is inline style on the block or a text mark, so it always wins over the
+style, as in Word; **Clear direct formatting** (Mod-\) removes it.
+
+**Book points.** Sizes and spacing are in points, rendered as `calc(N * var(--nv-pt, 1pt))`. The continuous
+writing view sets `--nv-pt` so Body (11 pt) shows at the Phase 1 reading size (18px); page surfaces set it to a
+true point times their zoom.
+
+**Built-in defaults** (book typography for an 11 pt text face): Body 11/16.5 pt, ragged right, 1.5 em indent, no
+space between paragraphs (switch to Justify in Modify style for print); First Paragraph without the indent; Chapter
+Number 12 pt small capitals, tracked; Chapter Title 20 pt centred with a 72 pt sink, new page; Part Title 24 pt
+capitals, 144 pt sink, new right-hand page; Subheading 13 pt semibold; Scene Break centred, 12 pt above and below;
+Block Quote 10 pt indented 2 em both sides; Epigraph 10 pt italic indented 4 em; Dedication italic, centred,
+144 pt sink, new right-hand page. **Heading group:** a style whose `nextStyle` is another breaking style (Chapter
+Number → Chapter Title) breaks once; the second block gets no break and no space before.
+
+**Pagination contract.** Top-level blocks whose style breaks carry `data-break-before="page|recto"` (a ProseMirror
+node decoration, so style edits never change the document). Every paragraph/heading carries `data-style`.
+
+**Toolbar.** A "Styles" group after the spacing controls: the picker (a native select showing the current
+paragraph's style; Mod-Alt-0 Body, Mod-Alt-1 Chapter Title), Modify style (pilcrow-and-nib icon), Manage styles
+(stack of set lines) and Clear direct formatting (struck T).
+
+**Modify style.** The one expressive element is the *proof*: a slice of manuscript on the writing plane showing
+the paragraph before (muted), a dashed "New page" / "New right-hand page" rule when the style breaks, the sample
+(the writer's own paragraph when opened from the toolbar) and the next paragraph in the style Enter would create.
+It renders through the same resolver as the manuscript, so the preview cannot disagree with the result. The form
+is grouped Style / Type / Paragraph; an empty field inherits, and its placeholder or "From <parent>" option says
+what it inherits. Two columns from `md`, one column (form, then proof) on phones; the dialog widens to 48rem.
+
+**Manage styles.** Chapter and paragraph styles in two labelled groups; each row is a pressed-state button whose
+name is set in the style's own weight, slant, case and (capped) tracking, so the list reads as a specimen. Built-in
+styles can be modified and duplicated but not renamed or deleted. Rename and delete confirmation appear inline
+under the list (delete says how many paragraphs switch, and to which style); results are announced in a polite
+live region. Colours are existing token pairs only (selected row `accent` on `accent-soft`, delete in `danger`).
+
+## Book layout: trim size picker (Phase 2)
+
+- The picker is a Radix dropdown menu opened from a ghost toolbar button (`book.trimSize`) in its own "Book layout" toolbar group after Find. The button shows the current size as label plus dimensions and a chevron, so the current trim size is visible without opening anything.
+- The menu lists the sizes in two labelled groups, US and UK/EU, as radio items with a check mark. Each row is a label (medium weight, `text`) and its dimensions (`text-muted`); both pairs are already in `CONTRAST_PAIRS`. Rows are `min-h-control-lg` (40px) for touch, and the menu opens on press, with no hover-only behaviour.
+- Keyboard: Enter, Space or ArrowDown on the button opens the menu; arrows move, Enter selects, Escape closes and returns focus to the button. The button joins the toolbar roving focus through `ToolbarItem`.
+- Every row has its own `data-control-id` (`book.trimSize.<id>`), registry entry and tooltip (opened on the right), so the coverage audit also passes with the menu open.
+- Changing the size also moves the margins to the new size catalog defaults, but only while the margins still equal the previous size defaults, so margins the user customised are never overwritten.
 
 ## Pages and spreads (Phase 2, pagination)
 
 The writing surface is now a desk with book pages on it (`src/features/pagination`, docs/pagination.md).
 
-- **Paper is the brightest plane.** A page is a plain white sheet with a soft two-step shadow (a tight
-  contact shadow plus a wide, faint one) on the editor's `surface`, so the page reads as an object
-  lying on the desk without a frame or border. The spine of a spread gets a faint inner shade on both
-  facing pages (mirrored on the recto), the one cue that two pages are a bound book rather than two
-  cards. Everything is neutral on purpose: the paper surfaces ticket themes it.
-- **Five custom properties only.** Page elements read `--page-bg`, `--page-fg`, `--page-shadow`,
-  `--desk-bg` and `--spine-shadow`, each with a fallback (white, near-black `#1f1f1f`, the shadow above,
-  transparent desk, the spine gradient). Text on the page uses `--page-fg`, never the chrome's `text`, so
-  a white page stays readable in the dark theme (`#1f1f1f` on `#ffffff` is about 16.5:1).
-- **Book typography defaults.** 11pt, line-height 1.45, 0.6em after paragraphs: what a trade paperback
-  page looks like at 100 %. Style definitions (styles ticket) replace them.
+- **Paper comes from the surfaces contract.** Each page frame is an `.nv-page` with `.nv-page--verso` /
+  `.nv-page--recto` in a spread (spine on the gutter side) and none in single view; header and footer
+  slot regions are `.nv-page-muted`. The slice adds geometry only, no colours. The text layer above the
+  frames uses `--page-fg` and `--page-selection-bg`; the desk behind the pages is `--desk-bg`.
+- **Book points.** The page surface sets `--nv-pt` to a true point (96/72 px); zoom is a transform on
+  top, so style sizes (`calc(N * var(--nv-pt))`) are exact at 100 % and line breaks never depend on zoom.
 - **Status bar page controls** sit at the trailing end, after the project actions: the page indicator
   ("Pages 12–13 of 384", tabular figures), the spread toggle (an open-book icon, pressed = two pages),
   zoom out, the zoom select (Fit spread / Fit width / 50–200 %) and zoom in. All are standard

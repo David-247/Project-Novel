@@ -1,0 +1,142 @@
+/*
+ * Paper surfaces: the look of the page the manuscript is written on.
+ *
+ * `useSurfaceFollow()` writes the RESOLVED surface to <html data-surface="book|white|dark">
+ * ('auto' becomes white in light mode and dark in dark mode). Everything below reads that one
+ * attribute; the "book" surface also reads <html data-theme> for its warm-light / warm-dark
+ * variants. Pages and the continuous editor consume only the `--page-*` / `--desk-*` / `--spine-*`
+ * tokens, never colours, so switching is a pure repaint: no border widths, paddings or font
+ * properties change here, only colours, shadows and background images.
+ *
+ * The token blocks also match `.nv-surface-preview` elements (the picker's swatches), which carry
+ * their own data-surface / data-theme, so a swatch always shows its own paper.
+ *
+ * Plain 6-digit hex for every colour that has a contrast pair (src/shared/theme/contrast.ts parses
+ * this file). Contract for page elements: see docs/design.md, "Paper surfaces".
+ */
+
+/* ---- White paper: classic word-processor page, crisp shadow, neutral grey desk. -------------- */
+:root,
+:is(:root, .nv-surface-preview)[data-surface='white'] {
+  --desk-bg: #d6d9dd;
+  --page-bg: #ffffff;
+  --page-fg: #1b1d1f;
+  --page-muted-fg: #555a60;
+  --page-selection-bg: #b9d4f5;
+  --page-find-bg: #fbe58a;
+  --page-find-current-bg: #f5b94a;
+  --page-find-ring: #8a3d00; /* outline on the current match; against the page, 3:1 */
+  --page-focus-ring: #1d5c68; /* focus outline around the page, drawn on the desk */
+  --page-shadow: 0 0 0 1px rgb(20 24 28 / 0.1), 0 1px 3px rgb(20 24 28 / 0.2), 0 8px 24px rgb(20 24 28 / 0.14);
+  --page-edge: 0 0 0 0 transparent; /* inner edge shading: none on plain paper */
+  --page-texture: none;
+  --spine-shadow: rgb(0 0 0 / 0);
+  --spine-width: 0%;
+}
+
+/* ---- Dark paper: dark page, light text, darker desk. ----------------------------------------- */
+:is(:root, .nv-surface-preview)[data-surface='dark'] {
+  --desk-bg: #0e1012;
+  --page-bg: #202327;
+  --page-fg: #e7e9eb;
+  --page-muted-fg: #a4abb2;
+  --page-selection-bg: #33557f;
+  --page-find-bg: #5e5217;
+  --page-find-current-bg: #735a10;
+  --page-find-ring: #ffd36b;
+  --page-focus-ring: #8fd4de;
+  --page-shadow: 0 0 0 1px rgb(255 255 255 / 0.07), 0 1px 3px rgb(0 0 0 / 0.5), 0 10px 28px rgb(0 0 0 / 0.55);
+  --page-edge: 0 0 0 0 transparent;
+  --page-texture: none;
+  --spine-shadow: rgb(0 0 0 / 0);
+  --spine-width: 0%;
+}
+
+/* ---- Book, light: aged cream paper on a walnut-brown desk, shaded edges, a soft gutter. ------- */
+:is(:root, .nv-surface-preview)[data-surface='book'] {
+  --desk-bg: #bfb29a;
+  --page-bg: #f4ead2;
+  --page-fg: #2a2016;
+  --page-muted-fg: #65553f;
+  --page-selection-bg: #e3c37a;
+  --page-find-bg: #f0d77a;
+  --page-find-current-bg: #e8a94a;
+  --page-find-ring: #7a3410;
+  --page-focus-ring: #1d4f5a;
+  --page-shadow: 0 1px 2px rgb(60 40 15 / 0.28), 0 10px 26px rgb(60 40 15 / 0.22);
+  --page-edge: inset 0 0 0 1px rgb(120 85 30 / 0.16), inset 0 0 38px rgb(120 85 30 / 0.12);
+  /* Light falls from the top; a faint laid-paper grain. Alphas are low enough that body text
+     keeps the contrast tested on the flat --page-bg. */
+  --page-texture:
+    radial-gradient(130% 90% at 50% 0%, rgb(255 252 238 / 0.55), transparent 62%),
+    repeating-linear-gradient(0deg, rgb(110 80 30 / 0.022) 0 1px, transparent 1px 3px);
+  --spine-shadow: rgb(70 45 15 / 0.34);
+  --spine-width: 11%;
+}
+
+/* ---- Book, dark: warm dark paper, still a book. ---------------------------------------------- */
+:is(:root, .nv-surface-preview)[data-surface='book'][data-theme='dark'] {
+  --desk-bg: #16120f;
+  --page-bg: #2b2520;
+  --page-fg: #eadfc9;
+  --page-muted-fg: #b3a58d;
+  --page-selection-bg: #5b4a2a;
+  --page-find-bg: #6a5a1c;
+  --page-find-current-bg: #7a5c16;
+  --page-find-ring: #ffcf6e;
+  --page-focus-ring: #8fd4de;
+  --page-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 30px rgb(0 0 0 / 0.55);
+  --page-edge: inset 0 0 0 1px rgb(255 214 150 / 0.07), inset 0 0 38px rgb(0 0 0 / 0.28);
+  --page-texture:
+    radial-gradient(130% 90% at 50% 0%, rgb(255 225 170 / 0.06), transparent 62%),
+    repeating-linear-gradient(0deg, rgb(255 225 170 / 0.014) 0 1px, transparent 1px 3px);
+  --spine-shadow: rgb(0 0 0 / 0.5);
+  --spine-width: 11%;
+}
+
+/* Tailwind names: bg-desk, text-page-fg ... */
+@theme inline {
+  --color-desk: var(--desk-bg);
+  --color-page: var(--page-bg);
+  --color-page-fg: var(--page-fg);
+  --color-page-muted-fg: var(--page-muted-fg);
+}
+
+/*
+ * The page. `.nv-page` is the contract class for one rendered page; the Phase 1 continuous
+ * editor column (`.novel-writing-surface`) is styled as one long page. Colours, texture, edge
+ * shading and shadow only.
+ */
+.nv-page,
+.novel-writing-surface {
+  background-color: var(--page-bg);
+  background-image: var(--page-texture);
+  color: var(--page-fg);
+  box-shadow: var(--page-edge), var(--page-shadow);
+  border-radius: 2px;
+}
+
+/* Spine: the gutter edge of a page in a two-page spread darkens toward the fold. */
+.nv-page--verso,
+.page--verso,
+.nv-page[data-page-side='verso'] {
+  background-image: linear-gradient(to left, var(--spine-shadow), transparent var(--spine-width)), var(--page-texture);
+  border-radius: 2px 0 0 2px;
+}
+.nv-page--recto,
+.page--recto,
+.nv-page[data-page-side='recto'] {
+  background-image: linear-gradient(to right, var(--spine-shadow), transparent var(--spine-width)), var(--page-texture);
+  border-radius: 0 2px 2px 0;
+}
+
+.nv-page ::selection,
+.novel-writing-surface ::selection {
+  background: var(--page-selection-bg);
+  color: var(--page-fg);
+}
+
+/* Secondary text on a page (page numbers, running heads, footnote rules). */
+.nv-page-muted {
+  color: var(--page-muted-fg);
+}

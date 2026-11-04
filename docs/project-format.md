@@ -1,12 +1,13 @@
 # Novel project format
 
-A Novel project is an ordinary folder. Everything in it is readable without Novel: two JSON files and one SQLite
+A Novel project is an ordinary folder. Everything in it is readable without Novel: three JSON files and one SQLite
 database. The folder name becomes the project title when the project is created.
 
 ```
 My Novel/
 ├── project.json      metadata and schema version
 ├── manuscript.json   the manuscript as ProseMirror document JSON
+├── book.json         book layout settings (trim size, margins, styles, ...); optional
 ├── index.sqlite      index (revisions); can be rebuilt, never the only copy of text
 └── .recovery/        crash-recovery data
     ├── manuscript.json                 current snapshot (only while there are unsaved changes)
@@ -59,6 +60,103 @@ one means the default.
 On open, the file must be valid JSON with this shape; otherwise Novel shows an error dialog ("manuscript.json is
 damaged...") and does not open the project. The editor applies its own schema on load.
 
+### Paragraph and chapter styles in the manuscript
+
+Paragraphs and headings may carry `attrs.styleId`, the id of a style in `book.json` → `styles` (lowercase letters,
+digits and dashes). It is written only when set. Chapter styles (`kind: "chapter"`) are stored as `heading` nodes
+at the style's `outlineLevel`; paragraph styles as `paragraph` nodes. Body on a paragraph is stored as no `styleId`.
+
+**Phase 1 migration rule (rendering mapping, no rewrite):** a block without `styleId` uses **Body** if it is a
+paragraph, **Chapter Title** if it is a level-1 heading and **Subheading** if it is a level-2 or level-3 heading.
+The mapping happens when the block is rendered, so a Phase 1 `manuscript.json` loads and saves byte-for-byte
+unchanged until the user applies a style. A `styleId` naming a style that no longer exists (for example brought back
+by undo after a delete, pasted, or from an out-of-sync book.json) renders like Body on a paragraph, or like the
+heading's migration default, and shows as "Body (missing style)" (or the heading default) in the picker. Deleting a
+style in the app re-maps its blocks first.
+
+### Styles in book.json (`styles`)
+
+`styles` maps a style id to a record. It holds only what the user changed: `{}` means every built-in style at its
+default. Unknown keys in a record are preserved.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Display name (custom styles; a built-in may override it) |
+| `kind` | `"paragraph"` \| `"chapter"` | Custom styles only |
+| `basedOn` | style id | Unset formatting comes from this style (custom styles only) |
+| `outlineLevel` | 1–3 | Heading level for chapter styles (default 1) |
+| `nextStyle` | style id | Style of the paragraph Enter creates at the end of this one (default: same style) |
+| `fontFamily` | string | Family name |
+| `fontSize` | number, pt | |
+| `fontWeight` | 100–900 | |
+| `italic` | boolean | |
+| `align` | `left` \| `center` \| `right` \| `justify` | |
+| `lineHeight` | number | Multiple of the font size |
+| `spaceBefore`, `spaceAfter` | number, pt | |
+| `firstLineIndent`, `indentLeft`, `indentRight`, `letterSpacing` | number, em | |
+| `textTransform` | `none` \| `uppercase` \| `lowercase` \| `capitalize` \| `small-caps` | |
+| `breakBefore` | `none` \| `page` \| `recto` | Start a new page / right-hand page |
+| `builtIn` | `false` | Written on custom styles |
+
+For a built-in id the record is a partial override: a key equal to the built-in value is dropped, and `null` means
+"unset" where the built-in sets a value (inherit from the parent instead). A custom style stores its full
+definition. Built-ins: `body`, `first-paragraph`, `chapter-number`, `chapter-title`, `part-title`, `subheading`,
+`scene-break`, `block-quote`, `epigraph`, `dedication` (defaults documented in `src/shared/book/styles.ts`).
+
+## book.json
+
+Book-level layout settings, written next to manuscript.json (Phase 2). Pretty-printed UTF-8 JSON, written atomically
+like the other project files. A project without `book.json` (every Phase 1 project) opens with the defaults below;
+the file is created at the next save.
+
+| Field          | Type    | Notes                                                                                         |
+| -------------- | ------- | --------------------------------------------------------------------------------------------- |
+| `format`       | string  | Always `"novel-book"`.                                                                        |
+| `version`      | integer | Format version. Current: `1`.                                                                 |
+| `trimSize`     | string  | Trim size id from the list below. Default `"us-5.5x8.5"`.                                     |
+| `margins`      | object  | `{ top, bottom, inside, outside }` in points (1/72 in), each a number from 0 to 7200. Default `{ 54, 54, 63, 45 }`. `inside` is the binding side, `outside` the fore-edge. |
+| `styles`       | object  | Style definitions keyed by style id. Owned by the styles feature; default `{}`.               |
+| `headerFooter` | object  | Running heads and page numbers. Owned by the headers/footers feature; default `{}`.           |
+| `footnotes`    | object  | Footnote options. Owned by the footnotes feature; default `{}`.                               |
+| `surface`      | string  | Paper surface: `"auto"` (default), `"book"`, `"white"` or `"dark"`.                           |
+| `view`         | string  | `"spread"` (default) or `"single"`.                                                           |
+
+```json
+{
+  "format": "novel-book",
+  "version": 1,
+  "trimSize": "uk-a5",
+  "margins": { "top": 56, "bottom": 56, "inside": 64, "outside": 46 },
+  "styles": {},
+  "headerFooter": {},
+  "footnotes": {},
+  "surface": "auto",
+  "view": "spread"
+}
+```
+
+**Trim sizes** (id: size): `us-5x8` (5 x 8 in), `us-5.25x8` (5.25 x 8 in), `us-5.5x8.5` (5.5 x 8.5 in, the default),
+`us-6x9` (6 x 9 in), `us-mass-market` (4.25 x 6.87 in), `uk-a5` (148 x 210 mm), `uk-b-format` (129 x 198 mm),
+`uk-royal` (156 x 234 mm), `uk-demy` (138 x 216 mm). Page geometry in CSS pixels is 96 per inch.
+
+**Validation on open.** The file never blocks a project from opening, and `manuscript.json` is never touched:
+
+- Damaged JSON, JSON that is not an object, or a file that could not be read (for example locked by antivirus or a
+  sync tool): all settings are the defaults, and the status bar warns "book.json is damaged or could not be read ...".
+  The file is then **left untouched**: saves do not write book.json until the user changes a book setting. Just
+  before the first overwrite, the original is copied to `book.damaged-<timestamp>.json` in the project folder (best
+  effort; an unreadable file is read again at that moment). Novel never deletes these copies. Creating a project
+  (New Project, Save As) always writes book.json. The warning clears when book.json is written or the project closes.
+- A field with an invalid value (unknown `trimSize`, a margin that is not a number from 0 to 7200, `styles`,
+  `headerFooter` or `footnotes` that is not an object, unknown `surface` or `view`) falls back to its default. The
+  other fields are kept, the status bar lists what was replaced, and the next save rewrites the file. A missing field is simply the default, with no
+  warning.
+- **Unknown top-level keys are kept** and written back on save, so a newer Novel's additions survive. The contents of
+  `styles`, `headerFooter` and `footnotes` are opaque to this part of Novel and are preserved as they are.
+
+Unsaved settings count as unsaved changes: the save status, the unsaved-changes prompts on close and quit, autosave
+and crash recovery treat them exactly like unsaved text.
+
 ## index.sqlite
 
 SQLite database opened through the Tauri SQL plugin and accessed with Drizzle ORM (`drizzle-orm/sqlite-proxy`). Its
@@ -98,14 +196,14 @@ Safety rules enforced in Rust:
   (`storage_clear_project_root`). It cannot name an arbitrary folder.
 - Existence checks (`storage_path_exists`) only answer for paths inside the open project folder or a folder in the
   recent list, and refuse `..`.
-- New Project refuses a folder that already holds `manuscript.json` or `index.sqlite` without a `project.json`, so
+- New Project refuses a folder that already holds `manuscript.json`, `book.json` or `index.sqlite` without a `project.json`, so
   leftovers of an earlier project are never overwritten.
 - The final rename is retried for about 0.4 s when another program (antivirus, OneDrive, Dropbox) briefly locks the
   target.
 - **Known limitation:** `index.sqlite` is opened through the Tauri SQL plugin, which has no path scope. The webview
   could open a SQLite file anywhere. Only the JSON files go through the confined commands.
 
-Save order: `manuscript.json`, then `project.json` (`updatedAt`), then a `revisions` row. After a save that leaves
+Save order: `manuscript.json`, then `book.json`, then `project.json` (`updatedAt`), then a `revisions` row. After a save that leaves
 the document clean, `.recovery/manuscript.json` is deleted.
 
 All writes to a project (saves, autosave snapshots, recovery cleanup) go through one queue in the frontend, so they
@@ -131,12 +229,13 @@ write). The file is written atomically, like the other project files. Compact UT
 | Field           | Type    | Notes                                                                      |
 | --------------- | ------- | -------------------------------------------------------------------------- |
 | `format`        | string  | Always `"novel-recovery"`.                                                 |
-| `version`       | integer | Recovery format version. Current: `1`. A newer version is ignored.         |
+| `version`       | integer | Recovery format version. Current: `2`. A newer version is ignored.         |
 | `projectId`     | string  | `id` from project.json.                                                    |
 | `savedAt`       | string  | ISO 8601 time of the snapshot.                                             |
 | `baseUpdatedAt` | string  | project.json `updatedAt` (the last real save) when the snapshot was taken. |
 | `docVersion`    | integer | Editor document version (diagnostic only).                                 |
 | `doc`           | object  | The whole document, same shape as manuscript.json.                         |
+| `book`          | object  | Book settings at snapshot time, same shape as book.json. Added in version 2; a version 1 snapshot has none and restores only the text. |
 
 ```json
 {"format":"novel-recovery","version":1,"projectId":"6f1c…","savedAt":"2026-11-03T10:16:12.004Z","baseUpdatedAt":"2026-11-03T10:15:42.120Z","docVersion":312,"doc":{"type":"doc","content":[…]}}
@@ -146,7 +245,8 @@ write). The file is written atomically, like the other project files. Compact UT
 
 1. `projectId` differs from project.json `id`: the snapshot belongs to another project. It is not offered and is
    moved aside.
-2. `doc` is identical to manuscript.json: nothing to recover. The snapshot is deleted.
+2. `doc` is identical to manuscript.json, and `book` (if present, stored in book.json shape with unknown keys at top level) equals the settings loaded from book.json: nothing
+   to recover. The snapshot is deleted.
 3. `baseUpdatedAt` equals project.json `updatedAt`: the snapshot was taken on top of the current save. It is offered.
 4. `baseUpdatedAt` is something else: the snapshot was taken on top of a different save. It is not offered and is
    moved aside.
@@ -158,7 +258,7 @@ A timestamp never causes a deletion. "Moved aside" means the file is renamed to
 `.recovery/unrestored-<savedAt>.json` (`:` and `.` in the timestamp become `-`), which Novel never deletes; the user
 can open it to copy text out. An offered snapshot gets **Restore** or **Discard Backup**:
 
-- *Restore* loads the snapshot into the editor and marks it unsaved. Nothing on disk changes until the user saves,
+- *Restore* loads the snapshot into the editor (with its book settings, if it has them) and marks it unsaved. Nothing on disk changes until the user saves,
   and the snapshot is kept until then, so a second crash still recovers it.
 - *Discard Backup* deletes the snapshot. The editor keeps the saved manuscript.
 - *Decide later* (the X, or Escape) decides nothing, and nothing is lost. The status bar then shows

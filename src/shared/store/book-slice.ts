@@ -33,6 +33,8 @@ export interface BookSlice {
     setView: (view: BookView) => void
     /** Replace all settings (project open / recovery restore). Not a user change: clears dirty. */
     loadBook: (settings: BookSettings) => void
+    /** Replace all settings with unsaved ones (crash-recovery restore). Marks the project unsaved. */
+    restoreBook: (settings: BookSettings) => void
     /** Back to defaults (project closed). Clears dirty. */
     resetBook: () => void
     /** Settings persisted; clears dirty only if no change happened since `version`. */
@@ -58,6 +60,7 @@ export const createBookSlice: SliceCreator<BookSlice> = (set) => {
       setView: (view) => change({ view }),
       loadBook: (settings) =>
         set((s) => ({ book: { ...settings, settingsVersion: s.book.settingsVersion + 1, dirty: false } })),
+      restoreBook: (settings) => change({ ...settings }),
       resetBook: () =>
         set((s) => ({ book: { ...defaultBookSettings(), settingsVersion: s.book.settingsVersion + 1, dirty: false } })),
       markBookClean: (version) =>

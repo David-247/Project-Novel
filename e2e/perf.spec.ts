@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
-import { clickBlockStart, editor, launch, openRecent, readFile, saveStatus, seedProject } from './helpers'
+import { clickBlockStart, editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject } from './helpers'
 
 /**
  * Performance budget on a 100,000-word manuscript, in real browser engines
@@ -53,7 +53,7 @@ function buildManuscript() {
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]
 
 /** Launch, open the 100k-word project from Open Recent; returns the open time. */
-async function openEpic(page: Page, folder: string, doc: unknown): Promise<number> {
+async function openEpic(page: Page, folder: string, doc: unknown, blocks = 'p, h2'): Promise<number> {
   await launch(page)
   const title = folder.split('/').pop()!
   await seedProject(page, folder, title, doc)
@@ -61,7 +61,7 @@ async function openEpic(page: Page, folder: string, doc: unknown): Promise<numbe
   await openRecent(page, folder)
   await expect(saveStatus(page)).toHaveText(`${title}: All changes saved`, { timeout: 60_000 })
   const openMs = Date.now() - openStart
-  await expect(editor(page).locator('p, h2')).toHaveCount(WORDS / WORDS_PER_PARAGRAPH)
+  await expect(editor(page).locator(blocks)).toHaveCount(WORDS / WORDS_PER_PARAGRAPH)
   return openMs
 }
 
@@ -97,7 +97,7 @@ async function measureTyping(page: Page, beforeKey?: (i: number) => Promise<void
   const ed = editor(page)
   // On the painted text (paged view: a block's box is not where all its lines are painted).
   await clickBlockStart(page, ed.locator('p').nth(500))
-  await page.keyboard.press('End')
+  await lineEnd(page)
   await page.waitForFunction(() => (window as unknown as { __perf: number[] }).__perf.length >= 1)
   await page.evaluate(() => ((window as unknown as { __perf: number[] }).__perf = []))
   for (const [i, ch] of [...TYPED].entries()) {
@@ -216,4 +216,59 @@ test('100k-word manuscript, combined hot path: find panel open on "the" + autosa
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
   expect(typing.medianMs).toBeLessThan(50)
+})
+
+test('100k-word manuscript: changing the Chapter Title font size restyles every chapter in < 100 ms, no doc change', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const built = buildManuscript()
+  // Chapter Title applied to every chapter heading (40 chapters).
+  const content = (built.doc.content as Array<{ type: string; attrs?: Record<string, unknown> }>).map((b) =>
+    b.type === 'heading' ? { ...b, attrs: { level: 1, styleId: 'chapter-title' } } : b,
+  )
+  const doc = { type: 'doc', content }
+  const chapters = content.filter((b) => b.type === 'heading').length
+  const openMs = await openEpic(page, '/projects/Styled', doc, 'p, h1')
+  const titles = page.locator('main [contenteditable="true"] h1[data-style="chapter-title"]')
+  await expect(titles).toHaveCount(chapters)
+
+  await titles.nth(chapters - 1).click()
+  await page.locator('[data-control-id="styles.edit"]').click()
+  const dialog = page.getByRole('dialog', { name: 'Modify style: Chapter Title' })
+  await dialog.locator('[data-control-id="styles.field.fontSize"]').fill('28')
+  const versionBefore = await page.evaluate(() => window.__nvE2E.docVersion())
+
+  const result = await page.evaluate(async () => {
+    const all = Array.from(document.querySelectorAll<HTMLElement>('main [contenteditable="true"] h1[data-style="chapter-title"]'))
+    const before = all.map((el) => getComputedStyle(el).fontSize)
+    const save = document.querySelector<HTMLButtonElement>('[data-control-id="styles.modify.save"]')!
+    const t0 = performance.now()
+    save.click()
+    // Wait until the stylesheet change reached the last chapter, then force layout and include the paint.
+    await new Promise<void>((resolve) => {
+      const last = all[all.length - 1]
+      const check = () => (getComputedStyle(last).fontSize !== before[before.length - 1] ? resolve() : requestAnimationFrame(check))
+      check()
+    })
+    void document.body.offsetHeight
+    const styledMs = performance.now() - t0
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    const paintedMs = performance.now() - t0
+    const changed = all.filter((el, i) => getComputedStyle(el).fontSize !== before[i]).length
+    return { styledMs, paintedMs, changed }
+  })
+  const versionAfter = await page.evaluate(() => window.__nvE2E.docVersion())
+
+  await report(testInfo, 'perf-styles', {
+    manuscript: { words: built.words, blocks: content.length, chapters },
+    openMs,
+    restyleMs: +result.styledMs.toFixed(1),
+    restyleIncludingPaintMs: +result.paintedMs.toFixed(1),
+    chaptersRestyled: result.changed,
+    docVersionChanged: versionAfter !== versionBefore,
+    budgets: { restyleMs: 100 },
+  })
+
+  expect(result.changed).toBe(chapters)
+  expect(versionAfter).toBe(versionBefore)
+  expect(result.styledMs).toBeLessThan(100)
 })

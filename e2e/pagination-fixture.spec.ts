@@ -16,7 +16,7 @@ import { launch, openRecent, saveStatus, seedProject, waitForLayout } from './he
  * perf-results/pagination-fixture-<browser>-<platform>.json (and the test report).
  */
 
-const TRIMS = ['us-5x8', 'us-5.25x8', 'us-5.5x8.5', 'us-6x9', 'us-mass-market', 'a5', 'b-format', 'royal', 'demy']
+const TRIMS = ['us-5x8', 'us-5.25x8', 'us-5.5x8.5', 'us-6x9', 'us-mass-market', 'uk-a5', 'uk-b-format', 'uk-royal', 'uk-demy']
 const font = (file: string) => readFileSync(new URL(`./fixtures/fonts/${file}`, import.meta.url)).toString('base64')
 
 test('cross-engine fixture: chapter opening pages and page totals per trim size', async ({ page }, testInfo) => {
@@ -32,7 +32,7 @@ test('cross-engine fixture: chapter opening pages and page totals per trim size'
     content: `
       @font-face { font-family: 'NvFixtureSerif'; font-weight: 400; src: url(data:font/woff2;base64,${font('libre-baskerville-latin-400-normal.woff2')}) format('woff2'); }
       @font-face { font-family: 'NvFixtureSerif'; font-weight: 700; src: url(data:font/woff2;base64,${font('libre-baskerville-latin-700-normal.woff2')}) format('woff2'); }
-      .nv-text-layer .novel-editor-content { font-family: 'NvFixtureSerif', serif !important; }
+      .nv-text-layer .novel-editor-content, .nv-text-layer .novel-editor-content * { font-family: 'NvFixtureSerif', serif !important; }
     `,
   })
   await page.evaluate(async () => {
@@ -57,7 +57,7 @@ test('cross-engine fixture: chapter opening pages and page totals per trim size'
     scenario: 'pagination-fixture',
     browser: testInfo.project.name,
     platform: process.platform,
-    font: 'Libre Baskerville (OFL), 11pt, line-height 1.45',
+    font: 'Libre Baskerville (OFL), book styles at 96/72 px per point',
     manuscript: { words: fx.words, chapters: fx.chapters, blocks: fx.doc.content.length },
     tolerance: { totalPages: 'max(2, 1%)', chapterOpening: 1 },
     results,

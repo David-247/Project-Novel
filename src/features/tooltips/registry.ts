@@ -11,9 +11,11 @@
  * Shortcut specs use Tiptap notation ("Mod" = Cmd on macOS, Ctrl elsewhere) and are rendered per
  * platform by the shared Tooltip.
  */
-import { FIND_CONTROLS, HISTORY_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, HISTORY_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
+import { SURFACE_CONTROLS } from '@/shared/theme'
+import { TRIM_SIZES } from '@/shared/book'
 import type { TooltipCopy } from '@/shared/ui'
 
 function fromMeta<K extends string>(
@@ -45,6 +47,45 @@ const TOOLBAR_DESCRIPTIONS: Record<keyof typeof TOOLBAR_CONTROLS, string> = {
   firstLineIndent: 'How far the first line of each paragraph is pushed in.',
   indentDecrease: 'Move the paragraph one step to the left.',
   indentIncrease: 'Move the paragraph one step to the right.',
+  stylePicker: 'Style of the current paragraph. Pick one to apply it. The shortcuts apply Body and Chapter Title.',
+  styleEdit: "Change how the current paragraph's style looks, everywhere in the manuscript.",
+  styleManage: 'See every style in the book, and create, duplicate, rename or delete your own.',
+  clearFormatting: 'Remove formatting applied by hand to the paragraph, so it looks exactly like its style.',
+}
+
+const STYLE_DIALOG_DESCRIPTIONS: Record<keyof typeof STYLE_DIALOG_CONTROLS, string> = {
+  name: 'The name shown in the style list and the picker.',
+  kind: 'Chapter heading or paragraph style. Locked while paragraphs use the style.',
+  basedOn: 'Settings you leave empty come from this style, and follow it when it changes.',
+  nextStyle: 'Style of the new paragraph when you press Enter at the end of this one.',
+  fontFamily: 'Typeface name, for example Garamond. Leave empty to use the manuscript font.',
+  fontSize: 'Text size in points. Leave empty to inherit it.',
+  fontWeight: 'How heavy the letters are, from light to bold.',
+  italic: 'Upright or italic letters.',
+  textTransform: 'Show the text in capitals, small capitals or another case, without retyping it.',
+  letterSpacing: 'Extra space between letters, in ems. Small values like 0.05 go a long way.',
+  align: 'How lines line up: left, centered, right or justified.',
+  lineHeight: 'Distance between lines as a multiple of the text size, for example 1.5.',
+  spaceBefore: 'Space above the paragraph, in points.',
+  spaceAfter: 'Space below the paragraph, in points.',
+  firstLineIndent: 'How far the first line is pushed in, in ems.',
+  indentLeft: 'Space between the left margin and the whole paragraph, in ems.',
+  indentRight: 'Space between the whole paragraph and the right margin, in ems.',
+  breakBefore: 'Start a new page, or a new right-hand page, before each paragraph in this style.',
+  modifyReset: 'Put this built-in style back the way it came.',
+  modifyCancel: 'Close without changing the style.',
+  modifySave: 'Apply the changes to every paragraph that uses this style.',
+  manageItem: 'Select this style to modify, duplicate, rename or delete it.',
+  manageNew: 'Add a style based on the selected one.',
+  manageDuplicate: 'Make a copy of the selected style under a new name.',
+  manageRename: 'Give the selected style a new name. Built-in styles keep their names.',
+  manageRenameField: 'The new name for the style. Enter saves it.',
+  manageRenameSave: 'Save the new name.',
+  manageRenameCancel: 'Keep the current name.',
+  manageModify: 'Open the selected style to change how it looks.',
+  manageDelete: 'Remove the selected style. You confirm first; its paragraphs switch to the style it was based on.',
+  manageDeleteConfirm: 'Delete the style now. Its paragraphs switch to the style it was based on.',
+  manageDeleteCancel: 'Do not delete the style.',
 }
 
 const HISTORY_DESCRIPTIONS: Record<keyof typeof HISTORY_CONTROLS, string> = {
@@ -63,6 +104,30 @@ const FIND_DESCRIPTIONS: Record<keyof typeof FIND_CONTROLS, string> = {
   replaceAll: 'Replace every match at once. One undo puts them all back.',
   caseSensitive: 'Only find matches with the same capital letters.',
   wholeWord: 'Only find whole words, not parts of longer words.',
+}
+
+/** Paper surface picker (shared/theme SurfacePicker); titles come from SURFACE_CONTROLS. */
+const SURFACE_TOOLTIPS: Record<string, TooltipCopy> = {
+  [SURFACE_CONTROLS.group.id]: {
+    title: SURFACE_CONTROLS.group.label,
+    description: 'What the page looks like: Auto, Book, White or Dark paper.',
+  },
+  [SURFACE_CONTROLS.auto.id]: {
+    title: SURFACE_CONTROLS.auto.label,
+    description: 'White paper in light mode, dark paper in dark mode. Follows your computer.',
+  },
+  [SURFACE_CONTROLS.book.id]: {
+    title: SURFACE_CONTROLS.book.label,
+    description: 'Cream paper with a shaded spine, like an open printed book.',
+  },
+  [SURFACE_CONTROLS.white.id]: {
+    title: SURFACE_CONTROLS.white.label,
+    description: 'Plain white paper on a grey desk, like a word processor.',
+  },
+  [SURFACE_CONTROLS.dark.id]: {
+    title: SURFACE_CONTROLS.dark.label,
+    description: 'Dark paper with light text, easy on the eyes at night.',
+  },
 }
 
 /**
@@ -128,6 +193,20 @@ const RECOVERY_TOOLTIPS: Record<string, TooltipCopy> = {
   },
 }
 
+/** Book layout controls (book-settings slice): the trim size picker and one entry per catalog size. */
+const BOOK_TOOLTIPS: Record<string, TooltipCopy> = {
+  'book.trimSize': {
+    title: 'Trim size',
+    description: 'Page size of the printed book. Changing it reflows the whole manuscript.',
+  },
+  ...Object.fromEntries(
+    TRIM_SIZES.map((t): [string, TooltipCopy] => [
+      `book.trimSize.${t.id}`,
+      { title: `${t.label} (${t.dimensions})`, description: `Lay the book out on ${t.dimensions} pages.` },
+    ]),
+  ),
+}
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -145,7 +224,10 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...fromMeta(PAGINATION_CONTROLS, PAGINATION_DESCRIPTIONS),
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
+  ...fromMeta(STYLE_DIALOG_CONTROLS, STYLE_DIALOG_DESCRIPTIONS),
+  ...SURFACE_TOOLTIPS,
   ...FILE_TOOLTIPS,
+  ...BOOK_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
 })

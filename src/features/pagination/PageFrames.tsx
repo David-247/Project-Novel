@@ -59,7 +59,7 @@ function PageFrame({
   const ctx = (height: number): PageSlotContext => ({ page, pageCount, geometry, width: geometry.contentWidth, height })
   return (
     <div
-      className="nv-page"
+      className={placement.view === 'spread' ? `nv-page nv-page--${page.side}` : 'nv-page'}
       data-page-index={page.index}
       data-side={page.side}
       data-blank={page.isBlank || undefined}
@@ -68,7 +68,7 @@ function PageFrame({
     >
       {header.length > 0 && (
         <div
-          className="nv-slot nv-slot-header"
+          className="nv-slot nv-slot-header nv-page-muted"
           style={{ left: c.x - f.x, top: 0, width: geometry.contentWidth, height: geometry.margins.top }}
         >
           {header.map((s) => (
@@ -80,7 +80,7 @@ function PageFrame({
       )}
       {footer.length > 0 && (
         <div
-          className="nv-slot nv-slot-footer"
+          className="nv-slot nv-slot-footer nv-page-muted"
           style={{ left: c.x - f.x, bottom: 0, width: geometry.contentWidth, height: geometry.margins.bottom }}
         >
           {footer.map((s) => (

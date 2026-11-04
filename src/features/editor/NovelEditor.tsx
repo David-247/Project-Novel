@@ -4,6 +4,7 @@ import { useStore } from '@/shared/store'
 import { attachEditor } from './controller'
 import { createEditorExtensions } from './extensions'
 import { SYSTEM_FONT_STACK } from './fonts'
+import { BookStyleSheet } from './styles/BookStyleSheet'
 import './editor.css'
 
 export interface NovelEditorProps {
@@ -51,11 +52,12 @@ export function NovelEditor({ paged = false }: NovelEditorProps = {}) {
 
   return (
     <div
-      className={paged ? 'novel-paged-surface' : 'novel-writing-surface mx-auto w-full max-w-[72ch] px-6 py-10'}
+      className={paged ? 'novel-paged-surface' : 'novel-writing-surface mx-auto w-full px-6 py-10'}
       style={{ fontFamily: SYSTEM_FONT_STACK }}
       data-testid="writing-surface"
       aria-busy={opening || undefined}
     >
+      <BookStyleSheet />
       <EditorContent editor={editor} />
     </div>
   )

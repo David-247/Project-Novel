@@ -16,7 +16,7 @@ import { clickBlockStart, editor, launch, openRecent, saveStatus, seedProject, w
 const WARMUP = 5
 const MEASURED = 40
 const TYPED = 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do'.slice(0, WARMUP + MEASURED)
-const TRIMS = ['us-6x9', 'us-5x8', 'a5', 'us-5.5x8.5']
+const TRIMS = ['us-6x9', 'us-5x8', 'uk-a5', 'us-5.5x8.5']
 
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]
 

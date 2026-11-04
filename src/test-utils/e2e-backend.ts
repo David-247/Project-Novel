@@ -207,6 +207,19 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       e2eReservation?.()
       e2eReservation = pos === null ? null : registerBottomReservation('e2e', (p) => (p.from <= pos && pos < p.to ? px : 0))
     },
+    /** Editor document version (bumps on every document change; style edits must not bump it). */
+    docVersion: () => useStore.getState().editor.docVersion,
+    /**
+     * Make the editor read the DOM selection now. ProseMirror picks up a click / End-key caret move
+     * on the async `selectionchange` event; a test that presses the next key (or changes a toolbar
+     * select) within the same task can otherwise act on the previous selection under CPU load.
+     */
+    syncSelection: () => {
+      const view = getEditor()?.view as unknown as { domObserver?: { flush(): void } } | undefined
+      view?.domObserver?.flush()
+    },
+    /** book.styles as stored (overrides only). */
+    bookStyles: () => useStore.getState().book.styles,
   }
 }
 

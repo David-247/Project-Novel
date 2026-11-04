@@ -1,11 +1,13 @@
-/* Paginated view (docs/pagination.md). Paper colours come ONLY from these custom properties, each
-   with a neutral fallback; the paper surfaces ticket defines them in src/shared/theme:
-   --page-bg, --page-fg, --page-shadow, --desk-bg, --spine-shadow. */
+/* Paginated view (docs/pagination.md). Paper colours, texture, shadow and the spine come from the
+   paper surfaces contract (src/shared/theme/surfaces.css: .nv-page, .nv-page--verso / --recto,
+   .nv-page-muted, and the --page-* / --desk-* tokens). Only geometry here. */
 
 .nv-desk {
   display: flow-root;
   min-height: 100%;
-  background: var(--desk-bg, transparent);
+  background: var(--desk-bg);
+  /* One book point in CSS px (96/72) on the page surface; zoom is a transform on top of it. */
+  --nv-pt: calc(96px / 72);
 }
 /* The find panel floats over the top of the editor region: keep the first page below it (same
    contract as the continuous surface, see editor/find/find.css). */
@@ -33,25 +35,6 @@
 }
 .nv-page {
   position: absolute;
-  background: var(--page-bg, #ffffff);
-  color: var(--page-fg, #1f1f1f);
-  box-shadow: var(--page-shadow, 0 1px 3px rgb(0 0 0 / 0.16), 0 8px 24px rgb(0 0 0 / 0.08));
-}
-/* Spine: a soft shade on the binding edge of both pages of a spread (mirrored on the recto). */
-.nv-page[data-view='spread']::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  width: 28px;
-  background: var(--spine-shadow, linear-gradient(to left, rgb(0 0 0 / 0.07), rgb(0 0 0 / 0)));
-  pointer-events: none;
-}
-.nv-page[data-view='spread'][data-side='recto']::after {
-  right: auto;
-  left: 0;
-  transform: scaleX(-1);
 }
 .nv-slot {
   position: absolute;
@@ -59,8 +42,7 @@
   flex-direction: column;
   justify-content: center;
   overflow: hidden;
-  color: var(--page-fg, #1f1f1f);
-  font-size: 9pt;
+  font-size: calc(9 * var(--nv-pt));
 }
 
 /* ---- Text layer: the editor's one view ----------------------------------------------------
@@ -79,10 +61,10 @@
   height: var(--nv-canvas-h);
   padding: 0 calc(var(--nv-canvas-w) - var(--nv-text-w)) 0 0;
   outline: none;
-  color: var(--page-fg, #1f1f1f);
+  color: var(--page-fg);
   caret-color: currentColor;
-  /* Neutral book defaults until style definitions (styles ticket) take over. */
-  font-size: 11pt;
+  /* Fallback typography; the book style sheet (data-style rules) sets the real values. */
+  font-size: calc(11 * var(--nv-pt));
   line-height: 1.45;
   white-space: pre-wrap;
   word-wrap: break-word;
@@ -91,35 +73,15 @@
 .nv-text-layer .nv-shift {
   position: relative;
 }
-.nv-text-layer .novel-editor-content p {
-  margin: 0 0 0.6em;
-}
-.nv-text-layer .novel-editor-content h1 {
-  font-size: 1.8em;
-  font-weight: 700;
-  line-height: 1.2;
-  margin: 0 0 1em;
-}
-.nv-text-layer .novel-editor-content h2 {
-  font-size: 1.4em;
-  font-weight: 700;
-  line-height: 1.25;
-  margin: 0.8em 0 0.6em;
-}
-.nv-text-layer .novel-editor-content h3 {
-  font-size: 1.15em;
-  font-weight: 700;
-  margin: 0.8em 0 0.5em;
+.nv-text-layer ::selection {
+  background: var(--page-selection-bg);
+  color: var(--page-fg);
 }
 .nv-text-layer .novel-editor-content ul {
   list-style: disc;
   padding-left: 1.5em;
-  margin: 0 0 0.6em;
 }
 .nv-text-layer .novel-editor-content ol {
   list-style: decimal;
   padding-left: 1.5em;
-  margin: 0 0 0.6em;
 }
-/* Keyboard focus is visible on the page itself: a quiet ring around the text layer is meaningless
-   when text sits on many pages, so the caret (and the selection) is the focus indicator. */
