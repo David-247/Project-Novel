@@ -172,12 +172,21 @@ export function renderedStyleId(node: PMNode, styles: ResolvedStyles): string {
 function computeBreaks(doc: PMNode, styles: ResolvedStyles): DecorationSet {
   const decos: Decoration[] = []
   let prev: string | null = null
+  let afterPageBreak = false
   doc.forEach((node, offset) => {
+    if (node.type.name === 'pageBreak') {
+      // A manual page break makes the block after it start a page (recto, when its style says so).
+      afterPageBreak = true
+      prev = null
+      return
+    }
     const id = isStyledType(node) ? renderedStyleId(node, styles) : null
     const b = id ? styles.get(id)?.breakBefore : undefined
-    if (id && (b === 'page' || b === 'recto') && !continuesHeadingGroup(prev, id, styles)) {
-      decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': b }))
-    }
+    let value: 'page' | 'recto' | undefined =
+      id && (b === 'page' || b === 'recto') && !continuesHeadingGroup(prev, id, styles) ? b : undefined
+    if (afterPageBreak && value !== 'recto') value = 'page'
+    if (value) decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': value }))
+    afterPageBreak = false
     prev = id
   })
   return DecorationSet.create(doc, decos)

@@ -35,3 +35,42 @@
   list-style: decimal;
   padding-left: 1.5em;
 }
+
+/* Page break: a quiet labelled rule at the end of the page it closes. The label sits on the rule. */
+.novel-writing-surface .novel-editor-content [data-page-break] {
+  position: relative;
+  height: 1.75rem;
+  margin: 0;
+  cursor: default;
+  user-select: none;
+  color: var(--page-muted-fg);
+  font: 0.75rem/1 system-ui, sans-serif;
+  text-indent: 0;
+}
+.novel-writing-surface .novel-editor-content [data-page-break]::before {
+  content: '';
+  position: absolute;
+  inset: 50% 0 auto 0;
+  border-top: 1px dashed currentColor;
+  opacity: 0.6;
+}
+.novel-writing-surface .novel-editor-content [data-page-break]::after {
+  content: attr(data-label);
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  padding: 0 0.6rem;
+  background: var(--page-bg);
+  white-space: nowrap;
+}
+/* A selected break (click it, or arrow onto it): Backspace / Delete remove it. */
+.novel-writing-surface .novel-editor-content [data-page-break].ProseMirror-selectednode,
+.novel-writing-surface .novel-editor-content [data-scene-break].ProseMirror-selectednode {
+  outline: 2px solid var(--page-focus-ring);
+  outline-offset: 2px;
+}
+.novel-writing-surface .novel-editor-content [data-scene-break] {
+  cursor: default;
+  user-select: none;
+  white-space: pre;
+}
