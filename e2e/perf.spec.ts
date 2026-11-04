@@ -297,11 +297,13 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
   budget(testInfo, 'restyle all drawn ms', result.allDrawnMs, 3000)
 })
 
-test('100k-word manuscript with 200 footnotes: typing in the main text stays within budget', async ({ page }, testInfo) => {
-  test.setTimeout(180_000)
+/**
+ * The 100k-word manuscript with a footnote after the bold words of every 4th paragraph (200 in all;
+ * paragraph 500 has one, so every keystroke re-measures a block holding a reference and re-reserves
+ * its page).
+ */
+function buildFootnotedManuscript() {
   const built = buildManuscript()
-  // A footnote after the bold words of every 4th paragraph (200 in all; paragraph 500 has one, so
-  // every keystroke re-measures a block holding a reference and re-reserves its page).
   let notes = 0
   let paragraph = 0
   const content = (built.doc.content as Array<{ type: string; content?: unknown[] }>).map((b) => {
@@ -312,6 +314,12 @@ test('100k-word manuscript with 200 footnotes: typing in the main text stays wit
     const note = { type: 'footnote', content: [{ type: 'text', text: `Note ${notes}: ${VOCAB.slice(0, 6 + (notes % 12)).join(' ')}.` }] }
     return { ...b, content: [...b.content!.slice(0, 2), note, ...b.content!.slice(2)] }
   })
+  return { ...built, content, notes }
+}
+
+test('100k-word manuscript with 200 footnotes: typing in the main text stays within budget', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const { content, notes, ...built } = buildFootnotedManuscript()
   expect(notes).toBe(200)
   const doc = { type: 'doc', content }
   const openMs = await openEpic(page, '/projects/Footnoted', doc)
@@ -332,4 +340,58 @@ test('100k-word manuscript with 200 footnotes: typing in the main text stays wit
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
   budget(testInfo, 'typing median ms (200 footnotes)', typing.medianMs, 50)
+})
+
+test('100k-word manuscript, paginated combined hot path: spread view + 200 footnotes + find open + autosave mid-typing', async ({ page }, testInfo) => {
+  test.setTimeout(240_000)
+  // A window wide enough for the two-page spread at Fit spread (the default view).
+  await page.setViewportSize({ width: 1400, height: 900 })
+  const { content, notes, words } = buildFootnotedManuscript()
+  const doc = { type: 'doc', content }
+  const folder = '/projects/Combined'
+  const openMs = await openEpic(page, folder, doc)
+  expect((await page.evaluate(() => window.__nvE2E.layout())).effectiveView).toBe('spread')
+  await expect(page.locator('main [contenteditable="true"] [data-footnote-ref]')).toHaveCount(notes)
+  await expect(page.locator('.nv-fn-area').first()).toBeVisible()
+
+  // Find panel open on whole-word "the": 10,000 live matches (plus any in the notes' text).
+  await page.keyboard.press('ControlOrMeta+f')
+  const panel = findPanel(page)
+  await panel.getByRole('checkbox', { name: 'Whole word' }).check()
+  await panel.getByRole('textbox', { name: 'Find' }).fill('the')
+  await expect(page.getByTestId('find-status')).toHaveText(/ of \d+$/, { timeout: 30_000 })
+  const matches = Number((await page.getByTestId('find-status').textContent())!.match(/ of (\d+)$/)![1])
+  expect(matches).toBeGreaterThanOrEqual(10_000)
+  await installLatencyProbe(page)
+
+  // Autosave forced halfway through the measured keystrokes, not awaited (competes like the timer).
+  const autosaveAt = WARMUP + Math.floor(MEASURED / 2)
+  const typing = await measureTyping(page, async (i) => {
+    if (i === autosaveAt) {
+      await page.evaluate(() => {
+        void window.__nvE2E.autosaveNow()
+      })
+    }
+  })
+  await waitForLayout(page)
+  const after = await page.evaluate(() => window.__nvE2E.layout())
+
+  await expect(findPanel(page)).toBeVisible()
+  await expect.poll(() => readFile(page, `${folder}/.recovery/manuscript.json`)).not.toBeNull()
+  const snapshot = JSON.parse((await readFile(page, `${folder}/.recovery/manuscript.json`))!)
+  expect(JSON.stringify(snapshot.doc)).toContain(TYPED.slice(0, autosaveAt))
+  expect(after.effectiveView).toBe('spread')
+
+  await report(testInfo, 'perf-combined', {
+    manuscript: { words, blocks: content.length, footnotes: notes, liveMatches: matches },
+    view: after.effectiveView,
+    pages: after.pageCount,
+    openMs,
+    autosaveForcedBeforeKeystroke: autosaveAt + 1,
+    typing,
+    budgets: { typingMedianMs: 50 },
+  })
+
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  budget(testInfo, 'typing median ms (paginated combined hot path)', typing.medianMs, 50)
 })

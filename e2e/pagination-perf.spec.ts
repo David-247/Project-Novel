@@ -8,7 +8,7 @@ import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedP
  * Pagination performance budget on a 100,000-word manuscript (serial perf projects, like
  * perf.spec.ts; chromium ~ WebView2, webkit ~ WKWebView):
  *  - trim size change: set -> page model published and the pages in view drawn and painted, < 1 s
- *    for each of four trims (off-screen blocks drawn progressively after; reported, < 3 s);
+ *    for every catalog trim size (off-screen blocks drawn progressively after; < 3 s);
  *  - typing latency while paginated (keydown -> next frame painted), median < 50 ms, p95 reported:
  *    (a) at the end of a line of a mid-manuscript paragraph, (b) inside a paragraph split across two pages
  *    (every wrapped line moves a line between pages and re-decorates the rest of the book).
@@ -18,7 +18,8 @@ import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedP
 const WARMUP = 5
 const MEASURED = 40
 const TYPED = 'Lorem ipsum dolor sit amet consectetur adipiscing elit sed do'.slice(0, WARMUP + MEASURED)
-const TRIMS = ['us-6x9', 'us-5x8', 'uk-a5', 'us-5.5x8.5']
+/** Every catalog trim size, ending on the default (us-5.5x8.5) the book opened with. */
+const TRIMS = ['us-6x9', 'us-5x8', 'uk-a5', 'us-5.25x8', 'us-mass-market', 'uk-b-format', 'uk-royal', 'uk-demy', 'us-5.5x8.5']
 
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]
 
