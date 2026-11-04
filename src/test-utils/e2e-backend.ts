@@ -20,6 +20,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getEditor } from '@/features/editor'
 import { getPaginationDebug, registerBottomReservation, relayoutPagination } from '@/features/pagination'
 import { autosaveNow } from '@/features/storage'
+import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
@@ -216,6 +217,8 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       e2eReservation?.()
       e2eReservation = pos === null ? null : registerBottomReservation('e2e', (p) => (p.from <= pos && pos < p.to ? px : 0))
     },
+    /** Footnotes: px of the footnote area of each page, and the note lines placed on each page. */
+    footnoteAreas: () => ({ heights: footnoteAreaHeights(), placement: footnotePlacement() }),
     /** Editor document version (bumps on every document change; style edits must not bump it). */
     docVersion: () => useStore.getState().editor.docVersion,
     /**

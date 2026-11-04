@@ -60,7 +60,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     ]
     const surfaces = Object.values(SURFACE_CONTROLS).map((m) => m.id)
     expect(new Set(rendered)).toEqual(
-      new Set([...expected.map((m) => m.id), ...surfaces, 'book.trimSize', 'insert.menu', 'file.new_project', 'file.open_project']),
+      new Set([...expected.map((m) => m.id), ...surfaces, 'book.trimSize', 'insert.menu', 'footnote.options', 'file.new_project', 'file.open_project']),
     )
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
@@ -139,6 +139,34 @@ describe('tooltip coverage (every control in the app has a registered, wired too
       .map((m) => m.id)
       .filter((id) => id.startsWith('styles.field.'))
     for (const id of fieldIds) expect(modify.querySelector(`[data-control-id="${id}"]`), id).not.toBeNull()
+    audit()
+    act(() => useStore.getState().bookActions.resetBook())
+  })
+
+  it('covers the Footnote options dialog and the footnote editor', async () => {
+    await renderFullApp()
+    act(() => useStore.getState().findActions.closePanel())
+    const audit = () => {
+      const problems = auditTooltipCoverage(document.body)
+      expect(problems, formatCoverageProblems(problems)).toEqual([])
+    }
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="footnote.options"]')!))
+    const dialog = await screen.findByRole('dialog', { name: 'Footnote options' })
+    expect(Array.from(dialog.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))).toEqual([
+      'footnote.options.close',
+      'footnote.options.numbering',
+      'footnote.options.format',
+      'footnote.options.separator',
+      'footnote.options.done',
+    ])
+    audit()
+    act(() => void fireEvent.change(dialog.querySelector('[data-control-id="footnote.options.numbering"]')!, { target: { value: 'chapter' } }))
+    expect(useStore.getState().book.footnotes).toEqual({ numbering: 'chapter' })
+    act(() => void fireEvent.click(dialog.querySelector('[data-control-id="footnote.options.done"]')!))
+    // The footnote editor (popover) opened by Insert > Footnote.
+    act(() => void getEditor()!.commands.insertFootnote())
+    await screen.findByTestId('footnote-popover')
+    expect(document.querySelector('[data-control-id="footnote.done"]')).not.toBeNull()
     audit()
     act(() => useStore.getState().bookActions.resetBook())
   })

@@ -25,6 +25,7 @@ import {
   useStorageIntegration,
 } from '@/features/storage'
 import { PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
+import { FootnoteOptionsButton, useFootnotePagination } from '@/features/footnotes'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
@@ -50,6 +51,8 @@ export function App() {
   useReloadGuard(!import.meta.env.DEV)
   useEffect(() => registerDocumentProvider(editorDocumentProvider), [])
   useStorageIntegration()
+  // Footnotes at the bottom of their page (bottom reservations + the footnote area page slot).
+  useFootnotePagination()
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
@@ -76,6 +79,9 @@ export function App() {
                   <ToolbarGroup label="Insert">
                     <ToolbarItem>
                       <InsertMenu />
+                    </ToolbarItem>
+                    <ToolbarItem>
+                      <FootnoteOptionsButton />
                     </ToolbarItem>
                   </ToolbarGroup>
                   <ToolbarSeparator />

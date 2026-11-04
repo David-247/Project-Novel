@@ -1,0 +1,33 @@
+/* Footnote areas at the bottom of the text block (footnotes slice). Typography comes from the
+   Footnote Text style (inline, with an exact line height: notes split between whole lines). */
+.nv-fn-area {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  color: var(--page-fg);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.nv-fn-rule {
+  position: absolute;
+  left: 0;
+  width: 33%;
+  border-top: 1px solid currentColor;
+  opacity: 0.75;
+}
+/* A page whose area starts with the rest of a note from the page before: full-width rule. */
+.nv-fn-rule--continued {
+  width: 100%;
+}
+.nv-fn-note {
+  overflow: hidden;
+}
+.nv-fn-mark {
+  position: relative;
+  top: -0.4em;
+  font-size: 0.75em;
+  line-height: 0;
+}
