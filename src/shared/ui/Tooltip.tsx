@@ -1,5 +1,5 @@
 import * as RTooltip from '@radix-ui/react-tooltip'
-import { cloneElement, createContext, isValidElement, useContext, useEffect, useId, useMemo, useState } from 'react'
+import { cloneElement, createContext, isValidElement, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactElement, ReactNode, Ref } from 'react'
 import { flushSync } from 'react-dom'
 import { ariaKeyshortcuts, detectPlatform, formatShortcut, shortcutList } from './shortcut'
@@ -169,6 +169,18 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
   const env = useContext(TooltipEnvContext)
   const [open, setOpen] = useState(false)
   const descId = useId()
+  // Opened by `openNow` (sliding along the toolbar, long-press), not by Radix's hover logic: Radix does
+  // not track such a tooltip, so its pointer-leave handling must be done here.
+  const manual = useRef(false)
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const cancelLeave = () => clearTimeout(leaveTimer.current)
+  const leaveSoon = () => {
+    if (!manual.current) return
+    cancelLeave()
+    // Long enough to cross the gap onto the tooltip itself (which stays hoverable).
+    leaveTimer.current = setTimeout(() => setOpen(false), 150)
+  }
+  useEffect(() => cancelLeave, [])
   const childProps = (isValidElement(children) ? children.props : {}) as TriggerChildProps
   const id = controlId ?? childProps['data-control-id']
   const resolved = copy ?? (id ? env.lookup(id) : undefined)
@@ -194,6 +206,7 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
     window.addEventListener('keydown', onKey, true)
     return () => {
       openTooltips--
+      manual.current = false
       window.removeEventListener('keydown', onKey, true)
     }
   }, [open])
@@ -220,10 +233,13 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
   // Opening outside Radix's own triggers: announce it like Radix does, so any other open tooltip closes.
   const openNow = () => {
     document.dispatchEvent(new CustomEvent(RADIX_TOOLTIP_OPEN_EVENT))
+    manual.current = true
     setOpen(true)
   }
   const fwdKeyDown = forwarded.onKeyDown as ((e: KeyboardEvent) => void) | undefined
   const fwdContextMenu = forwarded.onContextMenu as ((e: MouseEvent) => void) | undefined
+  const fwdPointerLeave = forwarded.onPointerLeave as ((e: PointerEvent) => void) | undefined
+  const fwdPointerEnter = forwarded.onPointerEnter as ((e: PointerEvent) => void) | undefined
   const fwdFocus = forwarded.onFocus as ((e: FocusEvent) => void) | undefined
   const fwdPointerMove = forwarded.onPointerMove as ((e: PointerEvent) => void) | undefined
   const behaviour = {
@@ -233,6 +249,14 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
       // (Radix ignores moves inside the previous tooltip's hover "grace area", which for a wide
       // tooltip below a small button covers its neighbours.)
       if (e.pointerType !== 'touch' && !open && openTooltips > 0) openNow()
+    },
+    onPointerLeave: (e: PointerEvent) => {
+      fwdPointerLeave?.(e)
+      leaveSoon()
+    },
+    onPointerEnter: (e: PointerEvent) => {
+      fwdPointerEnter?.(e)
+      cancelLeave()
     },
     onFocus: (e: FocusEvent) => {
       fwdFocus?.(e)
@@ -278,6 +302,8 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
           sideOffset={6}
           collisionPadding={8}
           aria-label={description}
+          onPointerEnter={cancelLeave}
+          onPointerLeave={leaveSoon}
           className={cn(
             'z-50 max-w-72 rounded-control border border-border bg-surface-raised px-2.5 py-1.5',
             'text-ui-xs text-text shadow-raised select-none',
