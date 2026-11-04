@@ -157,3 +157,27 @@ Example toolbar:
 `AppShell` paints the toolbar header and status footer on `bg`, separated from the editor by a `border`
 hairline. The editor `<main>` uses `bg-surface text-text`, and that is all the shell styles there:
 document content is the editor slice's job, and paper/book surfaces and page spreads are Phase 2.
+
+## Pages and spreads (Phase 2, pagination)
+
+The writing surface is now a desk with book pages on it (`src/features/pagination`, docs/pagination.md).
+
+- **Paper is the brightest plane.** A page is a plain white sheet with a soft two-step shadow (a tight
+  contact shadow plus a wide, faint one) on the editor's `surface`, so the page reads as an object
+  lying on the desk without a frame or border. The spine of a spread gets a faint inner shade on both
+  facing pages (mirrored on the recto), the one cue that two pages are a bound book rather than two
+  cards. Everything is neutral on purpose: the paper surfaces ticket themes it.
+- **Five custom properties only.** Page elements read `--page-bg`, `--page-fg`, `--page-shadow`,
+  `--desk-bg` and `--spine-shadow`, each with a fallback (white, near-black `#1f1f1f`, the shadow above,
+  transparent desk, the spine gradient). Text on the page uses `--page-fg`, never the chrome's `text`, so
+  a white page stays readable in the dark theme (`#1f1f1f` on `#ffffff` is about 16.5:1).
+- **Book typography defaults.** 11pt, line-height 1.45, 0.6em after paragraphs: what a trade paperback
+  page looks like at 100 %. Style definitions (styles ticket) replace them.
+- **Status bar page controls** sit at the trailing end, after the project actions: the page indicator
+  ("Pages 12–13 of 384", tabular figures), the spread toggle (an open-book icon, pressed = two pages),
+  zoom out, the zoom select (Fit spread / Fit width / 50–200 %) and zoom in. All are standard
+  `IconButton` / `ToggleButton` / `Select` controls: 32 px targets, tooltips from the registry, keyboard
+  reachable in the footer's tab order, existing contrast pairs.
+- **Fit spread is the default zoom**: the whole spread fits the window, like holding the book open.
+  Narrow windows fall back to single pages (touch-tolerant; no hover-only actions). A press on a margin
+  or the desk puts the caret on the nearest line of that page.

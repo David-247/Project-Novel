@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 /**
  * Helpers for driving the app through the e2e fake Tauri backend
@@ -69,6 +69,35 @@ export async function seedProject(
   await writeFile(page, `${folder}/project.json`, JSON.stringify(meta, null, 2))
   await writeFile(page, `${folder}/manuscript.json`, manuscriptText)
   await page.evaluate(([f, t]) => window.__nvE2E.addRecent(f, t), [folder, title] as const)
+}
+
+/**
+ * Click on the first character of an editor block, as a user would on the page. On paginated pages a
+ * block's layout box is not where its lines are painted (a paragraph continued on the next page keeps
+ * a tall, partly empty box), so the target is the painted text itself, scrolled into view first.
+ */
+export async function clickBlockStart(page: Page, block: Locator): Promise<void> {
+  const point = async () =>
+    block.evaluate((el) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+      const text = walker.nextNode() as Text | null
+      const r = document.createRange()
+      if (text && text.length) {
+        r.setStart(text, 0)
+        r.setEnd(text, 1)
+      } else r.selectNodeContents(el)
+      const rc = r.getBoundingClientRect()
+      return { x: rc.left + Math.min(2, rc.width / 2), y: rc.top + rc.height / 2 }
+    })
+  const main = page.getByRole('main', { name: 'Editor' })
+  const box = (await main.boundingBox())!
+  let p = await point()
+  if (p.y < box.y + 40 || p.y > box.y + box.height - 40) {
+    await main.evaluate((m, dy) => m.scrollBy(0, dy), p.y - (box.y + box.height / 2))
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
+    p = await point()
+  }
+  await page.mouse.click(p.x, p.y)
 }
 
 /** Wait until the pagination engine has laid out the current document (no reflow pending) and painted. */

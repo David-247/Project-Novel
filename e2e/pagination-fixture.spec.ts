@@ -8,9 +8,11 @@ import { launch, openRecent, saveStatus, seedProject, waitForLayout } from './he
  * total pages differ <= max(2, 1%), each chapter opening page index differs <= 1).
  *
  * The deterministic ~100k-word fixture is typeset in a bundled OFL font (Libre Baskerville,
- * e2e/fixtures/fonts, see OFL.txt there) so system fonts do not differ between machines; chapter
- * headings start on a recto (data-break-before, as a style definition would emit it). For every
- * trim size this records the total page count and each chapter's opening page index to
+ * e2e/fixtures/fonts, see OFL.txt there) so system fonts do not differ between machines. Chapter
+ * headings start a new page (data-break-before, as a style definition would emit it), in two
+ * modes: 'page' (any page) and 'recto' (next right-hand page; a one-page drift then moves an
+ * opening by two). For every mode and trim size this records the total page count and each
+ * chapter's opening page index to
  * perf-results/pagination-fixture-<browser>-<platform>.json (and the test report).
  */
 
@@ -35,18 +37,20 @@ test('cross-engine fixture: chapter opening pages and page totals per trim size'
   })
   await page.evaluate(async () => {
     await Promise.all([document.fonts.load("400 11pt 'NvFixtureSerif'"), document.fonts.load("700 11pt 'NvFixtureSerif'")])
-    window.__nvE2E.breakBeforeBlocks({ type: 'heading', level: 1 }, 'recto')
   })
   expect(await page.evaluate(() => document.fonts.check("400 11pt 'NvFixtureSerif'"))).toBe(true)
 
-  const results: { trim: string; pageCount: number; chapterOpenings: number[] }[] = []
-  for (const trim of TRIMS) {
-    await page.evaluate((id) => window.__nvE2E.setTrimSize(id), trim)
-    await waitForLayout(page)
-    const l = await page.evaluate(() => window.__nvE2E.layout())
-    const openings: number[] = []
-    for (const p of l.pages) if (!p.isBlank && p.startsBlockType === 'heading' && p.chapterIndex === openings.length) openings.push(p.index)
-    results.push({ trim, pageCount: l.pageCount, chapterOpenings: openings })
+  const results: { mode: 'page' | 'recto'; trim: string; pageCount: number; chapterOpenings: number[] }[] = []
+  for (const mode of ['page', 'recto'] as const) {
+    await page.evaluate((m) => window.__nvE2E.breakBeforeBlocks({ type: 'heading', level: 1 }, m), mode)
+    for (const trim of TRIMS) {
+      await page.evaluate((id) => window.__nvE2E.setTrimSize(id), trim)
+      await waitForLayout(page)
+      const l = await page.evaluate(() => window.__nvE2E.layout())
+      const openings: number[] = []
+      for (const p of l.pages) if (!p.isBlank && p.startsBlockType === 'heading' && p.chapterIndex === openings.length) openings.push(p.index)
+      results.push({ mode, trim, pageCount: l.pageCount, chapterOpenings: openings })
+    }
   }
 
   const out = {
@@ -65,9 +69,10 @@ test('cross-engine fixture: chapter opening pages and page totals per trim size'
   await testInfo.attach('pagination-fixture.json', { body: JSON.stringify(out, null, 2), contentType: 'application/json' })
 
   for (const r of results) {
-    expect(r.chapterOpenings, r.trim).toHaveLength(fx.chapters)
-    // Every chapter opens on a recto (even index), in order.
-    expect(r.chapterOpenings.every((p, i) => p % 2 === 0 && (i === 0 || p > r.chapterOpenings[i - 1])), r.trim).toBe(true)
-    expect(r.pageCount, r.trim).toBeGreaterThan(150)
+    const label = `${r.mode} ${r.trim}`
+    expect(r.chapterOpenings, label).toHaveLength(fx.chapters)
+    // Chapters open in order; with 'recto' always on a right-hand page (even index).
+    expect(r.chapterOpenings.every((p, i) => (r.mode === 'page' || p % 2 === 0) && (i === 0 || p > r.chapterOpenings[i - 1])), label).toBe(true)
+    expect(r.pageCount, label).toBeGreaterThan(150)
   }
 })

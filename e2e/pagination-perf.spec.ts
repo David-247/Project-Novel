@@ -1,14 +1,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { editor, launch, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Pagination performance budget on a 100,000-word manuscript (serial perf projects, like
  * perf.spec.ts; chromium ~ WebView2, webkit ~ WKWebView):
  *  - trim size change: set -> reflowed model published -> painted, < 1 s for each of four trims;
  *  - typing latency while paginated (keydown -> next frame painted), median < 50 ms, p95 reported:
- *    (a) at the end of a mid-manuscript paragraph, (b) inside a paragraph split across two pages
+ *    (a) at the end of a line of a mid-manuscript paragraph, (b) inside a paragraph split across two pages
  *    (every wrapped line moves a line between pages and re-decorates the rest of the book).
  * Numbers go to perf-results/pagination-*.json and the report.
  */
@@ -110,40 +110,39 @@ test('100k words paginated: trim size reflow < 1 s', async ({ page }, testInfo) 
   for (const r of reflows) expect(r.ms, r.trim).toBeLessThan(1000)
 })
 
-test('100k words paginated: typing latency (end of paragraph; inside a paragraph split across pages)', async ({ page }, testInfo) => {
+test('100k words paginated: typing latency (end of a line; inside a paragraph split across pages)', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   const { fx, openMs } = await openFixture(page, '/projects/Typing')
   const ed = editor(page)
   await installLatencyProbe(page)
 
-  // (a) End of a mid-manuscript paragraph: click its first line, then End of paragraph.
-  const mid = ed.locator('p').nth(Math.floor((await ed.locator('p').count()) / 2))
-  await mid.scrollIntoViewIfNeeded()
-  await mid.click({ position: { x: 4, y: 4 } })
-  await page.keyboard.press('ControlOrMeta+End')
-  await page.keyboard.press('ControlOrMeta+Home')
-  await mid.click({ position: { x: 4, y: 4 } })
+  // (a) End of the first line of a mid-manuscript paragraph.
+  await clickBlockStart(page, ed.locator('p').nth(Math.floor((await ed.locator('p').count()) / 2)))
   await page.keyboard.press('End')
-  const endOfParagraph = await typeAndMeasure(page)
+  const endOfLine = await typeAndMeasure(page)
 
   // (b) Inside a paragraph whose last lines continue on the next page.
-  const split = ed.locator('p:has(> span.nv-shift)').nth(40)
-  await split.scrollIntoViewIfNeeded()
-  await split.click({ position: { x: 4, y: 4 } })
+  // (Index found natively: Playwright's own :has engine is slow over 1,300 paragraphs.)
+  const splitIndex = await ed.evaluate((root) => {
+    const ps = Array.from(root.querySelectorAll(':scope > p'))
+    return ps.indexOf(ps.filter((p) => p.querySelector(':scope > span.nv-shift'))[40])
+  })
+  expect(splitIndex).toBeGreaterThan(0)
+  await clickBlockStart(page, ed.locator(':scope > p').nth(splitIndex))
   await page.keyboard.press('ArrowRight')
   const splitParagraph = await typeAndMeasure(page)
   await waitForLayout(page)
-  await expect(ed).toContainText(TYPED)
+  expect(await ed.evaluate((el, t) => el.textContent!.split(t).length - 1, TYPED)).toBe(2)
 
   await report(testInfo, 'pagination-typing', {
     manuscript: { words: fx.words, chapters: fx.chapters, blocks: fx.doc.content.length },
     openMs,
     pages: (await page.evaluate(() => window.__nvE2E.layout())).pageCount,
-    endOfParagraph,
+    endOfLine,
     splitParagraph,
     budgets: { typingMedianMs: 50 },
   })
-  for (const t of [endOfParagraph, splitParagraph]) {
+  for (const t of [endOfLine, splitParagraph]) {
     expect(t.keystrokes).toBeGreaterThanOrEqual(20)
     expect(t.medianMs).toBeLessThan(50)
   }

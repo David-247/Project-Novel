@@ -262,8 +262,23 @@ export class PaginationEngine {
     let delta = 0
     let anchor = true
     let b = 0
+    // Top-level DOM elements in document order (view.nodeDOM scans from the start: O(n) per call).
+    let domChild = root.firstElementChild as (HTMLElement & { pmViewDesc?: { node?: PMNode } }) | null
+    const domFor = (node: PMNode, pos: number): HTMLElement | null => {
+      while (domChild && domChild.pmViewDesc?.node !== node) {
+        // Not this node's element (a widget, or the walk lost sync): fall back to the lookup.
+        if (!domChild.pmViewDesc?.node) {
+          domChild = domChild.nextElementSibling as typeof domChild
+          continue
+        }
+        return view.nodeDOM(pos) as HTMLElement | null
+      }
+      const el = domChild
+      domChild = (domChild?.nextElementSibling ?? null) as typeof domChild
+      return el
+    }
     doc.forEach((node, pos) => {
-      const dom = view.nodeDOM(pos) as HTMLElement | null
+      const dom = domFor(node, pos)
       if (!dom || dom.nodeType !== 1) return
       let m = this.cache.get(node)
       let fresh = false
@@ -344,6 +359,8 @@ export class PaginationEngine {
     const current = paginationKey.getState(view.state) ?? DecorationSet.empty
     const geometryChanged = key !== this.lastKey
     let changed = geometryChanged
+    // Blocks whose decorations differ from what is drawn: [start in `decos`, end, pos, node size].
+    const dirty: [number, number, number, number][] = []
     let lineCursor = 0
     for (let bi = 0; bi < blockNodes.length; bi++) {
       const m = blockMetrics[bi]
@@ -353,13 +370,17 @@ export class PaginationEngine {
       const first = lineCursor
       lineCursor += nLines
       const sigParts: string[] = []
+      const start = decos.length
       this.decorateBlock(node, pos, first, m, pageOfLine, offsets, (li) => posOfLine(li), decos, sigParts)
       const sig = sigParts.join(',')
-      if (!changed) {
+      if (!geometryChanged) {
         // An unchanged node compares with its last signature; an edited one with the decorations
         // ProseMirror mapped through the edit (usually still right: then nothing is redrawn).
         const last = this.lastSigs.get(node) ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1)
-        if (last !== sig) changed = true
+        if (last !== sig) {
+          changed = true
+          dirty.push([start, decos.length, pos, node.nodeSize])
+        }
       }
       this.lastSigs.set(node, sig)
     }
@@ -371,7 +392,17 @@ export class PaginationEngine {
     const t4 = performance.now()
     this.lastKey = key
     if (changed) {
-      const tr = view.state.tr.setMeta(paginationKey, DecorationSet.create(doc, decos)).setMeta('addToHistory', false)
+      // Few blocks changed (typing moved a split point): patch the drawn set, so ProseMirror redraws
+      // only those blocks. Otherwise (a line moved between pages, geometry) rebuild it.
+      let next: DecorationSet
+      if (!geometryChanged && dirty.length <= 8) {
+        next = current
+        for (const [a, z, pos, size] of dirty) {
+          next = next.remove(next.find(pos, pos + size, (spec) => (spec as Partial<ShiftSpec>).nvShift !== undefined).filter((d) => d.from >= pos && d.to <= pos + size))
+          next = next.add(doc, decos.slice(a, z))
+        }
+      } else next = DecorationSet.create(doc, decos)
+      const tr = view.state.tr.setMeta(paginationKey, next).setMeta('addToHistory', false)
       if (this.scrollAfterPass && view.hasFocus()) tr.scrollIntoView()
       view.dispatch(tr)
     }
