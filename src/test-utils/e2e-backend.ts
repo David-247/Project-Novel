@@ -17,7 +17,7 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { getEditor } from '@/features/editor'
+import { getEditor, getFootnotes } from '@/features/editor'
 import { getPaginationDebug, registerBottomReservation, relayoutPagination } from '@/features/pagination'
 import { autosaveNow } from '@/features/storage'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
@@ -219,6 +219,15 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     },
     /** Footnotes: px of the footnote area of each page, and the note lines placed on each page. */
     footnoteAreas: () => ({ heights: footnoteAreaHeights(), placement: footnotePlacement() }),
+    /** The manuscript's footnotes in order: reference position, derived label, note text. */
+    footnotes: () => getFootnotes().map((r) => ({ pos: r.pos, label: r.label, text: r.node.textContent })),
+    /** Insert a footnote with `text` at document position `pos` (no editor opened). */
+    insertFootnoteAt: (pos: number, text: string) => {
+      const ed = getEditor()
+      if (!ed) return
+      const schema = ed.schema
+      ed.view.dispatch(ed.state.tr.insert(pos, schema.nodes.footnote.create(null, text ? schema.text(text) : null)))
+    },
     /** Editor document version (bumps on every document change; style edits must not bump it). */
     docVersion: () => useStore.getState().editor.docVersion,
     /**
