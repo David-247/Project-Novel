@@ -16,6 +16,7 @@ import {
   snapshotsSuppressedAt,
   writeRecoveryFile,
 } from './recovery'
+import { sideFilesForSnapshot } from './side-files'
 import { withWriteLock } from './write-lock'
 
 /**
@@ -126,6 +127,7 @@ async function snapshot(): Promise<AutosaveResult> {
         docVersion: version,
         doc: p.getDocJSON(),
         book: currentBookSettings(),
+        sideFiles: sideFilesForSnapshot(),
       })
       // A snapshot the user has not answered yet is moved aside, never overwritten.
       await preserveUnansweredRecoveryUnlocked(folder)

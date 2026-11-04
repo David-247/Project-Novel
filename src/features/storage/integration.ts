@@ -8,6 +8,7 @@ import { exitApp, MENU_EVENTS } from './ipc'
 import {
   clearRecoveryData,
   confirmUnsavedChanges,
+  finishSideFilesOnClose,
   hasPendingRecovery,
   loadRecentProjects,
   newProject,
@@ -31,6 +32,7 @@ export function prepareToExit(action: 'closing' | 'quitting'): Promise<boolean> 
   exitFlow ??= (async () => {
     try {
       if (!(await confirmUnsavedChanges(action))) return false
+      await finishSideFilesOnClose()
       await stopAutosave()
       if (!hasPendingRecovery() && !getDocumentProvider()?.isDirty() && !isBookDirty()) await clearRecoveryData()
       return true

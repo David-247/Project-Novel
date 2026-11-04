@@ -38,7 +38,21 @@ import {
   restoreProjectRoot,
   setRecentMenu,
   writeFileAtomic,
+  writeFilesAtomic,
 } from './ipc'
+import {
+  forgetSideFiles,
+  hasGuardedSideFile,
+  loadSideFiles,
+  resetSideFiles,
+  restoreSideFiles,
+  sideFileNames,
+  sideFilesForNewProject,
+  sideFilesForSave,
+  sideFilesKey,
+  sideFilesSaved,
+  writeSideFilesOnClose,
+} from './side-files'
 import { flagMissing, parseRecentFile } from './recent'
 import {
   deleteRecoveryFile,
@@ -330,7 +344,7 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
     )
   }
   // Never overwrite leftovers of a project whose project.json is gone.
-  for (const file of [MANUSCRIPT_FILE, BOOK_FILE, INDEX_FILE]) {
+  for (const file of [MANUSCRIPT_FILE, BOOK_FILE, INDEX_FILE, ...sideFileNames()]) {
     if (await pathExists(joinPath(folder, file))) {
       throw new ProjectError(
         'already-exists',
@@ -342,7 +356,12 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   const version = p.getDocVersion()
   const content = doc ?? p.getDocJSON()
   const meta = newProjectMeta(baseName(folder))
-  await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), serializeManuscript(content), MANUSCRIPT_FILE)
+  // Side files (comments.json, ...): a new project starts without any; Save As keeps the current ones.
+  const side = doc ? { files: [], written: [] } : sideFilesForNewProject(folder)
+  await writeFilesAtomic([
+    ...side.files,
+    { path: joinPath(folder, MANUSCRIPT_FILE), contents: serializeManuscript(content), label: MANUSCRIPT_FILE },
+  ])
   // A new project starts with default book settings; Save As keeps the current ones.
   const book = doc ? defaultBookSettings() : currentBookSettings()
   const bookVersion = getBookVersion()
@@ -350,10 +369,13 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(meta), PROJECT_FILE)
   if (doc) {
     loadDocument(p, doc)
+    resetSideFiles(true)
     bookActions().loadBook(book)
   } else {
     p.markClean(version)
     bookActions().markBookClean(bookVersion)
+    resetSideFiles(false)
+    sideFilesSaved(side.written)
   }
   await activate(folder, meta, await switchIndex(folder))
 }
@@ -383,9 +405,12 @@ export async function openProjectAt(folder: string): Promise<void> {
   const book = await readBookFile(folder)
   loadDocument(p, parseManuscript(docText))
   bookActions().loadBook(book.settings)
+  // After the manuscript: a side file's content refers to it (comment anchors).
+  const sideWarnings = await loadSideFiles(folder)
   await activate(folder, meta, await switchIndex(folder))
   bookGuard = book.guard
   actions().setBookWarning(book.warning)
+  actions().setSideFileWarning(sideWarnings.length ? sideWarnings.join(' ') : null)
   await detectRecovery(folder, meta, docText, book.settings)
 }
 
@@ -456,7 +481,12 @@ async function writeProject(
     const bookText = serializeBook(currentBookSettings())
     // The write lock keeps this from overlapping an autosave snapshot.
     await withWriteLock(async () => {
-      await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), text, MANUSCRIPT_FILE)
+      // The manuscript and its side files (comments.json, ...) in one batch: all staged before any
+      // is replaced, the manuscript renamed last (docs/project-format.md, "Saving").
+      const side = await sideFilesForSave(folder)
+      await writeFilesAtomic([...side.files, { path: joinPath(folder, MANUSCRIPT_FILE), contents: text, label: MANUSCRIPT_FILE }])
+      sideFilesSaved(side.written)
+      if (side.written.length && !hasGuardedSideFile()) actions().setSideFileWarning(null)
       // An unreadable / damaged / newer book.json is only replaced once the user changed a book setting
       // other than view / surface, and only after a copy of it was kept.
       let bookSaved = true
@@ -592,6 +622,7 @@ export function newProject(): Promise<boolean> {
 
 async function newProjectUnguarded(): Promise<boolean> {
   if (!(await confirmUnsavedChanges('creating a new project'))) return false
+  await finishSideFilesOnClose()
   try {
     provider()
     const folder = await pickProjectFolder('Choose a folder for the new project')
@@ -614,6 +645,7 @@ export function openProject(folder?: string): Promise<boolean> {
 
 async function openProjectUnguarded(folder?: string): Promise<boolean> {
   if (!(await confirmUnsavedChanges('opening another project'))) return false
+  await finishSideFilesOnClose()
   let target = folder ?? null
   try {
     provider()
@@ -640,8 +672,21 @@ export async function closeProject(): Promise<void> {
   lastSaveDoneAt = 0
   pendingRecovery = null
   bookGuard = null
+  forgetSideFiles()
   bookActions().resetBook()
   actions().projectClosed()
+}
+
+/**
+ * The open project is about to be closed (quit, or another project opened), after the
+ * unsaved-changes prompt: if nothing is unsaved, write the side files' close data (comments: threads
+ * whose anchor text is gone are pruned now, not on save). Never throws.
+ */
+export async function finishSideFilesOnClose(): Promise<void> {
+  const folder = getCurrentProjectPath()
+  const p = getDocumentProvider()
+  if (!folder || !p || isProjectDirty(p)) return
+  await withWriteLock(() => writeSideFilesOnClose(folder)).catch((e) => console.warn('Closing side files failed:', e))
 }
 
 // ---- Crash recovery ---------------------------------------------------------
@@ -750,7 +795,9 @@ async function judgeFoundRecovery(
       console.warn('Ignoring unreadable recovery data in', recoveryFilePath(folder))
       return
     }
-    const verdict = judgeRecovery(snapshot, meta, manuscriptText, savedBook)
+    // Side files changed without the text (a resolved comment) make the snapshot worth offering.
+    const sameSideFiles = !snapshot.sideFiles || sideFilesKey(snapshot.sideFiles) === sideFilesKey()
+    const verdict = judgeRecovery(snapshot, meta, manuscriptText, savedBook, sameSideFiles)
     if (verdict === 'identical') {
       await withWriteLock(() => clearRecoveryUnlocked(folder, true))
     } else if (verdict === 'unrelated') {
@@ -797,6 +844,8 @@ export async function restoreRecovery(): Promise<boolean> {
   try {
     const p = provider()
     loadDocument(p, pending.snapshot.doc)
+    // Side files (comments) come back with the text they refer to.
+    restoreSideFiles(pending.snapshot.sideFiles)
     p.markDirty()
     // Unsaved book settings come back with the text (snapshots from before book settings have none).
     // Only when they differ: restoring equal settings would mark the book unsaved, and the next save would
@@ -904,4 +953,5 @@ export async function __resetStorageForTests(): Promise<void> {
   bookGuard = null
   suppressSnapshotsAt(null)
   openedListeners.clear()
+  forgetSideFiles()
 }

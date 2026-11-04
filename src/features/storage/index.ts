@@ -41,7 +41,14 @@ export {
 } from './recovery'
 
 // Low-level file helpers (Rust commands; atomic temp-file + fsync + rename)
-export { writeFileAtomic, readTextFile, MENU_EVENTS } from './ipc'
+export { writeFileAtomic, writeFilesAtomic, readTextFile, MENU_EVENTS } from './ipc'
+export type { BatchFile } from './ipc'
+
+// Project side files: named JSON files beside manuscript.json owned by a slice (comments.json, ...),
+// saved in one batch with the manuscript, snapshotted for crash recovery, guarded when damaged or
+// newer (see side-files.ts and docs/project-format.md, "Side files").
+export { registerSideFile } from './side-files'
+export type { ProjectSideFile } from './side-files'
 
 // Book settings file (book.json; see docs/project-format.md)
 export { BOOK_FILE, BOOK_FORMAT, BOOK_VERSION, parseBook, serializeBook, type BookParseResult } from './book-file'

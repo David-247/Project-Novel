@@ -83,6 +83,7 @@ export const HANDLED_COMMANDS = [
   'storage_restore_project_root',
   'storage_clear_project_root',
   'storage_write_file_atomic',
+  'storage_write_files_atomic',
   'storage_read_text_file',
   'storage_path_exists',
   'storage_ensure_dir',
@@ -323,6 +324,21 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
         state.files.set(c, args.contents as string)
         state.writes.push(c)
         await persist.file(c, args.contents as string)
+        return null
+      }
+      case 'storage_write_files_atomic': {
+        // Like Rust: every file is confined and "staged" (failWrite checked) before any is replaced,
+        // so a failure while staging changes nothing; then all are written in order.
+        const files = args.files as { path: string; contents: string }[]
+        const targets = files.map((f) => confined(f.path, true))
+        if (new Set(targets).size !== targets.length) throw { kind: 'invalid_path', message: 'A file is listed twice' }
+        for (const c of targets) checkWrite(c)
+        for (const c of targets) if (state.writeGate) await state.writeGate(c)
+        for (const [i, c] of targets.entries()) {
+          state.files.set(c, files[i].contents)
+          state.writes.push(c)
+          await persist.file(c, files[i].contents)
+        }
         return null
       }
       case 'storage_ensure_dir': {
