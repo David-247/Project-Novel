@@ -321,6 +321,24 @@ describe('an unreadable or damaged book.json is not silently overwritten', () =>
     expect(backend.files.get(BOOK)).toBe('garbage')
   })
 
+  it('REGRESSION: a crash 1 s after a save whose book copy failed still offers the unsaved book settings', async () => {
+    await createProject()
+    backend.files.set(BOOK, 'garbage')
+    await launch()
+    await reopen()
+    bookActions().setTrimSize('us-6x9')
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    backend.failWrite = (p: string) => (p.includes('/book.damaged-') ? { kind: 'disk_full', message: 'full' } : null)
+    expect(await saveProject()).toBe(true)
+    backend.failWrite = null
+    await vi.advanceTimersByTimeAsync(1000)
+    await launch() // crash
+    await reopen()
+    expect(useStore.getState().project.recoveryPrompt).toMatchObject({ kind: 'restore' })
+    expect(await restoreRecovery()).toBe(true)
+    expect(book().trimSize).toBe('us-6x9')
+  })
+
   it('the warning survives a later set-aside note and clears when the project closes', async () => {
     await createProject()
     backend.files.set(BOOK, 'garbage')

@@ -163,7 +163,7 @@ function rearmIfStillDirty(): void {
 }
 
 /**
- * Forget the last snapshot and arm the timer: the next tick writes a snapshot even though the document
+ * Forget the last snapshot and take one at once (timer at 0): it is written even though the document
  * and book versions did not change. For a save that left the project unsaved (the book settings could
  * not be written): it moved project.json `updatedAt`, so the snapshot on disk, taken on top of the
  * previous save, would no longer be offered after a crash.
@@ -171,7 +171,9 @@ function rearmIfStillDirty(): void {
 export function forceNextSnapshot(): void {
   lastSnapshotVersion = null
   lastSnapshotBookVersion = null
-  arm()
+  // Now, not in 30 s: until it is written, a crash would lose the unsaved settings.
+  clearTimer()
+  arm(0)
 }
 
 /** Book settings changes arm the snapshot timer exactly like text edits. */
