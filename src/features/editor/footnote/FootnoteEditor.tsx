@@ -171,7 +171,8 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
       aria-label={`Footnote ${label}`}
       data-testid="footnote-popover"
       className="fixed z-40 w-[min(28rem,calc(100vw-1rem))] rounded-panel border border-border bg-surface-raised p-3 text-text shadow-raised"
-      style={place ? { left: place.left, top: place.top } : { left: GUTTER, top: GUTTER, visibility: 'hidden' }}
+      // Until it is placed: invisible but focusable (visibility: hidden would refuse focus).
+      style={place ? { left: place.left, top: place.top } : { left: GUTTER, top: GUTTER, opacity: 0 }}
       onBlur={(e) => {
         const next = e.relatedTarget as Node | null
         // Focus left the editor for something else (the manuscript, the toolbar): close.

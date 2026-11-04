@@ -27,6 +27,12 @@ const FORMATS: { value: FootnoteFormat; label: string }[] = [
  */
 export function FootnoteOptionsButton({ ref, ...forwarded }: FootnoteOptionsButtonProps) {
   const [open, setOpen] = useState(false)
+  const change = (next: boolean) => {
+    setOpen(next)
+    // The dialog has no Radix trigger: give the focus back to the button once it closed.
+    if (!next)
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(`button[data-control-id="${C.open.id}"]`)?.focus())
+  }
   return (
     <>
       <Tooltip controlId={C.open.id} {...forwarded} ref={ref as Ref<HTMLElement>}>
@@ -34,7 +40,7 @@ export function FootnoteOptionsButton({ ref, ...forwarded }: FootnoteOptionsButt
           {C.open.label}
         </Button>
       </Tooltip>
-      <FootnoteOptionsDialog open={open} onOpenChange={setOpen} />
+      <FootnoteOptionsDialog open={open} onOpenChange={change} />
     </>
   )
 }

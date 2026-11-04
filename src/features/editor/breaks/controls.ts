@@ -46,7 +46,8 @@ export const INSERT_ITEMS: readonly InsertItem[] = [
     description: 'Add a centred ornament between scenes. Typing *** or ### on a line does the same.',
     run: (editor) => editor.chain().focus().insertSceneBreak().run(),
   },
-  { ...FOOTNOTE_INSERT, run: (editor) => editor.chain().focus().insertFootnote().run() },
+  // No focus() in the chain: the footnote editor takes focus (a deferred manuscript focus would steal it).
+  { ...FOOTNOTE_INSERT, run: (editor) => editor.commands.insertFootnote() },
 ]
 
 /** "Chapters start on" radio items (a book setting: rewrites the Chapter Title style). */
