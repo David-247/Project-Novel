@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { waitForLayout } from './helpers'
+import { clickBlockStart, lineEnd, waitForLayout } from './helpers'
 
 /**
  * Paginated view (Phase 2, docs/pagination.md): one editor view laid out as book pages, in a
@@ -303,6 +303,8 @@ test('trim size reflows; margins mirror on verso and recto; bottom reservations 
   const after = await layout(page)
   expect(after.pages[0].to).toBeLessThan(before)
   expect(await page.evaluate(() => window.__nvE2E.paginationReserved()[0])).toBe(300)
+  // A reservation change re-breaks pages from the measured lines: nothing is re-measured.
+  expect((await page.evaluate(() => window.__nvE2E.paginationLines())).lastPass.measuredBlocks).toBe(0)
   await page.evaluate(() => window.__nvE2E.reserveBottom(null))
   await waitForLayout(page)
   expect((await layout(page)).pages[0].to).toBe(before)
@@ -323,4 +325,159 @@ test('a press on a margin or the desk puts the caret on the nearest line of that
   expect(l.currentPage).toBe(2)
   const text = await page.evaluate(() => document.querySelector('.ProseMirror')!.textContent!)
   expect(text).toContain('Q')
+})
+
+/** Pages tile the document and the model is settled. */
+async function expectTiled(page: Page) {
+  await waitForLayout(page)
+  const l = await layout(page)
+  expect(l.pages[0].from).toBe(0)
+  for (let i = 1; i < l.pages.length; i++) expect(l.pages[i].from).toBe(l.pages[i - 1].to)
+  return l
+}
+
+test('Replace and Replace All on a later page reflow the book', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(40, 100))
+  await page.waitForTimeout(600) // own undo group
+  // A unique word on page 4 (index 3): two spreads down, a few lines in.
+  await page.keyboard.press('ControlOrMeta+Home')
+  await page.keyboard.press('PageDown')
+  await page.keyboard.press('PageDown')
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown')
+  await lineEnd(page)
+  await page.keyboard.type(' Quokka')
+  await waitForLayout(page)
+  expect((await layout(page)).currentPage).toBeGreaterThanOrEqual(3)
+  const before = await layout(page)
+
+  await page.keyboard.press('ControlOrMeta+Home')
+  await page.keyboard.press('ControlOrMeta+f')
+  const panel = page.getByRole('region', { name: 'Find and replace' })
+  await panel.getByRole('textbox', { name: 'Find' }).fill('Quokka')
+  await expect(page.getByTestId('find-status')).toHaveText('1 of 1')
+  await panel.getByRole('textbox', { name: 'Replace with' }).fill('Quokka Quokka Quokka')
+  await panel.locator('[data-control-id="find.replace"]').click()
+  let l = await expectTiled(page)
+  expect(await editor(page).evaluate((el) => el.textContent!.includes('Quokka Quokka Quokka'))).toBe(true)
+  // The edit is on page 4 or later: the first three pages did not move.
+  expect(l.pages[3].from).toBe(before.pages[3].from)
+
+  // Replace All of a common word shortens every page's text: the book reflows and stays tiled.
+  await panel.getByRole('textbox', { name: 'Find' }).fill('meadow')
+  await expect(page.getByTestId('find-status')).toHaveText(/ of \d+$/)
+  await panel.getByRole('textbox', { name: 'Replace with' }).fill('')
+  await panel.locator('[data-control-id="find.replaceAll"]').click()
+  await expect(page.getByTestId('find-status')).toHaveText(/^Replaced \d+$/)
+  l = await expectTiled(page)
+  expect(l.pageCount).toBeLessThan(before.pageCount)
+  expect(await editor(page).evaluate((el) => el.textContent!.includes('meadow'))).toBe(false)
+})
+
+test('IME composition inside a split paragraph: no reflow until it ends, then the book reflows', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Input.imeSetComposition is a Chromium DevTools protocol call')
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(30, 100))
+  // Caret at the end of the first line of the first paragraph that continues on the next page.
+  const idx = await editor(page).evaluate((root) => {
+    const ps = Array.from(root.querySelectorAll(':scope > p'))
+    return ps.findIndex((p) => p.querySelector(':scope > span.nv-shift'))
+  })
+  expect(idx).toBeGreaterThanOrEqual(0)
+  await clickBlockStart(page, editor(page).locator(':scope > p').nth(idx))
+  await lineEnd(page)
+  await waitForLayout(page)
+
+  const cdp = await page.context().newCDPSession(page)
+  const compose = (text: string) => cdp.send('Input.imeSetComposition', { text, selectionStart: text.length, selectionEnd: text.length })
+  await compose('k')
+  await compose('ka')
+  await compose('か')
+  await compose('かんじかんじかんじ')
+  // While composing, the pass waits (redrawing under the composition would break it).
+  await page.waitForTimeout(150)
+  expect(await page.evaluate(() => window.__nvE2E.paginationSettled())).toBe(false)
+  await cdp.send('Input.insertText', { text: '漢字漢字漢字' })
+  const l = await expectTiled(page)
+  expect(await editor(page).evaluate((el) => el.textContent!.includes('漢字漢字漢字'))).toBe(true)
+  expect(l.pageCount).toBeGreaterThan(5)
+})
+
+test('ArrowDown / ArrowUp across a page split keep the caret column', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(30, 100))
+  await page.locator('[data-control-id="pagination.zoom"]').selectOption('100')
+  await waitForLayout(page)
+  // The last head line of the first paragraph that continues on the next page.
+  await editor(page).evaluate((root) => {
+    const p = Array.from(root.querySelectorAll(':scope > p')).find((el) => el.querySelector(':scope > span.nv-shift'))!
+    p.scrollIntoView({ block: 'center' })
+  })
+  const caretInfo = () =>
+    page.evaluate(() => {
+      const s = getSelection()!
+      const r = document.createRange()
+      r.setStart(s.focusNode!, s.focusOffset)
+      const rc = r.getClientRects()[0] ?? r.getBoundingClientRect()
+      const frames = Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page'))
+      const f = frames.find((fr) => {
+        const b = fr.getBoundingClientRect()
+        return rc.left >= b.left && rc.left <= b.right && rc.top >= b.top && rc.bottom <= b.bottom
+      })
+      return { page: f ? Number(f.dataset.pageIndex) : -1, xInPage: f ? rc.left - f.getBoundingClientRect().left : -1 }
+    })
+  const point = await editor(page).evaluate((root) => {
+    const p = Array.from(root.querySelectorAll(':scope > p')).find((el) => el.querySelector(':scope > span.nv-shift'))!
+    const head = Array.from(p.childNodes).filter((n) => !(n instanceof HTMLElement && n.classList.contains('nv-shift')))
+    const r = document.createRange()
+    let best: DOMRect | null = null
+    for (const n of head) {
+      r.selectNodeContents(n)
+      for (const rc of Array.from(r.getClientRects())) if (rc.width > 0 && (!best || rc.top > best.top)) best = rc
+    }
+    return { x: best!.left + best!.width / 2, y: best!.top + best!.height / 2 }
+  })
+  await page.mouse.click(point.x, point.y)
+  await waitForLayout(page)
+  const start = await caretInfo()
+  expect(start.page).toBeGreaterThanOrEqual(0)
+
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(async () => (await caretInfo()).page).toBe(start.page + 1)
+  const down = await caretInfo()
+  // Same column, mirrored margins aside (verso and recto text blocks start at different x).
+  const shift = (start.page % 2 === 0 ? 84 - 60 : 60 - 84) // recto -> verso moves the text block left
+  expect(Math.abs(down.xInPage - (start.xInPage - shift))).toBeLessThan(30)
+  expect((await layout(page)).currentPage).toBe(start.page + 1)
+
+  await page.keyboard.press('ArrowUp')
+  await expect.poll(async () => (await caretInfo()).page).toBe(start.page)
+  expect(Math.abs((await caretInfo()).xInPage - start.xInPage)).toBeLessThan(30)
+})
+
+test('PageDown on the last spread goes to the end of the book, PageUp on the first to its start', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(12))
+  const { pageCount } = await layout(page)
+  // PageDown spread by spread to the top of the last spread, then once more: the end, not backwards.
+  await page.keyboard.press('ControlOrMeta+Home')
+  const rows = Math.floor(pageCount / 2) // rows after the first (page 0 sits alone in row 0)
+  for (let i = 0; i < rows; i++) await page.keyboard.press('PageDown')
+  await expect.poll(async () => (await layout(page)).currentPage).toBe(2 * rows - 1)
+  await page.keyboard.press('PageDown')
+  const textAfterCaret = () =>
+    editor(page).evaluate((el) => {
+      const s = getSelection()!
+      const r = document.createRange()
+      r.selectNodeContents(el)
+      r.setStart(s.focusNode!, s.focusOffset)
+      return r.toString().length
+    })
+  await expect.poll(textAfterCaret).toBe(0)
+  expect((await layout(page)).currentPage).toBe(pageCount - 1)
+  await page.keyboard.press('ControlOrMeta+Home')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('PageUp')
+  await expect.poll(() => page.evaluate(() => getSelection()!.focusOffset)).toBe(0)
+  await expect.poll(async () => (await layout(page)).currentPage).toBe(0)
 })

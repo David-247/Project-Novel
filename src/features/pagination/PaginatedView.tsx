@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { TextSelection } from '@tiptap/pm/state'
+import { Selection, TextSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { useMountedEditor } from '@/features/editor'
 import { useStore } from '@/shared/store'
@@ -131,7 +131,9 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     }
     const plugin = createPaginationPlugin({
       keyDown: (v, e) => {
-        if ((e.key !== 'PageDown' && e.key !== 'PageUp') || e.altKey || e.ctrlKey || e.metaKey) return false
+        if (e.altKey || e.ctrlKey || e.metaKey) return false
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') return moveLineAcrossPages(v, e.key === 'ArrowDown' ? 1 : -1, e.shiftKey)
+        if (e.key !== 'PageDown' && e.key !== 'PageUp') return false
         return moveBySpread(v, e.key === 'PageDown' ? 1 : -1, e.shiftKey, live.current.placement, scrollToRow)
       },
       mouseDown: (v, e) => placeCaretFromDesk(v, e),
@@ -178,8 +180,20 @@ export function PaginatedView({ children }: PaginatedViewProps) {
 function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement: Placement, scrollToRow: (row: number) => void): boolean {
   const pages = useStore.getState().layout.pages
   if (!pages.length) return false
+  // A native caret move just before (arrow keys) may not be read yet: take it in first.
+  ;(view as unknown as { domObserver?: { flush(): void } }).domObserver?.flush()
   const current = pageAt(pages, view.state.selection.head)
-  const row = Math.min(placement.rowCount - 1, Math.max(0, placement.rowOf(current) + dir))
+  const currentRow = placement.rowOf(current)
+  const row = Math.min(placement.rowCount - 1, Math.max(0, currentRow + dir))
+  if (row === currentRow) {
+    // No further spread: PageDown goes to the end of the document, PageUp to its start.
+    const end = dir > 0 ? Selection.atEnd(view.state.doc) : Selection.atStart(view.state.doc)
+    const tr = view.state.tr.setSelection(
+      extend ? TextSelection.create(view.state.doc, view.state.selection.anchor, end.head) : end,
+    )
+    view.dispatch(tr.scrollIntoView())
+    return true
+  }
   const [first, last] = placement.pagesInRow(row)
   let target = first
   while (target < last && pages[target]?.isBlank) target++
@@ -191,6 +205,86 @@ function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement:
   view.dispatch(tr)
   if (!extend) caretToPageStart(view, page.from)
   scrollToRow(row)
+  return true
+}
+
+/**
+ * Document position of the text painted at a client point. The browser's caret hit test works on
+ * painted boxes (relative offsets included); ProseMirror's posAtCoords can fall back to layout
+ * coordinates, which differ on pages, so ask the browser first.
+ */
+function posAtPaintedPoint(view: EditorView, x: number, y: number): number | null {
+  const doc = view.dom.ownerDocument as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+    caretRangeFromPoint?: (x: number, y: number) => Range | null
+  }
+  let node: Node | null = null
+  let offset = 0
+  const p = doc.caretPositionFromPoint?.(x, y)
+  if (p) {
+    node = p.offsetNode
+    offset = p.offset
+  } else {
+    const r = doc.caretRangeFromPoint?.(x, y)
+    if (r) {
+      node = r.startContainer
+      offset = r.startOffset
+    }
+  }
+  if (node && view.dom.contains(node) && node !== view.dom) {
+    try {
+      return view.posAtDOM(node, offset)
+    } catch {
+      // fall through
+    }
+  }
+  return view.posAtCoords({ left: x, top: y })?.pos ?? null
+}
+
+/**
+ * ArrowDown on a page's last line / ArrowUp on its first line. The browser moves the caret by the
+ * layout column, where the next page's lines sit right below with no horizontal offset, so across a
+ * page boundary its x position is lost (it snaps to the line start). Move to the painted line
+ * instead: same x relative to the text block, on the first (last) line of the next (previous) page.
+ * Everywhere else the browser handles the key.
+ */
+function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean): boolean {
+  const snap = getEngine()?.getSnapshot()
+  if (!snap || !view.state.selection.empty && !extend) return false
+  ;(view as unknown as { domObserver?: { flush(): void } }).domObserver?.flush()
+  const { pages, ranges, lines, offsets, placement } = snap
+  const head = view.state.selection.head
+  const p = pageAt(pages, head)
+  const r = ranges[p]
+  if (!r || r.endLine <= r.startLine) return false
+  const root = view.dom as HTMLElement
+  const rect = root.getBoundingClientRect()
+  const s = root.offsetWidth ? rect.width / root.offsetWidth : 1
+  let caret: { left: number; top: number; bottom: number }
+  try {
+    caret = view.coordsAtPos(head, dir)
+  } catch {
+    return false
+  }
+  // The caret's line on its page, by painted position.
+  const y = ((caret.top + caret.bottom) / 2 - rect.top) / s
+  const edge = dir > 0 ? r.endLine - 1 : r.startLine
+  const edgeMid = (lines[edge].top + lines[edge].bottom) / 2 + offsets[p].dy
+  const half = (lines[edge].bottom - lines[edge].top) / 2
+  if (Math.abs(y - edgeMid) > half) return false
+  // Target page: the next / previous one with lines.
+  let q = p + dir
+  while (q >= 0 && q < pages.length && ranges[q] && ranges[q].endLine <= ranges[q].startLine) q += dir
+  if (q < 0 || q >= pages.length || !ranges[q]) return false
+  const target = dir > 0 ? ranges[q].startLine : ranges[q].endLine - 1
+  const ty = (lines[target].top + lines[target].bottom) / 2 + offsets[q].dy
+  const x = (caret.left - rect.left) / s - placement.content(p).x + placement.content(q).x
+  const hit = posAtPaintedPoint(view, rect.left + x * s, rect.top + ty * s)
+  if (hit === null) return false
+  const $pos = view.state.doc.resolve(hit)
+  const sel = extend ? TextSelection.create(view.state.doc, view.state.selection.anchor, $pos.pos) : TextSelection.near($pos)
+  view.dispatch(view.state.tr.setSelection(sel).scrollIntoView())
+  if (!extend && dir > 0) caretToPageStart(view, pages[q].from)
   return true
 }
 
@@ -260,8 +354,8 @@ function placeCaretFromDesk(view: EditorView, e: MouseEvent): boolean {
     const c = placement.content(page)
     const cx = Math.min(c.x + geometry.contentWidth - 1, Math.max(c.x + 1, x))
     const cy = (lines[li].top + lines[li].bottom) / 2 + o.dy
-    const hit = view.posAtCoords({ left: rect.left + cx * s, top: rect.top + cy * s })
-    if (hit) pos = hit.pos
+    const hit = posAtPaintedPoint(view, rect.left + cx * s, rect.top + cy * s)
+    if (hit !== null) pos = hit
   }
   const near = TextSelection.near(view.state.doc.resolve(Math.min(pos, view.state.doc.content.size)))
   const sel = e.shiftKey ? TextSelection.create(view.state.doc, view.state.selection.anchor, near.head) : near

@@ -77,15 +77,16 @@ const layoutListeners = new Set<() => void>()
 /**
  * Register a bottom reservation. The engine refills a page with the summed reservation until it
  * converges (capped; see breaker.ts `MAX_RESERVE_ITERATIONS`). Registering or unregistering reflows.
- * Call `invalidatePagination()` when the answer changes for another reason (e.g. a footnote edited).
+ * Call `relayoutPagination()` when the answer changes for another reason (e.g. a footnote edited):
+ * it re-breaks the pages from the measured lines without re-measuring anything.
  */
 export function registerBottomReservation(id: string, reserve: BottomReservation): () => void {
   reservations.set(id, reserve)
-  invalidatePagination()
+  relayoutPagination()
   return () => {
     if (reservations.get(id) !== reserve) return
     reservations.delete(id)
-    invalidatePagination()
+    relayoutPagination()
   }
 }
 
@@ -115,7 +116,7 @@ let chapterPredicate: ChapterPredicate = defaultChapterPredicate
 /** Replace the chapter predicate (the chapters ticket); `null` restores the default. Reflows. */
 export function setChapterPredicate(predicate: ChapterPredicate | null): void {
   chapterPredicate = predicate ?? defaultChapterPredicate
-  invalidatePagination()
+  relayoutPagination()
 }
 
 export function isChapterStart(node: PMNode): boolean {
@@ -125,16 +126,34 @@ export function isChapterStart(node: PMNode): boolean {
 // ---- Invalidation ----------------------------------------------------------------------------
 
 /**
- * Re-measure and reflow everything on the next frame. For changes the engine cannot see: a style
- * sheet that changes block metrics without changing the document, a `data-break-before` attribute
- * emitted by a decoration, a reservation whose answer changed.
+ * Re-measure and reflow everything on the next frame. For changes the engine cannot see that alter
+ * block metrics: a style sheet that changes line heights without changing the document, a font.
+ * (The engine already follows book.styles itself.) Costly on a long book: prefer
+ * `relayoutPagination()` when no line box changed.
  */
 export function invalidatePagination(): void {
   layoutListeners.forEach((l) => l())
 }
 
+/**
+ * Re-break the pages on the next frame from the lines already measured (no re-measuring): for a
+ * bottom reservation whose answer changed, a `data-break-before` attribute added or removed by a
+ * decoration, or a new chapter predicate. About the cost of a keystroke.
+ */
+export function relayoutPagination(): void {
+  relayoutListeners.forEach((l) => l())
+}
+
+const relayoutListeners = new Set<() => void>()
+
 /** Internal: the engine listens for invalidations. */
 export function onInvalidate(cb: () => void): () => void {
   layoutListeners.add(cb)
   return () => layoutListeners.delete(cb)
+}
+
+/** Internal: the engine listens for relayout requests. */
+export function onRelayout(cb: () => void): () => void {
+  relayoutListeners.add(cb)
+  return () => relayoutListeners.delete(cb)
 }

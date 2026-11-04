@@ -12,8 +12,11 @@ import {
   defaultChapterPredicate,
   hasReservations,
   isChapterStart,
+  invalidatePagination,
   onInvalidate,
+  onRelayout,
   registerBottomReservation,
+  relayoutPagination,
   registerPageSlot,
   setChapterPredicate,
   totalReservation,
@@ -103,9 +106,11 @@ describe('header / footer page slots', () => {
 })
 
 describe('bottom reservations', () => {
-  it('sums registered reservations, ignores bad answers, and reflows on (un)register', () => {
+  it('sums registered reservations, ignores bad answers, and re-breaks (without re-measuring) on (un)register', () => {
     const reflow = vi.fn()
-    const offInvalidate = onInvalidate(reflow)
+    const remeasure = vi.fn()
+    const offRelayout = onRelayout(reflow)
+    const offInvalidate = onInvalidate(remeasure)
     const p = { index: 0, side: 'recto' as const, from: 0, to: 50 }
     const a = registerBottomReservation('notes', (pg) => (pg.from <= 10 && 10 < pg.to ? 40 : 0))
     const b = registerBottomReservation('bad', () => Number.NaN)
@@ -116,6 +121,14 @@ describe('bottom reservations', () => {
     b()
     expect(hasReservations()).toBe(false)
     expect(reflow).toHaveBeenCalledTimes(4)
+    // A reservation change never re-measures the book (footnote edits must stay cheap).
+    expect(remeasure).not.toHaveBeenCalled()
+    relayoutPagination()
+    expect(reflow).toHaveBeenCalledTimes(5)
+    invalidatePagination()
+    expect(remeasure).toHaveBeenCalledTimes(1)
+    expect(reflow).toHaveBeenCalledTimes(5)
+    offRelayout()
     offInvalidate()
   })
 })

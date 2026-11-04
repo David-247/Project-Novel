@@ -4,7 +4,7 @@
 // pages; <PageIndicator> and <ZoomControls> go in the status bar.
 // Model: the shared store's `layout` slice (pages, currentPage, visibleSpread, ...).
 // Extension points: header/footer page slots, bottom reservations (footnotes), the chapter
-// predicate, and invalidatePagination() for changes the engine cannot see.
+// predicate, invalidatePagination() (re-measure) and relayoutPagination() (re-break only).
 // Break contract: block attr `breakBefore: 'page' | 'recto'`, or DOM attr `data-break-before` on
 // the block's top-level element.
 export { PaginatedView } from './PaginatedView'
@@ -18,6 +18,7 @@ export {
   setChapterPredicate,
   defaultChapterPredicate,
   invalidatePagination,
+  relayoutPagination,
 } from './extension-points'
 export type {
   PageSlot,

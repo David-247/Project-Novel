@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Pagination performance budget on a 100,000-word manuscript (serial perf projects, like
@@ -58,6 +58,16 @@ async function installLatencyProbe(page: Page) {
       true,
     )
   })
+}
+
+/**
+ * A caret-placing key before measuring: wait for its own latency sample, then start clean (else
+ * its late sample lands among the typed ones, as perf.spec.ts does for its End key).
+ */
+async function navKey(page: Page, press: () => Promise<void>) {
+  await page.evaluate(() => ((window as unknown as { __perf: number[] }).__perf = []))
+  await press()
+  await page.waitForFunction(() => (window as unknown as { __perf: number[] }).__perf.length >= 1)
 }
 
 /** Type WARMUP + MEASURED characters at the caret, each waiting for its own paint; summarize. */
@@ -118,7 +128,7 @@ test('100k words paginated: typing latency (end of a line; inside a paragraph sp
 
   // (a) End of the first line of a mid-manuscript paragraph.
   await clickBlockStart(page, ed.locator('p').nth(Math.floor((await ed.locator('p').count()) / 2)))
-  await page.keyboard.press('End')
+  await navKey(page, () => lineEnd(page))
   const endOfLine = await typeAndMeasure(page)
 
   // (b) Inside a paragraph whose last lines continue on the next page.
@@ -129,7 +139,7 @@ test('100k words paginated: typing latency (end of a line; inside a paragraph sp
   })
   expect(splitIndex).toBeGreaterThan(0)
   await clickBlockStart(page, ed.locator(':scope > p').nth(splitIndex))
-  await page.keyboard.press('ArrowRight')
+  await navKey(page, () => page.keyboard.press('ArrowRight'))
   const splitParagraph = await typeAndMeasure(page)
   await waitForLayout(page)
   expect(await ed.evaluate((el, t) => el.textContent!.split(t).length - 1, TYPED)).toBe(2)

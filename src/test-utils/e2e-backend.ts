@@ -18,7 +18,7 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getEditor } from '@/features/editor'
-import { getPaginationDebug, invalidatePagination, registerBottomReservation } from '@/features/pagination'
+import { getPaginationDebug, registerBottomReservation, relayoutPagination } from '@/features/pagination'
 import { autosaveNow } from '@/features/storage'
 import { useStore } from '@/shared/store'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
@@ -200,7 +200,7 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
           }),
         )
       }
-      invalidatePagination()
+      relayoutPagination()
     },
     /** Reserve `px` at the bottom of every page whose range contains `pos` (footnote stand-in); null removes. */
     reserveBottom: (pos: number | null, px = 0) => {

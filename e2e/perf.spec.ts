@@ -218,7 +218,7 @@ test('100k-word manuscript, combined hot path: find panel open on "the" + autosa
   expect(typing.medianMs).toBeLessThan(50)
 })
 
-test('100k-word manuscript: changing the Chapter Title font size restyles and repaginates every chapter in < 1 s, no doc change', async ({ page }, testInfo) => {
+test('100k-word manuscript: changing the Chapter Title font size restyles every chapter in < 100 ms and repaginates in < 1 s, no doc change', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   const built = buildManuscript()
   // Chapter Title applied to every chapter heading (40 chapters).
@@ -240,37 +240,46 @@ test('100k-word manuscript: changing the Chapter Title font size restyles and re
   const result = await page.evaluate(async () => {
     const all = Array.from(document.querySelectorAll<HTMLElement>('main [contenteditable="true"] h1[data-style="chapter-title"]'))
     const before = all.map((el) => getComputedStyle(el).fontSize)
+    const last = all[all.length - 1]
     const save = document.querySelector<HTMLButtonElement>('[data-control-id="styles.modify.save"]')!
+    const v = window.__nvE2E.layout().layoutVersion
     const t0 = performance.now()
     save.click()
-    // Wait until the stylesheet change reached the last chapter, then force layout and include the paint.
-    await new Promise<void>((resolve) => {
-      const last = all[all.length - 1]
-      const check = () => (getComputedStyle(last).fontSize !== before[before.length - 1] ? resolve() : requestAnimationFrame(check))
-      check()
-    })
+    // 1. The style sheet swap: React commits the new sheet within the click's task / microtasks.
+    //    Read it and force layout before any animation frame, i.e. before pagination runs.
+    let microtasks = 0
+    while (getComputedStyle(last).fontSize === before[before.length - 1] && microtasks++ < 50) await Promise.resolve()
+    const swapped = getComputedStyle(last).fontSize !== before[before.length - 1]
     void document.body.offsetHeight
-    const styledMs = performance.now() - t0
+    const cssMs = performance.now() - t0
+    // 2. Repagination: the engine re-measures the restyled blocks and republishes the page model.
+    await new Promise<void>((resolve) => {
+      const check = () =>
+        window.__nvE2E.paginationSettled() && window.__nvE2E.layout().layoutVersion > v ? resolve() : requestAnimationFrame(check)
+      requestAnimationFrame(check)
+    })
     await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
-    const paintedMs = performance.now() - t0
+    const repaginatedMs = performance.now() - t0
     const changed = all.filter((el, i) => getComputedStyle(el).fontSize !== before[i]).length
-    return { styledMs, paintedMs, changed }
+    return { cssMs, swapped, repaginatedMs, changed }
   })
   const versionAfter = await page.evaluate(() => window.__nvE2E.docVersion())
 
   await report(testInfo, 'perf-styles', {
     manuscript: { words: built.words, blocks: content.length, chapters },
     openMs,
-    restyleMs: +result.styledMs.toFixed(1),
-    restyleIncludingPaintMs: +result.paintedMs.toFixed(1),
+    restyleMs: +result.cssMs.toFixed(1),
+    repaginatedMs: +result.repaginatedMs.toFixed(1),
     chaptersRestyled: result.changed,
     docVersionChanged: versionAfter !== versionBefore,
-    // Paginated view: a style change that alters block heights reflows the whole book, like a trim
-    // change, so it gets the reflow budget (docs/pagination.md). Continuous view measured ~20 / 60 ms.
-    budgets: { restyleMs: 1000 },
+    // The style sheet swap keeps the styles budget; the reflow it causes in the paginated view
+    // (every page break can move) gets the reflow budget, like a trim change (docs/pagination.md).
+    budgets: { restyleMs: 100, repaginatedMs: 1000 },
   })
 
+  expect(result.swapped).toBe(true)
   expect(result.changed).toBe(chapters)
   expect(versionAfter).toBe(versionBefore)
-  expect(result.styledMs).toBeLessThan(1000)
+  expect(result.cssMs).toBeLessThan(100)
+  expect(result.repaginatedMs).toBeLessThan(1000)
 })

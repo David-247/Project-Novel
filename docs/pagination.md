@@ -90,8 +90,11 @@ layer behind the editor.
 - A caret at a page boundary inside a paragraph is ambiguous (end of the last line on one page = start
   of the first line of the next). The slice draws it at the top of the page when it put it there
   (PageDown, a press on a page).
-- Native vertical caret movement (ArrowUp/Down) across a page boundary inside one paragraph follows
-  the layout column; it reaches the right line but its x position may snap to the line start.
+- Native vertical caret movement follows the layout column, where the next page's first line sits
+  right below the previous page's last line with no horizontal offset. ArrowDown on a page's last line
+  and ArrowUp on its first line are therefore handled by the slice: the caret goes to the painted
+  first (last) line of the next (previous) page at the same column, hit-tested with the browser's
+  caret-from-point on painted boxes (Shift extends). Every other arrow press stays native.
 - Off-screen cost is bounded: unchanged blocks are never re-measured (cache keyed by node identity),
   page frames are virtualised to the rows near the viewport, and the browser lays out only changed
   blocks. `content-visibility` was not needed to meet the budget (see the perf numbers below) and is
@@ -109,7 +112,7 @@ layer behind the editor.
 | Typing inside a paragraph split across two pages, median / p95 | 25.3 / 32.4 ms | 45 / 56 ms |
 | Phase 1 `perf.spec.ts` typing (now paginated), median / p95 | 15.8 / 23.2 ms | 38 / 58 ms |
 | Phase 1 hot path (find on "the" + autosave), median / p95 | 21.5 / 29.4 ms | 45 / 61 ms |
-| Chapter Title restyle + repagination (styles ticket test; reflow budget < 1000 ms) | 132 ms | 320 ms |
+| Chapter Title restyle: style sheet swap (< 100 ms) / repaginated (< 1000 ms) | CSS_C / REPAG_C | CSS_W / REPAG_W |
 
 Measured after merging the book settings, styles and paper surfaces tickets (book styles, textured
 paper). 440 pages at 5.5 × 8.5 in. A keystroke's pass costs 1–3 ms (one block measured, two element
@@ -178,7 +181,7 @@ The node attribute wins when both are set; other values are ignored. `'page'` st
 `'recto'` starts the next recto, leaving a blank verso when the block would otherwise start on a verso.
 A break before the first block of the document is a no-op. Applies to top-level blocks. The engine
 reads the DOM attribute on every pass; a decoration that adds or removes it without a document change
-must call `invalidatePagination()`.
+must call `relayoutPagination()` (the styles ticket's decorations are followed through `book.styles`).
 
 ## Extension points
 
@@ -212,7 +215,10 @@ Convergence: the reservation for a page only ever grows (an answer ≤ what is r
 so it cannot oscillate; the loop is capped at `MAX_RESERVE_ITERATIONS` (8). **Fallback** when the cap
 is hit: the page keeps the last (largest) reservation tried and is flagged `reserveCapped` internally;
 a page always keeps at least one line. Assumes fewer lines never need more space (true for
-footnotes). Call `invalidatePagination()` when an answer changes without a document change.
+footnotes). Registering, unregistering, or calling `relayoutPagination()` when an answer changes
+without a document change re-breaks the pages from the lines already measured (nothing is
+re-measured: about the cost of a keystroke, tested in extension-points.test.tsx and the e2e
+reservation test).
 
 ### (c) Chapters
 
@@ -221,8 +227,10 @@ level-1 heading); `null` restores the default.
 
 ### Invalidation
 
-`invalidatePagination()`: re-measure everything and reflow on the next frame (style sheet changes,
-`data-break-before` decorations, reservation answers).
+- `relayoutPagination()`: re-break the pages on the next frame from the measured lines (reservation
+  answers, `data-break-before` decorations, a new chapter predicate). Cheap.
+- `invalidatePagination()`: re-measure every block and reflow (metrics changed without a document or
+  `book.styles` change, e.g. a style sheet injected by other code). About a trim change's cost.
 
 ## View, zoom and keys
 
@@ -248,12 +256,19 @@ level-1 heading); `null` restores the default.
   narrow fallback, zoom), `extension-points.test.tsx` (slots, reservations, chapters, the
   `breakBefore` contract with a fixture node).
 - E2E (`e2e/pagination.spec.ts`, chromium + webkit): spread flow of a pasted 100k-word manuscript with
-  split paragraphs; typing, selection, undo and find across pages; PageUp/PageDown; `breakBefore`
-  page / recto; narrow fallback and the spread toggle; zoom; trim reflow, mirrored margins and bottom
-  reservations; presses on margins.
+  split paragraphs; typing, selection, undo and find across pages; Replace and Replace All on a later
+  page; IME composition in a split paragraph (Chromium, CDP `Input.imeSetComposition`: no pass while
+  composing); PageUp/PageDown incl. the first and last spread; ArrowUp/Down across a split;
+  `breakBefore` page / recto; narrow fallback and the spread toggle; zoom; trim reflow, mirrored margins
+  and bottom reservations (re-break without re-measuring); presses on margins.
+- Guard (`pm-internals.test.ts`): fails if the prosemirror-view internals the engine uses disappear
+  (prosemirror-view is pinned with `pnpm.overrides`).
 - Perf (`e2e/pagination-perf.spec.ts`, serial perf projects): trim reflow and typing latency.
 - Cross-engine fixture (`e2e/pagination-fixture.spec.ts`): the deterministic manuscript
-  (`e2e/fixtures/pagination-manuscript.ts`) in the bundled OFL font, chapters breaking in `page` and `recto` mode, (`e2e/fixtures/fonts`, Libre
-  Baskerville, `OFL.txt`) for every catalog trim size; writes total pages and chapter opening page
-  indexes to `perf-results/pagination-fixture-<browser>-<platform>.json` for the acceptance
-  comparison (tolerance: total ≤ max(2, 1 %), openings ± 1).
+  (`e2e/fixtures/pagination-manuscript.ts`) typeset in the bundled OFL test font (`e2e/fixtures/fonts`,
+  Libre Baskerville, `OFL.txt`), with chapters breaking in `page` mode and in `recto` mode, for every
+  catalog trim size. It writes total pages and chapter opening page indexes to
+  `perf-results/pagination-fixture-<browser>-<platform>.json` for the acceptance comparison. Logged
+  tolerance (Vibeless decision): total pages differ by at most max(2, 1 %); chapter openings differ by
+  at most 1 in `page` mode and at most 2 in `recto` mode (a one-page drift moves a right-hand opening
+  by two).

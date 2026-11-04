@@ -4,7 +4,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { resolveStyleSheet, type BookView, type StyleSheetJSON } from '@/shared/book'
 import { useStore, type PageInfo } from '@/shared/store'
 import { breakPages, sideOf, type LineBox, type PageRange, type UnitInfo } from './breaker'
-import { hasReservations, isChapterStart, onInvalidate, totalReservation } from './extension-points'
+import { hasReservations, isChapterStart, onInvalidate, onRelayout, totalReservation } from './extension-points'
 import { resolvePageGeometry, type PageGeometry } from './geometry'
 import { blockBreakBefore, lineStart, measureBlock, ownShift, scaleOf, SHIFT_ATTR, type BlockMetrics } from './measure'
 import { placePages, type Placement } from './placement'
@@ -161,6 +161,9 @@ export class PaginationEngine {
         else if (s.layout.effectiveView !== p.layout.effectiveView) this.schedule()
       }),
       onInvalidate(() => this.invalidate()),
+      // Re-break only (reservations, data-break-before, chapters): measurements stay valid.
+      onRelayout(() => this.schedule()),
+      onRelayout(() => this.schedule()),
     )
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts
     if (fonts?.addEventListener) {
@@ -301,6 +304,8 @@ export class PaginationEngine {
         }
         return view.nodeDOM(pos) as HTMLElement | null
       }
+      // Ran off the end (or pmViewDesc is gone): the public lookup, never a silent null.
+      if (!domChild) return view.nodeDOM(pos) as HTMLElement | null
       const el = domChild
       domChild = (domChild?.nextElementSibling ?? null) as typeof domChild
       return el
