@@ -175,7 +175,11 @@ export class PaginationEngine {
   private flushPending = false
   /** Per block node: signature of its decorations in the last pass (positions relative to the block). */
   private lastSigs = new WeakMap<PMNode, string>()
-  /** Blocks waiting to be redrawn after a progressive reflow (hidden meanwhile). */
+  /**
+   * Blocks waiting to be redrawn after a progressive reflow (hidden meanwhile), by node instance.
+   * One instance can sit at two places in a document, so catch-up passes also redraw any block that
+   * still carries the stale decoration.
+   */
   private pendingNodes = new Set<PMNode>()
   /** Document of the last pass. */
   private lastDoc: PMNode | null = null
@@ -253,6 +257,16 @@ export class PaginationEngine {
     })
   }
 
+  private sizeRetry = 0
+
+  private retryWhenSized() {
+    if (this.sizeRetry || this.destroyed) return
+    this.sizeRetry = window.setTimeout(() => {
+      this.sizeRetry = 0
+      this.schedule()
+    }, 250)
+  }
+
   /** Run a pass now, cancelling a scheduled one. */
   private runNow() {
     if (this.destroyed) return
@@ -319,6 +333,7 @@ export class PaginationEngine {
   destroy() {
     this.destroyed = true
     if (this.frame) cancelAnimationFrame(this.frame)
+    if (this.sizeRetry) clearTimeout(this.sizeRetry)
     this.unsubs.forEach((u) => u())
     if (currentEngine === this) currentEngine = null
   }
@@ -356,7 +371,12 @@ export class PaginationEngine {
     const geometry = resolvePageGeometry(book.trimSize, book.margins)
     const widthPx = `${geometry.contentWidth}px`
     if (root.style.width !== widthPx) root.style.width = widthPx
-    if (!root.offsetWidth) return
+    if (!root.offsetWidth) {
+      // Not laid out (hidden or zero-size host): try again later, or blocks hidden as stale or
+      // unmapped would stay hidden. Polled every 250 ms until the editor has a size.
+      this.retryWhenSized()
+      return
+    }
     const key = `${geometry.contentWidth}|${this.epoch}`
     const t0 = performance.now()
     let measured = 0
@@ -498,6 +518,11 @@ export class PaginationEngine {
     const inWin = (p0: number, p1: number) => (p1 >= win[0] && p0 <= win[1]) || (p1 >= caretPage - 1 && p0 <= caretPage + 1)
     const allDirty = geometryChanged || unmapped
     const pureCatchUp = this.catchUpOnly && !allDirty && restyled === null && doc === this.lastDoc
+    // Start positions of the blocks still hidden as stale (catch-up passes only).
+    const staleAt = pureCatchUp
+      ? new Set(current.find(undefined, undefined, (spec) => (spec as { nvStale?: boolean }).nvStale === true).map((d) => d.from))
+      : null
+    const pendingAt = (node: PMNode, pos: number) => this.pendingNodes.has(node) || !!staleAt?.has(pos)
     const spans: [number, number][] = []
     {
       let c = 0
@@ -513,7 +538,7 @@ export class PaginationEngine {
       const candidates: number[] = []
       blockNodes.forEach((node, bi) => {
         if (inWin(spans[bi][0], spans[bi][1])) return
-        if (pureCatchUp && !this.pendingNodes.has(node)) return
+        if (pureCatchUp && !pendingAt(node, blockPos[bi])) return
         candidates.push(bi)
       })
       candidates.sort((x, y) => Math.abs(spans[x][0] - centre) - Math.abs(spans[y][0] - centre))
@@ -533,7 +558,7 @@ export class PaginationEngine {
       lineCursor += nLines
       const [p0, p1] = spans[bi]
       if (chosen) {
-        if (pureCatchUp && !this.pendingNodes.has(node)) continue
+        if (pureCatchUp && !pendingAt(node, pos)) continue
         if (!inWin(p0, p1) && !chosen.has(bi)) {
           // Redrawn in a later frame; hidden until then (below).
           dirty.push({ a: 0, z: 0, pos, size: node.nodeSize, node, sig: '', p0, p1, lazy: true })
@@ -577,6 +602,10 @@ export class PaginationEngine {
         apply = now
       }
       const applied = new Set(apply)
+      // Drawn now, then still pending (in that order: an instance drawn at one place and deferred at
+      // another stays pending).
+      for (const d of apply) this.pendingNodes.delete(d.node)
+      for (const d of dirty) if (!applied.has(d)) this.pendingNodes.add(d.node)
       let next: DecorationSet
       // A full rebuild needs every block decorated in this pass (not a lazy or catch-up pass).
       if (apply.length === dirty.length && !chosen && (geometryChanged || dirty.length > 8)) {
@@ -597,7 +626,6 @@ export class PaginationEngine {
         if (deferred) {
           for (const d of dirty) {
             if (applied.has(d)) continue
-            this.pendingNodes.add(d.node)
             const has = next.find(d.pos, d.pos + d.size, (spec) => (spec as { nvStale?: boolean }).nvStale === true).some((o) => o.from === d.pos && o.to === d.pos + d.size)
             if (!has) added.push(Decoration.node(d.pos, d.pos + d.size, { class: STALE_CLASS }, { nvStale: true }))
           }
@@ -620,10 +648,7 @@ export class PaginationEngine {
           next = DecorationSet.create(doc, next.find().filter((d) => !(ours(d.spec) && inRedrawn(d.from, d.to))).concat(added))
         } else next = next.remove(removed).add(doc, added)
       }
-      for (const d of apply) {
-        this.lastSigs.set(d.node, d.sig)
-        this.pendingNodes.delete(d.node)
-      }
+      for (const d of apply) this.lastSigs.set(d.node, d.sig)
       if (!deferred) this.pendingNodes.clear()
       const tr = view.state.tr.setMeta(paginationKey, next).setMeta('addToHistory', false)
       if (this.scrollAfterPass && view.hasFocus()) tr.scrollIntoView()

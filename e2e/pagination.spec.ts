@@ -7,6 +7,13 @@ import { clickBlockStart, docEnd, docStart, lineEnd, waitForLayout } from './hel
  * through window.__nvE2E.
  */
 
+declare global {
+  interface Window {
+    /** Starts the per-frame paint sampler (samplePaints). */
+    __nvArm?: () => void
+  }
+}
+
 const editor = (page: Page) => page.getByRole('textbox', { name: 'Manuscript' })
 const layout = (page: Page) => page.evaluate(() => window.__nvE2E.layout())
 const indicator = (page: Page) => page.getByTestId('page-indicator')
@@ -548,6 +555,90 @@ test('Chapters start on right-hand page: a New chapter lands on a recto, with a 
   expect(h.y).toBeGreaterThan(f2.y)
 })
 
+/**
+ * Sample, every animation frame, where each visible block is painted while `act` triggers a
+ * wholesale reflow, until the engine has settled; then compare every sample with the final place.
+ * Sampling starts when `act` calls `window.__nvArm()` in the page in the
+ * same task as the trigger. Positions are in unscaled canvas px (fit-spread zoom changes with the
+ * page height).
+ */
+async function samplePaints(page: Page, act: () => Promise<void>) {
+  await page.evaluate(() => {
+    const m = document.querySelector('main')!
+    const root = document.querySelector('.ProseMirror')!
+    const canvas = () => {
+      const el = document.querySelector<HTMLElement>('.nv-canvas')!
+      const r = el.getBoundingClientRect()
+      return { left: r.left, top: r.top, s: r.width / el.offsetWidth }
+    }
+    const seen = new Map<Element, { f: number; x: number; y: number }[]>()
+    const state = { frames: 0, hiding: 0, stop: false, armed: false, seen, canvas, v0: window.__nvE2E.layout().layoutVersion }
+    // Sample what the frame paints: after every animation-frame callback of that frame (the
+    // engine's pass may be queued after this one), i.e. in a task right after the frame.
+    const tick = () => {
+      if (state.stop) return
+      requestAnimationFrame(tick)
+      if (state.armed) setTimeout(sample, 0)
+    }
+    const sample = () => {
+      if (state.stop) return
+      state.frames++
+      if (document.querySelector('.nv-stale, .nv-unmapped')) state.hiding++
+      const v = m.getBoundingClientRect()
+      const c = canvas()
+      for (const el of Array.from(root.children)) {
+        const r = el.getBoundingClientRect()
+        if (r.bottom < v.top || r.top > v.bottom || r.height === 0) continue
+        // Hidden while stale (nv-stale) or while the decorations are unmapped (nv-unmapped).
+        if (getComputedStyle(el).visibility === 'hidden') continue
+        const list = seen.get(el) ?? []
+        list.push({ f: state.frames, x: (r.left - c.left) / c.s, y: (r.top - c.top) / c.s })
+        seen.set(el, list)
+      }
+    }
+    ;(window as unknown as { __nvSample: typeof state }).__nvSample = state
+    window.__nvArm = () => {
+      state.armed = true
+    }
+    requestAnimationFrame(tick)
+  })
+  await act()
+  return page.evaluate(async () => {
+    const state = (window as unknown as { __nvSample: { frames: number; hiding: number; stop: boolean; v0: number; seen: Map<Element, { f: number; x: number; y: number }[]>; canvas: () => { left: number; top: number; s: number } } }).__nvSample
+    await new Promise<void>((resolve) => {
+      const check = () =>
+        window.__nvE2E.layout().layoutVersion > state.v0 && window.__nvE2E.paginationSettled() && !document.querySelector('.nv-unmapped')
+          ? resolve()
+          : requestAnimationFrame(check)
+      requestAnimationFrame(check)
+    })
+    await new Promise((r) => requestAnimationFrame(() => r(null)))
+    state.stop = true
+    const c = state.canvas()
+    const stale: string[] = []
+    for (const [el, list] of state.seen) {
+      if (!el.isConnected) continue
+      const r = el.getBoundingClientRect()
+      const fin = { x: (r.left - c.left) / c.s, y: (r.top - c.top) / c.s }
+      for (const p of list) if (Math.abs(p.x - fin.x) > 1 || Math.abs(p.y - fin.y) > 1) stale.push(`frame ${p.f}: ${Math.round(p.y)}->${Math.round(fin.y)}`)
+    }
+    return { frames: state.frames, hiding: state.hiding, checked: state.seen.size, stale, hiddenLeft: document.querySelectorAll('.nv-stale').length }
+  })
+}
+
+async function expectNoStalePaint(page: Page, act: () => Promise<void>, at = 0.5) {
+  const main = page.getByRole('main', { name: 'Editor' })
+  await main.evaluate((m, f) => (m.scrollTop = (m.scrollHeight - m.clientHeight) * f), at)
+  await waitForLayout(page)
+  const result = await samplePaints(page, act)
+  expect(result.checked).toBeGreaterThan(0)
+  // The progressive (nv-stale) or unmapped (nv-unmapped) path was taken: some frames hid blocks.
+  expect(result.hiding).toBeGreaterThan(0)
+  // Once settled, no block is left hidden.
+  expect(result.hiddenLeft).toBe(0)
+  expect(result.stale, `stale paints over ${result.frames} frames`).toEqual([])
+}
+
 for (const [trim, at] of [
   ['us-6x9', 0.5],
   ['us-5x8', 0.2],
@@ -558,60 +649,69 @@ for (const [trim, at] of [
     test.setTimeout(90_000)
     await page.setViewportSize({ width: 1400, height: 900 })
     await paste(page, paragraphs(1000, 60))
-    const main = page.getByRole('main', { name: 'Editor' })
-    await main.evaluate((m, f) => (m.scrollTop = (m.scrollHeight - m.clientHeight) * f), at)
-    await waitForLayout(page)
-    const result = await page.evaluate(async (id) => {
-      const m = document.querySelector('main')!
-      const root = document.querySelector('.ProseMirror')!
-      // Canvas origin and zoom scale (fit-spread changes with the page height): positions are compared
-      // in unscaled canvas px.
-      const canvas = () => {
-        const el = document.querySelector<HTMLElement>('.nv-canvas')!
-        const r = el.getBoundingClientRect()
-        return { left: r.left, top: r.top, s: r.width / el.offsetWidth }
-      }
-      const seen = new Map<Element, { x: number; y: number }[]>()
-      let frames = 0
-      const sample = () => {
-        frames++
-        const v = m.getBoundingClientRect()
-        const c = canvas()
-        for (const el of Array.from(root.children)) {
-          const r = el.getBoundingClientRect()
-          if (r.bottom < v.top || r.top > v.bottom || r.height === 0) continue
-          if (getComputedStyle(el).visibility === 'hidden') continue
-          const list = seen.get(el) ?? []
-          list.push({ x: (r.left - c.left) / c.s, y: (r.top - c.top) / c.s })
-          seen.set(el, list)
-        }
-      }
-      window.__nvE2E.setTrimSize(id)
-      await new Promise<void>((resolve) => {
-        const tick = () => {
-          sample()
-          if (window.__nvE2E.paginationSettled()) resolve()
-          else requestAnimationFrame(tick)
-        }
-        requestAnimationFrame(tick)
-      })
-      await new Promise((r) => requestAnimationFrame(() => r(null)))
-      const c = canvas()
-      const stale: string[] = []
-      for (const [el, list] of seen) {
-        if (!el.isConnected) continue
-        const r = el.getBoundingClientRect()
-        const fin = { x: (r.left - c.left) / c.s, y: (r.top - c.top) / c.s }
-        for (const p of list) if (Math.abs(p.x - fin.x) > 1 || Math.abs(p.y - fin.y) > 1) stale.push(`${Math.round(p.y)}->${Math.round(fin.y)}`)
-      }
-      return { frames, checked: seen.size, stale, hiddenLeft: document.querySelectorAll('.nv-stale').length }
-    }, trim)
-    expect(result.checked).toBeGreaterThan(0)
-    // Once settled, no block is left hidden.
-    expect(result.hiddenLeft).toBe(0)
-    expect(result.stale, `stale paints over ${result.frames} frames`).toEqual([])
+    await expectNoStalePaint(page, () => page.evaluate((id) => (window.__nvArm!(), window.__nvE2E.setTrimSize(id)), trim), at)
   })
 }
+
+test('progressive restyle never paints a block at a stale place (Body font size)', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(1000, 60))
+  await expectNoStalePaint(page, async () => {
+    // Every paragraph changes height: more blocks than the progressive threshold are re-measured.
+    await editor(page).locator('p').nth(500).click()
+    await waitForLayout(page)
+    await page.locator('[data-control-id="styles.edit"]').click()
+    const dialog = page.getByRole('dialog', { name: /^Modify style:/ })
+    await dialog.locator('[data-control-id="styles.field.fontSize"]').fill('14')
+    await dialog.locator('[data-control-id="styles.modify.save"]').evaluate((b: HTMLButtonElement) => (window.__nvArm!(), b.click()))
+    await expect(dialog).toBeHidden()
+  })
+})
+
+test('Replace All (unmapped decorations) never paints a block at a stale place', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(1000, 60))
+  await page.keyboard.press('ControlOrMeta+f')
+  const panel = page.getByRole('region', { name: 'Find and replace' })
+  await panel.getByRole('textbox', { name: 'Find' }).fill('meadow')
+  await expect(page.getByTestId('find-status')).toHaveText(/ of \d+$/)
+  await panel.getByRole('textbox', { name: 'Replace with' }).fill('')
+  await expectNoStalePaint(page, async () => {
+    // Thousands of steps: over the mapping limit, so the decorations are dropped (nv-unmapped).
+    await panel.locator('[data-control-id="find.replaceAll"]').evaluate((b: HTMLButtonElement) => (window.__nvArm!(), b.click()))
+    await expect(page.getByTestId('find-status')).toHaveText(/^Replaced \d+$/)
+  })
+  expect(await editor(page).evaluate((el) => el.textContent!.includes('meadow'))).toBe(false)
+})
+
+test('a reflow requested while the editor has no size runs once it is shown again', async ({ page }) => {
+  await paste(page, paragraphs(40, 60))
+  const before = await layout(page)
+  // Hide the manuscript (zero width), change the trim size, show it again: no edit follows.
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('.ProseMirror')!.style.display = 'none'
+    window.__nvE2E.setTrimSize('us-5x8')
+  })
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  await page.evaluate(() => (document.querySelector<HTMLElement>('.ProseMirror')!.style.display = ''))
+  await expect.poll(async () => (await layout(page)).pageCount, { timeout: 5_000 }).toBeGreaterThan(before.pageCount)
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.paginationSettled())).toBe(true)
+  expect(await page.evaluate(() => document.querySelectorAll('.nv-stale, .nv-unmapped').length)).toBe(0)
+})
+
+test('a node instance used twice is redrawn at both places after a progressive reflow', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(1000, 60))
+  // Block 2 is in view (drawn first); its second place, at the end of the book, is drawn later.
+  await page.evaluate(() => window.__nvE2E.appendSameBlock(2))
+  await waitForLayout(page)
+  await page.evaluate(() => window.__nvE2E.setTrimSize('us-5x8'))
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.paginationSettled()), { timeout: 30_000 }).toBe(true)
+  expect(await page.evaluate(() => document.querySelectorAll('.nv-stale').length)).toBe(0)
+})
 
 test('find during a progressive reflow scrolls to where the match is painted', async ({ page }) => {
   test.setTimeout(90_000)

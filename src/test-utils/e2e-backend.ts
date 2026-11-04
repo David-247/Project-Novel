@@ -229,6 +229,16 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     },
     /** book.styles as stored (overrides only). */
     bookStyles: () => useStore.getState().book.styles,
+    /**
+     * Append the top-level block `index` itself (the same node instance, not a copy) at the end of
+     * the document: ProseMirror shares unchanged nodes, so one instance can sit at two places.
+     */
+    appendSameBlock: (index: number) => {
+      const view = getEditor()?.view
+      if (!view) return
+      const doc = view.state.doc
+      view.dispatch(view.state.tr.insert(doc.content.size, doc.child(index)))
+    },
   }
 }
 
