@@ -4,9 +4,10 @@ import { describe, expect, it } from 'vitest'
 // The summary is a plain Node script (scripts/perf-summary.mjs, run in CI); loaded untyped here.
 type R = Record<string, unknown>
 const SCRIPT: string = '../scripts/perf-summary.mjs'
-const { toMarkdown, isShipping } = (await import(/* @vite-ignore */ SCRIPT)) as {
+const { toMarkdown, isShipping, isBlocking } = (await import(/* @vite-ignore */ SCRIPT)) as {
   toMarkdown: (results: R[], dir?: string) => string
   isShipping: (r: R) => boolean
+  isBlocking: (r: R) => boolean
 }
 
 describe('perf summary', () => {
@@ -15,6 +16,14 @@ describe('perf summary', () => {
     expect(isShipping({ browser: 'perf-chromium', platform: 'win32' })).toBe(true)
     expect(isShipping({ browser: 'perf-chromium', platform: 'darwin' })).toBe(false)
     expect(isShipping({ browser: 'perf-webkit', platform: 'win32' })).toBe(false)
+  })
+
+  it('in CI only Windows Chromium blocks; macOS WebKit misses are warnings (decision f040009b)', () => {
+    expect(isBlocking({ browser: 'perf-chromium', platform: 'win32' })).toBe(true)
+    expect(isBlocking({ browser: 'perf-webkit', platform: 'darwin' })).toBe(false)
+    expect(isBlocking({ browser: 'perf-webkit', platform: 'win32' })).toBe(false)
+    const md = toMarkdown([{ scenario: 'perf', browser: 'perf-webkit', platform: 'darwin', typing: { medianMs: 55, p95Ms: 80, maxMs: 90 } }])
+    expect(md).toMatch(/\| perf \| webkit \/ darwin \(shipping\) \| \*\*55\*\* \(miss, warning\) \|/)
   })
 
   it('tabulates typing, trim reflow, style edit and Replace All; marks misses by pair', () => {

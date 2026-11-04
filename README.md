@@ -111,9 +111,10 @@ Phase 2 (book layout) adds:
   paper surface in OS light and dark.
 - Perf (`e2e/perf.spec.ts`, `e2e/pagination-perf.spec.ts`): typing in the spread view with 200 footnotes, the find
   panel open and an autosave mid-typing; trim size reflow for every catalog size; the Chapter Title style edit.
-  Budgets (typing median < 50 ms, reflow < 1 s, style sheet swap < 100 ms, Replace All < 2 s) are blocking only on
-  the engine/OS pairs the app ships on, WebKit on macOS and Chromium on Windows (`e2e/budget.ts`); the other pairs
-  report misses as warnings.
+  Budgets (typing median < 50 ms, reflow < 1 s, style sheet swap < 100 ms, Replace All < 2 s) apply to
+  the engine/OS pairs the app ships on, WebKit on macOS and Chromium on Windows (`e2e/budget.ts`). In CI only
+  Windows Chromium blocks: GitHub's free macOS runner is too slow and noisy, so macOS misses are warnings there and
+  the macOS budgets are enforced by running the perf specs on a real Mac. The other pairs report misses as warnings.
 - Cross-engine page breaks: `e2e/pagination-fixture.spec.ts` typesets the fixture in a bundled OFL font at every
   trim size and writes chapter opening pages and page totals to `perf-results/pagination-fixture-*.json`. CI
   collects them from chromium and webkit on macOS and Windows and runs
