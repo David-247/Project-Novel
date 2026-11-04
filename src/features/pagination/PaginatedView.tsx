@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Selection, TextSelection } from '@tiptap/pm/state'
+import type { Node as PMNode } from '@tiptap/pm/model'
 import type { EditorView } from '@tiptap/pm/view'
 import { setFindRevealHook, useMountedEditor } from '@/features/editor'
 import { useStore } from '@/shared/store'
@@ -195,7 +196,7 @@ function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement:
     // No further spread: PageDown goes to the end of the document, PageUp to its start.
     const end = dir > 0 ? Selection.atEnd(view.state.doc) : Selection.atStart(view.state.doc)
     const tr = view.state.tr.setSelection(
-      extend ? TextSelection.create(view.state.doc, view.state.selection.anchor, end.head) : end,
+      extend ? extendTo(view.state.doc, view.state.selection.anchor, end.head, dir) : end,
     )
     view.dispatch(tr.scrollIntoView())
     return true
@@ -206,7 +207,7 @@ function moveBySpread(view: EditorView, dir: 1 | -1, extend: boolean, placement:
   const page = pages[Math.min(target, pages.length - 1)]
   const sel = selectionForPage(view.state, page)
   const tr = view.state.tr.setSelection(
-    extend ? TextSelection.create(view.state.doc, view.state.selection.anchor, sel.head) : sel,
+    extend ? extendTo(view.state.doc, view.state.selection.anchor, sel.head, dir) : sel,
   )
   view.dispatch(tr)
   if (!extend) caretToPageStart(view, page.from)
@@ -271,10 +272,19 @@ function documentEdgeKey(e: KeyboardEvent): 1 | -1 | null {
   return null
 }
 
+/**
+ * Selection from `anchor` to `head`, valid even when either end is not in inline content (a page or
+ * scene break atom at the edge of the document): TextSelection.between falls back to the nearest
+ * valid positions.
+ */
+export function extendTo(doc: PMNode, anchor: number, head: number, bias: 1 | -1): Selection {
+  return TextSelection.between(doc.resolve(anchor), doc.resolve(head), bias)
+}
+
 function moveToDocumentEdge(view: EditorView, dir: 1 | -1, extend: boolean): boolean {
   freshSnapshot()
   const edge = dir > 0 ? Selection.atEnd(view.state.doc) : Selection.atStart(view.state.doc)
-  const sel = extend ? TextSelection.create(view.state.doc, view.state.selection.anchor, edge.head) : edge
+  const sel = extend ? extendTo(view.state.doc, view.state.selection.anchor, edge.head, dir) : edge
   view.dispatch(view.state.tr.setSelection(sel).scrollIntoView())
   return true
 }
@@ -336,7 +346,7 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean): bo
   const hit = posAtPaintedPoint(view, rect.left + x * s, rect.top + ty * s)
   if (hit === null) return false
   const $pos = view.state.doc.resolve(hit)
-  const sel = extend ? TextSelection.create(view.state.doc, view.state.selection.anchor, $pos.pos) : TextSelection.near($pos)
+  const sel = extend ? extendTo(view.state.doc, view.state.selection.anchor, $pos.pos, dir) : TextSelection.near($pos)
   view.dispatch(view.state.tr.setSelection(sel).scrollIntoView())
   if (!extend && dir > 0) caretToPageStart(view, pages[q].from)
   return true
@@ -412,7 +422,7 @@ function placeCaretFromDesk(view: EditorView, e: MouseEvent): boolean {
     if (hit !== null) pos = hit
   }
   const near = TextSelection.near(view.state.doc.resolve(Math.min(pos, view.state.doc.content.size)))
-  const sel = e.shiftKey ? TextSelection.create(view.state.doc, view.state.selection.anchor, near.head) : near
+  const sel = e.shiftKey ? extendTo(view.state.doc, view.state.selection.anchor, near.head, 1) : near
   view.dispatch(view.state.tr.setSelection(sel))
   view.focus()
   if (sel.empty) caretToPageStart(view, pages[page].from)
