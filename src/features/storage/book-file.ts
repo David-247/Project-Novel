@@ -117,7 +117,7 @@ export function bookWarningText(warnings: string[], keptOnDisk = false, newerVer
     return (
       `${BOOK_FILE} was saved by a newer version of Novel (format version ${newerVersion}), so its settings are used ` +
       `as far as this version understands them.${replaced} Your manuscript was not changed. The file is left as it is ` +
-      `until you change a book setting; a copy is kept before it is replaced.`
+      `until you change a book setting; a copy is kept before it is replaced. View and paper changes are not kept while this file is protected.`
     )
   }
   const whole = warnings.length === 1 && warnings[0] === 'the whole file'
@@ -125,7 +125,7 @@ export function bookWarningText(warnings: string[], keptOnDisk = false, newerVer
     ? `${BOOK_FILE} is damaged or could not be read`
     : `${BOOK_FILE} had invalid values (${warnings.join(', ')})`
   const tail = keptOnDisk
-    ? `The file is left as it is until you change a book setting; a copy is kept before it is replaced.`
+    ? `The file is left as it is until you change a book setting; a copy is kept before it is replaced. View and paper changes are not kept while this file is protected.`
     : `Saving will rewrite ${BOOK_FILE}.`
   return `${what}, so default book settings are in use. Your manuscript was not changed. ${tail}`
 }

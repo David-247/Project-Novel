@@ -207,7 +207,9 @@ built-in Footnote Text style in `styles` (`footnote-text`).
     written (the next open shows the file's values).
   - If the copy cannot be written (disk full, permissions), book.json is **not** replaced: the manuscript is still
     saved, the book settings stay unsaved (prompts and autosave snapshots keep them), the status bar says so, and the
-    next save tries again.
+    next save tries again. Because that save moved `updatedAt`, autosave takes a fresh snapshot (within 30 s, even
+    with no further edits), so a crash still offers the unsaved settings. The same applies to any save that leaves
+    the project unsaved.
   - Restoring a crash-recovery snapshot whose book settings equal the loaded ones changes no book setting, so a
     text-only restore never replaces a guarded book.json.
 - A `version` higher than this Novel's (an integer above `1`): the file was written by a newer Novel. Its fields are

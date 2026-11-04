@@ -6,6 +6,7 @@ import {
   getCurrentProjectMeta,
   getCurrentProjectPath,
   onProjectOpened,
+  onSaveLeftUnsaved,
   preserveUnansweredRecoveryUnlocked,
 } from './project'
 import {
@@ -161,6 +162,18 @@ function rearmIfStillDirty(): void {
   if (!unchanged && !snapshotsSuppressedAt(version, bookVersion)) arm()
 }
 
+/**
+ * Forget the last snapshot and arm the timer: the next tick writes a snapshot even though the document
+ * and book versions did not change. For a save that left the project unsaved (the book settings could
+ * not be written): it moved project.json `updatedAt`, so the snapshot on disk, taken on top of the
+ * previous save, would no longer be offered after a crash.
+ */
+export function forceNextSnapshot(): void {
+  lastSnapshotVersion = null
+  lastSnapshotBookVersion = null
+  arm()
+}
+
 /** Book settings changes arm the snapshot timer exactly like text edits. */
 function watchBook(): () => void {
   return useStore.subscribe((s, prev) => {
@@ -195,6 +208,7 @@ export function startAutosave(): () => void {
       lastSnapshotBookVersion = null
       failures = 0
     }),
+    onSaveLeftUnsaved(forceNextSnapshot),
   ]
   // Work restored from a backup (or edited before autosave started) is protected too.
   rearmIfStillDirty()

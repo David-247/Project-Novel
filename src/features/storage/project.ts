@@ -79,6 +79,17 @@ function setPendingRecovery(p: PendingRecovery | null): void {
   }
 }
 const openedListeners = new Set<(p: OpenedProject) => void>()
+const leftUnsavedListeners = new Set<() => void>()
+
+/**
+ * Subscribe to "a save succeeded but the project is still unsaved" (book settings that could not be
+ * written, edits made during the save). The save moved project.json `updatedAt`, so the last recovery
+ * snapshot no longer matches the current save: autosave must take a fresh one. Returns unsubscribe.
+ */
+export function onSaveLeftUnsaved(cb: () => void): () => void {
+  leftUnsavedListeners.add(cb)
+  return () => leftUnsavedListeners.delete(cb)
+}
 
 /** The registered editor; storage cannot work without one. */
 function provider(): DocumentProvider {
@@ -470,6 +481,8 @@ async function writeProject(
       // A clean save makes any crash-recovery snapshot obsolete.
       if (!isProjectDirty(p)) await clearRecoveryUnlocked(folder)
     })
+    // Still unsaved after the save: the snapshot on disk was taken on top of the previous save.
+    if (isProjectDirty(p) && getCurrentProjectPath() === folder) leftUnsavedListeners.forEach((cb) => cb())
     if (currentIndex) {
       const byteSize = new TextEncoder().encode(text).length
       await recordRevision(currentIndex, { kind, byteSize, path: MANUSCRIPT_FILE }).catch((e) =>
