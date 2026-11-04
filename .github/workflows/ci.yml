@@ -98,6 +98,8 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium webkit
       # Functional projects: chromium (stands in for WebView2) and webkit (for WKWebView). Perf runs
       # in its own job, so its numbers are published even when a functional test fails.
+      # Includes e2e/pagination-fixture.spec.ts, which writes the cross-engine page-break JSONs
+      # (perf-results/pagination-fixture-<browser>-<platform>.json) compared by the job below.
       - run: pnpm exec playwright test --project=chromium --project=webkit
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
@@ -108,6 +110,48 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 14
+      - name: Upload pagination fixture results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pagination-fixture-${{ matrix.os }}
+          path: perf-results/pagination-fixture-*.json
+          if-no-files-found: error
+          retention-days: 90
+
+  pagination-compare:
+    name: Cross-engine page breaks (WebKit/Chromium x macOS/Windows)
+    # Runs even when a functional e2e test failed: the fixture results are uploaded regardless.
+    needs: e2e
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pagination-fixture-*
+          path: pagination-fixture
+      # Tolerance (Vibeless decisions c945d094, 75522017): total pages within max(2, 1 %); chapter
+      # openings within 1 page, 2 for right-hand openings. Every pair is compared (shipping pair
+      # WebKit-macOS vs Chromium-Windows first); a miss on any pair fails with a diff table in the
+      # job summary.
+      - name: Compare page breaks across engines and OSes
+        run: >-
+          node scripts/compare-pagination.mjs pagination-fixture
+          --require webkit-darwin,chromium-win32,chromium-darwin,webkit-win32
+          --out pagination-comparison.json
+      - name: Upload comparison
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pagination-comparison
+          path: |
+            pagination-comparison.json
+            pagination-fixture/
+          retention-days: 90
 
   perf:
     name: Perf, 100k-word manuscript (${{ matrix.os }})
