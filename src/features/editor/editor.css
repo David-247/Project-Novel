@@ -78,10 +78,10 @@
 /* ---- Footnote references (footnotes ticket) ----------------------------------------------------
    The mark is a pseudo-element (the derived number comes from a decoration, data-fn-num), raised by
    relative positioning so it never makes its line taller (pagination measures line boxes). The
-   ::before box is the 32 x 32 px press / tap target around the small mark, out of flow. */
+   raise is on the pseudo-element: pagination may set left/top on the reference itself (a line moved
+   to a later page). The ::before box is the 32 x 32 px press / tap target, out of flow. */
 .novel-editor-content .nv-fn-ref {
   position: relative;
-  top: -0.45em;
   vertical-align: baseline;
   font-size: 0.72em;
   line-height: 0;
@@ -92,6 +92,8 @@
 }
 .novel-editor-content .nv-fn-ref::after {
   content: attr(data-fn-num);
+  position: relative;
+  top: -0.45em;
 }
 .novel-editor-content .nv-fn-ref::before {
   content: '';
