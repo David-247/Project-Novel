@@ -23,7 +23,21 @@ import { placePages, type Placement } from './placement'
  * Passes run in requestAnimationFrame, before paint, after any doc change or settings change.
  */
 
-export const paginationKey = new PluginKey<DecorationSet>('pagination')
+/**
+ * Plugin state: the drawn decorations. `unmapped` is set when a transaction with very many steps
+ * (Replace All of a common word: 10,000 steps) changed the document: mapping every decoration
+ * through every step costs O(steps x decorations), so the set is dropped instead, the editor root
+ * hides its blocks (`nv-unmapped`) and the next pass, before the next paint, redraws the view first.
+ */
+interface PaginationState {
+  set: DecorationSet
+  unmapped: boolean
+}
+
+/** Steps above which a transaction's decorations are not mapped but redrawn. */
+const MAP_STEP_LIMIT = 200
+
+export const paginationKey = new PluginKey<PaginationState>('pagination')
 
 interface PageOffset {
   dx: number
@@ -461,7 +475,7 @@ export class PaginationEngine {
     })
 
     const decos: Decoration[] = []
-    const current = paginationKey.getState(view.state) ?? DecorationSet.empty
+    const current = paginationKey.getState(view.state)?.set ?? DecorationSet.empty
     const geometryChanged = key !== this.lastKey
     // Blocks whose decorations differ from what is drawn.
     const dirty: DirtyBlock[] = []
@@ -722,18 +736,21 @@ export function createPaginationPlugin(handlers: {
   keyDown?: (view: EditorView, e: KeyboardEvent) => boolean
   mouseDown?: (view: EditorView, e: MouseEvent) => boolean
 }) {
-  return new Plugin<DecorationSet>({
+  return new Plugin<PaginationState>({
     key: paginationKey,
     state: {
-      init: () => DecorationSet.empty,
-      apply: (tr, set) => {
+      init: () => ({ set: DecorationSet.empty, unmapped: false }),
+      apply: (tr, value) => {
         const next = tr.getMeta(paginationKey) as DecorationSet | undefined
-        if (next) return next
-        return tr.docChanged ? set.map(tr.mapping, tr.doc) : set
+        if (next) return { set: next, unmapped: false }
+        if (!tr.docChanged) return value
+        if (tr.steps.length > MAP_STEP_LIMIT) return { set: DecorationSet.empty, unmapped: true }
+        return { set: value.set.map(tr.mapping, tr.doc), unmapped: value.unmapped }
       },
     },
     props: {
-      decorations: (state) => paginationKey.getState(state),
+      decorations: (state) => paginationKey.getState(state)?.set,
+      attributes: (state): Record<string, string> => (paginationKey.getState(state)?.unmapped ? { class: 'nv-unmapped' } : {}),
       // Scrolling to the selection while off-screen blocks are still being redrawn would use a stale
       // (hidden) position: finish the reflow first, then scroll.
       handleScrollToSelection: (view) => {

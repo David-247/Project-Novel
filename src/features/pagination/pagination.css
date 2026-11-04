@@ -73,7 +73,9 @@
 .nv-text-layer .nv-shift {
   position: relative;
 }
-/* Not redrawn yet after a reflow (see "Reflow complete" in docs/pagination.md). */
+/* Not redrawn yet after a reflow (see "Reflow complete" in docs/pagination.md); after a huge
+   transaction (Replace All) every block until the next pass, before the next paint. */
+.nv-text-layer .novel-editor-content.nv-unmapped > *,
 .nv-text-layer .novel-editor-content .nv-stale,
 .nv-text-layer .novel-editor-content .nv-stale * {
   visibility: hidden;
