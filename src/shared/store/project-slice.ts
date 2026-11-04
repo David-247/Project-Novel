@@ -30,6 +30,8 @@ export interface ProjectState {
   path: string | null
   /** Title of the open project. */
   title: string | null
+  /** Author of the open project ('' when none or not set). */
+  author: string
   saveStatus: SaveStatus
   /** Epoch ms of the last successful save. */
   lastSavedAt: number | null
@@ -61,7 +63,9 @@ export interface ProjectSlice {
   project: ProjectState
   /** Named actions: the only way to change `project` state. */
   projectActions: {
-    projectOpened: (p: { path: string; title: string }) => void
+    projectOpened: (p: { path: string; title: string; author?: string }) => void
+    /** The title / author were edited (Book details). */
+    projectDetailsChanged: (p: { title: string; author: string }) => void
     projectClosed: () => void
     saveStarted: () => void
     saveSucceeded: (at: number) => void
@@ -86,6 +90,7 @@ export interface ProjectSlice {
 export const initialProjectState: ProjectState = {
   path: null,
   title: null,
+  author: '',
   saveStatus: 'idle',
   lastSavedAt: null,
   saveError: null,
@@ -104,10 +109,11 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
   return {
     project: initialProjectState,
     projectActions: {
-      projectOpened: ({ path, title }) =>
+      projectOpened: ({ path, title, author }) =>
         patch({
           path,
           title,
+          author: author ?? '',
           saveStatus: 'idle',
           lastSavedAt: null,
           saveError: null,
@@ -122,6 +128,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
         patch({
           path: null,
           title: null,
+          author: '',
           saveStatus: 'idle',
           lastSavedAt: null,
           saveError: null,
@@ -133,6 +140,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
           bookWarning: null,
           opening: false,
         }),
+      projectDetailsChanged: ({ title, author }) => patch({ title, author }),
       saveStarted: () => patch({ saveStatus: 'saving', saveError: null }),
       saveSucceeded: (at) => patch({ saveStatus: 'saved', lastSavedAt: at, saveError: null }),
       saveFailed: (message) => patch({ saveStatus: 'error', saveError: message }),

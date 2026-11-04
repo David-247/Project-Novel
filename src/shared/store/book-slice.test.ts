@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { defaultBookSettings } from '@/shared/book'
+import { defaultBookSettings, defaultHeaderFooter } from '@/shared/book'
 import { useStore } from './index'
 
 const book = () => useStore.getState().book
@@ -16,7 +16,7 @@ describe('book slice', () => {
     ['setTrimSize', () => a().setTrimSize('uk-a5'), { trimSize: 'uk-a5' }],
     ['setMargins', () => a().setMargins({ top: 1, bottom: 2, inside: 3, outside: 4 }), { margins: { top: 1, bottom: 2, inside: 3, outside: 4 } }],
     ['setStyles (value)', () => a().setStyles({ body: { size: 11 } }), { styles: { body: { size: 11 } } }],
-    ['setHeaderFooter (updater)', () => a().setHeaderFooter((p) => ({ ...p, x: 1 })), { headerFooter: { x: 1 } }],
+    ['setHeaderFooter (updater)', () => a().setHeaderFooter((p) => ({ ...p, suppressOnBlank: false })), { headerFooter: { ...defaultHeaderFooter(), suppressOnBlank: false } }],
     ['setFootnotes (updater)', () => a().setFootnotes((p) => ({ ...p, y: 2 })), { footnotes: { y: 2 } }],
     ['setSurface', () => a().setSurface('dark'), { surface: 'dark' }],
     ['setView', () => a().setView('single'), { view: 'single' }],

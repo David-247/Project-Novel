@@ -26,7 +26,8 @@ Pretty-printed UTF-8 JSON.
 | `format`        | string  | Always `"novel-project"`. Identifies the folder as a project.     |
 | `schemaVersion` | integer | Format version. Current: `1`.                                    |
 | `id`            | string  | Random UUID, assigned at creation, never changes.                 |
-| `title`         | string  | Project title.                                                   |
+| `title`         | string  | Project title (the book title shown in running heads).           |
+| `author`        | string  | Author name shown in running heads. Optional: a file without it (every earlier project) reads as `""`. Edited in the "Book details" dialog, which rewrites project.json at once. |
 | `createdAt`     | string  | ISO 8601 timestamp (UTC).                                        |
 | `updatedAt`     | string  | ISO 8601 timestamp (UTC) of the last save.                        |
 
@@ -36,6 +37,7 @@ Pretty-printed UTF-8 JSON.
   "schemaVersion": 1,
   "id": "6f1c1f0e-4f4e-4c55-9d43-2d6f1e0f3a10",
   "title": "My Novel",
+  "author": "Ada Quill",
   "createdAt": "2026-11-03T09:00:00.000Z",
   "updatedAt": "2026-11-03T10:15:42.120Z"
 }
@@ -113,7 +115,7 @@ default. Unknown keys in a record are preserved.
 For a built-in id the record is a partial override: a key equal to the built-in value is dropped, and `null` means
 "unset" where the built-in sets a value (inherit from the parent instead). A custom style stores its full
 definition. Built-ins: `body`, `first-paragraph`, `chapter-number`, `chapter-title`, `part-title`, `subheading`,
-`scene-break`, `block-quote`, `epigraph`, `dedication` (defaults documented in `src/shared/book/styles.ts`).
+`scene-break`, `block-quote`, `epigraph`, `dedication`, `running-head` (defaults documented in `src/shared/book/styles.ts`).
 
 ## book.json
 
@@ -128,7 +130,7 @@ the file is created at the next save.
 | `trimSize`     | string  | Trim size id from the list below. Default `"us-5.5x8.5"`.                                     |
 | `margins`      | object  | `{ top, bottom, inside, outside }` in points (1/72 in), each a number from 0 to 7200. Default `{ 54, 54, 63, 45 }`. `inside` is the binding side, `outside` the fore-edge. |
 | `styles`       | object  | Style definitions keyed by style id. Owned by the styles feature; default `{}`.               |
-| `headerFooter` | object  | Running heads and page numbers. Owned by the headers/footers feature; default `{}`.           |
+| `headerFooter` | object  | Running heads and page numbers; see "headerFooter" below. A missing or `{}` value is the defaults. |
 | `footnotes`    | object  | Footnote options (below). Owned by the footnotes feature; default `{}`.                       |
 | `surface`      | string  | Paper surface: `"auto"` (default), `"book"`, `"white"` or `"dark"`.                           |
 | `view`         | string  | `"spread"` (default) or `"single"`.                                                           |
@@ -147,7 +149,30 @@ the file is created at the next save.
 }
 ```
 
-**Footnote options** (`footnotes`, every field optional; `{}` = the defaults; unknown keys are kept):
+### headerFooter
+
+Written in full by Novel (an older or hand-written file may leave any field out: it is then the default).
+
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| `verso` | `{ kind, text }` | Header of left-hand pages. `kind`: `"none"`, `"title"`, `"author"`, `"chapter"` or `"custom"` (then `text` is shown). Default `{ "kind": "author", "text": "" }`. |
+| `recto` | `{ kind, text }` | Header of right-hand pages. Default `{ "kind": "title", "text": "" }`. |
+| `pageNumber` | object | `position`: `"footer-centre"` (default), `"footer-outside"`, `"header-outside"` or `"none"`; `format`: `"arabic"` (default) or `"lower-roman"`, for the body; `start`: integer 0 to 9999, the number on the first body page (default `1`). |
+| `frontMatter` | string | Pages before the first chapter: `"none"` (default, no number) or `"roman"` (i, ii, iii from the first page). |
+| `restartAtFirstChapter` | boolean | Default `true`: the page where the first chapter starts gets `pageNumber.start`. `false`: page 1 gets it and front matter counts. |
+| `suppressHeaderOnOpening`, `suppressNumberOnOpening` | boolean | Default `true`: no header / no number on a page where a chapter opens. |
+| `suppressOnBlank` | boolean | Default `true`: no header and no number on blank pages (they still count). |
+
+Pages before the first chapter never show a running head. A book without chapters is all body, numbered from page 1.
+Invalid values fall back to their defaults individually (the status bar notes "the headers and footers"); unknown keys at the
+**top level of `headerFooter`** are kept and written back (unknown keys nested inside `verso`, `recto` or `pageNumber` are not).
+Roman numerals exist for 1 to 3999: with `format: "lower-roman"` a page whose number falls outside that range (for example a
+`start` of 0) shows no number. What each page shows is computed from these settings, the layout and the chapter list; none of it
+is stored in manuscript.json.
+
+### footnotes
+
+Every field optional; `{}` = the defaults; unknown keys are kept.
 
 | Field       | Values                    | Default    | Meaning                                                    |
 | ----------- | ------------------------- | ---------- | ---------------------------------------------------------- |

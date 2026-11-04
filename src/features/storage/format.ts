@@ -16,6 +16,9 @@ export interface ProjectMeta {
   /** Random UUID, stable for the project's lifetime. */
   id: string
   title: string
+  /** Author name shown in running heads. Added to the format after version 1 shipped: a project.json
+   *  without it reads as '' (no schema bump needed, older Novel versions ignore the field). */
+  author: string
   /** ISO 8601 timestamps. */
   createdAt: string
   updatedAt: string
@@ -75,7 +78,7 @@ export function baseName(path: string): string {
 
 export function newProjectMeta(title: string, now: Date = new Date(), id: string = crypto.randomUUID()): ProjectMeta {
   const iso = now.toISOString()
-  return { format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, id, title, createdAt: iso, updatedAt: iso }
+  return { format: PROJECT_FORMAT, schemaVersion: PROJECT_SCHEMA_VERSION, id, title, author: '', createdAt: iso, updatedAt: iso }
 }
 
 function parseJSON(text: string, fileName: string): unknown {
@@ -116,6 +119,7 @@ export function parseProjectMeta(text: string): ProjectMeta {
     schemaVersion: v,
     id: data.id as string,
     title: data.title as string,
+    author: typeof data.author === 'string' ? data.author : '',
     createdAt: data.createdAt as string,
     updatedAt: data.updatedAt as string,
   }

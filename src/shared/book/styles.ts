@@ -91,6 +91,7 @@ export const STYLE_IDS = {
   blockQuote: 'block-quote',
   epigraph: 'epigraph',
   dedication: 'dedication',
+  runningHead: 'running-head',
 } as const
 
 export const DEFAULT_STYLE_ID = STYLE_IDS.body
@@ -109,6 +110,8 @@ type BuiltInDef = Omit<StyleDef, 'builtIn'>
  * - Block Quote: 10 pt, indented 2 em both sides, 6 pt above and below.
  * - Epigraph: 10 pt italic, indented 4 em on the left.
  * - Dedication: italic, centered, 144 pt sink; starts a right-hand page.
+ * - Running Head: 9 pt, centered, no indent or spacing; the text of page headers and page numbers
+ *   (drawn on the page, not in the manuscript; headers/footers ticket).
  */
 const BUILT_INS = new Map<string, BuiltInDef>()
 
@@ -169,6 +172,10 @@ registerBuiltInStyle(STYLE_IDS.epigraph, {
 registerBuiltInStyle(STYLE_IDS.dedication, {
   name: 'Dedication', kind: 'paragraph', basedOn: STYLE_IDS.body, italic: true, align: 'center', firstLineIndent: 0,
   spaceBefore: 144, breakBefore: 'recto', nextStyle: STYLE_IDS.body,
+})
+registerBuiltInStyle(STYLE_IDS.runningHead, {
+  name: 'Running Head', kind: 'paragraph', basedOn: STYLE_IDS.body, fontSize: 9, align: 'center', lineHeight: 1.2,
+  firstLineIndent: 0, spaceBefore: 0, spaceAfter: 0, letterSpacing: 0.04,
 })
 
 /** The registered built-in definitions (a copy), in registration order. */

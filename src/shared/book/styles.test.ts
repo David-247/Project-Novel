@@ -19,7 +19,7 @@ describe('built-in styles', () => {
     const r = resolveStyleSheet({})
     expect([...r.keys()]).toEqual([
       'body', 'first-paragraph', 'chapter-number', 'chapter-title', 'part-title', 'subheading',
-      'scene-break', 'block-quote', 'epigraph', 'dedication',
+      'scene-break', 'block-quote', 'epigraph', 'dedication', 'running-head',
     ])
     expect(r.get('body')).toMatchObject({ name: 'Body', kind: 'paragraph', fontSize: 11, firstLineIndent: 1.5, builtIn: true })
     expect(r.get('chapter-title')).toMatchObject({ kind: 'chapter', breakBefore: 'page', nextStyle: 'first-paragraph' })

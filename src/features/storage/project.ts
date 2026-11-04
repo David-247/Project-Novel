@@ -158,6 +158,36 @@ export function getCurrentProjectMeta(): ProjectMeta | null {
   return currentMeta
 }
 
+/**
+ * Change the open project's title and/or author ("Book details"). project.json is rewritten at once
+ * (atomically, under the write lock) rather than waiting for the next save, so a crash cannot lose
+ * it and it needs no unsaved-changes bookkeeping. Resolves false when no project is open, nothing
+ * changed, or the write failed (an error dialog is shown). A blank title keeps the old one.
+ */
+export async function updateProjectDetails(details: { title?: string; author?: string }): Promise<boolean> {
+  const folder = getCurrentProjectPath()
+  const meta = currentMeta
+  if (!folder || !meta) return false
+  const title = details.title === undefined || !details.title.trim() ? meta.title : details.title.trim()
+  const author = details.author === undefined ? meta.author : details.author.trim()
+  if (title === meta.title && author === meta.author) return true
+  try {
+    await withWriteLock(async () => {
+      const base = currentMeta && currentMeta.id === meta.id ? currentMeta : meta
+      const updated: ProjectMeta = { ...base, title, author, updatedAt: new Date().toISOString() }
+      await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
+      if (currentMeta === base) currentMeta = updated
+    })
+  } catch (e) {
+    await showError('Could not save the book details', e)
+    return false
+  }
+  if (getCurrentProjectPath() !== folder) return true
+  actions().projectDetailsChanged({ title, author })
+  await rememberRecent(title)
+  return true
+}
+
 /** Subscribe to "a project was opened or created". Returns unsubscribe. */
 export function onProjectOpened(cb: (p: OpenedProject) => void): () => void {
   openedListeners.add(cb)
@@ -212,7 +242,7 @@ async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex |
   lastSaveDoneAt = 0
   setPendingRecovery(null)
   suppressSnapshotsAt(null)
-  actions().projectOpened({ path: folder, title: meta.title })
+  actions().projectOpened({ path: folder, title: meta.title, author: meta.author })
   openedListeners.forEach((cb) => cb({ path: folder, meta }))
   await rememberRecent(meta.title)
 }
@@ -366,9 +396,11 @@ async function writeProject(
         bookGuard = null
         actions().setBookWarning(null)
       }
-      const updated: ProjectMeta = { ...meta, updatedAt: new Date().toISOString() }
+      // Book details may have been edited while this save was queued: write the latest of this project.
+      const base = currentMeta && currentMeta.id === meta.id ? currentMeta : meta
+      const updated: ProjectMeta = { ...base, updatedAt: new Date().toISOString() }
       await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
-      if (currentMeta === meta) currentMeta = updated
+      if (currentMeta === base) currentMeta = updated
       p.markClean(version)
       bookActions().markBookClean(bookVersion)
       // A clean save makes any crash-recovery snapshot obsolete.
