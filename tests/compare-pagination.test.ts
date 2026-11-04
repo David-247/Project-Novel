@@ -128,6 +128,48 @@ describe('cross-engine pagination tolerance', () => {
     expect(mod.loadRuns(dir).map(mod.runKey).sort()).toEqual(['chromium-win32', 'webkit-darwin'])
   })
 
+  it('boundaries: 600 vs 606 pages passes (limit 6.06), 600 vs 607 fails; a recto drift of 3 fails', () => {
+    const pages = (a: number, b: number) =>
+      mod.compareRuns(run('webkit', 'darwin', [res('page', 'us-6x9', a, [0, 10])]), run('chromium', 'win32', [res('page', 'us-6x9', b, [0, 10])]))
+    expect(pages(600, 606).ok).toBe(true)
+    expect(pages(606, 600).ok).toBe(true)
+    const over = pages(600, 607)
+    expect(over.ok).toBe(false)
+    expect(over.rows[0].problems.join()).toMatch(/total pages differ by 7 \(limit 6\.07\)/)
+    const recto = mod.compareRuns(
+      run('webkit', 'darwin', [res('recto', 'uk-a5', 200, [0, 50]), res('page', 'uk-a5', 200, [0, 50])]),
+      run('chromium', 'win32', [res('recto', 'uk-a5', 200, [0, 53]), res('page', 'uk-a5', 200, [0, 51])]),
+    )
+    expect(recto.rows.map((r) => [r.mode, r.maxOpeningDrift, r.ok])).toEqual([
+      ['recto', 3, false],
+      ['page', 1, true],
+    ])
+    expect(recto.rows[0].problems.join()).toMatch(/chapter 2 opens on page 50 vs 53 \(limit ±2\)/)
+  })
+
+  it('REGRESSION: a result with no chapter openings is a problem, never a silent pass', () => {
+    const empty = mod.compareRuns(run('webkit', 'darwin', [res('page', 'uk-a5', 200, [])]), run('chromium', 'win32', [res('page', 'uk-a5', 200, [])]))
+    expect(empty.ok).toBe(false)
+    expect(empty.rows[0].problems.join()).toMatch(/no chapter openings in webkit-darwin, chromium-win32/)
+    const oneSide = mod.compareRuns(run('webkit', 'darwin', [res('page', 'uk-a5', 200, [0, 50])]), run('chromium', 'win32', [res('page', 'uk-a5', 200, [])]))
+    expect(oneSide.ok).toBe(false)
+    expect(oneSide.rows[0].problems.join()).toMatch(/no chapter openings in chromium-win32/)
+  })
+
+  it('REGRESSION: the summary lists only failing rows, with a one-line count for each pair', () => {
+    const ok = (browser: string, platform: string) =>
+      run(browser, platform, [res('page', 'uk-a5', 200, [0, 50]), res('page', 'us-6x9', 180, [0, 45]), res('recto', 'uk-a5', 204, [0, 52])])
+    const bad = run('webkit', 'win32', [res('page', 'uk-a5', 200, [0, 50]), res('page', 'us-6x9', 186, [0, 45]), res('recto', 'uk-a5', 204, [0, 52])])
+    const md = mod.toMarkdown(mod.compareAll([ok('webkit', 'darwin'), ok('chromium', 'win32'), bad]))
+    // A passing pair: one line, no table.
+    expect(md).toMatch(/- webkit-darwin vs chromium-win32 \(shipping pair\): pass, 3 of 3 rows within tolerance \(max total diff 0, max opening drift 0\)/)
+    expect(md).not.toMatch(/\| page \| uk-a5 \|/) // no passing row anywhere
+    // A failing pair: its count line, then only its failing row.
+    expect(md).toMatch(/- webkit-darwin vs webkit-win32: FAIL, 2 of 3 rows within tolerance/)
+    expect(md).toMatch(/\| page \| us-6x9 \| 180 \| 186 \| 6 \/ 2 \| 0 \/ 1 \| FAIL: total pages differ by 6 \(limit 2\) \|/)
+    expect(md.match(/\| page \| us-6x9 \|/g)).toHaveLength(2) // webkit-darwin and chromium-win32 each vs webkit-win32
+  })
+
   it('renders a markdown diff table with the failing rows marked', () => {
     const a = run('webkit', 'darwin', [res('page', 'uk-a5', 200, [0, 50])])
     const b = run('chromium', 'win32', [res('page', 'uk-a5', 205, [0, 53])])
