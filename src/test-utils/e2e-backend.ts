@@ -157,6 +157,13 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     /** Px reserved at the bottom of each page. */
     paginationReserved: () => getPaginationDebug().reserved,
     /** Engine internals for diagnostics: line count and the line range of each page. */
+    /** Diagnostics: the editor state's document, and the editor DOM's top-level structure. */
+    editorDiag: () => {
+      const ed = getEditor()
+      if (!ed) return null
+      const dom = Array.from(ed.view.dom.children).map((el) => `${el.tagName}.${el.className}[${(el.textContent ?? '').slice(0, 20)}]`)
+      return { state: ed.state.doc.toString(), selection: ed.state.selection.toJSON(), dom, active: document.activeElement?.className ?? null }
+    },
     paginationLines: () => {
       const d = getPaginationDebug()
       return { lineCount: d.lineCount, lineRanges: d.lineRanges, lastPass: d.lastPass }

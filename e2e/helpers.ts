@@ -22,6 +22,8 @@ export const recoveryControl = (page: Page, id: string) => page.locator(`[data-c
 
 /** Load (or "relaunch") the app and wait until the editor and fake backend are ready. */
 export async function launch(page: Page): Promise<void> {
+  // Surface uncaught page errors in the test output (they otherwise only show as their symptoms).
+  page.on('pageerror', (e) => console.error(`[pageerror] ${e.message}\n${e.stack ?? ''}`))
   await page.goto('/')
   // CSS, not role: a modal (e.g. the recovery prompt) hides the editor from the a11y tree.
   await expect(page.locator('main [contenteditable="true"]')).toBeVisible()

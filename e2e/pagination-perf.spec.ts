@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { budget } from './budget'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
 import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
 
@@ -128,8 +129,8 @@ test('100k words paginated: trim size reflow < 1 s', async ({ page }, testInfo) 
     budgets: { reflowMs: 1000, allDrawnMs: 3000 },
   })
   expect(reflows.at(-1)!.pages).toBe(initialPages)
-  for (const r of reflows) expect(r.allDrawnMs, `${r.trim}: all blocks drawn`).toBeLessThan(3000)
-  for (const r of reflows) expect(r.ms, r.trim).toBeLessThan(1000)
+  for (const r of reflows) budget(testInfo, `${r.trim}: all blocks drawn ms`, r.allDrawnMs, 3000)
+  for (const r of reflows) budget(testInfo, `${r.trim}: reflow complete ms`, r.ms, 1000)
 })
 
 test('100k words paginated: typing latency (end of a line; inside a paragraph split across pages)', async ({ page }, testInfo) => {
@@ -166,6 +167,6 @@ test('100k words paginated: typing latency (end of a line; inside a paragraph sp
   })
   for (const t of [endOfLine, splitParagraph]) {
     expect(t.keystrokes).toBeGreaterThanOrEqual(20)
-    expect(t.medianMs).toBeLessThan(50)
+    budget(testInfo, 'typing median ms', t.medianMs, 50)
   }
 })

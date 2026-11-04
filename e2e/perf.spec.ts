@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { budget } from './budget'
 import { clickBlockStart, editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
@@ -177,8 +178,8 @@ test('100k-word manuscript: typing latency and Replace All stay within budget', 
   })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
-  expect(typing.medianMs).toBeLessThan(50)
-  expect(replaceAllMs).toBeLessThan(2000)
+  budget(testInfo, 'typing median ms', typing.medianMs, 50)
+  budget(testInfo, 'Replace All ms', replaceAllMs, 2000)
 })
 
 test('100k-word manuscript, combined hot path: find panel open on "the" + autosave mid-typing', async ({ page }, testInfo) => {
@@ -218,7 +219,7 @@ test('100k-word manuscript, combined hot path: find panel open on "the" + autosa
   })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
-  expect(typing.medianMs).toBeLessThan(50)
+  budget(testInfo, 'typing median ms (hot path)', typing.medianMs, 50)
 })
 
 test('100k-word manuscript: changing the Chapter Title font size restyles every chapter in < 100 ms and repaginates in < 1 s, no doc change', async ({ page }, testInfo) => {
@@ -291,7 +292,7 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
   expect(result.swapped).toBe(true)
   expect(result.changed).toBe(chapters)
   expect(versionAfter).toBe(versionBefore)
-  expect(result.cssMs).toBeLessThan(100)
-  expect(result.repaginatedMs).toBeLessThan(1000)
-  expect(result.allDrawnMs).toBeLessThan(3000)
+  budget(testInfo, 'restyle style sheet swap ms', result.cssMs, 100)
+  budget(testInfo, 'restyle reflow complete ms', result.repaginatedMs, 1000)
+  budget(testInfo, 'restyle all drawn ms', result.allDrawnMs, 3000)
 })

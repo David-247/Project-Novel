@@ -31,6 +31,8 @@ test('create a project, type formatted text, save with Mod-S, relaunch and reope
 
   await expect(ed.locator('h2')).toHaveText('Chapter One')
   await expect(ed.locator('strong')).toHaveText('dark')
+  // TEMP diagnostics (macOS Chromium typing loss): state vs DOM.
+  console.log('[diag]', JSON.stringify(await page.evaluate(() => window.__nvE2E.editorDiag())))
   await expect(ed.locator('ul > li')).toHaveCount(2)
   await expect(saveStatus(page)).toHaveText('My Novel: Unsaved changes')
 
