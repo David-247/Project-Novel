@@ -9,7 +9,9 @@ const marker = (doc: Document) => {
 /**
  * Maps pasted or imported HTML to the book's break nodes: an element with `page-break-before` /
  * `break-before: page` gets a page break node before it, `page-break-after` after it. (`<hr>` is
- * mapped to a scene break by the scene break node's own parse rule.) Returns the input unchanged
+ * mapped to a scene break by the scene break node's own parse rule.) Limitation: `left`/`right`/`recto`/
+ * `verso` are not distinguished; they become a plain page break, never a recto break. Wired to paste
+ * only; an importer must call this itself. Returns the input unchanged
  * when it names no page break.
  */
 export function mapPastedHtml(html: string): string {
