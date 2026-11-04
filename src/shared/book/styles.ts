@@ -397,15 +397,18 @@ const declarationText = (s: StyleFormat) => styleDeclarations(s).map(([p, v]) =>
 
 /**
  * True when a block of style `id` directly after a block of style `prevId` continues a heading
- * group: the previous style breaks, names this one as its next style, and this one breaks too
- * (e.g. Chapter Number followed by Chapter Title). The group breaks once, before its first block,
- * and its later blocks get no space before.
+ * group: both styles break, and either the previous style names this one as its next style, or the
+ * pair is a chapter number then a chapter title (`chapterRole`: Chapter Number or a style based on
+ * it, then Chapter Title or a style based on it, e.g. their duplicates). The group breaks once,
+ * before its first block, and its later blocks get no space before. The chapter model
+ * (`getChapters`) groups the same pairs.
  */
 export function continuesHeadingGroup(prevId: string | null, id: string, styles: ResolvedStyles): boolean {
   if (!prevId || prevId === id) return false
   const prev = styles.get(prevId)
   const cur = styles.get(id)
-  return !!prev && !!cur && prev.nextStyle === id && isBreaking(prev) && isBreaking(cur)
+  if (!prev || !cur || !isBreaking(prev) || !isBreaking(cur)) return false
+  return prev.nextStyle === id || (chapterRole(styles, prevId) === 'number' && chapterRole(styles, id) === 'title')
 }
 
 const isBreaking = (s: StyleFormat) => s.breakBefore === 'page' || s.breakBefore === 'recto'
@@ -473,11 +476,17 @@ export function buildStyleSheetCSS(styles: ResolvedStyles, scope: string): strin
     if (!STYLE_ID_PATTERN.test(s.id)) continue
     rules.push(`${scope} [data-style="${s.id}"] { ${declarationText(s)} }`)
   }
-  for (const prev of styles.values()) {
-    if (prev.nextStyle && continuesHeadingGroup(prev.id, prev.nextStyle, styles)) {
-      rules.push(`${scope} [data-style="${prev.id}"] + [data-style="${prev.nextStyle}"] { margin-top: 0; }`)
-    }
+  // Heading groups: a next-style pair, and every chapter number style then chapter title style.
+  const pairs = new Set<string>()
+  const group = (a: string, b: string) => {
+    const key = `${a} ${b}`
+    if (pairs.has(key) || !continuesHeadingGroup(a, b, styles)) return
+    pairs.add(key)
+    rules.push(`${scope} [data-style="${a}"] + [data-style="${b}"] { margin-top: 0; }`)
   }
+  for (const prev of styles.values()) if (prev.nextStyle) group(prev.id, prev.nextStyle)
+  const roles = [...chapterRoles(styles)]
+  for (const [numberId, r] of roles) if (r === 'number') for (const [titleId, t] of roles) if (t === 'title') group(numberId, titleId)
   // Paragraphs inside list items keep the list's own geometry.
   rules.push(`${scope} li > [data-style] { text-indent: 0; margin-top: 0; margin-bottom: 0; }`)
   return rules.join('\n')

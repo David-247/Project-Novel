@@ -141,6 +141,30 @@ describe('custom chapter styles (based on Chapter Title)', () => {
     ])
   })
 
+  it.each([
+    ['built-in Number', 'built-in Title'],
+    ['built-in Number', 'Title copy'],
+    ['Number copy', 'built-in Title'],
+    ['Number copy', 'Title copy'],
+  ])('REGRESSION: %s followed by %s breaks once, before the number (page and recto)', (numberKind, titleKind) => {
+    const number = numberKind === 'Number copy' ? dup('chapter-number') : 'chapter-number'
+    const title = titleKind === 'Title copy' ? dup('chapter-title') : 'chapter-title'
+    const ed = mount([p('Front'), h('3', { styleId: number }), h('The Road', { styleId: title }), p('a')])
+    expect(getChapters(ed.state.doc).map((c) => c.title)).toEqual(['The Road'])
+    expect(blocks(ed).map((b) => b.getAttribute('data-break-before'))).toEqual([null, 'page', null, null])
+    act(() => setChaptersStartOn('recto'))
+    expect(blocks(ed).map((b) => b.getAttribute('data-break-before'))).toEqual([null, 'recto', null, null])
+  })
+
+  it('REGRESSION: the number-title group follows a role change with no break change (Based on re-pointed)', () => {
+    const title = dup('chapter-title')
+    const ed = mount([p('Front'), h('3', { styleId: 'chapter-number' }), h('The Road', { styleId: title }), p('a')])
+    expect(blocks(ed).map((b) => b.getAttribute('data-break-before'))).toEqual([null, 'page', null, null])
+    // Based on Part Title: still breaks before (own copied setting), but is no longer a chapter title.
+    run(() => saveStyle(title, { ...ownDef(getStyleDefinition(title)!), basedOn: 'part-title' }))
+    expect(blocks(ed).map((b) => b.getAttribute('data-break-before'))).toEqual([null, 'page', 'page', null])
+  })
+
   it('the rule: a chapter style at outline level 1 whose Based on chain reaches Chapter Title (or Chapter Number)', () => {
     const viaChain = createStyle('chapter-title', 'Prologue Title') // based on Chapter Title
     const level2 = createStyle('chapter-title', 'Chapter Subtitle')
