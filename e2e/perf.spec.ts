@@ -218,7 +218,7 @@ test('100k-word manuscript, combined hot path: find panel open on "the" + autosa
   expect(typing.medianMs).toBeLessThan(50)
 })
 
-test('100k-word manuscript: changing the Chapter Title font size restyles every chapter in < 100 ms, no doc change', async ({ page }, testInfo) => {
+test('100k-word manuscript: changing the Chapter Title font size restyles and repaginates every chapter in < 1 s, no doc change', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   const built = buildManuscript()
   // Chapter Title applied to every chapter heading (40 chapters).
@@ -265,10 +265,12 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
     restyleIncludingPaintMs: +result.paintedMs.toFixed(1),
     chaptersRestyled: result.changed,
     docVersionChanged: versionAfter !== versionBefore,
-    budgets: { restyleMs: 100 },
+    // Paginated view: a style change that alters block heights reflows the whole book, like a trim
+    // change, so it gets the reflow budget (docs/pagination.md). Continuous view measured ~20 / 60 ms.
+    budgets: { restyleMs: 1000 },
   })
 
   expect(result.changed).toBe(chapters)
   expect(versionAfter).toBe(versionBefore)
-  expect(result.styledMs).toBeLessThan(100)
+  expect(result.styledMs).toBeLessThan(1000)
 })

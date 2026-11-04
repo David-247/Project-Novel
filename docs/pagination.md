@@ -104,13 +104,15 @@ layer behind the editor.
 
 | Measure (budget) | chromium | webkit |
 |---|---|---|
-| Trim reflow, worst of 6 × 9 / 5 × 8 / A5 / 5.5 × 8.5 (< 1000 ms) | 184 ms | 365 ms |
-| Typing at a line end mid-manuscript, median / p95 (< 50 ms median) | 14.4 / 26.4 ms | 43 / 55 ms |
-| Typing inside a paragraph split across two pages, median / p95 | 20.3 / 56.6 ms | 37 / 50 ms |
-| Phase 1 `perf.spec.ts` typing (now paginated), median / p95 | 13 / 25.3 ms | 34 / 47 ms |
-| Phase 1 hot path (find on "the" + autosave), median / p95 | 18 / 25.7 ms | 42 / 58 ms |
+| Trim reflow, worst of 6 × 9 / 5 × 8 / A5 / 5.5 × 8.5 (< 1000 ms) | 265 ms | 506 ms |
+| Typing at a line end mid-manuscript, median / p95 (< 50 ms median) | 19.2 / 28.5 ms | 47 / 79 ms |
+| Typing inside a paragraph split across two pages, median / p95 | 25.3 / 32.4 ms | 45 / 56 ms |
+| Phase 1 `perf.spec.ts` typing (now paginated), median / p95 | 15.8 / 23.2 ms | 38 / 58 ms |
+| Phase 1 hot path (find on "the" + autosave), median / p95 | 21.5 / 29.4 ms | 45 / 61 ms |
+| Chapter Title restyle + repagination (styles ticket test; reflow budget < 1000 ms) | 132 ms | 320 ms |
 
-420 pages at 5.5 × 8.5 in. A keystroke's pass costs about 2.5 ms (one block measured, two element
+Measured after merging the book settings, styles and paper surfaces tickets (book styles, textured
+paper). 440 pages at 5.5 × 8.5 in. A keystroke's pass costs 1–3 ms (one block measured, two element
 boxes read, decorations untouched unless a line moved between pages). Playwright's WebKit on Windows
 is bimodal for every build, Phase 1's continuous editor included: some keystrokes paint in the same
 frame, the rest slip to about 44 ms; the WebKit medians sit on that second mode. A line that moves
@@ -125,7 +127,10 @@ size / margin / view change, a font load, or `invalidatePagination()`.
 
 1. **Measure** (`measure.ts`). For each top-level block whose node changed (or after a geometry
    change): text and `<br>` fragments of each textblock (`Range.getClientRects`), grouped into line
-   boxes, in "stream px" (unscaled, page offsets subtracted). Cached by node identity.
+   boxes, in "stream px" (unscaled, page offsets subtracted). Cached by node identity. A change to
+   `book.styles` re-measures only the blocks whose `data-style` resolves differently. Unchanged
+   blocks keep their last stream top plus the shift of changed blocks above them (moves under
+   0.1 px are box snapping, not moves).
 2. **Break** (`breaker.ts`, pure, unit-tested). Fill lines while `bottom − top of page ≤ text
    height`; forced breaks; widows / orphans 2; keep headings with the next block; bottom
    reservations; at least one line per page.

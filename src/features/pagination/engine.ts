@@ -1,7 +1,7 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection, type EditorState } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
-import type { BookView } from '@/shared/book'
+import { resolveStyleSheet, type BookView, type StyleSheetJSON } from '@/shared/book'
 import { useStore, type PageInfo } from '@/shared/store'
 import { breakPages, sideOf, type LineBox, type PageRange, type UnitInfo } from './breaker'
 import { hasReservations, isChapterStart, onInvalidate, totalReservation } from './extension-points'
@@ -98,6 +98,15 @@ function signatureOf(decos: Decoration[], pos: number, end: number) {
     .join(',')
 }
 
+/** The block (or a textblock inside it) renders one of `ids` (data-style, from the styles ticket). */
+function usesStyle(dom: HTMLElement, ids: Set<string>): boolean {
+  const own = dom.getAttribute('data-style')
+  if (own !== null && ids.has(own)) return true
+  if (!dom.firstElementChild || dom.matches('p, h1, h2, h3, h4, h5, h6')) return false
+  for (const el of Array.from(dom.querySelectorAll('[data-style]'))) if (ids.has(el.getAttribute('data-style')!)) return true
+  return false
+}
+
 /** Listeners for completed passes (the view uses them to scroll / hit-test). */
 type SnapshotListener = (s: LayoutSnapshot) => void
 
@@ -146,8 +155,9 @@ export class PaginationEngine {
         const p = prev
         prev = s
         if (s.book.trimSize !== p.book.trimSize || s.book.margins !== p.book.margins) this.schedule()
-        // Style definitions change block metrics (and data-break-before) without a doc change.
-        else if (s.book.styles !== p.book.styles) this.invalidate()
+        // Style definitions change block metrics (and data-break-before) without a doc change:
+        // re-measure the blocks that use a style whose resolved definition changed.
+        else if (s.book.styles !== p.book.styles) this.stylesChanged(p.book.styles, s.book.styles)
         else if (s.layout.effectiveView !== p.layout.effectiveView) this.schedule()
       }),
       onInvalidate(() => this.invalidate()),
@@ -158,6 +168,20 @@ export class PaginationEngine {
       fonts.addEventListener('loadingdone', onFonts)
       this.unsubs.push(() => fonts.removeEventListener('loadingdone', onFonts))
     }
+    this.schedule()
+  }
+
+  /** Style ids whose resolved definition changed and whose blocks must be re-measured. */
+  private restyled: Set<string> | null = null
+
+  private stylesChanged(before: StyleSheetJSON, after: StyleSheetJSON) {
+    const a = resolveStyleSheet(before)
+    const b = resolveStyleSheet(after)
+    const ids = new Set<string>()
+    for (const id of new Set([...a.keys(), ...b.keys()])) if (JSON.stringify(a.get(id)) !== JSON.stringify(b.get(id))) ids.add(id)
+    if (ids.size === 0) return
+    for (const id of this.restyled ?? []) ids.add(id)
+    this.restyled = ids
     this.schedule()
   }
 
@@ -260,6 +284,8 @@ export class PaginationEngine {
     // Stream tops: unchanged blocks keep their last top plus the shift of the changed blocks above
     // them, so a keystroke reads two element boxes instead of one per block.
     const prevTops = key === this.lastKey ? this.prevTops : new Map<PMNode, number>()
+    const restyled = this.restyled
+    this.restyled = null
     const nextTops = new Map<PMNode, number>()
     let delta = 0
     let anchor = true
@@ -284,6 +310,7 @@ export class PaginationEngine {
       if (!dom || dom.nodeType !== 1) return
       let m = this.cache.get(node)
       let fresh = false
+      if (m && restyled && usesStyle(dom, restyled)) m = undefined
       if (!m || m.key !== key) {
         m = measureBlock(view, node, pos, dom, scale, key)
         this.cache.set(node, m)
