@@ -9,7 +9,7 @@ import { newProject, openProject, reopenRecoveryPrompt, saveProject } from './pr
  */
 export function NoProjectActions() {
   const path = useStore((s) => s.project.path)
-  const dirty = useStore((s) => s.editor.dirty)
+  const dirty = useStore((s) => s.editor.dirty || s.book.dirty)
   const opening = useStore((s) => s.project.opening)
   if (path) return null
   return (
@@ -45,6 +45,7 @@ export function RecoveryStatus() {
   const pendingAt = useStore((s) => s.project.pendingRecoveryAt)
   const promptOpen = useStore((s) => s.project.recoveryPrompt !== null)
   const notice = useStore((s) => s.project.recoveryNotice)
+  const bookWarning = useStore((s) => s.project.bookWarning)
   return (
     <>
       {pendingAt && !promptOpen ? (
@@ -53,6 +54,11 @@ export function RecoveryStatus() {
             Backup available — Restore…
           </Button>
         </Tooltip>
+      ) : null}
+      {bookWarning ? (
+        <StatusText tone="warning" live className="min-w-0 truncate" data-testid="book-warning" title={bookWarning}>
+          {bookWarning}
+        </StatusText>
       ) : null}
       {notice ? (
         <StatusText live className="min-w-0 truncate" data-testid="recovery-notice" title={notice}>

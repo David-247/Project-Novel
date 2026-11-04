@@ -3,6 +3,7 @@ import {
   createMemoryDocumentProvider,
   emptyDoc,
   getDocumentProvider,
+  isEmptyDocJSON,
   onDocumentProviderChange,
   registerDocumentProvider,
 } from './document'
@@ -44,5 +45,16 @@ describe('document provider registry', () => {
     expect(p.isDirty()).toBe(true)
     p.markClean(p.getDocVersion())
     expect(p.isDirty()).toBe(false)
+  })
+})
+
+describe('isEmptyDocJSON', () => {
+  it('is true only for a document holding one empty paragraph or heading (or nothing)', () => {
+    expect(isEmptyDocJSON(emptyDoc())).toBe(true)
+    expect(isEmptyDocJSON({ type: 'doc' })).toBe(true)
+    expect(isEmptyDocJSON({ type: 'doc', content: [{ type: 'heading', attrs: { level: 1 } }] })).toBe(true)
+    expect(isEmptyDocJSON({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }] })).toBe(false)
+    expect(isEmptyDocJSON({ type: 'doc', content: [{ type: 'paragraph' }, { type: 'paragraph' }] })).toBe(false)
+    expect(isEmptyDocJSON({ type: 'doc', content: [{ type: 'pageBreak' }] })).toBe(false)
   })
 })

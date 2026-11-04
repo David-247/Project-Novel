@@ -15,6 +15,7 @@ export {
   loadRecentProjects,
   getCurrentProjectPath,
   getCurrentProjectMeta,
+  updateProjectDetails,
   onProjectOpened,
   createProjectAt,
   openProjectAt,
@@ -41,6 +42,9 @@ export {
 
 // Low-level file helpers (Rust commands; atomic temp-file + fsync + rename)
 export { writeFileAtomic, readTextFile, MENU_EVENTS } from './ipc'
+
+// Book settings file (book.json; see docs/project-format.md)
+export { BOOK_FILE, BOOK_FORMAT, BOOK_VERSION, parseBook, serializeBook, type BookParseResult } from './book-file'
 
 // Format
 export {

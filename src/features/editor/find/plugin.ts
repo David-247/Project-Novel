@@ -1,4 +1,5 @@
 import { Extension } from '@tiptap/core'
+import type { Node as PMNode } from '@tiptap/pm/model'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
@@ -36,17 +37,31 @@ function decorationPlugin(key: PluginKey<DecorationSet>) {
   })
 }
 
+/**
+ * The inline node with content (a footnote) holding `pos`, as [position, node], or null. Its text is
+ * not shown in the line, so a match inside it is highlighted and selected on the reference.
+ */
+export function noteAround(doc: PMNode, pos: number): [number, PMNode] | null {
+  const $pos = doc.resolve(pos)
+  const parent = $pos.parent
+  return parent.isInline && !parent.isLeaf && $pos.depth > 0 ? [$pos.before(), parent] : null
+}
+
+/** Where a match is drawn: its range, or its footnote reference when it is inside a note. */
+export function matchDecoration(state: EditorState, m: MatchRange, attrs: Record<string, string>): Decoration {
+  const note = noteAround(state.doc, m.from)
+  return note ? Decoration.node(note[0], note[0] + note[1].nodeSize, attrs) : Decoration.inline(m.from, m.to, attrs)
+}
+
 export function buildMatchDecorations(state: EditorState, matches: readonly MatchRange[]): DecorationSet {
   if (matches.length === 0) return DecorationSet.empty
-  const decos = matches.map((m) => Decoration.inline(m.from, m.to, { class: MATCH_CLASS }))
+  const decos = matches.map((m) => matchDecoration(state, m, { class: MATCH_CLASS }))
   return DecorationSet.create(state.doc, decos)
 }
 
 export function buildCurrentDecoration(state: EditorState, match: MatchRange | undefined): DecorationSet {
   if (!match) return DecorationSet.empty
-  return DecorationSet.create(state.doc, [
-    Decoration.inline(match.from, match.to, { class: CURRENT_CLASS, 'aria-current': 'true' }),
-  ])
+  return DecorationSet.create(state.doc, [matchDecoration(state, match, { class: CURRENT_CLASS, 'aria-current': 'true' })])
 }
 
 /** Attach new decoration sets to a transaction (never added to undo history). */

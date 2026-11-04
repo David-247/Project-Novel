@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
 
 /**
  * Helpers for driving the app through the e2e fake Tauri backend
@@ -22,6 +22,8 @@ export const recoveryControl = (page: Page, id: string) => page.locator(`[data-c
 
 /** Load (or "relaunch") the app and wait until the editor and fake backend are ready. */
 export async function launch(page: Page): Promise<void> {
+  // Surface uncaught page errors in the test output (they otherwise only show as their symptoms).
+  page.on('pageerror', (e) => console.error(`[pageerror] ${e.message}\n${e.stack ?? ''}`))
   await page.goto('/')
   // CSS, not role: a modal (e.g. the recovery prompt) hides the editor from the a11y tree.
   await expect(page.locator('main [contenteditable="true"]')).toBeVisible()
@@ -71,8 +73,72 @@ export async function seedProject(
   await page.evaluate(([f, t]) => window.__nvE2E.addRecent(f, t), [folder, title] as const)
 }
 
-/** Editor document as ProseMirror-ish text blocks, for content comparisons. */
-export const editorHTML = (page: Page) => editor(page).evaluate((el) => el.innerHTML)
+/**
+ * Click on the first character of an editor block, as a user would on the page. On paginated pages a
+ * block's layout box is not where its lines are painted (a paragraph continued on the next page keeps
+ * a tall, partly empty box), so the target is the painted text itself, scrolled into view first.
+ * The editor then reads the click's caret now: ProseMirror otherwise picks it up on the async
+ * `selectionchange`, and a toolbar select changed right after the click (Playwright's selectOption
+ * needs no focus move) could act on the previous selection (seen on macOS CI: the style went to the
+ * block at the old caret).
+ */
+export async function clickBlockStart(page: Page, block: Locator): Promise<void> {
+  const point = async () =>
+    block.evaluate((el) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+      const text = walker.nextNode() as Text | null
+      const r = document.createRange()
+      if (text && text.length) {
+        r.setStart(text, 0)
+        r.setEnd(text, 1)
+      } else r.selectNodeContents(el)
+      const rc = r.getBoundingClientRect()
+      return { x: rc.left + Math.min(2, rc.width / 2), y: rc.top + rc.height / 2 }
+    })
+  const main = page.getByRole('main', { name: 'Editor' })
+  const box = (await main.boundingBox())!
+  let p = await point()
+  if (p.y < box.y + 40 || p.y > box.y + box.height - 40) {
+    await main.evaluate((m, dy) => m.scrollBy(0, dy), p.y - (box.y + box.height / 2))
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
+    p = await point()
+  }
+  await page.mouse.click(p.x, p.y)
+  await page.evaluate(() => window.__nvE2E?.syncSelection())
+}
+
+/** Wait until the pagination engine has laid out the current document (no reflow pending) and painted. */
+export async function waitForLayout(page: Page): Promise<void> {
+  await page.waitForFunction(() => window.__nvE2E.paginationSettled())
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
+  await page.waitForFunction(() => window.__nvE2E.paginationSettled())
+}
+
+/**
+ * Editor document markup, for content comparisons. Page placement is view state, not content: the
+ * pagination offsets (class nv-shift, left/top, data-nv-dy, and the inline wrappers of lines moved
+ * to a later page) are removed after the layout settled.
+ */
+export async function editorHTML(page: Page): Promise<string> {
+  await waitForLayout(page)
+  return editor(page).evaluate((el) => {
+    const copy = el.cloneNode(true) as HTMLElement
+    for (const n of Array.from(copy.querySelectorAll<HTMLElement>('.nv-shift'))) {
+      if (n.tagName === 'SPAN' && n.attributes.length === 3) {
+        n.replaceWith(...Array.from(n.childNodes))
+        continue
+      }
+      n.classList.remove('nv-shift')
+      if (!n.classList.length) n.removeAttribute('class')
+      n.removeAttribute('data-nv-dy')
+      n.style.removeProperty('left')
+      n.style.removeProperty('top')
+      if (!n.getAttribute('style')) n.removeAttribute('style')
+    }
+    copy.normalize()
+    return copy.innerHTML
+  })
+}
 
 const IS_MAC = process.platform === 'darwin'
 const isWebKit = (page: Page) => page.context().browser()?.browserType().name() === 'webkit'
@@ -89,3 +155,15 @@ export async function pressTab(page: Page, opts: { shift?: boolean } = {}): Prom
 /** Caret to start / end of line: Home/End elsewhere; on macOS those scroll, so Cmd+Left/Right. */
 export const lineStart = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowLeft' : 'Home')
 export const lineEnd = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowRight' : 'End')
+/**
+ * Caret to start / end of the document: Ctrl+Home/End elsewhere; Cmd+Up/Down on macOS. The editor
+ * then reads the native caret move now (it otherwise waits for the async selectionchange).
+ */
+export async function docStart(page: Page): Promise<void> {
+  await page.keyboard.press(IS_MAC ? 'Meta+ArrowUp' : 'Control+Home')
+  await page.evaluate(() => window.__nvE2E?.syncSelection())
+}
+export async function docEnd(page: Page): Promise<void> {
+  await page.keyboard.press(IS_MAC ? 'Meta+ArrowDown' : 'Control+End')
+  await page.evaluate(() => window.__nvE2E?.syncSelection())
+}

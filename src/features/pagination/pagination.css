@@ -1,0 +1,126 @@
+/* Paginated view (docs/pagination.md). Paper colours, texture, shadow and the spine come from the
+   paper surfaces contract (src/shared/theme/surfaces.css: .nv-page, .nv-page--verso / --recto,
+   .nv-page-muted, and the --page-* / --desk-* tokens). Only geometry here. */
+
+.nv-desk {
+  display: flow-root;
+  min-height: 100%;
+  background: var(--desk-bg);
+  /* One book point in CSS px (96/72) on the page surface; zoom is a transform on top of it. */
+  --nv-pt: calc(96px / 72);
+}
+/* The find panel floats over the top of the editor region: keep the first page below it (same
+   contract as the continuous surface, see editor/find/find.css). */
+:root[data-find-open] .nv-desk {
+  padding-top: calc(var(--nv-find-panel-height, 0px) + 0.5rem);
+}
+.nv-sizer {
+  position: relative;
+  margin: 0 auto;
+}
+.nv-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  overflow: clip;
+}
+
+/* ---- Paper ------------------------------------------------------------------------------ */
+.nv-frames {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.nv-page {
+  position: absolute;
+}
+.nv-slot {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  font-size: calc(9 * var(--nv-pt));
+}
+
+/* The text block, behind the text: content drawn in a bottom reservation (footnotes). */
+.nv-slot-reserved {
+  position: absolute;
+}
+
+/* ---- Text layer: the editor's one view ----------------------------------------------------
+   The root covers the whole canvas (so presses on margins and the desk reach the editor) while
+   its content box is exactly the text block width: the natural "stream" the engine measures.
+   Pages are placed by position:relative offsets (.nv-shift), which never change line breaking. */
+.nv-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+.nv-text-layer .novel-editor-content {
+  position: relative;
+  box-sizing: content-box;
+  width: var(--nv-text-w);
+  height: var(--nv-canvas-h);
+  padding: 0 calc(var(--nv-canvas-w) - var(--nv-text-w)) 0 0;
+  outline: none;
+  color: var(--page-fg);
+  caret-color: currentColor;
+  /* Fallback typography; the book style sheet (data-style rules) sets the real values. */
+  font-size: calc(11 * var(--nv-pt));
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.nv-text-layer .nv-shift {
+  position: relative;
+}
+/* Not redrawn yet after a reflow (see "Reflow complete" in docs/pagination.md); after a huge
+   transaction (Replace All) every block until the next pass, before the next paint. */
+.nv-text-layer .novel-editor-content.nv-unmapped > *,
+/* (visibility inherits: no descendant selector, which every restyle would evaluate per element) */
+.nv-text-layer .novel-editor-content .nv-stale {
+  visibility: hidden;
+}
+.nv-text-layer ::selection {
+  background: var(--page-selection-bg);
+  color: var(--page-fg);
+}
+/* Page break node (breaks ticket) on pages: zero height. The break is the end of the page it closes,
+   so it takes no line there; a hairline with its label is drawn just below the last line (in the
+   bottom margin), outside layout, so the writer can still see, select and delete it. */
+.nv-text-layer .novel-editor-content [data-page-break] {
+  position: relative;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+}
+.nv-text-layer .novel-editor-content [data-page-break]::after {
+  content: attr(data-label);
+  position: absolute;
+  top: calc(3 * var(--nv-pt));
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--page-muted-fg);
+  color: var(--page-muted-fg);
+  font-size: calc(7.5 * var(--nv-pt));
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}
+.nv-text-layer .novel-editor-content [data-page-break].ProseMirror-selectednode::after {
+  outline: 2px solid var(--page-focus-ring);
+  outline-offset: 1px;
+}
+.nv-text-layer .novel-editor-content ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+.nv-text-layer .novel-editor-content ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+}

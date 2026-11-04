@@ -15,7 +15,13 @@
  * and folder picker through `window.__nvE2E` (see e2e/helpers.ts).
  */
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { getEditor, getFootnotes, setDocJSON } from '@/features/editor'
+import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
 import { autosaveNow } from '@/features/storage'
+import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
+import { useStore } from '@/shared/store'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
 
@@ -144,8 +150,122 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     countControls: () => document.body.querySelectorAll(CONTROL_SELECTOR).length,
     /** Take a crash-recovery snapshot now, as the 30 s autosave timer would (perf: autosave mid-typing). */
     autosaveNow: () => autosaveNow(),
+    // ---- Pagination (Phase 2) ----
+    /** The engine has laid out the current document and no reflow is pending. */
+    paginationSettled: () => getPaginationDebug().settled,
+    /** Page model current and the pages in view drawn (off-screen offsets may still be applying). */
+    paginationModelSettled: () => getPaginationDebug().modelSettled,
+    /** Px reserved at the bottom of each page. */
+    paginationReserved: () => getPaginationDebug().reserved,
+    /** Engine internals for diagnostics: line count and the line range of each page. */
+    /** Diagnostics: the editor state's document, and the editor DOM's top-level structure. */
+    editorDiag: () => {
+      const ed = getEditor()
+      if (!ed) return null
+      const dom = Array.from(ed.view.dom.children).map((el) => `${el.tagName}.${el.className}[${(el.textContent ?? '').slice(0, 20)}]`)
+      return { state: ed.state.doc.toString(), selection: ed.state.selection.toJSON(), dom, active: document.activeElement?.className ?? null }
+    },
+    paginationLines: () => {
+      const d = getPaginationDebug()
+      return { lineCount: d.lineCount, lineRanges: d.lineRanges, lastPass: d.lastPass }
+    },
+    /** The published layout model (store `layout` slice). */
+    layout: () => {
+      const l = useStore.getState().layout
+      return {
+        pageCount: l.pageCount,
+        pages: l.pages,
+        currentPage: l.currentPage,
+        visibleSpread: l.visibleSpread,
+        effectiveView: l.effectiveView,
+        scale: l.scale,
+        layoutVersion: l.layoutVersion,
+      }
+    },
+    /** Book settings without the settings UI (owned by the book settings ticket). */
+    setTrimSize: (id: string) => useStore.getState().bookActions.setTrimSize(id),
+    setBookView: (view: 'spread' | 'single') => useStore.getState().bookActions.setView(view),
+    /**
+     * Emit `data-break-before` on top-level blocks, as style definitions will: `match` selects
+     * blocks by node type (and heading level). Call with `null` to remove.
+     */
+    breakBeforeBlocks: (match: { type: string; level?: number } | null, value: 'page' | 'recto' = 'page') => {
+      const ed = getEditor()
+      if (!ed) return
+      ed.unregisterPlugin(E2E_BREAK_KEY)
+      if (match) {
+        ed.registerPlugin(
+          new Plugin({
+            key: E2E_BREAK_KEY,
+            props: {
+              decorations: (state) => {
+                const decos: Decoration[] = []
+                state.doc.forEach((node, pos) => {
+                  if (node.type.name === match.type && (match.level === undefined || node.attrs.level === match.level))
+                    decos.push(Decoration.node(pos, pos + node.nodeSize, { 'data-break-before': value }))
+                })
+                return DecorationSet.create(state.doc, decos)
+              },
+            },
+          }),
+        )
+      }
+      relayoutPagination()
+    },
+    /** Reserve `px` at the bottom of every page whose range contains `pos` (footnote stand-in); null removes. */
+    reserveBottom: (pos: number | null, px = 0) => {
+      e2eReservation?.()
+      e2eReservation = pos === null ? null : registerBottomReservation('e2e', (p) => (p.from <= pos && pos < p.to ? px : 0))
+    },
+    /** Footnotes: px of the footnote area of each page, and the note lines placed on each page. */
+    footnoteAreas: () => ({ heights: footnoteAreaHeights(), placement: footnotePlacement() }),
+    /** The manuscript's footnotes in order: reference position, derived label, note text. */
+    footnotes: () => getFootnotes().map((r) => ({ pos: r.pos, label: r.label, text: r.node.textContent })),
+    /** Replace the document (as a project load does). */
+    setDoc: (doc: unknown) => setDocJSON(doc as Parameters<typeof setDocJSON>[0]),
+    /** Insert a paragraph holding `text` at top-level position `pos`. */
+    insertParagraphAt: (pos: number, text: string) => {
+      const ed = getEditor()
+      if (!ed) return
+      ed.view.dispatch(ed.state.tr.insert(pos, ed.schema.nodes.paragraph.create(null, ed.schema.text(text))))
+    },
+    /** Re-measure every block (pagination), e.g. to check that incremental measurement was right. */
+    remeasureAll: () => invalidatePagination(),
+    /** Insert a footnote with `text` at document position `pos` (no editor opened). */
+    insertFootnoteAt: (pos: number, text: string) => {
+      const ed = getEditor()
+      if (!ed) return
+      const schema = ed.schema
+      ed.view.dispatch(ed.state.tr.insert(pos, schema.nodes.footnote.create(null, text ? schema.text(text) : null)))
+    },
+    /** Editor document version (bumps on every document change; style edits must not bump it). */
+    docVersion: () => useStore.getState().editor.docVersion,
+    /**
+     * Make the editor read the DOM selection now. ProseMirror picks up a click / End-key caret move
+     * on the async `selectionchange` event; a test that presses the next key (or changes a toolbar
+     * select) within the same task can otherwise act on the previous selection under CPU load.
+     */
+    syncSelection: () => {
+      const view = getEditor()?.view as unknown as { domObserver?: { flush(): void } } | undefined
+      view?.domObserver?.flush()
+    },
+    /** book.styles as stored (overrides only). */
+    bookStyles: () => useStore.getState().book.styles,
+    /**
+     * Append the top-level block `index` itself (the same node instance, not a copy) at the end of
+     * the document: ProseMirror shares unchanged nodes, so one instance can sit at two places.
+     */
+    appendSameBlock: (index: number) => {
+      const view = getEditor()?.view
+      if (!view) return
+      const doc = view.state.doc
+      view.dispatch(view.state.tr.insert(doc.content.size, doc.child(index)))
+    },
   }
 }
+
+const E2E_BREAK_KEY = new PluginKey('e2e-break-before')
+let e2eReservation: (() => void) | null = null
 
 declare global {
   interface Window {

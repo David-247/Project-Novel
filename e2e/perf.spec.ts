@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
-import { editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject } from './helpers'
+import { budget } from './budget'
+import { clickBlockStart, editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Performance budget on a 100,000-word manuscript, in real browser engines
@@ -53,7 +54,7 @@ function buildManuscript() {
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]
 
 /** Launch, open the 100k-word project from Open Recent; returns the open time. */
-async function openEpic(page: Page, folder: string, doc: unknown): Promise<number> {
+async function openEpic(page: Page, folder: string, doc: unknown, blocks = 'p, h2'): Promise<number> {
   await launch(page)
   const title = folder.split('/').pop()!
   await seedProject(page, folder, title, doc)
@@ -61,7 +62,10 @@ async function openEpic(page: Page, folder: string, doc: unknown): Promise<numbe
   await openRecent(page, folder)
   await expect(saveStatus(page)).toHaveText(`${title}: All changes saved`, { timeout: 60_000 })
   const openMs = Date.now() - openStart
-  await expect(editor(page).locator('p, h2')).toHaveCount(WORDS / WORDS_PER_PARAGRAPH)
+  await expect(editor(page).locator(blocks)).toHaveCount(WORDS / WORDS_PER_PARAGRAPH)
+  // The opened book is laid out progressively (pages in view first): wait until every block is at its
+  // page before clicking text by its painted position.
+  await waitForLayout(page)
   return openMs
 }
 
@@ -95,7 +99,8 @@ async function installLatencyProbe(page: Page) {
  */
 async function measureTyping(page: Page, beforeKey?: (i: number) => Promise<void>) {
   const ed = editor(page)
-  await ed.locator('p').nth(500).click()
+  // On the painted text (paged view: a block's box is not where all its lines are painted).
+  await clickBlockStart(page, ed.locator('p').nth(500))
   await lineEnd(page)
   await page.waitForFunction(() => (window as unknown as { __perf: number[] }).__perf.length >= 1)
   await page.evaluate(() => ((window as unknown as { __perf: number[] }).__perf = []))
@@ -173,8 +178,8 @@ test('100k-word manuscript: typing latency and Replace All stay within budget', 
   })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
-  expect(typing.medianMs).toBeLessThan(50)
-  expect(replaceAllMs).toBeLessThan(2000)
+  budget(testInfo, 'typing median ms', typing.medianMs, 50)
+  budget(testInfo, 'Replace All ms', replaceAllMs, 2000)
 })
 
 test('100k-word manuscript, combined hot path: find panel open on "the" + autosave mid-typing', async ({ page }, testInfo) => {
@@ -214,5 +219,179 @@ test('100k-word manuscript, combined hot path: find panel open on "the" + autosa
   })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
-  expect(typing.medianMs).toBeLessThan(50)
+  budget(testInfo, 'typing median ms (hot path)', typing.medianMs, 50)
+})
+
+test('100k-word manuscript: changing the Chapter Title font size restyles every chapter in < 100 ms and repaginates in < 1 s, no doc change', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const built = buildManuscript()
+  // Chapter Title applied to every chapter heading (40 chapters).
+  const content = (built.doc.content as Array<{ type: string; attrs?: Record<string, unknown> }>).map((b) =>
+    b.type === 'heading' ? { ...b, attrs: { level: 1, styleId: 'chapter-title' } } : b,
+  )
+  const doc = { type: 'doc', content }
+  const chapters = content.filter((b) => b.type === 'heading').length
+  const openMs = await openEpic(page, '/projects/Styled', doc, 'p, h1')
+  const titles = page.locator('main [contenteditable="true"] h1[data-style="chapter-title"]')
+  await expect(titles).toHaveCount(chapters)
+
+  await titles.nth(chapters - 1).click()
+  await page.locator('[data-control-id="styles.edit"]').click()
+  const dialog = page.getByRole('dialog', { name: 'Modify style: Chapter Title' })
+  await dialog.locator('[data-control-id="styles.field.fontSize"]').fill('28')
+  const versionBefore = await page.evaluate(() => window.__nvE2E.docVersion())
+
+  const result = await page.evaluate(async () => {
+    const all = Array.from(document.querySelectorAll<HTMLElement>('main [contenteditable="true"] h1[data-style="chapter-title"]'))
+    const before = all.map((el) => getComputedStyle(el).fontSize)
+    const last = all[all.length - 1]
+    const save = document.querySelector<HTMLButtonElement>('[data-control-id="styles.modify.save"]')!
+    const v = window.__nvE2E.layout().layoutVersion
+    const t0 = performance.now()
+    save.click()
+    // 1. The style sheet swap: React commits the new sheet within the click's task / microtasks.
+    //    Read it and force layout before any animation frame, i.e. before pagination runs.
+    let microtasks = 0
+    while (getComputedStyle(last).fontSize === before[before.length - 1] && microtasks++ < 50) await Promise.resolve()
+    const swapped = getComputedStyle(last).fontSize !== before[before.length - 1]
+    void document.body.offsetHeight
+    const cssMs = performance.now() - t0
+    // 2. Repagination, "reflow complete" (docs/pagination.md): the engine re-measured the restyled
+    //    blocks, published the new page model, and drew and painted the pages in view.
+    await new Promise<void>((resolve) => {
+      const check = () =>
+        window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > v ? resolve() : requestAnimationFrame(check)
+      requestAnimationFrame(check)
+    })
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    const repaginatedMs = performance.now() - t0
+    // Off-screen blocks follow in later frames: reported.
+    await new Promise<void>((resolve) => {
+      const check = () => (window.__nvE2E.paginationSettled() ? resolve() : requestAnimationFrame(check))
+      check()
+    })
+    const allDrawnMs = performance.now() - t0
+    const changed = all.filter((el, i) => getComputedStyle(el).fontSize !== before[i]).length
+    return { cssMs, swapped, repaginatedMs, allDrawnMs, changed }
+  })
+  const versionAfter = await page.evaluate(() => window.__nvE2E.docVersion())
+
+  await report(testInfo, 'perf-styles', {
+    manuscript: { words: built.words, blocks: content.length, chapters },
+    openMs,
+    restyleMs: +result.cssMs.toFixed(1),
+    repaginatedMs: +result.repaginatedMs.toFixed(1),
+    allDrawnMs: +result.allDrawnMs.toFixed(1),
+    chaptersRestyled: result.changed,
+    docVersionChanged: versionAfter !== versionBefore,
+    // The style sheet swap keeps the styles budget; the reflow it causes in the paginated view
+    // (every page break can move) gets the reflow budget, like a trim change (docs/pagination.md).
+    budgets: { restyleMs: 100, repaginatedMs: 1000, allDrawnMs: 3000 },
+  })
+
+  expect(result.swapped).toBe(true)
+  expect(result.changed).toBe(chapters)
+  expect(versionAfter).toBe(versionBefore)
+  budget(testInfo, 'restyle style sheet swap ms', result.cssMs, 100)
+  budget(testInfo, 'restyle reflow complete ms', result.repaginatedMs, 1000)
+  budget(testInfo, 'restyle all drawn ms', result.allDrawnMs, 3000)
+})
+
+/**
+ * The 100k-word manuscript with a footnote after the bold words of every 4th paragraph (200 in all;
+ * paragraph 500 has one, so every keystroke re-measures a block holding a reference and re-reserves
+ * its page).
+ */
+function buildFootnotedManuscript() {
+  const built = buildManuscript()
+  let notes = 0
+  let paragraph = 0
+  const content = (built.doc.content as Array<{ type: string; content?: unknown[] }>).map((b) => {
+    if (b.type !== 'paragraph') return b
+    const withNote = paragraph++ % 4 === 0 && notes < 200
+    if (!withNote) return b
+    notes++
+    const note = { type: 'footnote', content: [{ type: 'text', text: `Note ${notes}: ${VOCAB.slice(0, 6 + (notes % 12)).join(' ')}.` }] }
+    return { ...b, content: [...b.content!.slice(0, 2), note, ...b.content!.slice(2)] }
+  })
+  return { ...built, content, notes }
+}
+
+test('100k-word manuscript with 200 footnotes: typing in the main text stays within budget', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const { content, notes, ...built } = buildFootnotedManuscript()
+  expect(notes).toBe(200)
+  const doc = { type: 'doc', content }
+  const openMs = await openEpic(page, '/projects/Footnoted', doc)
+  await expect(page.locator('main [contenteditable="true"] [data-footnote-ref]')).toHaveCount(200)
+  // Footnote areas are drawn for the pages in view.
+  await expect(page.locator('.nv-fn-area').first()).toBeVisible()
+  await installLatencyProbe(page)
+  const typing = await measureTyping(page)
+  const pass = await page.evaluate(() => window.__nvE2E.paginationLines().lastPass)
+
+  await report(testInfo, 'perf-footnotes', {
+    manuscript: { words: built.words, blocks: content.length, footnotes: notes },
+    openMs,
+    typing,
+    lastPass: pass,
+    budgets: { typingMedianMs: 50 },
+  })
+
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  budget(testInfo, 'typing median ms (200 footnotes)', typing.medianMs, 50)
+})
+
+test('100k-word manuscript, paginated combined hot path: spread view + 200 footnotes + find open + autosave mid-typing', async ({ page }, testInfo) => {
+  test.setTimeout(240_000)
+  // A window wide enough for the two-page spread at Fit spread (the default view).
+  await page.setViewportSize({ width: 1400, height: 900 })
+  const { content, notes, words } = buildFootnotedManuscript()
+  const doc = { type: 'doc', content }
+  const folder = '/projects/Combined'
+  const openMs = await openEpic(page, folder, doc)
+  expect((await page.evaluate(() => window.__nvE2E.layout())).effectiveView).toBe('spread')
+  await expect(page.locator('main [contenteditable="true"] [data-footnote-ref]')).toHaveCount(notes)
+  await expect(page.locator('.nv-fn-area').first()).toBeVisible()
+
+  // Find panel open on whole-word "the": 10,000 live matches (plus any in the notes' text).
+  await page.keyboard.press('ControlOrMeta+f')
+  const panel = findPanel(page)
+  await panel.getByRole('checkbox', { name: 'Whole word' }).check()
+  await panel.getByRole('textbox', { name: 'Find' }).fill('the')
+  await expect(page.getByTestId('find-status')).toHaveText(/ of \d+$/, { timeout: 30_000 })
+  const matches = Number((await page.getByTestId('find-status').textContent())!.match(/ of (\d+)$/)![1])
+  expect(matches).toBeGreaterThanOrEqual(10_000)
+  await installLatencyProbe(page)
+
+  // Autosave forced halfway through the measured keystrokes, not awaited (competes like the timer).
+  const autosaveAt = WARMUP + Math.floor(MEASURED / 2)
+  const typing = await measureTyping(page, async (i) => {
+    if (i === autosaveAt) {
+      await page.evaluate(() => {
+        void window.__nvE2E.autosaveNow()
+      })
+    }
+  })
+  await waitForLayout(page)
+  const after = await page.evaluate(() => window.__nvE2E.layout())
+
+  await expect(findPanel(page)).toBeVisible()
+  await expect.poll(() => readFile(page, `${folder}/.recovery/manuscript.json`)).not.toBeNull()
+  const snapshot = JSON.parse((await readFile(page, `${folder}/.recovery/manuscript.json`))!)
+  expect(JSON.stringify(snapshot.doc)).toContain(TYPED.slice(0, autosaveAt))
+  expect(after.effectiveView).toBe('spread')
+
+  await report(testInfo, 'perf-combined', {
+    manuscript: { words, blocks: content.length, footnotes: notes, liveMatches: matches },
+    view: after.effectiveView,
+    pages: after.pageCount,
+    openMs,
+    autosaveForcedBeforeKeystroke: autosaveAt + 1,
+    typing,
+    budgets: { typingMedianMs: 50 },
+  })
+
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  budget(testInfo, 'typing median ms (paginated combined hot path)', typing.medianMs, 50)
 })

@@ -1,17 +1,20 @@
 import type { Editor } from '@tiptap/core'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { closeHistory } from '@tiptap/pm/history'
-import { TextSelection } from '@tiptap/pm/state'
+import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { DecorationSet } from '@tiptap/pm/view'
 import { useStore } from '@/shared/store'
 import { getEditor, subscribeEditor } from '../controller'
+import { FOOTNOTE_NODE } from '../footnote/name'
 import {
   buildCurrentDecoration,
   buildMatchDecorations,
   clearFindDecorations,
   CURRENT_CLASS,
   findMatchesKey,
+  matchDecoration,
+  noteAround,
   setFindDecorations,
 } from './plugin'
 import { findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
@@ -128,14 +131,28 @@ function windowDecorations(state: EditorState, force: boolean): DecorationSet | 
     const shown = findMatchesKey.getState(state)?.find() ?? []
     if (shown.length === slice.length) {
       shown.sort((a, b) => a.from - b.from)
-      if (shown.every((d, i) => d.from === slice[i].from && d.to === slice[i].to)) return undefined
+      const drawn = slice.map((m) => matchDecoration(state, m, {}))
+      if (shown.every((d, i) => d.from === drawn[i].from && d.to === drawn[i].to)) return undefined
     }
   }
   return buildMatchDecorations(state, slice)
 }
 
 function selectMatch(tr: Transaction, m: MatchRange) {
-  tr.setSelection(TextSelection.create(tr.doc, m.from, m.to)).scrollIntoView()
+  // A match inside a footnote: its text is not in the line, so the reference is selected.
+  const note = noteAround(tr.doc, m.from)
+  tr.setSelection(note ? NodeSelection.create(tr.doc, note[0]) : TextSelection.create(tr.doc, m.from, m.to)).scrollIntoView()
+}
+
+let beforeReveal: (() => void) | null = null
+
+/**
+ * Hook run before the find panel scrolls the current match into view by its DOM position. A host
+ * that lays the editor out (pagination) uses it to finish pending layout work first, so the match is
+ * where it is painted. One hook; `null` removes it.
+ */
+export function setFindRevealHook(hook: (() => void) | null): void {
+  beforeReveal = hook
 }
 
 /**
@@ -143,6 +160,7 @@ function selectMatch(tr: Transaction, m: MatchRange) {
  * is not the case while typing in the find field, so scroll the current highlight ourselves.
  */
 function revealCurrent(ed: Editor) {
+  beforeReveal?.()
   const el = ed.view.dom.querySelector(`.${CURRENT_CLASS}`)
   if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center', inline: 'nearest' })
 }
@@ -311,7 +329,13 @@ export function openFind({ prefill: usePrefill = true }: { prefill?: boolean } =
   let prefill: string | undefined
   if (ed && usePrefill) {
     const { from, to, $from, $to, empty } = ed.state.selection
-    if (!empty && $from.sameParent($to) && to - from <= MAX_PREFILL) {
+    // A selection holding a footnote reference is not prefilled: textBetween would run the note text
+    // into the sentence, and a match never spans a reference anyway (search.ts blockText).
+    // Cheap checks first; the note scan only runs on a short single-block selection.
+    let hasNote = false
+    const short = !empty && $from.sameParent($to) && to - from <= MAX_PREFILL
+    if (short) ed.state.doc.nodesBetween(from, to, (n) => !(hasNote ||= n.type.name === FOOTNOTE_NODE))
+    if (short && !hasNote) {
       const text = ed.state.doc.textBetween(from, to, '\n', '\n')
       if (text.trim().length > 0 && !text.includes('\n')) prefill = text
     }

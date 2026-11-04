@@ -1,6 +1,10 @@
-/* Minimal structural rendering for the base schema (Tailwind preflight resets
-   these). Not "paragraph styles" — those are out of Phase 1 scope. */
+/* Structural rendering for the base schema (Tailwind preflight resets these). Paragraph and
+   heading typography comes from the generated style sheet (BookStyleSheet: one rule per
+   paragraph/chapter style, keyed by data-style), not from tag selectors here. */
 .novel-writing-surface .novel-editor-content {
+  /* One book point on this surface. The continuous writing view scales book points so Body
+     (11 pt) shows at the Phase 1 reading size (18px); page surfaces set their own value. */
+  --nv-pt: calc(1.125rem / 11);
   min-height: 60vh;
   outline: none;
   font-size: 1.125rem;
@@ -8,28 +12,20 @@
   white-space: pre-wrap;
   word-wrap: break-word;
 }
+/* The continuous editor is one long page lying on the desk (paper colours: shared/theme/surfaces.css). */
+.novel-writing-surface {
+  max-width: min(72ch, calc(100% - 1rem));
+  margin: 1.5rem auto;
+}
 .novel-writing-surface:focus-within {
-  outline: 2px solid color-mix(in srgb, currentColor 35%, transparent);
+  outline: 2px solid var(--page-focus-ring);
   outline-offset: 4px;
-  border-radius: 4px;
 }
-.novel-writing-surface .novel-editor-content p {
-  margin: 0 0 0.75em;
-}
-.novel-writing-surface .novel-editor-content h1 {
-  font-size: 2em;
-  font-weight: 700;
-  margin: 0.67em 0;
-}
-.novel-writing-surface .novel-editor-content h2 {
-  font-size: 1.5em;
-  font-weight: 700;
-  margin: 0.75em 0;
-}
-.novel-writing-surface .novel-editor-content h3 {
-  font-size: 1.25em;
-  font-weight: 700;
-  margin: 0.83em 0;
+/* Zero specificity: the generated style rules always win. */
+:where(.novel-editor-content) :where(p, h1, h2, h3) {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
 }
 .novel-writing-surface .novel-editor-content ul {
   list-style: disc;
@@ -38,4 +34,77 @@
 .novel-writing-surface .novel-editor-content ol {
   list-style: decimal;
   padding-left: 1.5em;
+}
+
+/* Page break: a quiet labelled rule at the end of the page it closes. The label sits on the rule. */
+.novel-writing-surface .novel-editor-content [data-page-break] {
+  position: relative;
+  height: 1.75rem;
+  margin: 0;
+  cursor: default;
+  user-select: none;
+  color: var(--page-muted-fg);
+  font: 0.75rem/1 system-ui, sans-serif;
+  text-indent: 0;
+}
+.novel-writing-surface .novel-editor-content [data-page-break]::before {
+  content: '';
+  position: absolute;
+  inset: 50% 0 auto 0;
+  border-top: 1px dashed currentColor;
+  opacity: 0.6;
+}
+.novel-writing-surface .novel-editor-content [data-page-break]::after {
+  content: attr(data-label);
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  padding: 0 0.6rem;
+  background: var(--page-bg);
+  white-space: nowrap;
+}
+/* A selected break (click it, or arrow onto it): Backspace / Delete remove it. */
+.novel-writing-surface .novel-editor-content [data-page-break].ProseMirror-selectednode,
+.novel-writing-surface .novel-editor-content [data-scene-break].ProseMirror-selectednode {
+  outline: 2px solid var(--page-focus-ring);
+  outline-offset: 2px;
+}
+.novel-writing-surface .novel-editor-content [data-scene-break] {
+  cursor: default;
+  user-select: none;
+  white-space: pre;
+}
+
+/* ---- Footnote references (footnotes ticket) ----------------------------------------------------
+   The mark is a pseudo-element (the derived number comes from a decoration, data-fn-num), raised by
+   relative positioning so it never makes its line taller (pagination measures line boxes). The
+   raise is on the pseudo-element: pagination may set left/top on the reference itself (a line moved
+   to a later page). The ::before box is the 32 x 32 px press / tap target, out of flow. */
+.novel-editor-content .nv-fn-ref {
+  position: relative;
+  vertical-align: baseline;
+  font-size: 0.72em;
+  line-height: 0;
+  padding: 0 0.08em;
+  cursor: pointer;
+  border-radius: 2px;
+  user-select: none;
+}
+.novel-editor-content .nv-fn-ref::after {
+  content: attr(data-fn-num);
+  position: relative;
+  top: -0.45em;
+}
+.novel-editor-content .nv-fn-ref::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+}
+.novel-editor-content .nv-fn-ref.ProseMirror-selectednode {
+  outline: 2px solid var(--page-focus-ring);
+  outline-offset: 1px;
 }

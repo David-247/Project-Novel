@@ -53,6 +53,15 @@ export function emptyDoc(): DocJSON {
   return { type: 'doc', content: [{ type: 'paragraph' }] }
 }
 
+/** True for a document with nothing in it: one textblock (paragraph or heading) without content. */
+export function isEmptyDocJSON(doc: DocJSON): boolean {
+  const blocks = doc.content ?? []
+  if (blocks.length === 0) return true
+  if (blocks.length > 1) return false
+  const only = blocks[0]
+  return (only.type === 'paragraph' || only.type === 'heading') && !(only.content?.length)
+}
+
 let current: DocumentProvider | null = null
 const providerListeners = new Set<(p: DocumentProvider | null) => void>()
 

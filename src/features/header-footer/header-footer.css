@@ -1,0 +1,106 @@
+/* Running heads and page numbers (docs/design.md, "Headers and page numbers"). They are drawn inside
+   the page's top / bottom margin, behind the text layer: colour comes from .nv-page-muted
+   (--page-muted-fg, AA on all four paper surfaces), type from the Running Head style (inline). */
+
+.nv-hf-line {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 1.2em;
+  /* The margin is the limit: a head that does not fit is clipped, never a reason to move the text block. */
+  overflow: hidden;
+  white-space: nowrap;
+}
+.nv-hf-text {
+  display: block;
+  /* Keeps a long title clear of an outside page number. */
+  padding-inline: 3.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nv-hf-number {
+  display: block;
+  text-align: center;
+}
+.nv-hf-number--outside {
+  position: absolute;
+  top: 0;
+}
+.nv-hf-number--verso {
+  left: 0;
+}
+.nv-hf-number--recto {
+  right: 0;
+}
+/* A number alone in its line (the footer): the line is as wide as the text block. */
+.nv-hf-line > .nv-hf-number--outside:only-child {
+  position: static;
+}
+.nv-hf-line > .nv-hf-number--verso:only-child {
+  text-align: left;
+}
+.nv-hf-line > .nv-hf-number--recto:only-child {
+  text-align: right;
+}
+
+/* ---- Mini page preview in the dialog ------------------------------------------------------- */
+.nv-hf-preview {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem 1.5rem;
+  padding: 0.25rem 0;
+}
+/* Only the spread sits on the desk colour (it follows the paper surface, not the theme), so it
+   holds no text but the mini pages' own, which have their own paper. Captions are on the dialog. */
+.nv-hf-spread {
+  display: flex;
+  align-items: stretch;
+  padding: 0.75rem;
+  border-radius: var(--radius-control, 6px);
+  background: var(--desk-bg);
+}
+.nv-hf-figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+}
+.nv-hf-figure figcaption {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+.nv-hf-minipage {
+  /* Position and size are the spread's: only the paper (.nv-page) comes from the surface contract. */
+  position: relative !important;
+  box-sizing: border-box;
+  overflow: hidden;
+  flex: none;
+}
+.nv-hf-minipage .nv-hf-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+.nv-hf-minipage .nv-hf-body {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+}
+.nv-hf-minipage .nv-hf-body i {
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--page-fg);
+  opacity: 0.28;
+}
+.nv-hf-minipage .nv-hf-body i:last-child {
+  width: 55%;
+}

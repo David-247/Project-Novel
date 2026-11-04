@@ -1,6 +1,8 @@
 @import 'tailwindcss';
 /* Design tokens + light/dark themes (data-theme on <html>, see src/shared/theme). */
 @import './shared/theme/tokens.css';
+/* Paper surfaces (data-surface on <html>): --page-* / --desk-* tokens and the .nv-page contract. */
+@import './shared/theme/surfaces.css';
 
 html,
 body,

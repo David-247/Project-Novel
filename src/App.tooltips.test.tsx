@@ -1,7 +1,9 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, setDocJSON, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, setDocJSON, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { PAGINATION_CONTROLS } from '@/features/pagination'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
+import { SURFACE_CONTROLS } from '@/shared/theme'
 import { useStore } from '@/shared/store'
 import { IconButton, Tooltip } from '@/shared/ui'
 import { App } from './App'
@@ -49,9 +51,17 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     const { container } = await renderFullApp()
     const rendered = Array.from(container.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
     // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel
-    // controls, and the no-project New / Open actions in the status bar).
-    const expected = [...Object.values(TOOLBAR_CONTROLS), ...Object.values(HISTORY_CONTROLS), ...Object.values(FIND_CONTROLS)]
-    expect(new Set(rendered)).toEqual(new Set([...expected.map((m) => m.id), 'file.new_project', 'file.open_project']))
+    // controls, the no-project New / Open actions and the page view controls in the status bar).
+    const expected = [
+      ...Object.values(TOOLBAR_CONTROLS),
+      ...Object.values(HISTORY_CONTROLS),
+      ...Object.values(FIND_CONTROLS),
+      ...Object.values(PAGINATION_CONTROLS),
+    ]
+    const surfaces = Object.values(SURFACE_CONTROLS).map((m) => m.id)
+    expect(new Set(rendered)).toEqual(
+      new Set([...expected.map((m) => m.id), ...surfaces, 'book.trimSize', 'book.headerFooter', 'insert.menu', 'footnote.options', 'file.new_project', 'file.open_project']),
+    )
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
   })
@@ -76,7 +86,11 @@ describe('tooltip coverage (every control in the app has a registered, wired too
   it('covers the no-project state: New / Open, and Save as project once text was typed', async () => {
     const { container } = await renderFullApp()
     const statusBar = container.querySelector('footer[aria-label="Status bar"]')!
-    const ids = () => Array.from(statusBar.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
+    // Project actions (the page view controls always follow them).
+    const ids = () =>
+      Array.from(statusBar.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id')).filter(
+        (id) => !id!.startsWith('pagination.'),
+      )
     expect(ids()).toEqual(['file.new_project', 'file.open_project'])
     expect(statusBar).toHaveTextContent('No project open')
     act(() => {
@@ -100,6 +114,95 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
     act(() => useStore.getState().projectActions.setPendingRecovery(null))
+  })
+
+  it('covers the Modify style and Manage styles dialogs (incl. rename and delete confirmation)', async () => {
+    await renderFullApp()
+    act(() => useStore.getState().findActions.closePanel())
+    const audit = () => {
+      const problems = auditTooltipCoverage(document.body)
+      expect(problems, formatCoverageProblems(problems)).toEqual([])
+    }
+    // Manage styles: create a custom style (opens the rename form), then ask to delete it.
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="styles.manage"]')!))
+    const manage = await screen.findByRole('dialog', { name: 'Manage styles' })
+    act(() => void fireEvent.click(manage.querySelector('[data-control-id="styles.manage.new"]')!))
+    expect(manage.querySelector('[data-control-id="styles.manage.renameField"]')).not.toBeNull()
+    audit()
+    act(() => void fireEvent.click(manage.querySelector('[data-control-id="styles.manage.delete"]')!))
+    expect(manage.querySelector('[data-control-id="styles.manage.deleteConfirm"]')).not.toBeNull()
+    audit()
+    // Modify (stacked over Manage) for the custom style: every field of a custom style is shown.
+    act(() => void fireEvent.click(manage.querySelector('[data-control-id="styles.manage.modify"]')!))
+    const modify = await screen.findByRole('dialog', { name: /^Modify style/ })
+    const fieldIds = Object.values(STYLE_DIALOG_CONTROLS)
+      .map((m) => m.id)
+      .filter((id) => id.startsWith('styles.field.'))
+    for (const id of fieldIds) expect(modify.querySelector(`[data-control-id="${id}"]`), id).not.toBeNull()
+    audit()
+    act(() => useStore.getState().bookActions.resetBook())
+  })
+
+  it('covers the Footnote options dialog and the footnote editor', async () => {
+    await renderFullApp()
+    act(() => useStore.getState().findActions.closePanel())
+    const audit = () => {
+      const problems = auditTooltipCoverage(document.body)
+      expect(problems, formatCoverageProblems(problems)).toEqual([])
+    }
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="footnote.options"]')!))
+    const dialog = await screen.findByRole('dialog', { name: 'Footnote options' })
+    expect(Array.from(dialog.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))).toEqual([
+      'footnote.options.close',
+      'footnote.options.numbering',
+      'footnote.options.format',
+      'footnote.options.separator',
+      'footnote.options.done',
+    ])
+    audit()
+    act(() => void fireEvent.change(dialog.querySelector('[data-control-id="footnote.options.numbering"]')!, { target: { value: 'chapter' } }))
+    expect(useStore.getState().book.footnotes).toEqual({ numbering: 'chapter' })
+    act(() => void fireEvent.click(dialog.querySelector('[data-control-id="footnote.options.done"]')!))
+    // The footnote editor (popover) opened by Insert > Footnote.
+    act(() => void getEditor()!.commands.insertFootnote())
+    await screen.findByTestId('footnote-popover')
+    expect(document.querySelector('[data-control-id="footnote.done"]')).not.toBeNull()
+    audit()
+    act(() => useStore.getState().bookActions.resetBook())
+  })
+
+  it('covers the Headers & page numbers dialog (custom header text fields included)', async () => {
+    await renderFullApp()
+    act(() => useStore.getState().findActions.closePanel())
+    act(() => void fireEvent.click(document.querySelector('[data-control-id="book.headerFooter"]')!))
+    const dialog = await screen.findByRole('dialog', { name: 'Headers & page numbers' })
+    for (const sel of ['book.headerFooter.verso', 'book.headerFooter.recto']) {
+      act(() => void fireEvent.change(dialog.querySelector(`[data-control-id="${sel}"]`)!, { target: { value: 'custom' } }))
+    }
+    const ids = Array.from(dialog.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
+    for (const id of [
+      'book.headerFooter.verso',
+      'book.headerFooter.versoText',
+      'book.headerFooter.recto',
+      'book.headerFooter.rectoText',
+      'book.headerFooter.numberPosition',
+      'book.headerFooter.numberFormat',
+      'book.headerFooter.numberStart',
+      'book.headerFooter.frontMatter',
+      'book.headerFooter.restart',
+      'book.headerFooter.suppressHeader',
+      'book.headerFooter.suppressNumber',
+      'book.headerFooter.suppressBlank',
+      'book.details',
+      'book.headerFooter.done',
+    ]) {
+      expect(ids, id).toContain(id)
+    }
+    const problems = auditTooltipCoverage(document.body)
+    expect(problems, formatCoverageProblems(problems)).toEqual([])
+    act(() => void fireEvent.click(dialog.querySelector('[data-control-id="book.headerFooter.done"]')!))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Headers & page numbers' })).toBeNull())
+    act(() => useStore.getState().bookActions.resetBook())
   })
 
   it('NEGATIVE: fails for a button with no tooltip entry', async () => {
@@ -152,6 +255,7 @@ describe('tooltip registry', () => {
       ...Object.values(TOOLBAR_CONTROLS),
       ...Object.values(HISTORY_CONTROLS),
       ...Object.values(FIND_CONTROLS),
+      ...Object.values(STYLE_DIALOG_CONTROLS),
     ]) {
       const copy = getTooltipCopy(meta.id)!
       expect(copy.title).toBe(meta.label)

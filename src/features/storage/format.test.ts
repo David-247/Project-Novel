@@ -32,6 +32,16 @@ describe('project.json', () => {
     expect(meta).toMatchObject({ format: 'novel-project', schemaVersion: PROJECT_SCHEMA_VERSION })
   })
 
+  it('a project.json without an author (every older project) reads it as an empty string; an author round-trips', () => {
+    expect(meta.author).toBe('')
+    const { author: _a, ...older } = meta
+    void _a
+    expect(parseProjectMeta(JSON.stringify(older)).author).toBe('')
+    expect(parseProjectMeta(JSON.stringify({ ...meta, author: 7 })).author).toBe('')
+    const withAuthor = { ...meta, author: 'Ada Quill' }
+    expect(parseProjectMeta(serializeProjectMeta(withAuthor)).author).toBe('Ada Quill')
+  })
+
   it('rejects invalid JSON as corrupt', () => {
     expectProjectError(() => parseProjectMeta('{"format": "novel-pro'), 'corrupt-file')
   })
@@ -48,6 +58,28 @@ describe('project.json', () => {
     expectProjectError(() => parseProjectMeta(bump(0)), 'corrupt-file')
     expectProjectError(() => parseProjectMeta(bump('1')), 'corrupt-file')
     expectProjectError(() => parseProjectMeta(bump(1.5)), 'corrupt-file')
+  })
+
+  it('schema version 2 is current; a version 1 file is migrated (no-op) and written back as 2', () => {
+    expect(PROJECT_SCHEMA_VERSION).toBe(2)
+    const v1 = { ...meta, schemaVersion: 1 }
+    const read = parseProjectMeta(JSON.stringify(v1))
+    expect(read).toEqual({ ...meta, schemaVersion: 2 })
+    expect(JSON.parse(serializeProjectMeta(read)).schemaVersion).toBe(2)
+  })
+
+  it('keeps unknown top-level keys and writes them back (what a newer Novel adds survives)', () => {
+    const extra = { series: { name: 'Roads', book: 2 }, language: 'en-GB' }
+    const read = parseProjectMeta(JSON.stringify({ ...meta, ...extra }))
+    expect(read.extra).toEqual(extra)
+    const written = JSON.parse(serializeProjectMeta({ ...read, title: 'Renamed' }))
+    expect(written).toEqual({ ...meta, title: 'Renamed', ...extra })
+    // Known keys always come from the typed fields, never from `extra`.
+    const sneaky = JSON.parse(serializeProjectMeta({ ...meta, extra: { id: 'other', title: 'x' } }))
+    expect(sneaky).toMatchObject({ id: meta.id, title: meta.title })
+    // No unknown keys: no `extra` field at all (the file is unchanged in shape).
+    expect('extra' in parseProjectMeta(serializeProjectMeta(meta))).toBe(false)
+    expect(Object.keys(JSON.parse(serializeProjectMeta(meta)))).toEqual(['format', 'schemaVersion', 'id', 'title', 'author', 'createdAt', 'updatedAt'])
   })
 
   it('requires the metadata fields', () => {

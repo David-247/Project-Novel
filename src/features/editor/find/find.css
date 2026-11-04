@@ -1,14 +1,15 @@
-/* Find highlights (decorations from find/plugin.ts). Built from theme tokens so they follow
-   light/dark. Matches get a translucent warning-tone wash; the current match additionally gets
-   a solid accent outline, so "current" is not conveyed by colour alone. Text colour is
-   unchanged, and the washes are light enough to keep body text above 4.5:1 in both themes. */
+/* Find highlights (decorations from find/plugin.ts). Colours come from the paper-surface tokens
+   (src/shared/theme/surfaces.css), so they follow the chosen surface on the continuous editor and
+   on paginated pages alike, and are contrast-tested per surface (body text on both washes, and the
+   outline against the page). The current match additionally gets a solid outline, so "current" is
+   not conveyed by colour alone. Text colour is unchanged. */
 .nv-find-match {
-  background-color: color-mix(in srgb, var(--nv-warning) 22%, transparent);
+  background-color: var(--page-find-bg);
   border-radius: 2px;
 }
 .nv-find-match-current {
-  background-color: color-mix(in srgb, var(--nv-warning) 38%, transparent);
-  outline: 2px solid var(--nv-accent);
+  background-color: var(--page-find-current-bg);
+  outline: 2px solid var(--page-find-ring);
   outline-offset: 0;
   border-radius: 2px;
 }

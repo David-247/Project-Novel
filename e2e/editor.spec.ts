@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { budget } from './budget'
 
 test('user types into the editor in the OS system font', async ({ page }) => {
   await page.goto('/')
@@ -11,7 +12,7 @@ test('user types into the editor in the OS system font', async ({ page }) => {
   await expect(page.getByRole('combobox', { name: 'Font family' })).toBeEnabled()
 })
 
-test('100k-word paste stays responsive', async ({ page }) => {
+test('100k-word paste stays responsive', async ({ page }, testInfo) => {
   await page.goto('/')
   const editor = page.getByRole('textbox', { name: 'Manuscript' })
   await editor.click()
@@ -26,6 +27,9 @@ test('100k-word paste stays responsive', async ({ page }) => {
   })
   console.info(`[perf] chromium 100k-word paste dispatch: ${pasteMs.toFixed(0)} ms`)
   await expect(editor.locator('p')).toHaveCount(1000)
+  // The paste's own pagination (laying out 1,000 new paragraphs) is the paste's cost, not a
+  // keystroke's: wait for the page model and every block to be drawn before measuring keystrokes.
+  await page.waitForFunction(() => window.__nvE2E.paginationSettled(), undefined, { timeout: 30_000 })
 
   // Keystroke latency after the paste (input -> DOM updated -> next frame), median of 5.
   const keyMs = await page.evaluate(async () => {
@@ -40,6 +44,6 @@ test('100k-word paste stays responsive', async ({ page }) => {
     return samples[2]
   })
   console.info(`[perf] chromium keystroke after paste (median of 5): ${keyMs.toFixed(1)} ms`)
-  expect(pasteMs).toBeLessThan(5000)
-  expect(keyMs).toBeLessThan(50)
+  budget(testInfo, 'paste dispatch ms', pasteMs, 5000)
+  budget(testInfo, 'keystroke after paste ms', keyMs, 50)
 })
