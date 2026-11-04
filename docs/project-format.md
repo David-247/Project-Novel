@@ -24,7 +24,7 @@ Pretty-printed UTF-8 JSON.
 | Field           | Type    | Notes                                                            |
 | --------------- | ------- | ---------------------------------------------------------------- |
 | `format`        | string  | Always `"novel-project"`. Identifies the folder as a project.     |
-| `schemaVersion` | integer | Format version. Current: `1`.                                    |
+| `schemaVersion` | integer | Format version. Current: `2` (2 added `author`).                 |
 | `id`            | string  | Random UUID, assigned at creation, never changes.                 |
 | `title`         | string  | Project title (the book title shown in running heads).           |
 | `author`        | string  | Author name shown in running heads. Optional: a file without it (every earlier project) reads as `""`. Edited in the "Book details" dialog, which rewrites project.json at once (without changing `updatedAt`). |
@@ -34,7 +34,7 @@ Pretty-printed UTF-8 JSON.
 ```json
 {
   "format": "novel-project",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "6f1c1f0e-4f4e-4c55-9d43-2d6f1e0f3a10",
   "title": "My Novel",
   "author": "Ada Quill",
@@ -44,8 +44,15 @@ Pretty-printed UTF-8 JSON.
 ```
 
 **Versioning.** A file with a `schemaVersion` higher than the app supports is refused with "saved by a newer version
-of Novel" rather than being opened and possibly damaged. Older versions will be migrated on open when version 2
-exists. Unknown extra fields are ignored.
+of Novel" rather than being opened and possibly damaged. Older versions are migrated on open, one version at a time,
+and written back at the current version with the next write of project.json (a save or a Book details edit):
+
+- 1 → 2: no change to the data (a version 1 file has no `author`, which reads as `""`). The bump exists so that a
+  Phase 1 build, which does not know `author`, refuses a version 2 file instead of dropping the author on its next
+  save.
+
+**Unknown top-level keys are kept** and written back after the known fields, so a newer Novel's additions survive
+an older one opening and saving the project. Nested values are written exactly as they were read.
 
 ## manuscript.json
 

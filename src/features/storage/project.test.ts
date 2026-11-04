@@ -90,7 +90,7 @@ describe('project storage', () => {
     onProjectOpened(opened)
     await createAt('/books/novel')
 
-    expect(json('/books/novel/project.json')).toMatchObject({ format: 'novel-project', schemaVersion: 1, title: 'novel' })
+    expect(json('/books/novel/project.json')).toMatchObject({ format: 'novel-project', schemaVersion: 2, title: 'novel' })
     expect(backend.sqlLoads).toEqual(['sqlite:/books/novel/index.sqlite'])
     expect(backend.sqlExecuted.some((q) => q.includes('CREATE TABLE IF NOT EXISTS revisions'))).toBe(true)
     expect(opened).toHaveBeenCalledWith(expect.objectContaining({ path: '/books/novel' }))
@@ -380,6 +380,20 @@ describe('book details (title and author)', () => {
     const before = backend.files.get('/books/novel/project.json')
     expect(await updateProjectDetails({ author: 'A' })).toBe(true)
     expect(backend.files.get('/books/novel/project.json')).toBe(before)
+  })
+
+  it('a version 1 project.json with unknown keys keeps them through a save and a details edit, and is written as version 2', async () => {
+    await createAt('/books/newer')
+    const meta = json('/books/newer/project.json')
+    backend.files.set('/books/newer/project.json', JSON.stringify({ ...meta, schemaVersion: 1, series: { name: 'Roads' }, language: 'en-GB' }))
+    await closeProject()
+    backend.pick = '/books/newer'
+    expect(await openProject()).toBe(true)
+    editor.update(textDoc('words'))
+    expect(await saveProject()).toBe(true)
+    expect(json('/books/newer/project.json')).toMatchObject({ schemaVersion: 2, series: { name: 'Roads' }, language: 'en-GB' })
+    expect(await updateProjectDetails({ author: 'Ada Quill' })).toBe(true)
+    expect(json('/books/newer/project.json')).toEqual({ ...meta, schemaVersion: 2, author: 'Ada Quill', updatedAt: expect.any(String), series: { name: 'Roads' }, language: 'en-GB' })
   })
 
   it('a project.json without author opens with an empty author', async () => {
