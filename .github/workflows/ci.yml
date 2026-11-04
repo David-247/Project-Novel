@@ -249,7 +249,7 @@ jobs:
           function Probe($label, $port) {
             $p = Start-Process -FilePath 'src-tauri\target\release\novel.exe' -PassThru
             Start-Sleep -Seconds 20
-            "== $label: app exited: $($p.HasExited)"
+            "== $($label) - app exited: $($p.HasExited)"
             Get-CimInstance Win32_Process -Filter "name='msedgewebview2.exe'" | Select-Object -First 1 |
               ForEach-Object { "browser cmd: $($_.CommandLine)" }
             try { "devtools: " + (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/json/version" -TimeoutSec 5).Content } catch { "devtools: $($_.Exception.Message)" }
