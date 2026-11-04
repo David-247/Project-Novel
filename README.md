@@ -142,3 +142,7 @@ to their files would have to be published under MPL-2.0:
 - Rust (transitive, through `tauri-utils`' HTML processing via `dom_query`, and through `dirs`): `cssparser`,
   `cssparser-macros`, `dtoa-short`, `selectors`, `option-ext`.
 - JS (dev only, build tooling via Tailwind CSS): `lightningcss` and its platform package.
+
+**Bundled test font (test-only, not shipped).** `e2e/fixtures/fonts/` holds Libre Baskerville (regular and
+bold WOFF2, from `@fontsource/libre-baskerville`) under the SIL Open Font License 1.1 (`e2e/fixtures/fonts/OFL.txt`).
+The cross-engine pagination test loads it into the page; it is not part of the app or any build output.

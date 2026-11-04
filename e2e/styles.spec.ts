@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { launch, newProject, openRecent, readFile, saveStatus, seedProject } from './helpers'
+import { launch, lineEnd, newProject, openRecent, readFile, saveStatus, seedProject } from './helpers'
 
 const ctl = (page: Page, id: string) => page.locator(`[data-control-id="${id}"]`)
 const picker = (page: Page) => ctl(page, 'styles.picker')
@@ -27,7 +27,7 @@ test('style picker, shortcuts, Enter chaining, undo and Clear direct formatting'
   // Back to the text (the picker keeps focus after a choice, like the other toolbar selects).
   await title.click()
   await expect(ed).toBeFocused()
-  await page.keyboard.press('End')
+  await lineEnd(page)
   await settle(page)
   await page.keyboard.press('Enter')
   await page.keyboard.type('It began at the harbor.')
@@ -54,7 +54,16 @@ test('style picker, shortcuts, Enter chaining, undo and Clear direct formatting'
   await page.keyboard.press('ControlOrMeta+Shift+e')
   await expect(body).toHaveCSS('text-align', 'center')
   await ctl(page, 'styles.clearFormatting').click()
-  await expect(body).not.toHaveAttribute('style', /.+/)
+  // No direct formatting left inline. The paginated view's left/top page offsets are view state, not
+  // formatting: strip exactly those and nothing may remain.
+  expect(
+    await body.evaluate((el) => {
+      const copy = el.cloneNode(false) as HTMLElement
+      copy.style.removeProperty('left')
+      copy.style.removeProperty('top')
+      return copy.getAttribute('style') ?? ''
+    }),
+  ).toBe('')
   expect(await body.evaluate((el) => getComputedStyle(el).textAlign)).toMatch(/^(left|start)$/)
 })
 

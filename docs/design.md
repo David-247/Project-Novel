@@ -274,3 +274,22 @@ live region. Colours are existing token pairs only (selected row `accent` on `ac
 - **Insert menu** (toolbar group "Insert", `insert.menu`): Page break, New chapter, Scene break, then radio groups "Chapters start on" and "Scene break ornament". Same Radix dropdown as the trim size picker; every row has a control id, registry entry and tooltip. New items are one entry in `INSERT_ITEMS` (`breaks/controls.ts`); the menu and registry both read it.
 - **Editor look.** A page break is a dashed rule with a "Page break" label on a paper-coloured plate (`--page-muted-fg` on `--page-bg`, the existing AA pair); selected, it gets the page focus ring. No new colours.
 - **Paste.** `page-break-before/after` and `break-before/after: page|always|left|right|recto|verso` become page break nodes; `<hr>` becomes a scene break. Limitation: left/right/recto/verso are not distinguished, they all become a plain page break (never a recto break). Only paste is wired (`transformPastedHTML`); an import path would call the exported `mapPastedHtml` itself.
+
+## Pages and spreads (Phase 2, pagination)
+
+The writing surface is now a desk with book pages on it (`src/features/pagination`, docs/pagination.md).
+
+- **Paper comes from the surfaces contract.** Each page frame is an `.nv-page` with `.nv-page--verso` /
+  `.nv-page--recto` in a spread (spine on the gutter side) and none in single view; header and footer
+  slot regions are `.nv-page-muted`. The slice adds geometry only, no colours. The text layer above the
+  frames uses `--page-fg` and `--page-selection-bg`; the desk behind the pages is `--desk-bg`.
+- **Book points.** The page surface sets `--nv-pt` to a true point (96/72 px); zoom is a transform on
+  top, so style sizes (`calc(N * var(--nv-pt))`) are exact at 100 % and line breaks never depend on zoom.
+- **Status bar page controls** sit at the trailing end, after the project actions: the page indicator
+  ("Pages 12–13 of 384", tabular figures), the spread toggle (an open-book icon, pressed = two pages),
+  zoom out, the zoom select (Fit spread / Fit width / 50–200 %) and zoom in. All are standard
+  `IconButton` / `ToggleButton` / `Select` controls: 32 px targets, tooltips from the registry, keyboard
+  reachable in the footer's tab order, existing contrast pairs.
+- **Fit spread is the default zoom**: the whole spread fits the window, like holding the book open.
+  Narrow windows fall back to single pages (touch-tolerant; no hover-only actions). A press on a margin
+  or the desk puts the caret on the nearest line of that page.

@@ -4,6 +4,7 @@ import { createEditorSlice } from './editor-slice'
 import { createProjectSlice } from './project-slice'
 import { createFindSlice } from './find-slice'
 import { createBookSlice } from './book-slice'
+import { createLayoutSlice } from './layout-slice'
 import type { RootState } from './types'
 
 /**
@@ -19,6 +20,7 @@ export const useStore = create<RootState>()((...a) => ({
   ...createProjectSlice(...a),
   ...createFindSlice(...a),
   ...createBookSlice(...a),
+  ...createLayoutSlice(...a),
 }))
 
 export { useColorSchemeSync } from './use-color-scheme-sync'
@@ -27,4 +29,5 @@ export type { EditorSlice } from './editor-slice'
 export type { ProjectSlice, ProjectState, RecentProject, RecoveryPrompt, SaveStatus } from './project-slice'
 export type { FindSlice } from './find-slice'
 export type { BookSlice } from './book-slice'
+export type { LayoutSlice, PageInfo, PageSide, VisibleSpread, ZoomMode } from './layout-slice'
 export type { RootState, SliceCreator } from './types'

@@ -39,6 +39,17 @@ export function ToolbarItem({ children, disabled }: { children: ReactElement; di
 }
 
 /** Pointer activation returns focus to the text; keyboard activation keeps it in the toolbar. */
+/**
+ * A pointer press on a formatting button must not take focus from the manuscript. Otherwise the
+ * button holds focus until the command's deferred editor focus (next animation frame) runs, and
+ * typing that starts sooner (a fast typist, a busy frame) lands on the button: Space and Enter then
+ * activate it again, toggling the formatting back and dropping the text (seen on macOS Chromium).
+ * Keyboard activation is unaffected.
+ */
+function keepEditorFocus(e: MouseEvent) {
+  if (e.button === 0) e.preventDefault()
+}
+
 function chainFrom(chain: ChainedCommands, e: MouseEvent): ChainedCommands {
   return e.detail > 0 ? chain.focus() : chain
 }
@@ -70,6 +81,7 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFont
             pressed={pressed}
             disabled={disabled}
             onPressedChange={() => {}}
+            onMouseDown={keepEditorFocus}
             onClick={(e) => {
               e.preventDefault()
               if (editor) run(chainFrom(editor.chain(), e)).run()
@@ -91,6 +103,7 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFont
             label={meta.label}
             data-control-id={meta.id}
             disabled={disabled || !enabled}
+            onMouseDown={keepEditorFocus}
             onClick={(e) => {
               if (editor) run(chainFrom(editor.chain(), e)).run()
             }}

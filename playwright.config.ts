@@ -34,12 +34,15 @@ export default defineConfig({
     {
       name: 'perf-chromium',
       use: desktop('Desktop Chrome'),
+      // A budget miss must fail: no retry for perf.
+      retries: 0,
       testMatch: PERF,
       dependencies: ['chromium', 'webkit'],
     },
     {
       name: 'perf-webkit',
       use: desktop('Desktop Safari'),
+      retries: 0,
       testMatch: PERF,
       dependencies: ['perf-chromium'],
     },

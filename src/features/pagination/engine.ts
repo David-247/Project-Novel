@@ -1,0 +1,883 @@
+import type { Node as PMNode } from '@tiptap/pm/model'
+import { Plugin, PluginKey, TextSelection, type EditorState } from '@tiptap/pm/state'
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
+import { resolveStyleSheet, type BookView, type StyleSheetJSON } from '@/shared/book'
+import { useStore, type PageInfo } from '@/shared/store'
+import { breakPages, sideOf, type LineBox, type PageRange, type UnitInfo } from './breaker'
+import { chapterOpenings, hasReservations, onInvalidate, onRelayout, totalReservation } from './extension-points'
+import { resolvePageGeometry, type PageGeometry } from './geometry'
+import { blockBreakBefore, lineStart, measureBlock, ownShift, scaleOf, SHIFT_ATTR, type BlockMetrics } from './measure'
+import { placePages, type Placement } from './placement'
+
+/**
+ * The pagination engine (ADR: docs/pagination.md). One ProseMirror view stays the only editor;
+ * its DOM is laid out as a natural single column the width of the text block (the "stream").
+ * Each pass:
+ *  1. measures line boxes of changed top-level blocks (cache keyed by node identity),
+ *  2. breaks the stream into pages (breaker.ts: widows/orphans, keep-with-next, forced breaks,
+ *     bottom reservations),
+ *  3. moves every page's lines to their page on the canvas with `position: relative` offsets:
+ *     node decorations for whole blocks, inline decorations for the lines of a block that continue
+ *     on a later page (line-level fragmentation; offsets never change line breaking),
+ *  4. publishes the page model to the store's `layout` slice.
+ * Passes run in requestAnimationFrame, before paint, after any doc change or settings change.
+ */
+
+/**
+ * Plugin state: the drawn decorations. `unmapped` is set when a transaction with very many steps
+ * (Replace All of a common word: 10,000 steps) changed the document: mapping every decoration
+ * through every step costs O(steps x decorations), so the set is dropped instead, the editor root
+ * hides its blocks (`nv-unmapped`) and the next pass, before the next paint, redraws the view first.
+ */
+interface PaginationState {
+  set: DecorationSet
+  unmapped: boolean
+}
+
+/** Steps above which a transaction's decorations are not mapped but redrawn. */
+const MAP_STEP_LIMIT = 200
+
+export const paginationKey = new PluginKey<PaginationState>('pagination')
+
+interface PageOffset {
+  dx: number
+  dy: number
+}
+
+export interface LayoutSnapshot {
+  geometry: PageGeometry
+  placement: Placement
+  ranges: PageRange[]
+  pages: PageInfo[]
+  /** Per page: offset from stream to canvas coordinates (blank pages: copy of a neighbour). */
+  offsets: PageOffset[]
+  /** Stream line boxes, and the page of each line. */
+  lines: LineBox[]
+  pageOfLine: Int32Array
+}
+
+/**
+ * ProseMirror view internals used defensively (both optional): `domObserver.flush()` reads pending
+ * DOM changes and selection; `input.mouseDown` is set while a pointer press is in progress.
+ */
+interface ViewInternals {
+  domObserver?: { flush(): void; forceFlush?(): void }
+  input?: { mouseDown?: unknown }
+}
+
+/** Frames a pass may wait for the browser's selection to reach ProseMirror. */
+const MAX_DEFERRALS = 5
+
+/**
+ * True when the DOM selection is inside the editor but differs from ProseMirror's: a native caret
+ * move (Home, End, arrows) whose selectionchange has not been handled yet. Redrawing now would put
+ * the old selection back.
+ */
+function domSelectionPending(view: EditorView): boolean {
+  if (!view.hasFocus()) return false
+  const sel = view.dom.ownerDocument.getSelection()
+  if (!sel?.anchorNode || !sel.focusNode || !view.dom.contains(sel.anchorNode)) return false
+  try {
+    const anchor = view.posAtDOM(sel.anchorNode, sel.anchorOffset)
+    const head = view.posAtDOM(sel.focusNode, sel.focusOffset)
+    const s = view.state.selection
+    return anchor !== s.anchor || head !== s.head
+  } catch {
+    return false
+  }
+}
+
+/** Above this many changed blocks, decorations are applied progressively (view first). */
+const PROGRESSIVE_MIN = 160
+/** Off-screen blocks drawn per follow-up frame. */
+const CHUNK = 120
+
+interface DirtyBlock {
+  /** Range of the block's decorations in the pass's list. */
+  a: number
+  z: number
+  pos: number
+  size: number
+  node: PMNode
+  sig: string
+  /** First and last page holding the block's lines. */
+  p0: number
+  p1: number
+  /** Not decorated in this pass: drawn in a later frame. */
+  lazy: boolean
+}
+
+/** Spec carried by this slice's decorations (also identifies them). */
+interface ShiftSpec {
+  nvShift: string
+  inline: boolean
+  /** An inline decoration that runs to the end of its textblock. */
+  atEnd: boolean
+}
+
+/** Signature of one decoration relative to its block: node decorations by start, inline ones by range. */
+function sigPart(spec: ShiftSpec, fromRel: number, toRel: number) {
+  return spec.inline ? `i${fromRel}:${spec.atEnd ? 'end' : toRel}:${spec.nvShift}` : `n${fromRel}:${spec.nvShift}`
+}
+
+/** Signature of the (mapped) decorations currently drawn on a block. */
+function signatureOf(decos: Decoration[], pos: number, end: number) {
+  // A block still hidden as stale must be redrawn, even if its offsets happen to be right already.
+  if (decos.some((d) => (d.spec as { nvStale?: boolean }).nvStale === true && d.from >= pos && d.to <= end + 1)) return '!stale'
+  return decos
+    .filter((d) => (d.spec as Partial<ShiftSpec>).nvShift !== undefined && d.from >= pos && d.to <= end + 1)
+    .sort((a, b) => a.from - b.from || Number((a.spec as ShiftSpec).inline) - Number((b.spec as ShiftSpec).inline))
+    .map((d) => {
+      const spec = d.spec as ShiftSpec
+      return sigPart(spec, d.from - pos, (spec.atEnd ? end : d.to) - pos)
+    })
+    .join(',')
+}
+
+/** The block (or a textblock inside it) renders one of `ids` (data-style, from the styles ticket). */
+function usesStyle(dom: HTMLElement, ids: Set<string>): boolean {
+  const own = dom.getAttribute('data-style')
+  if (own !== null && ids.has(own)) return true
+  if (!dom.firstElementChild || dom.matches('p, h1, h2, h3, h4, h5, h6')) return false
+  for (const el of Array.from(dom.querySelectorAll('[data-style]'))) if (ids.has(el.getAttribute('data-style')!)) return true
+  return false
+}
+
+/** Listeners for completed passes (the view uses them to scroll / hit-test). */
+type SnapshotListener = (s: LayoutSnapshot) => void
+
+const SHIFT_CLASS = 'nv-shift'
+/** A block whose page offsets are not redrawn yet (progressive reflow): hidden until it is. */
+const STALE_CLASS = 'nv-stale'
+
+function shiftAttrs(dx: number, dy: number) {
+  const x = round(dx)
+  const y = round(dy)
+  return { class: SHIFT_CLASS, style: `left:${x}px;top:${y}px`, [SHIFT_ATTR]: String(y) }
+}
+
+function round(n: number) {
+  return Math.round(n * 100) / 100
+}
+
+/** Effective view the engine lays out for (the view component decides; see placement.effectiveView). */
+let currentEngine: PaginationEngine | null = null
+
+/** The engine of the mounted editor (null when none). Internal to the slice. */
+export function getEngine(): PaginationEngine | null {
+  return currentEngine
+}
+
+export class PaginationEngine {
+  private cache = new WeakMap<PMNode, BlockMetrics>()
+  private epoch = 0
+  private frame = 0
+  private flushPending = false
+  /** Per block node: signature of its decorations in the last pass (positions relative to the block). */
+  private lastSigs = new WeakMap<PMNode, string>()
+  /**
+   * Blocks waiting to be redrawn after a progressive reflow (hidden meanwhile), by node instance.
+   * One instance can sit at two places in a document, so catch-up passes also redraw any block that
+   * still carries the stale decoration.
+   */
+  private pendingNodes = new Set<PMNode>()
+  /** Document of the last pass. */
+  private lastDoc: PMNode | null = null
+  /** Per block node: its stream top in the last pass. */
+  private prevTops = new Map<PMNode, number>()
+  private lastKey = ''
+  private snapshot: LayoutSnapshot | null = null
+  private listeners = new Set<SnapshotListener>()
+  private unsubs: (() => void)[] = []
+  private destroyed = false
+  private scrollAfterPass = false
+  private deferrals = 0
+  /** The scheduled pass only finishes drawing off-screen blocks (nothing else changed). */
+  private catchUpOnly = false
+
+  constructor(private view: EditorView) {
+    currentEngine = this // eslint-disable-line @typescript-eslint/no-this-alias
+    let prev = useStore.getState()
+    this.unsubs.push(
+      useStore.subscribe((s) => {
+        const p = prev
+        prev = s
+        // Geometry: lay out now, in the same task, so the browser never renders (lays out and paints
+        // the whole book) one frame at the new width with the old page offsets.
+        if (s.book.trimSize !== p.book.trimSize || s.book.margins !== p.book.margins) this.runNow()
+        // Style definitions change block metrics (and data-break-before) without a doc change:
+        // re-measure the blocks that use a style whose resolved definition changed.
+        else if (s.book.styles !== p.book.styles) this.stylesChanged(p.book.styles, s.book.styles)
+        else if (s.layout.effectiveView !== p.layout.effectiveView) this.schedule()
+      }),
+      onInvalidate(() => this.invalidate()),
+      // Re-break only (reservations, data-break-before, chapters): measurements stay valid.
+      onRelayout(() => this.schedule()),
+    )
+    const fonts = (document as Document & { fonts?: FontFaceSet }).fonts
+    if (fonts?.addEventListener) {
+      const onFonts = () => this.invalidate()
+      fonts.addEventListener('loadingdone', onFonts)
+      this.unsubs.push(() => fonts.removeEventListener('loadingdone', onFonts))
+    }
+    this.schedule()
+  }
+
+  /** Style ids whose resolved definition changed and whose blocks must be re-measured. */
+  private restyled: Set<string> | null = null
+
+  private stylesChanged(before: StyleSheetJSON, after: StyleSheetJSON) {
+    const a = resolveStyleSheet(before)
+    const b = resolveStyleSheet(after)
+    const ids = new Set<string>()
+    for (const id of new Set([...a.keys(), ...b.keys()])) if (JSON.stringify(a.get(id)) !== JSON.stringify(b.get(id))) ids.add(id)
+    if (ids.size === 0) return
+    for (const id of this.restyled ?? []) ids.add(id)
+    this.restyled = ids
+    this.schedule()
+  }
+
+  /** Drop every measurement and reflow on the next frame. */
+  invalidate() {
+    this.epoch++
+    this.schedule()
+  }
+
+  /** Run a pass on the next animation frame (before paint). */
+  schedule(scrollIntoView = false, catchUp = false) {
+    if (scrollIntoView) this.scrollAfterPass = true
+    if (!catchUp) this.catchUpOnly = false
+    if (this.frame || this.destroyed) return
+    this.catchUpOnly = catchUp
+    this.flushPending = true
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0
+      this.flushPending = false
+      this.run()
+    })
+  }
+
+  private sizeRetry = 0
+
+  private retryWhenSized() {
+    if (this.sizeRetry || this.destroyed) return
+    this.sizeRetry = window.setTimeout(() => {
+      this.sizeRetry = 0
+      this.schedule()
+    }, 250)
+  }
+
+  /** Run a pass now, cancelling a scheduled one. */
+  private runNow() {
+    if (this.destroyed) return
+    this.scrollAfterPass = false
+    this.flush()
+  }
+
+  /** Run a pending pass now (tests, and callers that need the model synchronously). */
+  flush() {
+    if (this.frame) cancelAnimationFrame(this.frame)
+    this.frame = 0
+    this.flushPending = false
+    this.run()
+  }
+
+  get pending() {
+    return this.flushPending
+  }
+
+  /** Only off-screen blocks of a progressive reflow are left to draw. */
+  get catchingUp() {
+    return this.flushPending && this.catchUpOnly
+  }
+
+  /** Run every pending pass now (a progressive reflow included), so all blocks are at their page. */
+  drain() {
+    for (let i = 0; this.flushPending && i < 64; i++) this.flush()
+  }
+
+  /**
+   * The page model is current and the pages in view are drawn; only off-screen blocks may still be
+   * waiting for their offsets (progressive application after a full reflow).
+   */
+  get modelCurrent() {
+    return !!this.snapshot && (!this.flushPending || this.catchUpOnly)
+  }
+
+  /** Pages to draw first: those in the scroll viewport (new placement), ±2. */
+  private viewWindow(root: HTMLElement, scale: number, placement: Placement): [number, number] {
+    let lo = 0
+    let hi = 3
+    let scroller: HTMLElement | null = root.parentElement
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+    if (scroller) {
+      const top = root.getBoundingClientRect().top
+      const v = scroller.getBoundingClientRect()
+      const [a] = placement.pagesInRow(placement.rowAtY((v.top - top) / scale))
+      const [, b] = placement.pagesInRow(placement.rowAtY((v.bottom - top) / scale))
+      lo = a
+      hi = b
+    }
+    return [lo - 2, hi + 2]
+  }
+
+  getSnapshot(): LayoutSnapshot | null {
+    return this.snapshot
+  }
+
+  onPass(cb: SnapshotListener): () => void {
+    this.listeners.add(cb)
+    return () => this.listeners.delete(cb)
+  }
+
+  destroy() {
+    this.destroyed = true
+    if (this.frame) cancelAnimationFrame(this.frame)
+    if (this.sizeRetry) clearTimeout(this.sizeRetry)
+    this.unsubs.forEach((u) => u())
+    if (currentEngine === this) currentEngine = null
+  }
+
+  /** Selection moved without a doc change: update `currentPage`. */
+  selectionChanged(state: EditorState) {
+    const pages = this.snapshot?.pages
+    if (!pages || this.flushPending) return
+    useStore.getState().layoutActions.setCurrentPage(pageAt(pages, state.selection.head))
+  }
+
+  private run() {
+    if (this.destroyed) return
+    const view = this.view
+    const root = view.dom as HTMLElement
+    if (!root.isConnected) return
+    const internals = view as unknown as ViewInternals
+    // Never redraw under an IME composition or a pointer drag; their end updates the view again.
+    if (view.composing || internals.input?.mouseDown) {
+      this.schedule()
+      return
+    }
+    // DOM changes ProseMirror deliberately delayed (flushSoon) are taken in now. A DOM selection that
+    // differs from ProseMirror's (a native Home / arrow move whose selectionchange is still queued, or
+    // a stale DOM selection after a toolbar click on macOS) is never forced into the state: the pass
+    // waits for ProseMirror to settle it (a few frames at most), so neither side overwrites the other.
+    internals.domObserver?.forceFlush?.()
+    if (this.deferrals < MAX_DEFERRALS && domSelectionPending(view)) {
+      this.deferrals++
+      this.schedule()
+      return
+    }
+    this.deferrals = 0
+    const { book, layout } = useStore.getState()
+    const geometry = resolvePageGeometry(book.trimSize, book.margins)
+    const widthPx = `${geometry.contentWidth}px`
+    if (root.style.width !== widthPx) root.style.width = widthPx
+    if (!root.offsetWidth) {
+      // Not laid out (hidden or zero-size host): try again later, or blocks hidden as stale or
+      // unmapped would stay hidden. Polled every 250 ms until the editor has a size.
+      this.retryWhenSized()
+      return
+    }
+    const key = `${geometry.contentWidth}|${this.epoch}`
+    const t0 = performance.now()
+    let measured = 0
+    const scale = scaleOf(root)
+    const rootTop = root.getBoundingClientRect().top
+    const doc = view.state.doc
+
+    // ---- 1. Measure (cached) and assemble the stream.
+    const lines: LineBox[] = []
+    const units: UnitInfo[] = []
+    const unitRef: { block: number; unit: number }[] = []
+    const unitNodes: PMNode[] = []
+    const blockPos: number[] = []
+    const blockDom: HTMLElement[] = []
+    const blockMetrics: BlockMetrics[] = []
+    const blockNodes: PMNode[] = []
+    // Stream tops: unchanged blocks keep their last top plus the shift of the changed blocks above
+    // them, so a keystroke reads two element boxes instead of one per block.
+    const prevTops = key === this.lastKey ? this.prevTops : new Map<PMNode, number>()
+    const restyled = this.restyled
+    this.restyled = null
+    const nextTops = new Map<PMNode, number>()
+    let delta = 0
+    let anchor = true
+    let b = 0
+    // Top-level DOM elements in document order (view.nodeDOM scans from the start: O(n) per call).
+    let domChild = root.firstElementChild as (HTMLElement & { pmViewDesc?: { node?: PMNode } }) | null
+    const domFor = (node: PMNode, pos: number): HTMLElement | null => {
+      while (domChild && domChild.pmViewDesc?.node !== node) {
+        // Not this node's element (a widget, or the walk lost sync): fall back to the lookup.
+        if (!domChild.pmViewDesc?.node) {
+          domChild = domChild.nextElementSibling as typeof domChild
+          continue
+        }
+        return view.nodeDOM(pos) as HTMLElement | null
+      }
+      // Ran off the end (or pmViewDesc is gone): the public lookup, never a silent null.
+      if (!domChild) return view.nodeDOM(pos) as HTMLElement | null
+      const el = domChild
+      domChild = (domChild?.nextElementSibling ?? null) as typeof domChild
+      return el
+    }
+    doc.forEach((node, pos) => {
+      const dom = domFor(node, pos)
+      if (!dom || dom.nodeType !== 1) return
+      let m = this.cache.get(node)
+      let fresh = false
+      if (m && restyled && usesStyle(dom, restyled)) m = undefined
+      if (!m || m.key !== key) {
+        m = measureBlock(view, node, pos, dom, scale, key)
+        this.cache.set(node, m)
+        measured++
+        fresh = true
+      }
+      const known = fresh || nextTops.has(node) ? undefined : prevTops.get(node)
+      let top: number
+      if (known !== undefined && !anchor) top = known + delta
+      else {
+        top = (dom.getBoundingClientRect().top - rootTop) / scale - ownShift(dom)
+        if (known !== undefined) {
+          // Element boxes are snapped to device pixels relative to the scroll position: a block
+          // that did not move can read a few hundredths of a px off. Treat that as no move, or
+          // every offset below it would flicker between two roundings (and be redrawn).
+          delta = Math.abs(top - known) < 0.1 ? 0 : top - known
+          top = known + delta
+          anchor = false
+        } else anchor = true
+      }
+      // A node instance used twice in the document is never trusted for its top.
+      if (nextTops.has(node)) nextTops.set(node, Number.NaN)
+      else nextTops.set(node, top)
+      const bb = blockBreakBefore(node, dom)
+      m.units.forEach((u, k) => {
+        units.push({ firstLine: lines.length, lineCount: u.lines.length, breakBefore: k === 0 ? bb : null, keepWithNext: u.keepWithNext })
+        unitRef.push({ block: b, unit: k })
+        unitNodes.push(u.node)
+        const ui = units.length - 1
+        for (const l of u.lines) lines.push({ top: top + l.top, bottom: top + l.bottom, unit: ui })
+      })
+      blockPos.push(pos)
+      blockDom.push(dom)
+      blockMetrics.push(m)
+      blockNodes.push(node)
+      b++
+    })
+    for (const [n, t] of nextTops) if (Number.isNaN(t)) nextTops.delete(n)
+    this.prevTops = nextTops
+
+    // Line index -> document position (relative to the doc), lazily.
+    const lineToUnitLine = (li: number) => {
+      const ui = lines[li].unit
+      return { ui, k: li - units[ui].firstLine }
+    }
+    const posOfLine = (li: number): number => {
+      if (li >= lines.length) return doc.content.size
+      const { ui, k } = lineToUnitLine(li)
+      const { block, unit } = unitRef[ui]
+      const m = blockMetrics[block]
+      const u = m.units[unit]
+      if (k === 0) return blockPos[block] + (unit === 0 ? 0 : u.rel)
+      return blockPos[block] + lineStart(view, blockPos[block], blockDom[block], u, k, scale)
+    }
+
+    const t1 = performance.now()
+    // ---- 2. Break.
+    const reserve = hasReservations()
+      ? (pageIndex: number, s: number, e: number) =>
+          totalReservation({ index: pageIndex, side: sideOf(pageIndex), from: posOfLine(s), to: posOfLine(e) })
+      : undefined
+    const ranges = breakPages(lines, units, { contentHeight: geometry.contentHeight, reserve })
+
+    const t2 = performance.now()
+    // ---- 3. Place and decorate.
+    const view0: BookView = layout.effectiveView
+    const placement = placePages(ranges.length, geometry, view0)
+    const offsets: PageOffset[] = ranges.map((r, i) => {
+      const c = placement.content(i)
+      const top = r.startLine < lines.length ? lines[r.startLine].top : 0
+      return { dx: c.x, dy: c.y - top }
+    })
+    const pageOfLine = new Int32Array(lines.length)
+    ranges.forEach((r, p) => {
+      for (let i = r.startLine; i < r.endLine; i++) pageOfLine[i] = p
+    })
+
+    const decos: Decoration[] = []
+    const pluginState = paginationKey.getState(view.state)
+    const current = pluginState?.set ?? DecorationSet.empty
+    const unmapped = !!pluginState?.unmapped
+    const geometryChanged = key !== this.lastKey
+    const pages = this.pageModel(ranges, lines, units, unitRef, blockNodes, unitNodes, posOfLine, doc.content.size)
+
+    // Which blocks to draw in this pass. After a geometry change or a huge transaction every block
+    // is redrawn: the blocks on the pages in view (and around the caret) now, the rest progressively,
+    // and those are not even decorated in this pass ("lazy"). A pure catch-up pass (nothing changed
+    // since) only decorates the next pending blocks.
+    const win = this.viewWindow(root, scale, placement)
+    const caretPage = pageAt(pages, view.state.selection.head)
+    const inWin = (p0: number, p1: number) => (p1 >= win[0] && p0 <= win[1]) || (p1 >= caretPage - 1 && p0 <= caretPage + 1)
+    const allDirty = geometryChanged || unmapped
+    const pureCatchUp = this.catchUpOnly && !allDirty && restyled === null && doc === this.lastDoc
+    // Start positions of the blocks still hidden as stale (catch-up passes only).
+    const staleAt = pureCatchUp
+      ? new Set(current.find(undefined, undefined, (spec) => (spec as { nvStale?: boolean }).nvStale === true).map((d) => d.from))
+      : null
+    const pendingAt = (node: PMNode, pos: number) => this.pendingNodes.has(node) || !!staleAt?.has(pos)
+    const spans: [number, number][] = []
+    {
+      let c = 0
+      for (const m of blockMetrics) {
+        const n = m.units.reduce((s, u) => s + u.lines.length, 0)
+        spans.push([pageOfLine[c] ?? 0, pageOfLine[Math.max(c, c + n - 1)] ?? 0])
+        c += n
+      }
+    }
+    let chosen: Set<number> | null = null
+    if ((allDirty && blockNodes.length > PROGRESSIVE_MIN) || pureCatchUp) {
+      const centre = (win[0] + win[1]) / 2
+      const candidates: number[] = []
+      blockNodes.forEach((node, bi) => {
+        if (inWin(spans[bi][0], spans[bi][1])) return
+        if (pureCatchUp && !pendingAt(node, blockPos[bi])) return
+        candidates.push(bi)
+      })
+      candidates.sort((x, y) => Math.abs(spans[x][0] - centre) - Math.abs(spans[y][0] - centre))
+      chosen = new Set(candidates.slice(0, CHUNK))
+    }
+
+    // Blocks whose decorations differ from what is drawn.
+    const dirty: DirtyBlock[] = []
+    let lazy = 0
+    let lineCursor = 0
+    for (let bi = 0; bi < blockNodes.length; bi++) {
+      const m = blockMetrics[bi]
+      const node = blockNodes[bi]
+      const pos = blockPos[bi]
+      const nLines = m.units.reduce((s, u) => s + u.lines.length, 0)
+      const first = lineCursor
+      lineCursor += nLines
+      const [p0, p1] = spans[bi]
+      if (chosen) {
+        if (pureCatchUp && !pendingAt(node, pos)) continue
+        if (!inWin(p0, p1) && !chosen.has(bi)) {
+          // Redrawn in a later frame; hidden until then (below).
+          dirty.push({ a: 0, z: 0, pos, size: node.nodeSize, node, sig: '', p0, p1, lazy: true })
+          this.lastSigs.delete(node)
+          lazy++
+          continue
+        }
+      }
+      const sigParts: string[] = []
+      const start = decos.length
+      this.decorateBlock(node, pos, first, m, pageOfLine, offsets, (li) => posOfLine(li), decos, sigParts)
+      const sig = sigParts.join(',')
+      // An unchanged node compares with its last applied signature; an edited one (or a node instance
+      // used twice) with the decorations ProseMirror mapped through the edit.
+      const known = !allDirty && this.prevTops.has(node) && !this.pendingNodes.has(node) ? this.lastSigs.get(node) : undefined
+      const last = allDirty ? null : (known ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1))
+      if (last !== sig) {
+        dirty.push({ a: start, z: decos.length, pos, size: node.nodeSize, node, sig, p0, p1, lazy: false })
+        // Recorded as applied only once it is drawn (below).
+        this.lastSigs.delete(node)
+      }
+    }
+
+    const t3 = performance.now()
+    const t4 = performance.now()
+    this.lastKey = key
+    this.lastDoc = doc
+    let deferred = 0
+    if (dirty.length) {
+      let apply = dirty.filter((d) => !d.lazy)
+      deferred = lazy
+      // Progressive also for a restyle that moved many blocks (all decorated, so pick by place).
+      const wholesale = restyled !== null || this.catchUpOnly
+      if (!chosen && wholesale && apply.length > PROGRESSIVE_MIN) {
+        const near = apply.filter((d) => inWin(d.p0, d.p1))
+        const rest = apply.filter((d) => !inWin(d.p0, d.p1))
+        const centre = (win[0] + win[1]) / 2
+        rest.sort((x, y) => Math.abs(x.p0 - centre) - Math.abs(y.p0 - centre))
+        const now = near.concat(rest.slice(0, CHUNK))
+        deferred += apply.length - now.length
+        apply = now
+      }
+      const applied = new Set(apply)
+      // Drawn now, then still pending (in that order: an instance drawn at one place and deferred at
+      // another stays pending).
+      for (const d of apply) this.pendingNodes.delete(d.node)
+      for (const d of dirty) if (!applied.has(d)) this.pendingNodes.add(d.node)
+      let next: DecorationSet
+      // A full rebuild needs every block decorated in this pass (not a lazy or catch-up pass).
+      if (apply.length === dirty.length && !chosen && (geometryChanged || dirty.length > 8)) {
+        next = DecorationSet.create(doc, decos)
+      } else {
+        // Patch the drawn set block by block, so ProseMirror redraws only those blocks.
+        next = current
+        const removed: Decoration[] = []
+        const added: Decoration[] = []
+        const ours = (spec: unknown) => (spec as Partial<ShiftSpec>).nvShift !== undefined || (spec as { nvStale?: boolean }).nvStale === true
+        for (const d of apply) {
+          for (const old of next.find(d.pos, d.pos + d.size, ours)) if (old.from >= d.pos && old.to <= d.pos + d.size) removed.push(old)
+          for (let i = d.a; i < d.z; i++) added.push(decos[i])
+        }
+        // Blocks not redrawn yet still carry their old offsets, which against the new placement can
+        // put them anywhere, including in view: hide them (visibility keeps layout and line metrics)
+        // until they are redrawn.
+        if (deferred) {
+          for (const d of dirty) {
+            if (applied.has(d)) continue
+            const has = next.find(d.pos, d.pos + d.size, (spec) => (spec as { nvStale?: boolean }).nvStale === true).some((o) => o.from === d.pos && o.to === d.pos + d.size)
+            if (!has) added.push(Decoration.node(d.pos, d.pos + d.size, { class: STALE_CLASS }, { nvStale: true }))
+          }
+        }
+        if (removed.length + added.length > 64) {
+          // Many blocks: rebuild. Keep every decoration except this slice's own inside a redrawn block
+          // (by range: DecorationSet.find returns fresh copies, so identity cannot be used).
+          const ranges = apply.map((d) => [d.pos, d.pos + d.size] as const).sort((x, y) => x[0] - y[0])
+          const inRedrawn = (from: number, to: number) => {
+            let lo = 0
+            let hi = ranges.length - 1
+            while (lo <= hi) {
+              const mid = (lo + hi) >> 1
+              if (ranges[mid][1] < to) lo = mid + 1
+              else if (ranges[mid][0] > from) hi = mid - 1
+              else return true
+            }
+            return false
+          }
+          next = DecorationSet.create(doc, next.find().filter((d) => !(ours(d.spec) && inRedrawn(d.from, d.to))).concat(added))
+        } else next = next.remove(removed).add(doc, added)
+      }
+      for (const d of apply) this.lastSigs.set(d.node, d.sig)
+      if (!deferred) this.pendingNodes.clear()
+      const tr = view.state.tr.setMeta(paginationKey, next).setMeta('addToHistory', false)
+      if (this.scrollAfterPass && view.hasFocus()) tr.scrollIntoView()
+      view.dispatch(tr)
+      if (deferred) this.schedule(false, true)
+    }
+    const changed = dirty.length > 0
+    this.scrollAfterPass = false
+    const t5 = performance.now()
+
+    this.snapshot = { geometry, placement, ranges, pages, offsets, lines, pageOfLine }
+    const store = useStore.getState()
+    if (!samePages(store.layout.pages, pages)) store.layoutActions.setPages(pages)
+    store.layoutActions.setCurrentPage(pageAt(pages, view.state.selection.head))
+    this.listeners.forEach((l) => l(this.snapshot!))
+    const t6 = performance.now()
+    this.timings = {
+      measuredBlocks: measured,
+      startedAt: t0,
+      measureMs: t1 - t0,
+      breakMs: t2 - t1,
+      decorateMs: t3 - t2,
+      modelMs: t4 - t3,
+      dispatchMs: t5 - t4,
+      publishMs: t6 - t5,
+      totalMs: t6 - t0,
+      redecorated: changed,
+      dirtyBlocks: dirty.length,
+      deferredBlocks: deferred,
+      geometryChanged,
+    }
+  }
+
+  /** Durations of the last pass (diagnostics, perf reports). */
+  timings: Record<string, number | boolean> = {}
+
+  /**
+   * Decorations for one top-level block whose lines are `[first, first + lines)`.
+   * Whole nodes on one page get a node decoration; a textblock that spans pages gets its first
+   * page's offset and inline decorations (offset differences) for the lines of each later page.
+   * Containers that span pages (lists) are not moved themselves; their children are.
+   */
+  private decorateBlock(
+    node: PMNode,
+    pos: number,
+    first: number,
+    m: BlockMetrics,
+    pageOfLine: Int32Array,
+    offsets: PageOffset[],
+    posOfLine: (li: number) => number,
+    out: Decoration[],
+    sig: string[],
+  ) {
+    const push = (from: number, to: number, dx: number, dy: number, inline: boolean, atEnd = false) => {
+      const attrs = shiftAttrs(dx, dy)
+      const spec: ShiftSpec = { nvShift: attrs.style, inline, atEnd }
+      // The last moved lines of a paragraph end at its end: text typed there stays with them.
+      out.push(inline ? Decoration.inline(from, to, attrs, { ...spec, inclusiveEnd: atEnd }) : Decoration.node(from, to, attrs, spec))
+      sig.push(sigPart(spec, from - pos, to - pos))
+    }
+    // Line range of each unit (global line indices).
+    const unitFirst: number[] = []
+    let c = first
+    for (const u of m.units) {
+      unitFirst.push(c)
+      c += u.lines.length
+    }
+    const unitsIn = (fromRel: number, toRel: number) => {
+      const idx: number[] = []
+      m.units.forEach((u, i) => {
+        if (u.rel >= fromRel && u.rel < toRel) idx.push(i)
+      })
+      return idx
+    }
+    const visit = (n: PMNode, nPos: number, rel: number, parent: PageOffset) => {
+      const us = rel === 0 ? m.units.map((_, i) => i) : unitsIn(rel, rel + n.nodeSize)
+      if (us.length === 0) return
+      const lo = unitFirst[us[0]]
+      const hi = unitFirst[us[us.length - 1]] + m.units[us[us.length - 1]].lines.length - 1
+      const p0 = pageOfLine[lo]
+      const o0 = offsets[p0]
+      if (pageOfLine[hi] === p0) {
+        push(nPos, nPos + n.nodeSize, o0.dx - parent.dx, o0.dy - parent.dy, false)
+        return
+      }
+      if (n.isTextblock || n.isLeaf) {
+        push(nPos, nPos + n.nodeSize, o0.dx - parent.dx, o0.dy - parent.dy, false)
+        if (!n.isTextblock) return
+        const end = nPos + n.nodeSize - 1
+        let li = lo + 1
+        while (li <= hi) {
+          if (pageOfLine[li] === pageOfLine[li - 1]) {
+            li++
+            continue
+          }
+          const p = pageOfLine[li]
+          let lj = li + 1
+          while (lj <= hi && pageOfLine[lj] === p) lj++
+          const from = posOfLine(li)
+          const to = lj <= hi ? posOfLine(lj) : end
+          const o = offsets[p]
+          if (to > from) push(from, to, o.dx - o0.dx, o.dy - o0.dy, true, lj > hi)
+          li = lj
+        }
+        return
+      }
+      // A container spanning pages: leave it in place, move its children.
+      n.forEach((child, offset) => visit(child, nPos + 1 + offset, rel + 1 + offset, parent))
+    }
+    visit(node, pos, 0, { dx: 0, dy: 0 })
+  }
+
+  private pageModel(
+    ranges: PageRange[],
+    lines: LineBox[],
+    units: UnitInfo[],
+    unitRef: { block: number; unit: number }[],
+    blockNodes: PMNode[],
+    unitNodes: PMNode[],
+    posOfLine: (li: number) => number,
+    docSize: number,
+  ): PageInfo[] {
+    // Chapter openings (top-level block positions) in order.
+    const chapterPos = chapterOpenings(this.view.state.doc)
+    const starts = ranges.map((r) => (r.startLine >= lines.length ? docSize : posOfLine(r.startLine)))
+    if (starts.length) starts[0] = 0
+    let ch = -1
+    return ranges.map((r, i) => {
+      const from = starts[i]
+      const to = i + 1 < ranges.length ? starts[i + 1] : docSize
+      while (ch + 1 < chapterPos.length && chapterPos[ch + 1] <= from && !(r.blank && chapterPos[ch + 1] === from)) ch++
+      let startsBlockType: string | null = null
+      if (!r.blank && r.startLine < lines.length) {
+        const ui = lines[r.startLine].unit
+        if (units[ui].firstLine === r.startLine) {
+          const { block, unit } = unitRef[ui]
+          startsBlockType = unit === 0 ? blockNodes[block].type.name : unitNodes[ui].type.name
+        }
+      }
+      return { index: i, side: sideOf(i), from, to, isBlank: r.blank, startsBlockType, chapterIndex: ch }
+    })
+  }
+}
+
+export function pageAt(pages: readonly PageInfo[], pos: number): number {
+  let lo = 0
+  let hi = pages.length - 1
+  if (hi < 0) return 0
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (pages[mid].from <= pos) lo = mid
+    else hi = mid - 1
+  }
+  // A blank page never holds the selection.
+  while (lo > 0 && pages[lo].isBlank) lo--
+  while (lo < pages.length - 1 && pages[lo].isBlank) lo++
+  return lo
+}
+
+function samePages(a: readonly PageInfo[], b: readonly PageInfo[]) {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]
+    const y = b[i]
+    if (x.from !== y.from || x.to !== y.to || x.isBlank !== y.isBlank || x.startsBlockType !== y.startsBlockType || x.chapterIndex !== y.chapterIndex) return false
+  }
+  return true
+}
+
+/** Move the selection to the first page of a spread and scroll it to the top. */
+export function selectionForPage(state: EditorState, page: PageInfo) {
+  const $pos = state.doc.resolve(Math.min(page.from, state.doc.content.size))
+  return TextSelection.near($pos, 1)
+}
+
+/** The ProseMirror plugin: holds the decorations and drives the engine from view updates. */
+export function createPaginationPlugin(handlers: {
+  keyDown?: (view: EditorView, e: KeyboardEvent) => boolean
+  mouseDown?: (view: EditorView, e: MouseEvent) => boolean
+}) {
+  return new Plugin<PaginationState>({
+    key: paginationKey,
+    state: {
+      init: () => ({ set: DecorationSet.empty, unmapped: false }),
+      apply: (tr, value) => {
+        const next = tr.getMeta(paginationKey) as DecorationSet | undefined
+        if (next) return { set: next, unmapped: false }
+        if (!tr.docChanged) return value
+        if (tr.steps.length > MAP_STEP_LIMIT) return { set: DecorationSet.empty, unmapped: true }
+        return { set: value.set.map(tr.mapping, tr.doc), unmapped: value.unmapped }
+      },
+    },
+    props: {
+      decorations: (state) => paginationKey.getState(state)?.set,
+      attributes: (state): Record<string, string> => (paginationKey.getState(state)?.unmapped ? { class: 'nv-unmapped' } : {}),
+      // Scrolling to the selection while off-screen blocks are still being redrawn would use a stale
+      // (hidden) position: finish the reflow first, then scroll.
+      handleScrollToSelection: (view) => {
+        const engine = getEngine()
+        if (!engine?.catchingUp) return false
+        queueMicrotask(() => {
+          engine.drain()
+          if (!view.isDestroyed) view.dispatch(view.state.tr.scrollIntoView().setMeta('addToHistory', false))
+        })
+        return true
+      },
+      handleKeyDown: (view, e) => handlers.keyDown?.(view, e) ?? false,
+      handleDOMEvents: {
+        mousedown: (view, e) => handlers.mouseDown?.(view, e) ?? false,
+      },
+    },
+    view: (view) => {
+      const engine = new PaginationEngine(view)
+      return {
+        update: (v, prev) => {
+          if (v.state.doc !== prev.doc) engine.schedule(true)
+          else if (!v.state.selection.eq(prev.selection)) {
+            engine.selectionChanged(v.state)
+            // A caret moved natively (Mod-End, arrows) while off-screen blocks are still hidden at
+            // their old place: the browser scrolled to that stale place. Finish and scroll again.
+            if (engine.catchingUp && v.hasFocus())
+              queueMicrotask(() => {
+                engine.drain()
+                if (!v.isDestroyed) v.dispatch(v.state.tr.scrollIntoView().setMeta('addToHistory', false))
+              })
+          }
+        },
+        destroy: () => engine.destroy(),
+      }
+    },
+  })
+}

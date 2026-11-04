@@ -12,6 +12,9 @@
 // - markDirty(): flag the current content as unsaved (bumps the version, no onDocChange), e.g.
 //   after restoring crash-recovery data.
 export { NovelEditor } from './NovelEditor'
+export type { NovelEditorProps } from './NovelEditor'
+// The mounted editor (re-renders when it mounts/unmounts, not per transaction), for hosts such as pagination.
+export { useMountedEditor } from './use-mounted-editor'
 export { FontFamilyPicker, Toolbar, ToolbarItem, TOOLBAR_CONTROLS } from './toolbar'
 export type { FontFamilyPickerProps, ToolbarProps, ToolbarControlMeta, ToolbarControlKey } from './toolbar'
 export {
@@ -29,6 +32,8 @@ export { createEditorExtensions } from './extensions'
 export { SYSTEM_FONT_STACK, listSystemFonts, fontFamilyCss, primaryFontFamily } from './fonts'
 // Find & replace + history (task 4)
 export { FindReplacePanel } from './find/FindReplacePanel'
+// Pagination: finish layout work before the find panel scrolls a match into view.
+export { setFindRevealHook } from './find/engine'
 export type { FindReplacePanelProps } from './find/FindReplacePanel'
 export { FindButton } from './find/FindButton'
 export type { FindButtonProps } from './find/FindButton'

@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
-import { editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject } from './helpers'
+import { budget } from './budget'
+import { clickBlockStart, editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Performance budget on a 100,000-word manuscript, in real browser engines
@@ -62,6 +63,9 @@ async function openEpic(page: Page, folder: string, doc: unknown, blocks = 'p, h
   await expect(saveStatus(page)).toHaveText(`${title}: All changes saved`, { timeout: 60_000 })
   const openMs = Date.now() - openStart
   await expect(editor(page).locator(blocks)).toHaveCount(WORDS / WORDS_PER_PARAGRAPH)
+  // The opened book is laid out progressively (pages in view first): wait until every block is at its
+  // page before clicking text by its painted position.
+  await waitForLayout(page)
   return openMs
 }
 
@@ -95,7 +99,8 @@ async function installLatencyProbe(page: Page) {
  */
 async function measureTyping(page: Page, beforeKey?: (i: number) => Promise<void>) {
   const ed = editor(page)
-  await ed.locator('p').nth(500).click()
+  // On the painted text (paged view: a block's box is not where all its lines are painted).
+  await clickBlockStart(page, ed.locator('p').nth(500))
   await lineEnd(page)
   await page.waitForFunction(() => (window as unknown as { __perf: number[] }).__perf.length >= 1)
   await page.evaluate(() => ((window as unknown as { __perf: number[] }).__perf = []))
@@ -173,8 +178,8 @@ test('100k-word manuscript: typing latency and Replace All stay within budget', 
   })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
-  expect(typing.medianMs).toBeLessThan(50)
-  expect(replaceAllMs).toBeLessThan(2000)
+  budget(testInfo, 'typing median ms', typing.medianMs, 50)
+  budget(testInfo, 'Replace All ms', replaceAllMs, 2000)
 })
 
 test('100k-word manuscript, combined hot path: find panel open on "the" + autosave mid-typing', async ({ page }, testInfo) => {
@@ -214,10 +219,10 @@ test('100k-word manuscript, combined hot path: find panel open on "the" + autosa
   })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
-  expect(typing.medianMs).toBeLessThan(50)
+  budget(testInfo, 'typing median ms (hot path)', typing.medianMs, 50)
 })
 
-test('100k-word manuscript: changing the Chapter Title font size restyles every chapter in < 100 ms, no doc change', async ({ page }, testInfo) => {
+test('100k-word manuscript: changing the Chapter Title font size restyles every chapter in < 100 ms and repaginates in < 1 s, no doc change', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   const built = buildManuscript()
   // Chapter Title applied to every chapter heading (40 chapters).
@@ -239,35 +244,55 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
   const result = await page.evaluate(async () => {
     const all = Array.from(document.querySelectorAll<HTMLElement>('main [contenteditable="true"] h1[data-style="chapter-title"]'))
     const before = all.map((el) => getComputedStyle(el).fontSize)
+    const last = all[all.length - 1]
     const save = document.querySelector<HTMLButtonElement>('[data-control-id="styles.modify.save"]')!
+    const v = window.__nvE2E.layout().layoutVersion
     const t0 = performance.now()
     save.click()
-    // Wait until the stylesheet change reached the last chapter, then force layout and include the paint.
+    // 1. The style sheet swap: React commits the new sheet within the click's task / microtasks.
+    //    Read it and force layout before any animation frame, i.e. before pagination runs.
+    let microtasks = 0
+    while (getComputedStyle(last).fontSize === before[before.length - 1] && microtasks++ < 50) await Promise.resolve()
+    const swapped = getComputedStyle(last).fontSize !== before[before.length - 1]
+    void document.body.offsetHeight
+    const cssMs = performance.now() - t0
+    // 2. Repagination, "reflow complete" (docs/pagination.md): the engine re-measured the restyled
+    //    blocks, published the new page model, and drew and painted the pages in view.
     await new Promise<void>((resolve) => {
-      const last = all[all.length - 1]
-      const check = () => (getComputedStyle(last).fontSize !== before[before.length - 1] ? resolve() : requestAnimationFrame(check))
+      const check = () =>
+        window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > v ? resolve() : requestAnimationFrame(check)
+      requestAnimationFrame(check)
+    })
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    const repaginatedMs = performance.now() - t0
+    // Off-screen blocks follow in later frames: reported.
+    await new Promise<void>((resolve) => {
+      const check = () => (window.__nvE2E.paginationSettled() ? resolve() : requestAnimationFrame(check))
       check()
     })
-    void document.body.offsetHeight
-    const styledMs = performance.now() - t0
-    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
-    const paintedMs = performance.now() - t0
+    const allDrawnMs = performance.now() - t0
     const changed = all.filter((el, i) => getComputedStyle(el).fontSize !== before[i]).length
-    return { styledMs, paintedMs, changed }
+    return { cssMs, swapped, repaginatedMs, allDrawnMs, changed }
   })
   const versionAfter = await page.evaluate(() => window.__nvE2E.docVersion())
 
   await report(testInfo, 'perf-styles', {
     manuscript: { words: built.words, blocks: content.length, chapters },
     openMs,
-    restyleMs: +result.styledMs.toFixed(1),
-    restyleIncludingPaintMs: +result.paintedMs.toFixed(1),
+    restyleMs: +result.cssMs.toFixed(1),
+    repaginatedMs: +result.repaginatedMs.toFixed(1),
+    allDrawnMs: +result.allDrawnMs.toFixed(1),
     chaptersRestyled: result.changed,
     docVersionChanged: versionAfter !== versionBefore,
-    budgets: { restyleMs: 100 },
+    // The style sheet swap keeps the styles budget; the reflow it causes in the paginated view
+    // (every page break can move) gets the reflow budget, like a trim change (docs/pagination.md).
+    budgets: { restyleMs: 100, repaginatedMs: 1000, allDrawnMs: 3000 },
   })
 
+  expect(result.swapped).toBe(true)
   expect(result.changed).toBe(chapters)
   expect(versionAfter).toBe(versionBefore)
-  expect(result.styledMs).toBeLessThan(100)
+  budget(testInfo, 'restyle style sheet swap ms', result.cssMs, 100)
+  budget(testInfo, 'restyle reflow complete ms', result.repaginatedMs, 1000)
+  budget(testInfo, 'restyle all drawn ms', result.allDrawnMs, 3000)
 })

@@ -3,8 +3,9 @@ import { launch } from './helpers'
 
 const html = (page: Page) => page.locator('html')
 const radio = (page: Page, value: string) => page.locator(`[data-control-id="book.surface.${value}"]`)
+// The first rendered page of the paginated view (the .nv-page contract element).
 const pageBg = (page: Page) =>
-  page.getByTestId('writing-surface').evaluate((el) => getComputedStyle(el).backgroundColor)
+  page.locator('.nv-frames .nv-page').first().evaluate((el) => getComputedStyle(el).backgroundColor)
 const deskBg = (page: Page) => page.locator('main').evaluate((el) => getComputedStyle(el).backgroundColor)
 
 test('auto paper follows the OS light/dark mode live', async ({ page }) => {
