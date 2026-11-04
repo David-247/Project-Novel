@@ -1,7 +1,8 @@
 // Markdown tables of the perf numbers in perf-results/*.json (written by e2e/perf.spec.ts and
 // e2e/pagination-perf.spec.ts). Appends to $GITHUB_STEP_SUMMARY in CI, otherwise prints to stdout.
-// Never fails the job: the budgets are asserted by the tests (blocking only on the shipping pairs,
-// WebKit on macOS and Chromium on Windows; elsewhere a miss is a warning, decision afbe3475).
+// Never fails the job: the budgets are asserted by the tests. In CI only Windows Chromium blocks; every
+// other pair, macOS WebKit included (free shared runner), reports a miss as a warning (decisions
+// afbe3475, f040009b).
 import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,12 +10,14 @@ import { pathToFileURL } from 'node:url'
 const SHIPPING = new Set(['webkit|darwin', 'chromium|win32'])
 const engineOf = (browser) => String(browser ?? '').replace(/^perf-/, '')
 export const isShipping = (r) => SHIPPING.has(`${engineOf(r.browser)}|${r.platform}`)
+/** Whether a miss failed the CI job: a shipping pair, except macOS (decision f040009b). */
+export const isBlocking = (r) => isShipping(r) && r.platform !== 'darwin'
 const v = (n) => (n === undefined || n === null ? '–' : String(n))
-/** "12.3" plus a miss marker against `limit` (BLOCKING on a shipping pair, warning elsewhere). */
+/** "12.3" plus a miss marker against `limit` (MISS where it blocks CI, warning elsewhere). */
 const cell = (r, n, limit) => {
   if (n === undefined || n === null) return '–'
   if (limit === undefined || n < limit) return String(n)
-  return `**${n}** (${isShipping(r) ? 'MISS' : 'miss, warning'})`
+  return `**${n}** (${isBlocking(r) ? 'MISS' : 'miss, warning'})`
 }
 const pair = (r) => `${engineOf(r.browser)} / ${r.platform}${isShipping(r) ? ' (shipping)' : ''}`
 
@@ -34,7 +37,7 @@ export function loadResults(dir) {
 export function toMarkdown(results, dir = 'perf-results') {
   const md = ['### Performance (100,000-word manuscript)', '']
   if (!results.length) return [...md, `_No perf results found in ${dir}/._`, ''].join('\n')
-  md.push('Budgets block CI on the shipping pairs (WebKit on macOS, Chromium on Windows); elsewhere a miss is a warning.', '')
+  md.push('Budgets block CI on Windows Chromium only; elsewhere, macOS WebKit included (free shared runner), a miss is a warning.', '')
 
   const typing = []
   for (const r of results) {

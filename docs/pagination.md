@@ -114,7 +114,14 @@ layer behind the editor.
 **Which budgets block CI (Vibeless decision afbe3475).** Perf budgets block only on the shipping
 pairs: **macOS + WebKit** (WKWebView) and **Windows + Chromium** (WebView2). On macOS Chromium and
 Windows WebKit every perf test still runs and records its numbers, but a budget miss is a warning
-(a `perf-budget-warning` test annotation and a console line), not a failure. The gate is
+(a `perf-budget-warning` test annotation and a console line), not a failure.
+
+**macOS in CI (Vibeless decision f040009b).** CI stays on GitHub's free hosted runners. The free
+macOS runner is a shared 3-core M1 that misses the WebKit trim reflow and style sheet swap budgets on
+commits that change no app code, so in CI a macOS miss is also a warning; only Windows Chromium
+blocks. Outside CI (no `CI` env var) the macOS WebKit budgets block as before: run the perf specs on a
+real Mac to enforce them. Any other CI check that keeps failing for runner rather than app reasons
+is demoted or cut the same way. The gate is
 `budget(testInfo, name, value, limit)` in `e2e/budget.ts`, used by the perf specs and by the
 paste-keystroke check in `e2e/editor.spec.ts`. Functional assertions and the cross-engine
 pagination tolerance stay blocking everywhere.
