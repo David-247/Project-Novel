@@ -131,6 +131,10 @@ function HeaderFooterForm() {
   }
 
   const pn = settings.pageNumber
+  // Not `disabled`: a disabled control leaves the tab order and loses its tooltip, which is where its
+  // explanation lives. aria-disabled keeps it focusable; the handlers ignore input.
+  const off = pn.position === 'none'
+  const dim = { 'aria-disabled': off || undefined, className: 'aria-disabled:opacity-50' }
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
@@ -149,8 +153,8 @@ function HeaderFooterForm() {
             {...p}
             value={pn.format}
             options={FORMAT_OPTIONS}
-            disabled={pn.position === 'none'}
-            onChange={(e) => update((x) => ({ ...x, pageNumber: { ...x.pageNumber, format: e.target.value as PageNumberFormat } }))}
+            {...dim}
+            onChange={(e) => !off && update((x) => ({ ...x, pageNumber: { ...x.pageNumber, format: e.target.value as PageNumberFormat } }))}
           />
         ))}
         {field(
@@ -160,10 +164,12 @@ function HeaderFooterForm() {
               {...p}
               inputMode="numeric"
               value={startText}
-              disabled={pn.position === 'none'}
+              aria-disabled={dim['aria-disabled']}
+              readOnly={off}
               aria-invalid={!startValid || undefined}
-              className={cn('max-w-28')}
+              className={cn('max-w-28', dim.className)}
               onChange={(e) => {
+                if (off) return
                 setStartText(e.target.value)
                 const t = e.target.value.trim()
                 if (/^\d{1,4}$/.test(t)) update((x) => ({ ...x, pageNumber: { ...x.pageNumber, start: Math.min(MAX_START_NUMBER, Number(t)) } }))
@@ -178,8 +184,8 @@ function HeaderFooterForm() {
             {...p}
             value={settings.frontMatter}
             options={FRONT_OPTIONS}
-            disabled={pn.position === 'none'}
-            onChange={(e) => update((x) => ({ ...x, frontMatter: e.target.value as FrontMatterNumbering }))}
+            {...dim}
+            onChange={(e) => !off && update((x) => ({ ...x, frontMatter: e.target.value as FrontMatterNumbering }))}
           />
         ), 'Pages before the first chapter.')}
       </div>
@@ -205,11 +211,17 @@ function HeaderFooterForm() {
 
       <div className="flex flex-wrap items-center gap-3">
         <Tooltip>
-          <Button data-control-id={C.details.id} disabled={!projectOpen} onClick={() => openHeaderFooterDialog('details')}>
+          <Button
+            data-control-id={C.details.id}
+            aria-disabled={!projectOpen || undefined}
+            aria-describedby={`${formId}-details-note`}
+            className={!projectOpen ? 'opacity-50' : undefined}
+            onClick={() => projectOpen && openHeaderFooterDialog('details')}
+          >
             {C.details.label}
           </Button>
         </Tooltip>
-        <p className="m-0 min-w-0 flex-1 text-ui-xs text-text-muted">
+        <p id={`${formId}-details-note`} className="m-0 min-w-0 flex-1 text-ui-xs text-text-muted">
           {projectOpen ? (
             <>
               <strong className="font-medium text-text">{title || 'Untitled'}</strong>

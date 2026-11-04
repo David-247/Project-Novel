@@ -283,6 +283,11 @@ directly before it; content before the first opening is front matter (−1).
 `defaultChapterOpenings(doc)` gives those positions. `setChapterPredicate((node) => boolean)`
 replaces the model with a per-block predicate; `null` restores the default. Both re-break only.
 
+**Two chapter models.** `PageInfo.chapterIndex` follows `setChapterPredicate` when one is set; chapter *titles* and
+positions used by other slices (running heads, `getChapters`) always come from the editor's `getChapters`. With a
+custom predicate the two can disagree: the headers/footers slice resolves the chapter of a page from the `getChapters` list and the page's
+position, ignoring `chapterIndex`, so its titles, openings and numbering stay consistent with each other.
+
 ### Page break node
 
 The breaks ticket's `pageBreak` atom does not carry the break: the block after it gets

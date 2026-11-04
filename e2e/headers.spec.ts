@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { editor, launch, newProject, openRecent, readFile, recoveryControl, saveStatus, seedProject, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, newProject, openRecent, readFile, recoveryControl, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Running headers, footers and page numbers (Phase 2, headers/footers ticket). They are drawn in the
@@ -36,16 +36,16 @@ async function shown(page: Page): Promise<Shown[]> {
 }
 
 /** Doc: one front matter paragraph, then three chapters (level-1 headings start a page). */
-function manuscript() {
-  const fx = buildPaginationFixture({ words: 4500, chapters: 3 })
+function manuscript(words = 4500) {
+  const fx = buildPaginationFixture({ words, chapters: 3 })
   const front = { type: 'paragraph', content: [{ type: 'text', text: 'For my mother, who read every draft.' }] }
   return { type: 'doc', content: [front, ...fx.doc.content] }
 }
 
 /** Open the seeded project (author/title set through Book details when asked). */
-async function openBook(page: Page, name: string, author = 'Ada Quill') {
+async function openBook(page: Page, name: string, author = 'Ada Quill', words = 4500) {
   await launch(page)
-  await seedProject(page, `/projects/${name}`, name, manuscript())
+  await seedProject(page, `/projects/${name}`, name, manuscript(words))
   await openRecent(page, `/projects/${name}`)
   await expect(saveStatus(page)).toHaveText(`${name}: All changes saved`)
   await waitForLayout(page)
@@ -221,24 +221,35 @@ test('headers and numbers do not change body pagination: identical page breaks a
   expect(long.firstLines).toEqual(on.firstLines)
 })
 
-test('a chapter title edit updates only the heads that show it, without a reflow of other pages', async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 900 })
-  await openBook(page, 'Titles')
+test('a chapter title edit updates only the heads that show it: other pages keep their DOM nodes, and nothing reflows', async ({ page }) => {
+  // Tall window: more rows are rendered (frames are virtualised), so chapter 2's pages sit next to chapter 1's title.
+  await page.setViewportSize({ width: 1400, height: 2000 })
+  // Short chapters, so chapter 2's pages are rendered (frames are virtualised) next to chapter 1's title.
+  await openBook(page, 'Titles', 'Ada Quill', 1800)
+  const versionBefore = (await layout(page)).layoutVersion
   await ctl(page, 'book.headerFooter').click()
   await ctl(page, 'book.headerFooter.verso').selectOption('chapter')
   await ctl(page, 'book.headerFooter.recto').selectOption('chapter')
   await ctl(page, 'book.headerFooter.done').click()
+  // A header settings change is not a reflow: the layout was not republished.
   const l = await layout(page)
+  expect(l.layoutVersion).toBe(versionBefore)
+
   const openings = l.pages.filter((p) => p.startsBlockType === 'heading').map((p) => p.index)
   const body = openings[0] + 1
   let got = await shown(page)
   const oldTitle = got.find((g) => g.index === body)!.header
   expect(oldTitle).toMatch(/^Chapter 1: /)
-  // Mark a head of another chapter (if rendered): React must keep that DOM node.
+
+  // A page of chapter 2 that shows a head and is rendered now.
+  const other = l.pages.find((p) => p.chapterIndex === 1 && !p.isBlank && p.startsBlockType !== 'heading' && got.some((g) => g.index === p.index && g.header))
+  expect(other, 'a rendered body page of chapter 2').toBeDefined()
+  const otherText = got.find((g) => g.index === other!.index)!.header
   await page.evaluate((i) => {
-    const t = document.querySelector(`.nv-frames .nv-page[data-page-index="${i}"] [data-hf="text"]`)
-    if (t) t.setAttribute('data-probe', 'kept')
-  }, body + 1)
+    const t = document.querySelector(`.nv-frames .nv-page[data-page-index="${i}"] [data-hf="text"]`)!
+    t.setAttribute('data-probe', 'kept')
+    ;(window as unknown as { __probe: Element }).__probe = t
+  }, other!.index)
 
   // Edit chapter 1's title: click its heading and type.
   const h1 = editor(page).locator('h1').first()
@@ -255,8 +266,54 @@ test('a chapter title edit updates only the heads that show it, without a reflow
     if (p.chapterIndex === 0) expect(g.header, `page ${p.index}`).toBe(`${oldTitle} (revised)`)
     else expect(g.header).not.toContain('(revised)')
   }
-  const probe = await page.evaluate(() => document.querySelector('[data-probe="kept"]')?.textContent ?? null)
-  if (probe !== null) expect(probe).toMatch(/^Chapter 1: /)
+  // The chapter 2 head is the very same, still attached DOM node, with its attribute and text intact.
+  const probe = await page.evaluate((i) => {
+    const kept = (window as unknown as { __probe: Element }).__probe
+    const now = document.querySelector(`.nv-frames .nv-page[data-page-index="${i}"] [data-hf="text"]`)
+    return { same: kept === now, connected: kept.isConnected, attr: kept.getAttribute('data-probe'), text: kept.textContent }
+  }, other!.index)
+  expect(probe).toEqual({ same: true, connected: true, attr: 'kept', text: otherText })
+})
+
+test('running heads are not document content: find, select-all + copy and the document never see them', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await openBook(page, 'NotContent', 'Ada Quill', 1500)
+  const HEAD = 'Zephyr-Quokka-Head'
+  await ctl(page, 'book.headerFooter').click()
+  await ctl(page, 'book.headerFooter.verso').selectOption('custom')
+  await ctl(page, 'book.headerFooter.versoText').fill(HEAD)
+  await ctl(page, 'book.headerFooter.recto').selectOption('custom')
+  await ctl(page, 'book.headerFooter.rectoText').fill(HEAD)
+  await ctl(page, 'book.headerFooter.done').click()
+  // It is on the pages...
+  expect((await shown(page)).filter((g) => g.header === HEAD).length).toBeGreaterThan(1)
+  // ...but not in the document,
+  await expect(editor(page)).not.toContainText(HEAD)
+  const doc = await page.evaluate(() => window.__nvE2E.editorDiag()!.state)
+  expect(doc).not.toContain(HEAD)
+  // not found by Find,
+  await editor(page).click()
+  await page.keyboard.press('ControlOrMeta+f')
+  const panel = page.getByRole('region', { name: 'Find and replace' })
+  await expect(panel).toBeVisible()
+  await panel.getByRole('textbox', { name: 'Find' }).fill(HEAD)
+  await page.keyboard.press('Enter')
+  await expect(editor(page).locator('.nv-find-match')).toHaveCount(0)
+  await panel.getByRole('textbox', { name: 'Find' }).fill('Chapter')
+  await expect(editor(page).locator('.nv-find-match').first()).toBeAttached() // find does work
+  await page.keyboard.press('Escape')
+  // and not copied by select-all + copy.
+  await editor(page).click()
+  await page.evaluate(() => {
+    ;(window as unknown as { __copied: string | null }).__copied = null
+    document.addEventListener('copy', (e) => ((window as unknown as { __copied: string | null }).__copied = e.clipboardData?.getData('text/plain') ?? ''), { once: true })
+  })
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.press('ControlOrMeta+c')
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __copied: string | null }).__copied)).not.toBeNull()
+  const copied = await page.evaluate(() => (window as unknown as { __copied: string }).__copied)
+  expect(copied.length).toBeGreaterThan(500)
+  expect(copied).not.toContain(HEAD)
 })
 
 test('the dialog opens from the toolbar button with the keyboard and from a double-click on a header or footer; every control has a tooltip', async ({ page }) => {
@@ -277,6 +334,10 @@ test('the dialog opens from the toolbar button with the keyboard and from a doub
 
   // Double-click in the header region of a body page, then in the footer region.
   const l = await layout(page)
+  const selection = () => page.evaluate(() => JSON.stringify(window.__nvE2E.editorDiag()!.selection))
+  await clickBlockStart(page, editor(page).locator('p').nth(1))
+  await page.evaluate(() => window.__nvE2E.syncSelection())
+  const caret = await selection()
   const body = l.pages.find((p) => p.startsBlockType === 'heading')!.index + 1
   for (const region of ['header', 'footer'] as const) {
     const slot = page.locator(`.nv-frames .nv-page[data-page-index="${body}"] .nv-slot-${region}`)
@@ -285,9 +346,12 @@ test('the dialog opens from the toolbar button with the keyboard and from a doub
     expect(box).not.toBeNull()
     await page.mouse.dblclick(box!.x + box!.width / 2, box!.y + box!.height / 2)
     await expect(dialog(page)).toBeVisible()
+    // The presses of the double-click did not move the caret or select a word.
+    expect(await selection(), `${region} double-click keeps the selection`).toBe(caret)
     await page.keyboard.press('Escape')
     if (await dialog(page).count()) await page.keyboard.press('Escape')
     await expect(dialog(page)).toHaveCount(0)
+    expect(await selection()).toBe(caret)
   }
   // The text itself is untouched by all of this.
   await expect(editor(page)).not.toContainText('Ada Quill')

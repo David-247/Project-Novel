@@ -152,8 +152,10 @@ Written in full by Novel (an older or hand-written file may leave any field out:
 | `suppressOnBlank` | boolean | Default `true`: no header and no number on blank pages (they still count). |
 
 Pages before the first chapter never show a running head. A book without chapters is all body, numbered from page 1.
-Invalid values fall back to their defaults individually (the status bar notes "the headers and footers"); unknown keys are
-kept and written back. What each page shows is computed from these settings, the layout and the chapter list; none of it
+Invalid values fall back to their defaults individually (the status bar notes "the headers and footers"); unknown keys at the
+**top level of `headerFooter`** are kept and written back (unknown keys nested inside `verso`, `recto` or `pageNumber` are not).
+Roman numerals exist for 1 to 3999: with `format: "lower-roman"` a page whose number falls outside that range (for example a
+`start` of 0) shows no number. What each page shows is computed from these settings, the layout and the chapter list; none of it
 is stored in manuscript.json.
 
 **Trim sizes** (id: size): `us-5x8` (5 x 8 in), `us-5.25x8` (5.25 x 8 in), `us-5.5x8.5` (5.5 x 8.5 in, the default),

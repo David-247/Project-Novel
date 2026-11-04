@@ -230,6 +230,22 @@ export function isChapterOpening(page: HFPage, chapters: readonly HFChapter[]): 
   return lo < chapters.length && chapters[lo].from < page.to
 }
 
+/**
+ * The chapter in effect at the top of a page, from the chapter list itself (not `page.chapterIndex`,
+ * which follows pagination's chapter predicate and may differ). A blank page belongs to the chapter
+ * before the one starting at its position.
+ */
+function chapterAt(page: HFPage, chapters: readonly HFChapter[]): HFChapter | undefined {
+  let lo = 0
+  let hi = chapters.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (page.isBlank ? chapters[mid].from < page.from : chapters[mid].from <= page.from) lo = mid + 1
+    else hi = mid
+  }
+  return lo > 0 ? chapters[lo - 1] : undefined
+}
+
 function headText(setting: RunningHeadSetting, chapterTitle: string, meta: HFMeta): string {
   switch (setting.kind) {
     case 'title':
@@ -281,7 +297,7 @@ export function makeHeaderFooterResolver(
     const front = page.index < firstBody
     let headerText = ''
     if (!(blank && settings.suppressOnBlank) && !(opening && settings.suppressHeaderOnOpening) && !front) {
-      const title = page.chapterIndex >= 0 ? (chapters[page.chapterIndex]?.title ?? '') : ''
+      const title = chapterAt(page, chapters)?.title ?? ''
       headerText = headText(page.side === 'verso' ? settings.verso : settings.recto, title.trim(), meta).trim()
     }
     let number = ''
@@ -292,7 +308,9 @@ export function makeHeaderFooterResolver(
         if (settings.frontMatter === 'roman') number = toLowerRoman(page.index + 1)
       } else {
         const n = pn.start + (settings.restartAtFirstChapter ? page.index - firstBody : page.index)
-        number = pn.format === 'lower-roman' ? toLowerRoman(n) : String(n)
+        // Roman numerals exist for 1 to 3999 only: outside that, no number rather than "0" or "-2".
+        if (pn.format === 'lower-roman') number = n >= 1 && n <= 3999 ? toLowerRoman(n) : ''
+        else number = String(n)
       }
     }
     return {

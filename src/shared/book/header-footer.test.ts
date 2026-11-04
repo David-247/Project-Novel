@@ -142,6 +142,14 @@ describe('resolveHeaderFooter: page numbers', () => {
     expect(at(4, s).number).toBe('iii')
   })
 
+  it('Roman body numbers exist for 1 to 3999 only: a start of 0 prints nothing on that page, and counting on is fine', () => {
+    const s = settings({ pageNumber: { position: 'footer-centre', format: 'lower-roman', start: 0 } })
+    expect(at(3, s).number).toBe('i') // page 2 of the body: 0 + 1
+    expect(at(2, settings({ ...s, suppressNumberOnOpening: false })).number).toBe('') // 0 has no numeral
+    expect(at(2, settings({ pageNumber: { position: 'footer-centre', format: 'lower-roman', start: 4000 }, suppressNumberOnOpening: false })).number).toBe('')
+    expect(at(3, settings({ pageNumber: { position: 'footer-centre', format: 'arabic', start: 0 } })).number).toBe('1')
+  })
+
   it('reports the position, or none', () => {
     expect(at(3, settings({ pageNumber: { position: 'footer-outside', format: 'arabic', start: 1 } }))).toMatchObject({
       number: '2',

@@ -225,7 +225,8 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
   const keys = shortcutList(resolved.shortcut)
   const a11y: Record<string, string | undefined> = {
     // While open, Radix points aria-describedby at the content (same text); avoid reading it twice.
-    'aria-describedby': open ? undefined : descId,
+    // A description the control brings itself (aria-describedby on the child) is kept alongside.
+    'aria-describedby': [childProps['aria-describedby'], open ? undefined : descId].filter(Boolean).join(' ') || undefined,
   }
   if (keys.length && !childProps['aria-keyshortcuts']) {
     a11y['aria-keyshortcuts'] = ariaKeyshortcuts(keys, env.platform)

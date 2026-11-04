@@ -153,6 +153,15 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     }
   }, [editor, actions])
 
+  // The selection before the first press of a click sequence: a press in a margin moves the caret to
+  // the nearest line, which a double-click on a header / footer should not leave behind.
+  const selectionBeforePress = useRef<{ anchor: number; head: number } | null>(null)
+  const onMouseDownCapture = (e: ReactMouseEvent) => {
+    if (e.detail !== 1 || !editor || editor.isDestroyed) return
+    const { anchor, head } = editor.state.selection
+    selectionBeforePress.current = { anchor, head }
+  }
+
   // Double-click on a header / footer region (slots are drawn behind the text layer, which covers them).
   const onDoubleClick = (e: ReactMouseEvent) => {
     const canvas = canvasRef.current
@@ -171,6 +180,18 @@ export function PaginatedView({ children }: PaginatedViewProps) {
       const slot = doubleClickSlots(region)[0]
       if (!slot) return
       e.preventDefault()
+      const before = selectionBeforePress.current
+      if (before && editor && !editor.isDestroyed) {
+        const { doc } = editor.state
+        const size = doc.content.size
+        const at = (n: number) => Math.min(Math.max(0, n), size)
+        try {
+          const sel = TextSelection.between(doc.resolve(at(before.anchor)), doc.resolve(at(before.head)))
+          if (!sel.eq(editor.state.selection)) editor.view.dispatch(editor.state.tr.setSelection(sel))
+        } catch {
+          // Document changed since: leave the selection as it is.
+        }
+      }
       slot.onDoubleClick!(pages[i])
       return
     }
@@ -192,7 +213,7 @@ export function PaginatedView({ children }: PaginatedViewProps) {
         className="nv-sizer"
         style={{ width: placement.canvasWidth * scale, height: placement.canvasHeight * scale }}
       >
-        <div ref={canvasRef} className="nv-canvas" style={canvasStyle} onDoubleClick={onDoubleClick}>
+        <div ref={canvasRef} className="nv-canvas" style={canvasStyle} onMouseDownCapture={onMouseDownCapture} onDoubleClick={onDoubleClick}>
           <PageFrames
             placement={placement}
             pages={pages}

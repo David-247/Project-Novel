@@ -126,6 +126,31 @@ describe('Headers & page numbers dialog', () => {
     expect(details).not.toBeInTheDocument()
 
     act(() => useStore.getState().projectActions.projectClosed())
-    expect(screen.getByRole('button', { name: 'Book details…' })).toBeDisabled()
+    const btn = screen.getByRole('button', { name: 'Book details…' })
+    // aria-disabled, not disabled: still focusable, so its tooltip stays reachable; tied to the explanation.
+    expect(btn).toHaveAttribute('aria-disabled', 'true')
+    expect(btn).not.toBeDisabled()
+    const note = btn.getAttribute('aria-describedby')!.split(' ').map((i) => document.getElementById(i)?.textContent ?? '').join(' ')
+    expect(note).toMatch(/Save the project/)
+    expect(btn.getAttribute('aria-describedby')!.split(' ').length).toBeGreaterThan(1) // note + tooltip
+    fireEvent.click(btn)
+    expect(screen.queryByRole('dialog', { name: 'Book details' })).toBeNull()
+  })
+
+  it('with page numbers off, the number controls stay focusable (aria-disabled) and ignore input', async () => {
+    app()
+    fireEvent.click(screen.getByRole('button', { name: 'Headers & page numbers' }))
+    fireEvent.change(await screen.findByLabelText('Page numbers'), { target: { value: 'none' } })
+    for (const label of ['Number style', 'Starting number', 'Front matter numbers']) {
+      const el = screen.getByLabelText(label)
+      expect(el, label).toHaveAttribute('aria-disabled', 'true')
+      expect(el, label).not.toBeDisabled()
+    }
+    fireEvent.change(screen.getByLabelText('Number style'), { target: { value: 'lower-roman' } })
+    fireEvent.change(screen.getByLabelText('Front matter numbers'), { target: { value: 'roman' } })
+    fireEvent.change(screen.getByLabelText('Starting number'), { target: { value: '7' } })
+    expect(useStore.getState().book.headerFooter).toEqual({ ...defaultHeaderFooter(), pageNumber: { ...defaultHeaderFooter().pageNumber, position: 'none' } })
+    const problems = auditTooltipCoverage(document.body)
+    expect(problems, formatCoverageProblems(problems)).toEqual([])
   })
 })
