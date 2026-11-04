@@ -1,5 +1,5 @@
 import { useStore } from '@/shared/store'
-import { closeAuthorPrompt, openAuthorPrompt } from './dialog-state'
+import { closeAuthorPrompt, isSettingsOpen, openAuthorPrompt } from './dialog-state'
 
 export interface Author {
   /** Trimmed; '' when no name is known and the one-time question was dismissed. */
@@ -9,16 +9,24 @@ export interface Author {
 }
 
 /** The author to attribute tracked changes and comments to (non-React). */
-export function getAuthor(): Author {
-  const p = useStore.getState().preferences
-  return { name: p.authorName.trim(), color: p.authorColor }
+let lastAuthor: Author = { name: '', color: null }
+
+/** The same object until the name or colour changes, so it is safe in dependency lists. */
+function stableAuthor(name: string, color: string | null): Author {
+  if (lastAuthor.name !== name || lastAuthor.color !== color) lastAuthor = { name, color }
+  return lastAuthor
 }
 
-/** Reactive `getAuthor()`. */
+export function getAuthor(): Author {
+  const p = useStore.getState().preferences
+  return stableAuthor(p.authorName.trim(), p.authorColor)
+}
+
+/** Reactive `getAuthor()` (a stable reference between changes). */
 export function useAuthor(): Author {
   const name = useStore((s) => s.preferences.authorName).trim()
   const color = useStore((s) => s.preferences.authorColor)
-  return { name, color }
+  return stableAuthor(name, color)
 }
 
 /** How long to wait for preferences to load before treating them as defaults. */
@@ -51,6 +59,8 @@ export async function ensureAuthorName(): Promise<string> {
   await whenLoaded()
   const known = getAuthor().name
   if (known) return known
+  // The name field in Settings writes on every keystroke: an empty value mid-edit is not "no name".
+  if (isSettingsOpen()) return ''
   if (pendingPrompt) return pendingPrompt.promise
   if (useStore.getState().preferences.authorPrompted) return ''
   let settle!: (name: string) => void

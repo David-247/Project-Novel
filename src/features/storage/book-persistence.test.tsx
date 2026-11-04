@@ -24,6 +24,7 @@ import {
 } from './index'
 import { __resetAutosaveForTests } from './autosave'
 import { prepareToExit } from './integration'
+import { loadPreferences, startPreferencesWriter } from '@/features/settings/persistence'
 import { __resetStorageForTests } from './project'
 import { parseBook, serializeBook } from './book-file'
 import { serializeManuscript, type ProjectMeta } from './format'
@@ -413,6 +414,17 @@ describe('unsaved-changes prompts and exit', () => {
     backend.answer = 'Save'
     expect(await prepareToExit('quitting')).toBe(true)
     expect(onDisk().trimSize).toBe('us-6x9')
+  })
+
+  it('the exit flow writes a preference changed a moment ago (debounce not yet elapsed)', async () => {
+    const stop = startPreferencesWriter()
+    await loadPreferences()
+    useStore.getState().preferencesActions.set('authorName', 'Quit Fast')
+    expect(backend.preferences).toBeNull()
+    expect(await prepareToExit('quitting')).toBe(true)
+    expect(JSON.parse(backend.preferences!)).toMatchObject({ authorName: 'Quit Fast' })
+    stop()
+    useStore.getState().preferencesActions.reset()
   })
 
   it("Don't Save drops the book change and stops it being snapshotted again", async () => {

@@ -21,5 +21,7 @@ export { openSettings, closeSettings } from './dialog-state'
 export { getAuthor, useAuthor, ensureAuthorName } from './author'
 export type { Author } from './author'
 export { prefersReducedMotion, useReducedMotion } from './motion'
+// flushPreferences(): write pending changes now; await it in the quit / window-close path.
+export { flushPreferences } from './persistence'
 export { SETTINGS_CONTROLS, SETTINGS_SHORTCUT } from './controls'
 export type { SettingsControlMeta, SettingsControlKey } from './controls'

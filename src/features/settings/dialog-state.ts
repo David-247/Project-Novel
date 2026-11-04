@@ -56,6 +56,10 @@ function subscribe(cb: () => void): () => void {
   return () => listeners.delete(cb)
 }
 
+export function isSettingsOpen(): boolean {
+  return state.settingsOpen
+}
+
 export function useDialogState(): DialogState {
   return useSyncExternalStore(subscribe, () => state, () => state)
 }

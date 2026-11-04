@@ -151,6 +151,33 @@ describe('author', () => {
     expect(screen.getByText('Ada|#112233')).toBeInTheDocument()
   })
 
+  it('getAuthor / useAuthor return the same object until the name or colour changes', () => {
+    act(() => actions().set('authorName', 'Ada'))
+    const first = getAuthor()
+    expect(getAuthor()).toBe(first)
+    const seen: unknown[] = []
+    function Probe() {
+      seen.push(useAuthor())
+      return null
+    }
+    const { rerender } = render(<Probe />)
+    rerender(<Probe />)
+    expect(new Set(seen).size).toBe(1)
+    expect(seen[0]).toBe(first)
+    act(() => actions().set('authorColor', '#112233'))
+    expect(getAuthor()).not.toBe(first)
+    expect(getAuthor()).toBe(getAuthor())
+  })
+
+  it('does not ask while Settings is open (an emptied name field is mid-edit, not "no name")', async () => {
+    actions().load({ authorName: '' })
+    render(<SettingsDialog />)
+    act(() => openSettings())
+    expect(await ensureAuthorName()).toBe('')
+    expect(screen.queryByRole('dialog', { name: 'Who is writing?' })).toBeNull()
+    expect(prefs().authorPrompted).toBe(false)
+  })
+
   it('ensureAuthorName returns a known name without asking', async () => {
     actions().load({ authorName: 'Ada' })
     render(<SettingsDialog />)
