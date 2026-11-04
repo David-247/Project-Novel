@@ -16,6 +16,11 @@ import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readF
  * budgets are measured on a quiet CPU. Reflow numbers go to perf-results/acceptance-*.json (job summary).
  */
 
+// A worker-scoped option of its own gives this file a fresh worker and browser: in the serial perf
+// projects it otherwise inherits a browser process that already ran seven 100k-word tests (their
+// memory and caches are not the app's). Nothing else changes.
+test.use({ launchOptions: { env: { ...process.env, NV_E2E_FRESH_BROWSER: 'phase2-acceptance' } } })
+
 const ctl = (page: Page, id: string) => page.locator(`[data-control-id="${id}"]`)
 const layout = (page: Page) => page.evaluate(() => window.__nvE2E.layout())
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -58,13 +63,14 @@ async function pasteHtml(page: Page, html: string, text: string) {
  * Playwright's round trip) to "reflow complete" (docs/pagination.md): the new page model published
  * and the pages in view drawn and painted. Then waits until every block is drawn.
  */
-async function timeReflow(page: Page, selector: string): Promise<{ ms: number; allDrawnMs: number }> {
+async function timeReflow(page: Page, selector: string): Promise<{ ms: number; syncMs: number; allDrawnMs: number }> {
   return page.evaluate(async (sel) => {
     const el = document.querySelector<HTMLElement>(sel)
     if (!el) throw new Error(`no ${sel}`)
     const v = window.__nvE2E.layout().layoutVersion
     const t0 = performance.now()
     el.click()
+    const syncMs = performance.now() - t0
     await new Promise<void>((resolve) => {
       const check = () =>
         window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > v ? resolve() : requestAnimationFrame(check)
@@ -76,7 +82,7 @@ async function timeReflow(page: Page, selector: string): Promise<{ ms: number; a
       const check = () => (window.__nvE2E.paginationSettled() ? resolve() : requestAnimationFrame(check))
       check()
     })
-    return { ms: +ms.toFixed(1), allDrawnMs: +(performance.now() - t0).toFixed(1) }
+    return { ms: +ms.toFixed(1), syncMs: +syncMs.toFixed(1), allDrawnMs: +(performance.now() - t0).toFixed(1) }
   }, selector)
 }
 
@@ -88,7 +94,7 @@ async function chooseTrim(page: Page, id: string, label: RegExp) {
   await expect(page.getByRole('menu')).toHaveCount(0)
   await waitForLayout(page)
   const l = await layout(page)
-  console.info(`[acceptance] trim ${id}: reflow ${r.ms} ms, all drawn ${r.allDrawnMs} ms, ${before} -> ${l.pageCount} pages`)
+  console.info(`[acceptance] trim ${id}: reflow ${r.ms} ms (sync ${r.syncMs}), all drawn ${r.allDrawnMs} ms, ${before} -> ${l.pageCount} pages`)
   return { trim: id, ...r, pages: l.pageCount }
 }
 
