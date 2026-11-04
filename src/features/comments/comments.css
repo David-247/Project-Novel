@@ -1,0 +1,50 @@
+/*
+ * Comments (docs/design.md, "Comments"). Paper tokens for the anchor highlight, one block per paper
+ * surface like src/shared/theme/surfaces.css (same selectors). Plain 6-digit hex: the contrast test
+ * (comments.test.ts) parses this file and checks page text on both fills (4.5:1) and the active
+ * underline against the paper and the fills (3:1), on all four papers.
+ */
+:root,
+:is(:root, .nv-surface-preview)[data-surface='white'] {
+  --page-comment-bg: #fde2c4;
+  --page-comment-active-bg: #f7c48c;
+  --page-comment-ring: #9a4d0f;
+}
+
+:is(:root, .nv-surface-preview)[data-surface='dark'] {
+  --page-comment-bg: #4b3a24;
+  --page-comment-active-bg: #6e5228;
+  --page-comment-ring: #f2b56b;
+}
+
+:is(:root, .nv-surface-preview)[data-surface='book'] {
+  --page-comment-bg: #efcfa6;
+  --page-comment-active-bg: #e4b06c;
+  --page-comment-ring: #7c3d0e;
+}
+
+:is(:root, .nv-surface-preview)[data-surface='book'][data-theme='dark'] {
+  --page-comment-bg: #4f3b28;
+  --page-comment-active-bg: #6f5130;
+  --page-comment-ring: #f0bf84;
+}
+
+/* The anchor: a soft highlight (author colours and the active thread: generated rules, highlight.ts).
+   Colour only: no box changes, so the pagination measurement is untouched. */
+.nv-comment {
+  background-color: var(--page-comment-bg);
+  border-radius: 1px;
+}
+.nv-comment-draft {
+  background-color: var(--page-comment-active-bg);
+  box-shadow: inset 0 -2px 0 var(--page-comment-ring);
+}
+
+.nv-comment-slot {
+  transition: transform 120ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nv-comment-slot {
+    transition: none;
+  }
+}

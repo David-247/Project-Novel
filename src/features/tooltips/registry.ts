@@ -13,6 +13,7 @@
  */
 import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
+import { COMMENT_CONTROLS } from '@/features/comments'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
@@ -248,6 +249,14 @@ const FOOTNOTE_TOOLTIPS: Record<string, TooltipCopy> = {
   ...fromMeta(FOOTNOTE_EDITOR_CONTROLS, { done: 'Finish the footnote and put the cursor back after its number in the text.' }),
 }
 
+/** Comments: toolbar buttons, the margin panel / drawer and the thread cards (comments slice). */
+const COMMENT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(COMMENT_CONTROLS).map((c): [string, TooltipCopy] => [
+    c.id,
+    { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+  ]),
+)
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -273,6 +282,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...INSERT_TOOLTIPS,
   ...FOOTNOTE_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
+  ...COMMENT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
 })
 

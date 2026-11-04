@@ -27,6 +27,7 @@ import {
 } from '@/features/storage'
 import { PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
 import { FootnoteOptionsButton, useFootnotePagination } from '@/features/footnotes'
+import { CommentsLayout, CommentsPanelButton, NewCommentButton, registerCommentsSideFile } from '@/features/comments'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
@@ -54,6 +55,8 @@ export function App() {
   useStorageIntegration()
   // Footnotes at the bottom of their page (bottom reservations + the footnote area page slot).
   useFootnotePagination()
+  // comments.json is saved, autosaved and recovered with the manuscript (storage side file).
+  useEffect(() => registerCommentsSideFile(), [])
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
@@ -98,6 +101,15 @@ export function App() {
                       <HeaderFooterButton />
                     </ToolbarItem>
                   </ToolbarGroup>
+                  <ToolbarSeparator />
+                  <ToolbarGroup label="Comments">
+                    <ToolbarItem>
+                      <NewCommentButton />
+                    </ToolbarItem>
+                    <ToolbarItem>
+                      <CommentsPanelButton />
+                    </ToolbarItem>
+                  </ToolbarGroup>
                 </>
               }
             />
@@ -111,9 +123,12 @@ export function App() {
             <div className="pointer-events-none sticky top-0 z-10 flex h-0 items-start justify-end px-2 sm:px-4">
               <FindReplacePanel className="pointer-events-auto mt-2" />
             </div>
-            <PaginatedView>
-              <NovelEditor paged />
-            </PaginatedView>
+            {/* The comments margin panel sits beside the pages (a drawer in a narrow window). */}
+            <CommentsLayout>
+              <PaginatedView>
+                <NovelEditor paged />
+              </PaginatedView>
+            </CommentsLayout>
           </>
         }
         statusBar={

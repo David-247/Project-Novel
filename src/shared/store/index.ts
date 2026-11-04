@@ -5,6 +5,7 @@ import { createProjectSlice } from './project-slice'
 import { createFindSlice } from './find-slice'
 import { createBookSlice } from './book-slice'
 import { createLayoutSlice } from './layout-slice'
+import { createCommentsSlice } from './comments-slice'
 import type { RootState } from './types'
 
 /**
@@ -21,6 +22,7 @@ export const useStore = create<RootState>()((...a) => ({
   ...createFindSlice(...a),
   ...createBookSlice(...a),
   ...createLayoutSlice(...a),
+  ...createCommentsSlice(...a),
 }))
 
 export { useColorSchemeSync } from './use-color-scheme-sync'
@@ -30,4 +32,5 @@ export type { ProjectSlice, ProjectState, RecentProject, RecoveryPrompt, SaveSta
 export type { FindSlice } from './find-slice'
 export type { BookSlice } from './book-slice'
 export type { LayoutSlice, PageInfo, PageSide, VisibleSpread, ZoomMode } from './layout-slice'
+export type { CommentsSlice, CommentThread, CommentMessage } from './comments-slice'
 export type { RootState, SliceCreator } from './types'

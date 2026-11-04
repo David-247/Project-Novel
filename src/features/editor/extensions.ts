@@ -16,6 +16,7 @@ import { FindHighlight } from './find/plugin'
 import { BlockStyles } from './styles/block-styles'
 import { BookBreaks } from './breaks/nodes'
 import { Footnotes } from './footnote/node'
+import { CommentsExtension } from '@/features/comments'
 
 /**
  * Phase 1 base schema.
@@ -75,5 +76,10 @@ export function createEditorExtensions(): Extensions {
     // text), derived numbering (book.footnotes), Insert Footnote (Mod-Alt-f), Enter edits a selected
     // reference.
     Footnotes,
+
+    // --- Comments (Phase 3): additive only. The inline `comment` mark (attr id; overlaps other
+    // comments and every other mark), the thread plugin (threads change through undoable steps) and
+    // Mod-Alt-m (New Comment).
+    CommentsExtension,
   ]
 }
