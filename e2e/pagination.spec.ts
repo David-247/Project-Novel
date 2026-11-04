@@ -10,7 +10,7 @@ import { waitForLayout } from './helpers'
 const editor = (page: Page) => page.getByRole('textbox', { name: 'Manuscript' })
 const layout = (page: Page) => page.evaluate(() => window.__nvE2E.layout())
 const indicator = (page: Page) => page.getByTestId('page-indicator')
-const frame = (page: Page, i: number) => page.locator(`.nv-page[data-page-index="${i}"]`)
+const frame = (page: Page, i: number) => page.locator(`.nv-frames .nv-page[data-page-index="${i}"]`)
 
 const WORDS = 'night river quiet lantern stone window garden letter morning shadow silver harbor whisper meadow'.split(' ')
 /** `count` paragraphs of varied length (about `words` words on average). */
@@ -40,7 +40,7 @@ async function linesByPage(page: Page, selector: string) {
     const el = document.querySelector(sel)!
     const r = document.createRange()
     r.selectNodeContents(el)
-    const frames = Array.from(document.querySelectorAll<HTMLElement>('.nv-page')).map((f) => ({
+    const frames = Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page')).map((f) => ({
       index: Number(f.dataset.pageIndex),
       rect: f.getBoundingClientRect(),
     }))
@@ -164,10 +164,8 @@ test("breakBefore 'page' and 'recto' (data-break-before contract) start chapters
     await page.keyboard.press('Enter')
   }
   await waitForLayout(page)
-  expect((await layout(page)).pageCount).toBe(1)
-
-  await page.evaluate(() => window.__nvE2E.breakBeforeBlocks({ type: 'heading', level: 1 }, 'page'))
-  await waitForLayout(page)
+  // The Chapter Title style (styles ticket) already emits data-break-before="page" on each level-1 heading.
+  await expect(editor(page).locator('h1').nth(1)).toHaveAttribute('data-break-before', 'page')
   let l = await layout(page)
   expect(l.pageCount).toBe(3)
   expect(l.pages.map((p) => [p.startsBlockType, p.isBlank, p.chapterIndex])).toEqual([
@@ -194,20 +192,21 @@ test("breakBefore 'page' and 'recto' (data-break-before contract) start chapters
   expect(h!.y).toBeGreaterThan(f!.y)
   expect(h!.y + h!.height).toBeLessThan(f!.y + f!.height)
 
+  // Back to the style's own breaks.
   await page.evaluate(() => window.__nvE2E.breakBeforeBlocks(null))
   await waitForLayout(page)
-  expect((await layout(page)).pageCount).toBe(1)
+  expect((await layout(page)).pageCount).toBe(3)
 })
 
 test('a narrow window or book.view single shows one page at a time', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await paste(page, paragraphs(12))
   const { pageCount } = await layout(page)
-  await expect(page.locator('.nv-page').first()).toHaveAttribute('data-view', 'spread')
+  await expect(page.locator('.nv-frames .nv-page').first()).toHaveAttribute('data-view', 'spread')
 
   await page.setViewportSize({ width: 500, height: 800 })
   await expect.poll(async () => (await layout(page)).effectiveView).toBe('single')
-  await expect(page.locator('.nv-page').first()).toHaveAttribute('data-view', 'single')
+  await expect(page.locator('.nv-frames .nv-page').first()).toHaveAttribute('data-view', 'single')
   await page.keyboard.press('ControlOrMeta+Home')
   await expect(indicator(page)).toHaveText(`Page 1 of ${pageCount}`)
   // Single pages stack vertically; text stays on its page.
@@ -278,7 +277,7 @@ test('trim size reflows; margins mirror on verso and recto; bottom reservations 
   const leftOfText = async (i: number) => {
     const f = (await frame(page, i).boundingBox())!
     const x = await page.evaluate((idx) => {
-      const fr = document.querySelector(`.nv-page[data-page-index="${idx}"]`)!.getBoundingClientRect()
+      const fr = document.querySelector(`.nv-frames .nv-page[data-page-index="${idx}"]`)!.getBoundingClientRect()
       const r = document.createRange()
       let min = Infinity
       for (const p of Array.from(document.querySelectorAll('.ProseMirror p'))) {

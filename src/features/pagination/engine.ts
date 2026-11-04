@@ -296,7 +296,11 @@ export class PaginationEngine {
       else {
         top = (dom.getBoundingClientRect().top - rootTop) / scale - ownShift(dom)
         if (known !== undefined) {
-          delta = top - known
+          // Element boxes are snapped to device pixels relative to the scroll position: a block
+          // that did not move can read a few hundredths of a px off. Treat that as no move, or
+          // every offset below it would flicker between two roundings (and be redrawn).
+          delta = Math.abs(top - known) < 0.1 ? 0 : top - known
+          top = known + delta
           anchor = false
         } else anchor = true
       }
@@ -378,7 +382,10 @@ export class PaginationEngine {
       if (!geometryChanged) {
         // An unchanged node compares with its last signature; an edited one with the decorations
         // ProseMirror mapped through the edit (usually still right: then nothing is redrawn).
-        const last = this.lastSigs.get(node) ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1)
+        // A node instance used more than once in the document (not in prevTops) has no single last
+        // signature: compare with what is drawn at this position.
+        const known = this.prevTops.has(node) ? this.lastSigs.get(node) : undefined
+        const last = known ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1)
         if (last !== sig) {
           changed = true
           dirty.push([start, decos.length, pos, node.nodeSize])
@@ -428,6 +435,8 @@ export class PaginationEngine {
       publishMs: t6 - t5,
       totalMs: t6 - t0,
       redecorated: changed,
+      dirtyBlocks: dirty.length,
+      geometryChanged,
     }
   }
 

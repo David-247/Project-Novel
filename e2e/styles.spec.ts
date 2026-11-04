@@ -54,7 +54,8 @@ test('style picker, shortcuts, Enter chaining, undo and Clear direct formatting'
   await page.keyboard.press('ControlOrMeta+Shift+e')
   await expect(body).toHaveCSS('text-align', 'center')
   await ctl(page, 'styles.clearFormatting').click()
-  await expect(body).not.toHaveAttribute('style', /.+/)
+  // No direct formatting left inline (the paginated view's left/top page offsets are not formatting).
+  await expect(body).not.toHaveAttribute('style', /text-align/)
   expect(await body.evaluate((el) => getComputedStyle(el).textAlign)).toMatch(/^(left|start)$/)
 })
 
