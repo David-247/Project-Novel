@@ -6,8 +6,22 @@ import { expect, type TestInfo } from '@playwright/test'
  * Windows WebKit, Linux) the measurement still runs and is reported; a miss is a warning (test
  * annotation + console line), not a failure. Functional assertions are never routed through here.
  */
+export type Engine = 'chromium' | 'webkit' | 'firefox'
+
+/** The project's browser engine, from its configuration (`use.browserName` / `defaultBrowserType`). */
+export function engineOf(testInfo: TestInfo): Engine | null {
+  const use = testInfo.project.use as { browserName?: string; defaultBrowserType?: string }
+  const name = use.browserName ?? use.defaultBrowserType
+  return name === 'chromium' || name === 'webkit' || name === 'firefox' ? name : null
+}
+
 export function isShippingPair(testInfo: TestInfo, platform: NodeJS.Platform = process.platform): boolean {
-  const engine = /webkit/i.test(testInfo.project.name) ? 'webkit' : /chromium/i.test(testInfo.project.name) ? 'chromium' : 'other'
+  const engine = engineOf(testInfo)
+  if (!engine) {
+    // A gate that guesses wrong would silently stop blocking: on CI an unknown engine is an error.
+    if (process.env.CI) throw new Error(`perf budget: unknown browser engine for project "${testInfo.project.name}"`)
+    return false
+  }
   return (platform === 'darwin' && engine === 'webkit') || (platform === 'win32' && engine === 'chromium')
 }
 
