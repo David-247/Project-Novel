@@ -24,7 +24,11 @@ const apply = <T>(u: Updater<T>, prev: T): T => (typeof u === 'function' ? (u as
 export interface BookSlice {
   book: BookSettings & { settingsVersion: number; dirty: boolean }
   bookActions: {
-    setTrimSize: (id: TrimSizeId) => void
+    /**
+     * Change the trim size; with `margins`, set those in the same update (the trim size picker moves
+     * the margins to the new size defaults: one store update, so pagination reflows once).
+     */
+    setTrimSize: (id: TrimSizeId, margins?: Margins) => void
     setMargins: (margins: Margins) => void
     setStyles: (u: Updater<StyleSheetJSON>) => void
     setHeaderFooter: (u: Updater<HeaderFooterSettings>) => void
@@ -51,7 +55,7 @@ export const createBookSlice: SliceCreator<BookSlice> = (set) => {
   return {
     book: { ...defaultBookSettings(), settingsVersion: 0, dirty: false },
     bookActions: {
-      setTrimSize: (trimSize) => change({ trimSize }),
+      setTrimSize: (trimSize, margins) => change(margins ? { trimSize, margins } : { trimSize }),
       setMargins: (margins) => change({ margins }),
       setStyles: (u) => change((b) => ({ styles: apply(u, b.styles) })),
       setHeaderFooter: (u) => change((b) => ({ headerFooter: apply(u, b.headerFooter) })),

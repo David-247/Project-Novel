@@ -27,6 +27,18 @@ describe('book slice', () => {
     expect(book().settingsVersion).toBe(before + 1)
   })
 
+  it('setTrimSize with margins changes both in one update (one reflow, not two)', () => {
+    const before = book().settingsVersion
+    const seen: unknown[] = []
+    const unsub = useStore.subscribe((s) => seen.push([s.book.trimSize, s.book.margins]))
+    const margins = { top: 5, bottom: 6, inside: 7, outside: 8 }
+    a().setTrimSize('uk-a5', margins)
+    unsub()
+    expect(seen).toEqual([['uk-a5', margins]])
+    expect(book()).toMatchObject({ trimSize: 'uk-a5', margins, dirty: true })
+    expect(book().settingsVersion).toBe(before + 1)
+  })
+
   it('markBookClean clears dirty only if nothing changed since the saved version (race-safe)', () => {
     a().setSurface('white')
     const saved = book().settingsVersion

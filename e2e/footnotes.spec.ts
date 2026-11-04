@@ -294,6 +294,8 @@ test('copy and paste a sentence with a footnote: the note comes along and number
   // Select the first 20 characters (the reference among them), copy, paste at the end.
   await docStart(page)
   for (let i = 0; i < 20; i++) await page.keyboard.press('Shift+ArrowRight')
+  // The editor reads a keyboard selection change on the async selectionchange: read it now.
+  await page.evaluate(() => window.__nvE2E.syncSelection())
   const html = await page.evaluate(() => {
     const data = new DataTransfer()
     document.querySelector('.ProseMirror')!.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }))

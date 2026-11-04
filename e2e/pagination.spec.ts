@@ -149,8 +149,11 @@ test('typing, selection across pages, undo and find work on any page; PageDown m
   await expect(editor(page)).not.toContainText('Zebra')
 
   // A selection across a page boundary (Shift+PageDown) deletes as one range.
-  await docStart(page)
-  await expect.poll(async () => (await layout(page)).currentPage).toBe(0)
+  // (Setup: caret to the start. On macOS Chromium the first Cmd+Up after the undo was sometimes lost.)
+  await expect(async () => {
+    await docStart(page)
+    expect((await layout(page)).currentPage).toBe(0)
+  }).toPass({ timeout: 15_000 })
   await page.keyboard.press('Shift+PageDown')
   await expect.poll(async () => (await layout(page)).currentPage).toBe(1)
   await page.keyboard.press('Shift+PageDown')

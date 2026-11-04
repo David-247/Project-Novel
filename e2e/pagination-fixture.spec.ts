@@ -4,8 +4,9 @@ import { buildPaginationFixture } from './fixtures/pagination-manuscript'
 import { launch, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
- * Cross-engine pagination fixture (input to the Phase 2 acceptance comparison; tolerance decision:
- * total pages differ <= max(2, 1%), each chapter opening page index differs <= 1).
+ * Cross-engine pagination fixture (input to the Phase 2 acceptance comparison; tolerance decisions:
+ * total pages differ <= max(2, 1%), each chapter opening page index differs <= 1, or <= 2 when
+ * chapters open on a right-hand page).
  *
  * The deterministic ~100k-word fixture is typeset in a bundled OFL font (Libre Baskerville,
  * e2e/fixtures/fonts, see OFL.txt there) so system fonts do not differ between machines. Chapter
@@ -59,7 +60,8 @@ test('cross-engine fixture: chapter opening pages and page totals per trim size'
     platform: process.platform,
     font: 'Libre Baskerville (OFL), book styles at 96/72 px per point',
     manuscript: { words: fx.words, chapters: fx.chapters, blocks: fx.doc.content.length },
-    tolerance: { totalPages: 'max(2, 1%)', chapterOpening: 1 },
+    // Applied by scripts/compare-pagination.mjs (CI job "Cross-engine page breaks").
+    tolerance: { totalPages: 'max(2, 1%)', chapterOpening: { page: 1, recto: 2 } },
     results,
     measuredAt: new Date().toISOString(),
   }

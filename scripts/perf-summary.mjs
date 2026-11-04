@@ -1,35 +1,90 @@
-// Markdown table of the perf numbers in perf-results/*.json (written by e2e/perf.spec.ts).
-// Appends to $GITHUB_STEP_SUMMARY in CI, otherwise prints to stdout. Never fails the job.
+// Markdown tables of the perf numbers in perf-results/*.json (written by e2e/perf.spec.ts and
+// e2e/pagination-perf.spec.ts). Appends to $GITHUB_STEP_SUMMARY in CI, otherwise prints to stdout.
+// Never fails the job: the budgets are asserted by the tests (blocking only on the shipping pairs,
+// WebKit on macOS and Chromium on Windows; elsewhere a miss is a warning, decision afbe3475).
 import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-const dir = process.argv[2] ?? 'perf-results'
-const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json')).sort() : []
-const rows = []
-for (const f of files) {
-  try {
-    const r = JSON.parse(readFileSync(join(dir, f), 'utf8'))
-    const t = r.typing ?? {}
-    rows.push(
-      `| ${r.scenario ?? 'perf'} | ${r.browser} | ${r.platform} | ${t.medianMs ?? '–'} | ${t.p95Ms ?? '–'} | ${t.maxMs ?? '–'} | ` +
-        `${r.replaceAllMs ?? '–'} | ${r.openMs ?? '–'} |`,
-    )
-  } catch (e) {
-    rows.push(`| ${f} | unreadable: ${String(e).slice(0, 60)} | | | | | | |`)
-  }
+const SHIPPING = new Set(['webkit|darwin', 'chromium|win32'])
+const engineOf = (browser) => String(browser ?? '').replace(/^perf-/, '')
+export const isShipping = (r) => SHIPPING.has(`${engineOf(r.browser)}|${r.platform}`)
+const v = (n) => (n === undefined || n === null ? '–' : String(n))
+/** "12.3" plus a miss marker against `limit` (BLOCKING on a shipping pair, warning elsewhere). */
+const cell = (r, n, limit) => {
+  if (n === undefined || n === null) return '–'
+  if (limit === undefined || n < limit) return String(n)
+  return `**${n}** (${isShipping(r) ? 'MISS' : 'miss, warning'})`
 }
-const md = [
-  '### Performance (100,000-word manuscript)',
-  '',
-  rows.length
-    ? [
-        '| scenario | browser | OS | typing median ms (budget < 50) | typing p95 ms | typing max ms | Replace All ms (< 2000) | open ms |',
-        '| --- | --- | --- | --- | --- | --- | --- | --- |',
-        ...rows,
-      ].join('\n')
-    : `_No perf results found in ${dir}/._`,
-  '',
-].join('\n')
+const pair = (r) => `${engineOf(r.browser)} / ${r.platform}${isShipping(r) ? ' (shipping)' : ''}`
 
-if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n')
-else console.log(md)
+export function loadResults(dir) {
+  if (!existsSync(dir)) return []
+  const out = []
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.json') && !x.startsWith('pagination-fixture')).sort()) {
+    try {
+      out.push({ file: f, ...JSON.parse(readFileSync(join(dir, f), 'utf8')) })
+    } catch (e) {
+      out.push({ file: f, scenario: f, error: String(e).slice(0, 80) })
+    }
+  }
+  return out
+}
+
+export function toMarkdown(results, dir = 'perf-results') {
+  const md = ['### Performance (100,000-word manuscript)', '']
+  if (!results.length) return [...md, `_No perf results found in ${dir}/._`, ''].join('\n')
+  md.push('Budgets block CI on the shipping pairs (WebKit on macOS, Chromium on Windows); elsewhere a miss is a warning.', '')
+
+  const typing = []
+  for (const r of results) {
+    const add = (label, t) => t && typing.push(`| ${label} | ${pair(r)} | ${cell(r, t.medianMs, 50)} | ${v(t.p95Ms)} | ${v(t.maxMs)} | ${v(r.openMs)} |`)
+    add(r.scenario, r.typing)
+    add(`${r.scenario}: end of line`, r.endOfLine)
+    add(`${r.scenario}: split paragraph`, r.splitParagraph)
+  }
+  if (typing.length) {
+    md.push('#### Typing latency (keydown to paint)', '')
+    md.push('| scenario | engine / OS | median ms (< 50) | p95 ms | max ms | open ms |', '| --- | --- | --- | --- | --- | --- |', ...typing, '')
+  }
+
+  const trims = results.filter((r) => Array.isArray(r.reflows))
+  if (trims.length) {
+    md.push('#### Trim size reflow (reflow complete < 1000 ms; all blocks drawn < 3000 ms)', '')
+    md.push('| scenario | engine / OS | max reflow ms | max all drawn ms | per trim: reflow / all drawn ms (pages) |', '| --- | --- | --- | --- | --- |')
+    for (const r of trims) {
+      const per = r.reflows.map((x) => `${x.trim} ${x.ms} / ${x.allDrawnMs} (${x.pages})`).join('; ')
+      md.push(`| ${r.scenario} | ${pair(r)} | ${cell(r, r.maxReflowMs, 1000)} | ${cell(r, r.maxAllDrawnMs, 3000)} | ${per} |`)
+    }
+    md.push('')
+  }
+
+  const styles = results.filter((r) => r.restyleMs !== undefined)
+  if (styles.length) {
+    md.push('#### Chapter Title style edit (style sheet swap < 100 ms; reflow complete < 1000 ms)', '')
+    md.push('| engine / OS | sheet swap ms | reflow complete ms | all drawn ms | chapters restyled |', '| --- | --- | --- | --- | --- |')
+    for (const r of styles) {
+      md.push(`| ${pair(r)} | ${cell(r, r.restyleMs, 100)} | ${cell(r, r.repaginatedMs, 1000)} | ${cell(r, r.allDrawnMs, 3000)} | ${v(r.chaptersRestyled)} |`)
+    }
+    md.push('')
+  }
+
+  const replace = results.filter((r) => r.replaceAllMs !== undefined)
+  if (replace.length) {
+    md.push('#### Replace All (10,000 occurrences, < 2000 ms)', '')
+    md.push('| engine / OS | Replace All ms |', '| --- | --- |')
+    for (const r of replace) md.push(`| ${pair(r)} | ${cell(r, r.replaceAllMs, 2000)} |`)
+    md.push('')
+  }
+
+  const broken = results.filter((r) => r.error)
+  for (const r of broken) md.push(`- ${r.file}: unreadable (${r.error})`)
+  return md.join('\n') + '\n'
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const dir = process.argv[2] ?? 'perf-results'
+  const md = toMarkdown(loadResults(dir), dir)
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n')
+  else console.log(md)
+}

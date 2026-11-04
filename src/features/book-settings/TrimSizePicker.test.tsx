@@ -119,6 +119,18 @@ describe('TrimSizePicker', () => {
     expect(book()).toMatchObject({ trimSize: 'uk-royal', margins: { top: 10, bottom: 10, inside: 10, outside: 10 } })
   })
 
+  it('changes trim size and default margins in a single store update (pagination reflows once)', () => {
+    renderPicker()
+    const updates: unknown[] = []
+    const unsub = useStore.subscribe((s, p) => {
+      if (s.book.trimSize !== p.book.trimSize || s.book.margins !== p.book.margins) updates.push([s.book.trimSize, s.book.margins])
+    })
+    openWithKeyboard()
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /A5/ }))
+    unsub()
+    expect(updates).toEqual([['uk-a5', getTrimSize('uk-a5')!.margins]])
+  })
+
   it('passes the tooltip coverage audit closed and with the menu open', () => {
     const { container } = renderPicker()
     let problems = auditTooltipCoverage(container)

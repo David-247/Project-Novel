@@ -288,3 +288,33 @@ test('custom styles and a modified Chapter Title persist through save, close and
   await ed.locator('p').click()
   await expect(picker(page).locator('option:checked')).toHaveText('Letter')
 })
+
+test('REGRESSION: a project whose book.json modifies Chapter Title is paginated with that style on open', async ({ page }) => {
+  // Opening loads every book setting at once (a new margins object too). The pages must be measured
+  // with the loaded style sheet, not with the defaults that were showing when the load started.
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await launch(page)
+  const words = 'night river quiet lantern stone window garden letter morning shadow '.repeat(6)
+  const content: unknown[] = []
+  for (let c = 0; c < 6; c++) {
+    content.push({ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: `Chapter ${c + 1}` }] })
+    for (let i = 0; i < 14; i++) content.push({ type: 'paragraph', content: [{ type: 'text', text: `Paragraph ${i} ${words}` }] })
+  }
+  await seedProject(page, '/projects/Sunk', 'Sunk', { type: 'doc', content })
+  const book = { format: 'novel-book', version: 1, trimSize: 'us-5.5x8.5', styles: { 'chapter-title': { fontSize: 40, spaceBefore: 200 } } }
+  await page.evaluate((b) => window.__nvE2E.writeFile('/projects/Sunk/book.json', b), JSON.stringify(book))
+  await openRecent(page, '/projects/Sunk')
+  await expect(saveStatus(page)).toHaveText('Sunk: All changes saved')
+  const title = manuscript(page).locator('h1[data-style="chapter-title"]').first()
+  await expect.poll(async () => px(await title.evaluate((el) => getComputedStyle(el).fontSize))).toBeCloseTo((40 * 96) / 72, 0)
+  const pagesOf = async () => {
+    await page.waitForFunction(() => window.__nvE2E.paginationSettled())
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
+    await page.waitForFunction(() => window.__nvE2E.paginationSettled())
+    return page.evaluate(() => window.__nvE2E.layout().pages.map((p) => [p.from, p.to]))
+  }
+  const onOpen = await pagesOf()
+  // Every block measured afresh must give the same pages.
+  await page.evaluate(() => window.__nvE2E.remeasureAll())
+  expect(onOpen).toEqual(await pagesOf())
+})

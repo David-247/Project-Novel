@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, newProject, openRecent, readFile, recoveryControl, saveStatus, seedProject, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, recoveryControl, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Running headers, footers and page numbers (Phase 2, headers/footers ticket). They are drawn in the
@@ -254,7 +254,7 @@ test('a chapter title edit updates only the heads that show it: other pages keep
   // Edit chapter 1's title: click its heading and type.
   const h1 = editor(page).locator('h1').first()
   await h1.click()
-  await page.keyboard.press('End')
+  await lineEnd(page) // End scrolls on macOS; Cmd+Right there
   await page.keyboard.type(' (revised)')
   await expect.poll(async () => (await shown(page)).find((g) => g.index === body)!.header).toBe(`${oldTitle} (revised)`)
   got = await shown(page)

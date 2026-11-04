@@ -37,6 +37,37 @@ shutdown or restart), the next start offers to reopen the project and then **Res
   status bar mentions such files when the project is opened. Novel never deletes them; to get text back from one,
   see "Recovering a set-aside backup" in [docs/project-format.md](docs/project-format.md).
 
+### Book layout (Phase 2)
+
+The manuscript is laid out as a printed book: pages on a desk, two facing pages at a time. Every control has a
+tooltip (hover, or focus it with the keyboard). Book settings are saved with the project in `book.json`
+(see [docs/project-format.md](docs/project-format.md)); the text stays in `manuscript.json`.
+
+A quick tour: paste a few chapters (headings become chapters), then try each row below.
+
+| Try | How | What to look for |
+| --- | --- | --- |
+| Trim size | Toolbar trim size button (shows e.g. "Trade 5.5 x 8.5 in") > pick a US or UK/EU size | The whole book reflows at once; the status bar page count changes. |
+| Pages and spreads | Status bar: spread toggle (open book), zoom out / zoom / zoom in; PageUp / PageDown | "Pages 12–13 of 384"; Fit spread is the default; narrow windows show one page at a time. |
+| Paragraph styles | Toolbar style picker; ⌘⌥0 / Ctrl+Alt+0 Body, ⌘⌥1 / Ctrl+Alt+1 Chapter Title | The paragraph takes the style; Enter after a Chapter Title gives a First Paragraph. |
+| Change a style everywhere | Put the caret in a chapter title > Modify style (pilcrow-and-nib icon) > e.g. size 28 > Save | Every chapter title changes and the pages reflow; the text itself is not changed. |
+| Your own styles | Manage styles > New / Duplicate / Rename / Delete | Built-in styles can be modified but not renamed or deleted. |
+| Clear direct formatting | ⌘\ / Ctrl+\ or the struck-T button | The paragraph looks exactly like its style again. |
+| Breaks | Insert > Page break, New chapter, Scene break; "Chapters start on" next page / right-hand page | Right-hand openings insert a blank left page when needed; `***` alone on a line becomes a scene break. |
+| Footnotes | Insert > Footnote, or ⌘⌥F / Ctrl+Alt+F; Escape or Done returns to the text | A raised number in the text, the note at the bottom of the same page; long notes continue on the next page. Toolbar "Footnotes" sets numbering (whole book / per chapter), format and the separator line. |
+| Running heads and page numbers | Toolbar Headers & page numbers, or double-click a header or footer | Author on left pages, title on right pages, numbers from 1 at the first chapter, nothing on chapter openings and blank pages. "Book details…" sets the title and author (after the first save). |
+| Paper | Toolbar Paper picker: Auto, Book, White, Dark | Auto follows the OS light/dark mode; Book is cream paper on a walnut desk (warm dark paper in dark mode). |
+
+**Save and reopen.** Everything above survives Save and reopening the project, and crash recovery restores unsaved
+book settings together with the text.
+
+**Known limitations (Phase 2).**
+
+- Pages are laid out with the fonts installed on your computer, so the same manuscript can paginate slightly
+  differently on macOS and Windows. The automated cross-engine check uses a bundled test font to separate engine
+  differences from font differences (see "End-to-end tests").
+- Export (PDF, DOCX), track changes, comments and the AI tutor are later phases.
+
 ## Development
 
 Requirements: Node 22, pnpm 9, Rust (stable), and the Tauri 2 platform prerequisites (WebView2 on Windows, Xcode CLT on macOS).
@@ -70,15 +101,40 @@ measurements to `perf-results/`; it runs in its own projects (`perf-chromium`, t
 after the functional projects finish, so nothing else competes for the CPU while it measures. CI runs
 perf in a separate job and puts the numbers in the job summary (`node scripts/perf-summary.mjs`).
 
+Phase 2 (book layout) adds:
+
+- `e2e/phase2-acceptance.spec.ts`: the acceptance scenario end to end (paste the 100k-word fixture, several trim
+  sizes, a Chapter Title style edit, a footnote, page numbers, the four paper surfaces, save and reopen with an
+  identical layout); it runs in the serial perf projects so its reflow budgets get a quiet CPU (in CI: the perf
+  job). `e2e/phase2-tooltips.spec.ts` audits every Phase 2 control's tooltip in the spread view with
+  each menu and dialog open; `e2e/phase2-contrast.spec.ts` measures WCAG AA contrast on the rendered spread for every
+  paper surface in OS light and dark.
+- Perf (`e2e/perf.spec.ts`, `e2e/pagination-perf.spec.ts`): typing in the spread view with 200 footnotes, the find
+  panel open and an autosave mid-typing; trim size reflow for every catalog size; the Chapter Title style edit.
+  Budgets (typing median < 50 ms, reflow < 1 s, style sheet swap < 100 ms, Replace All < 2 s) are blocking only on
+  the engine/OS pairs the app ships on, WebKit on macOS and Chromium on Windows (`e2e/budget.ts`); the other pairs
+  report misses as warnings.
+- Cross-engine page breaks: `e2e/pagination-fixture.spec.ts` typesets the fixture in a bundled OFL font at every
+  trim size and writes chapter opening pages and page totals to `perf-results/pagination-fixture-*.json`. CI
+  collects them from chromium and webkit on macOS and Windows and runs
+  `node scripts/compare-pagination.mjs <dir> --require webkit-darwin,chromium-win32`: total pages may differ by at
+  most max(2, 1 %), chapter openings by 1 page (2 for chapters that open on a right-hand page). A miss fails the
+  job with a diff table in the job summary.
+
 Real-app smoke (Windows/Linux only; WebDriver does not exist for macOS WKWebView): install
-`tauri-driver` (`cargo install tauri-driver`) and an msedgedriver matching your WebView2 version,
-build the app, then `node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe`.
+`tauri-driver` (`cargo install tauri-driver`) and an msedgedriver matching your WebView2 version
+(`EDGEWEBDRIVER` may point at it or its folder), build the app, then
+`node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe`. On Windows it tries tauri-driver first, then
+`--mode attach`: it starts the app with a WebView2 DevTools port and attaches msedgedriver to it. CI runs it
+non-blocking: on GitHub's Windows runners WebView2 ignores the extra browser arguments both modes rely on (see the
+comment in `.github/workflows/ci.yml`).
 
 ## Architecture
 
 ### Feature slices
 
-`src/features/{editor,storage,tooltips,app-shell}/` are independent slices. Each exposes **only** `src/features/<slice>/index.ts`
+`src/features/{editor,storage,tooltips,app-shell,book-settings,pagination,header-footer,footnotes}/` are independent
+slices; the shared book contract (types, trim sizes, styles, header/footer resolution) is `src/shared/book`. Each exposes **only** `src/features/<slice>/index.ts`
 as its public interface. A slice may import another slice's `index.ts` (`@/features/other`) or `@/shared/*`, never its internals
 (`@/features/other/x` or `../other/x`). ESLint (`no-restricted-imports` in `eslint.config.js`) enforces this; `tests/cross-slice-lint.test.ts`
 proves it against fixtures. `src/App.tsx` is the composition root where slices are plugged together. `@/` aliases `src/`.

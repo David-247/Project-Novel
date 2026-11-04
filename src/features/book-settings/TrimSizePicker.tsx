@@ -37,10 +37,9 @@ export function TrimSizePicker({ ref, ...forwarded }: TrimSizePickerProps) {
     if (id === book.trimSize) return
     const previous = resolveTrimSize(book.trimSize)
     const next = resolveTrimSize(id)
-    if (marginsEqual(book.margins, previous.margins) && !marginsEqual(book.margins, next.margins)) {
-      bookActions.setMargins({ ...next.margins })
-    }
-    bookActions.setTrimSize(id)
+    // Trim size and (default) margins in one store update: each geometry change is a full reflow.
+    const followDefaults = marginsEqual(book.margins, previous.margins) && !marginsEqual(book.margins, next.margins)
+    bookActions.setTrimSize(id, followDefaults ? { ...next.margins } : undefined)
   }
 
   return (
