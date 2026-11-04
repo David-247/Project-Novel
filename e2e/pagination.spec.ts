@@ -612,6 +612,10 @@ test('find during a progressive reflow scrolls to where the match is painted', a
   const blocks = paragraphs(1000, 60)
   blocks[900] = 'The Zanzibar paragraph near the end. ' + blocks[900]
   await paste(page, blocks)
+  // A fixed zoom: at fit-spread the scale itself changes with the page height after a trim change,
+  // which moves everything on screen once more.
+  await page.locator('[data-control-id="pagination.zoom"]').selectOption('100')
+  await editor(page).focus()
   await docStart(page)
   await waitForLayout(page)
   await page.keyboard.press('ControlOrMeta+f')

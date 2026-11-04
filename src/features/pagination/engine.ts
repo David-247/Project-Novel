@@ -475,7 +475,9 @@ export class PaginationEngine {
     })
 
     const decos: Decoration[] = []
-    const current = paginationKey.getState(view.state)?.set ?? DecorationSet.empty
+    const pluginState = paginationKey.getState(view.state)
+    const current = pluginState?.set ?? DecorationSet.empty
+    const unmapped = !!pluginState?.unmapped
     const geometryChanged = key !== this.lastKey
     // Blocks whose decorations differ from what is drawn.
     const dirty: DirtyBlock[] = []
@@ -517,7 +519,11 @@ export class PaginationEngine {
       const caretPage = pageAt(pages, view.state.selection.head)
       const inWin = (d: DirtyBlock) => (d.p1 >= win[0] && d.p0 <= win[1]) || (d.p1 >= caretPage - 1 && d.p0 <= caretPage + 1)
       let apply = dirty
-      if (dirty.length > PROGRESSIVE_MIN) {
+      // Progressive only for wholesale reflows (geometry, a restyle, a huge transaction). A line
+      // moving between pages while typing redraws everything at once: one slower keystroke, not a
+      // chunk added to each of the next several keystrokes.
+      const wholesale = geometryChanged || restyled !== null || unmapped || this.catchUpOnly
+      if (wholesale && dirty.length > PROGRESSIVE_MIN) {
         const near = dirty.filter(inWin)
         const rest = dirty.filter((d) => !inWin(d))
         const centre = (win[0] + win[1]) / 2

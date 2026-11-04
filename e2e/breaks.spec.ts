@@ -8,6 +8,8 @@ const surface = (page: Page) => page.locator('.novel-editor-content')
 async function choose(page: Page, id: string) {
   await insert(page).click()
   await item(page, id).click()
+  // The menu closes and hands focus back to the manuscript; typing before that is lost.
+  await expect(editor(page)).toBeFocused()
 }
 
 test('Insert menu adds a page break, a chapter and a scene break', async ({ page }) => {
