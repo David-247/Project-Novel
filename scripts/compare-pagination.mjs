@@ -60,6 +60,9 @@ export function compareRuns(a, b) {
       rows.push(row)
       continue
     }
+    // Every fixture has chapters: an empty list means the run measured nothing, never a pass.
+    const empty = [ra, rb].map((x, i) => (x.chapterOpenings.length === 0 ? runKey(i === 0 ? a : b) : null)).filter(Boolean)
+    if (empty.length) row.problems.push(`no chapter openings in ${empty.join(', ')}`)
     row.totalDiff = Math.abs(ra.pageCount - rb.pageCount)
     row.totalLimit = totalLimit(ra.pageCount, rb.pageCount)
     if (row.totalDiff > row.totalLimit) row.problems.push(`total pages differ by ${row.totalDiff} (limit ${fmt(row.totalLimit)})`)
@@ -120,18 +123,29 @@ export function toMarkdown(report) {
   )
   for (const p of report.problems) lines.push(`- ${p}`)
   if (report.problems.length) lines.push('')
+  // One line per pair (rows within tolerance, the largest differences), then a table of its failing rows only.
+  const max = (xs) => (xs.length ? Math.max(...xs) : null)
   for (const pair of report.pairs) {
-    lines.push(`#### ${pair.a} vs ${pair.b}${pair.shipping ? ' (shipping pair)' : ''}: ${pair.ok ? 'pass' : 'FAIL'}`, '')
-    lines.push(`| mode | trim | pages ${pair.a} | pages ${pair.b} | total diff / limit | max opening drift / limit | status |`)
+    const passing = pair.rows.filter((r) => r.ok)
+    const failing = pair.rows.filter((r) => !r.ok)
+    const maxTotal = max(pair.rows.map((r) => r.totalDiff).filter((n) => n !== null))
+    const maxDrift = max(pair.rows.map((r) => r.maxOpeningDrift).filter((n) => n !== null))
+    lines.push(
+      `- ${pair.a} vs ${pair.b}${pair.shipping ? ' (shipping pair)' : ''}: ${pair.ok ? 'pass' : 'FAIL'}, ` +
+        `${passing.length} of ${pair.rows.length} rows within tolerance (max total diff ${fmt(maxTotal)}, max opening drift ${fmt(maxDrift)})`,
+    )
+    if (!failing.length) continue
+    lines.push('', `| mode | trim | pages ${pair.a} | pages ${pair.b} | total diff / limit | max opening drift / limit | status |`)
     lines.push('| --- | --- | --- | --- | --- | --- | --- |')
-    for (const r of pair.rows) {
+    for (const r of failing) {
       lines.push(
         `| ${r.mode} | ${r.trim} | ${fmt(r.pagesA)} | ${fmt(r.pagesB)} | ${fmt(r.totalDiff)} / ${fmt(r.totalLimit)} | ` +
-          `${fmt(r.maxOpeningDrift)} / ${r.openingLimit} | ${r.ok ? 'ok' : `FAIL: ${r.problems.join('; ')}`} |`,
+          `${fmt(r.maxOpeningDrift)} / ${r.openingLimit} | FAIL: ${r.problems.join('; ')} |`,
       )
     }
     lines.push('')
   }
+  lines.push('')
   return lines.join('\n')
 }
 

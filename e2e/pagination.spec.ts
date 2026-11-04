@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { clickBlockStart, docEnd, docStart, lineEnd, waitForLayout } from './helpers'
+import { logFocusOnRetry } from './focus-log'
 
 /**
  * Paginated view (Phase 2, docs/pagination.md): one editor view laid out as book pages, in a
@@ -150,10 +151,12 @@ test('typing, selection across pages, undo and find work on any page; PageDown m
 
   // A selection across a page boundary (Shift+PageDown) deletes as one range.
   // (Setup: caret to the start. On macOS Chromium the first Cmd+Up after the undo was sometimes lost.)
-  await expect(async () => {
-    await docStart(page)
-    expect((await layout(page)).currentPage).toBe(0)
-  }).toPass({ timeout: 15_000 })
+  await expect(
+    logFocusOnRetry(page, 'docStart before Shift+PageDown', async () => {
+      await docStart(page)
+      expect((await layout(page)).currentPage).toBe(0)
+    }),
+  ).toPass({ timeout: 15_000 })
   await page.keyboard.press('Shift+PageDown')
   await expect.poll(async () => (await layout(page)).currentPage).toBe(1)
   await page.keyboard.press('Shift+PageDown')

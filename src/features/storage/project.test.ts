@@ -33,6 +33,7 @@ let unregister = () => {}
 async function freshSession() {
   await __resetStorageForTests()
   useStore.setState({ project: initialProjectState })
+  useStore.getState().bookActions.resetBook()
   unregister()
   editor = createMemoryDocumentProvider()
   unregister = registerDocumentProvider(editor)
@@ -90,7 +91,7 @@ describe('project storage', () => {
     onProjectOpened(opened)
     await createAt('/books/novel')
 
-    expect(json('/books/novel/project.json')).toMatchObject({ format: 'novel-project', schemaVersion: 1, title: 'novel' })
+    expect(json('/books/novel/project.json')).toMatchObject({ format: 'novel-project', schemaVersion: 2, title: 'novel' })
     expect(backend.sqlLoads).toEqual(['sqlite:/books/novel/index.sqlite'])
     expect(backend.sqlExecuted.some((q) => q.includes('CREATE TABLE IF NOT EXISTS revisions'))).toBe(true)
     expect(opened).toHaveBeenCalledWith(expect.objectContaining({ path: '/books/novel' }))
@@ -303,6 +304,48 @@ describe('project storage', () => {
     expect(backend.messages[0].text).toMatch(/editor is not ready/)
   })
 
+  describe('unsaved-changes prompt in an untitled session', () => {
+    it('REGRESSION: no prompt when no project is open and the document is empty, even if view or paper toggles made the book unsaved', async () => {
+      useStore.getState().bookActions.setView('single')
+      useStore.getState().bookActions.setSurface('dark')
+      expect(useStore.getState().book.dirty).toBe(true)
+      expect(await confirmUnsavedChanges('closing')).toBe(true)
+      expect(backend.messages).toEqual([])
+      // Text typed and deleted again leaves nothing to lose either.
+      editor.update({ type: 'doc', content: [{ type: 'paragraph' }] })
+      expect(await confirmUnsavedChanges('closing')).toBe(true)
+      expect(backend.messages).toEqual([])
+    })
+
+    it.each([
+      ['a trim size change', () => useStore.getState().bookActions.setTrimSize('uk-a5')],
+      ['a style change', () => useStore.getState().bookActions.setStyles((s) => ({ ...s, body: { fontSize: 12 } }))],
+      ['a margin change', () => useStore.getState().bookActions.setMargins({ top: 60, bottom: 60, inside: 70, outside: 50 })],
+    ])('REGRESSION: an empty untitled session still asks after %s (it works without a project)', async (_what, change) => {
+      useStore.getState().bookActions.setView('single')
+      change()
+      backend.answer = 'Cancel'
+      expect(await confirmUnsavedChanges('closing')).toBe(false)
+      expect(backend.messages).toHaveLength(1)
+    })
+
+    it('still asks when the untitled document has text, or when a project is open', async () => {
+      editor.update(textDoc('a first line'))
+      backend.answer = 'Cancel'
+      expect(await confirmUnsavedChanges('closing')).toBe(false)
+      expect(backend.messages).toHaveLength(1)
+
+      backend.answer = "Don't Save" // New Project asks about the untitled text first
+      await createAt('/books/novel')
+      expect(backend.messages).toHaveLength(2)
+      useStore.getState().bookActions.setView('single')
+      expect(editor.isDirty()).toBe(false)
+      backend.answer = 'Cancel'
+      expect(await confirmUnsavedChanges('closing')).toBe(false)
+      expect(backend.messages).toHaveLength(3)
+    })
+  })
+
   describe('unsaved-changes prompt', () => {
     beforeEach(async () => {
       await createAt('/books/novel')
@@ -380,6 +423,20 @@ describe('book details (title and author)', () => {
     const before = backend.files.get('/books/novel/project.json')
     expect(await updateProjectDetails({ author: 'A' })).toBe(true)
     expect(backend.files.get('/books/novel/project.json')).toBe(before)
+  })
+
+  it('a version 1 project.json with unknown keys keeps them through a save and a details edit, and is written as version 2', async () => {
+    await createAt('/books/newer')
+    const meta = json('/books/newer/project.json')
+    backend.files.set('/books/newer/project.json', JSON.stringify({ ...meta, schemaVersion: 1, series: { name: 'Roads' }, language: 'en-GB' }))
+    await closeProject()
+    backend.pick = '/books/newer'
+    expect(await openProject()).toBe(true)
+    editor.update(textDoc('words'))
+    expect(await saveProject()).toBe(true)
+    expect(json('/books/newer/project.json')).toMatchObject({ schemaVersion: 2, series: { name: 'Roads' }, language: 'en-GB' })
+    expect(await updateProjectDetails({ author: 'Ada Quill' })).toBe(true)
+    expect(json('/books/newer/project.json')).toEqual({ ...meta, schemaVersion: 2, author: 'Ada Quill', updatedAt: expect.any(String), series: { name: 'Roads' }, language: 'en-GB' })
   })
 
   it('a project.json without author opens with an empty author', async () => {

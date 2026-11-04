@@ -38,6 +38,32 @@ describe('perf summary', () => {
     expect(md).toMatch(/\| webkit \/ win32 \| 700 \|/)
   })
 
+  it('REGRESSION: reports the acceptance Chapter Title style edit timing next to the perf style edit', () => {
+    const md = toMarkdown([
+      { scenario: 'perf-styles', browser: 'perf-webkit', platform: 'darwin', restyleMs: 60, repaginatedMs: 500, allDrawnMs: 900, chaptersRestyled: 40 },
+      {
+        scenario: 'acceptance',
+        browser: 'perf-webkit',
+        platform: 'darwin',
+        reflows: [{ trim: 'uk-a5', ms: 300, allDrawnMs: 500, pages: 420 }],
+        maxReflowMs: 300,
+        maxAllDrawnMs: 500,
+        chapterStyleEdit: { ms: 640.2, syncMs: 80, passMs: 210.5, allDrawnMs: 1450 },
+      },
+      {
+        scenario: 'acceptance',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        reflows: [],
+        chapterStyleEdit: { ms: 1200, syncMs: 90, passMs: 300, allDrawnMs: 1800 },
+      },
+    ])
+    const section = md.slice(md.indexOf('#### Chapter Title style edit'))
+    expect(section).toMatch(/\| perf-styles \| webkit \/ darwin \(shipping\) \| 60 \| 500 \| 900 \| 40 \|/)
+    expect(section).toMatch(/\| acceptance \| webkit \/ darwin \(shipping\) \| – \| 640\.2 \| 1450 \| – \|/)
+    expect(section).toMatch(/\| acceptance \| chromium \/ win32 \(shipping\) \| – \| \*\*1200\*\* \(MISS\) \| 1800 \| – \|/)
+  })
+
   it('says so when there are no results', () => {
     expect(toMarkdown([], 'nowhere')).toMatch(/No perf results found in nowhere/)
   })

@@ -246,8 +246,10 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
   expect(refPage).toBeGreaterThan(0)
   await expect(page.locator(`.nv-frames .nv-page[data-page-index="${refPage}"] .nv-fn-area`)).toHaveText('1 Acceptance note.')
   for (const other of [refPage - 1, refPage + 1]) {
-    const area = page.locator(`.nv-frames .nv-page[data-page-index="${other}"] .nv-fn-area`)
-    if (await area.count()) await expect(area).not.toContainText('Acceptance note.')
+    // The neighbour is rendered (so this looks at a real page); it may rightly have no footnote area.
+    await expect(page.locator(`.nv-frames .nv-page[data-page-index="${other}"]`)).toHaveCount(1)
+    const areas = await page.locator(`.nv-frames .nv-page[data-page-index="${other}"] .nv-fn-area`).allTextContents()
+    expect(areas.join(' '), `footnote area of page ${other}`).not.toContain('Acceptance note.')
   }
 
   // ---- 5. Page numbers: off, then on (outside corner of the footer); read them on specific pages.
@@ -271,11 +273,17 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
     await clickBlockStart(page, titles.nth(ch))
     const shown = await footerNumbers(page)
     const open = openings[ch]
+    // The frames near the view are rendered (one viewport either side): the pages sampled must be among them.
+    expect(shown.has(open), `chapter ${ch + 1} opening page ${open} is rendered`).toBe(true)
     expect(shown.get(open), `chapter ${ch + 1} opening page ${open}`).toBe('')
+    let checked = 0
     for (const p of [open + 1, open + 2]) {
-      if (!shown.has(p) || l2.pages[p].isBlank || openings.includes(p)) continue
+      if (l2.pages[p].isBlank || openings.includes(p)) continue
+      expect(shown.has(p), `page index ${p} is rendered`).toBe(true)
       expect(shown.get(p), `page index ${p}`).toBe(String(p + 1))
+      checked++
     }
+    expect(checked, `numbered pages checked after chapter ${ch + 1} opens`).toBeGreaterThan(0)
     // The number sits in the outside corner: right on a recto, left on a verso.
     const pos = await page.evaluate((i) => {
       const f = document.querySelector(`.nv-frames .nv-page[data-page-index="${i}"]`)!
@@ -332,5 +340,7 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
   await clickBlockStart(page, titles.nth(12))
   const shown = await footerNumbers(page)
   const p = openings[12] + 1
-  if (shown.has(p) && !reopened.pages[p].isBlank) expect(shown.get(p)).toBe(String(p + 1))
+  expect(reopened.pages[p].isBlank, `page index ${p} is a body page`).toBe(false)
+  expect(shown.has(p), `page index ${p} is rendered`).toBe(true)
+  expect(shown.get(p)).toBe(String(p + 1))
 })

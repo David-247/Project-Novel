@@ -409,7 +409,23 @@ test('a note too long for the last page shows a "continued" marker', async ({ pa
   await page.evaluate((t) => window.__nvE2E.insertFootnoteAt(5, t), words(1500))
   await waitForLayout(page)
   const last = (await layout(page)).pageCount - 1
-  await expect(page.locator(`.nv-frames .nv-page[data-page-index="${last}"] [data-footnote-clipped]`)).toHaveText('continued…')
+  const marker = page.locator(`.nv-frames .nv-page[data-page-index="${last}"] [data-footnote-clipped]`)
+  await expect(marker).toHaveText('continued…')
+  // The marker has a line of its own at the bottom of the area: it never covers a line of the note.
+  const boxes = await marker.evaluate((m) => {
+    const area = m.closest('.nv-fn-area')!
+    const notes = Array.from(area.querySelectorAll('.nv-fn-note'))
+    const r = m.getBoundingClientRect()
+    return {
+      marker: { top: r.top, bottom: r.bottom },
+      area: area.getBoundingClientRect().bottom,
+      lastNoteBottom: Math.max(...notes.map((n) => n.getBoundingClientRect().bottom)),
+      lineHeight: parseFloat(getComputedStyle(area).lineHeight),
+    }
+  })
+  expect(boxes.marker.top, JSON.stringify(boxes)).toBeGreaterThanOrEqual(boxes.lastNoteBottom - 0.5)
+  expect(boxes.marker.bottom, JSON.stringify(boxes)).toBeLessThanOrEqual(boxes.area + 0.5)
+  expect(boxes.marker.bottom - boxes.marker.top, JSON.stringify(boxes)).toBeLessThanOrEqual(boxes.lineHeight + 0.5)
 })
 
 test('REGRESSION: a relabelled reference ("9" -> "10") is re-measured even when a second transaction lands in the same frame', async ({ page }) => {

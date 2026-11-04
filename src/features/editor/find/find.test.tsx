@@ -293,6 +293,18 @@ describe('find & replace panel', () => {
     expect(document.activeElement).toBe(input)
   })
 
+  it('REGRESSION: a selection across a footnote reference does not prefill (never the note text)', () => {
+    const ed = mountAll({
+      type: 'doc',
+      content: [para(t('A claim'), { type: 'footnote', content: [t('Smith, 1999.')] }, t(' holds'))],
+    })
+    // "claim" + the reference + " hold": positions 3..(8 + node size 14 + 5). A match never spans a
+    // reference (search/blockText), so no query could find this selection: leave the field alone.
+    act(() => void ed.commands.setTextSelection({ from: 3, to: 27 }))
+    act(() => key(ed.view.dom, 'f', { ctrlKey: true }))
+    expect((screen.getByRole('textbox', { name: 'Find' }) as HTMLInputElement).value).toBe('')
+  })
+
   it('defers re-scans while an IME composition is in progress', async () => {
     const ed = mountAll(story)
     act(() => useStore.getState().findActions.openPanel('cat'))

@@ -1,8 +1,10 @@
 import { useId, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import {
+  chapterRole,
   DEFAULT_STYLE_ID,
   resolveStyleSheet,
+  STYLE_IDS,
   writeStyle,
   type ResolvedStyle,
   type StyleDef,
@@ -81,6 +83,7 @@ function ModifyStyleForm({ styleId, initial, onClose, sample }: { styleId: strin
     const self = sheet.get(styleId)!
     return {
       self,
+      role: chapterRole(sheet, styleId),
       context: sheet.get(DEFAULT_STYLE_ID)!,
       next: sheet.get(self.nextStyle ?? styleId) ?? self,
       parent: self.basedOn ? sheet.get(self.basedOn) : undefined,
@@ -118,21 +121,44 @@ function ModifyStyleForm({ styleId, initial, onClose, sample }: { styleId: strin
   const inheritLabel = (shown: string | undefined) =>
     parent ? `From ${parent.name}${shown ? ` (${shown})` : ''}` : 'Default'
 
+  // A chapter heading made from scratch (or re-pointed away from Chapter Title) does not open chapters
+  // (the rule: docs/design.md, Chapters). Say so where it is decided, next to Kind and Based on.
+  const chapterHint =
+    draft.kind !== 'chapter'
+      ? undefined
+      : preview.role === 'title'
+        ? `Opens a chapter (based on ${styles.get(STYLE_IDS.chapterTitle)?.name ?? 'Chapter Title'}).`
+        : preview.role === 'number'
+          ? `Numbers the chapter whose title follows it (based on ${styles.get(STYLE_IDS.chapterNumber)?.name ?? 'Chapter Number'}).`
+          : (preview.self.outlineLevel ?? 1) !== 1
+            ? `A level ${preview.self.outlineLevel} heading: it won't start chapters.`
+            : "Won't start chapters: base it on Chapter Title to open a chapter."
+
   const save = () => {
     if (nameMissing || invalid.size) return
     saveStyle(styleId, { ...draft, name: draft.name.trim() })
     onClose()
   }
 
-  const field = (key: StyleDialogControlKey, control: (p: { id: string; 'data-control-id': string }) => ReactElement, wide = false, hint?: string) => {
+  const field = (
+    key: StyleDialogControlKey,
+    control: (p: { id: string; 'data-control-id': string; 'aria-describedby'?: string }) => ReactElement,
+    wide = false,
+    hint?: string,
+  ) => {
     const id = `${formId}-${key}`
+    const hintId = `${id}-hint`
     return (
       <div className={cn('flex min-w-0 flex-col gap-1', wide && 'col-span-2')}>
         <label htmlFor={id} className="text-ui-xs font-medium text-text-muted">
           {C[key].label}
         </label>
-        <Tooltip>{control({ id, 'data-control-id': C[key].id })}</Tooltip>
-        {hint ? <p className="m-0 text-ui-xs text-text-muted" data-testid={`hint-${key}`}>{hint}</p> : null}
+        <Tooltip>{control({ id, 'data-control-id': C[key].id, ...(hint ? { 'aria-describedby': hintId } : {}) })}</Tooltip>
+        {hint ? (
+          <p id={hintId} className="m-0 text-ui-xs text-text-muted" data-testid={`hint-${key}`}>
+            {hint}
+          </p>
+        ) : null}
       </div>
     )
   }
@@ -192,7 +218,7 @@ function ModifyStyleForm({ styleId, initial, onClose, sample }: { styleId: strin
               ), false, uses > 0 ? `Fixed while ${uses} ${uses === 1 ? 'paragraph uses' : 'paragraphs use'} this style.` : undefined)}
               {field('basedOn', (p) => (
                 <Select {...p} wrapperClassName="w-full" value={draft.basedOn ?? ''} options={[{ value: '', label: 'Nothing' }, ...basedOnOptions]} onChange={(e) => set('basedOn', e.target.value || undefined)} />
-              ))}
+              ), false, chapterHint)}
             </>
           )}
           {field('nextStyle', (p) => (

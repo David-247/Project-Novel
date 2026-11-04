@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react'
 import { getFootnotes, getEditor, getResolvedStyles, SYSTEM_FONT_STACK, type FootnoteRef } from '@/features/editor'
 import { resolvePageGeometry, type ReservationPage } from '@/features/pagination'
 import { useStore } from '@/shared/store'
-import { FootnoteRun } from './layout'
+import { FootnoteRun, withMarkerLine } from './layout'
 import { MAX_AREA_SHARE, measureNotes, noteMeasurementEpoch, noteStyle, type NoteStyle } from './note-dom'
 
 /** One note's lines drawn in a page's footnote area. */
@@ -22,7 +22,8 @@ export interface DrawnArea {
   lineHeight: number
   separator: boolean
   continued: boolean
-  /** Lines did not fit (the last page: there is no next page to continue on). */
+  /** Lines did not fit (the last page: there is no next page to continue on). The area's last line is then
+   *  the "continued…" marker's: `notes` hold one line less (see `withMarkerLine`). */
   clipped: boolean
   css: Record<string, string>
   notes: DrawnNote[]
@@ -127,15 +128,18 @@ function publish() {
       if (prev[i]) changed = true
       return
     }
+    const clipped = i === r.pages.areas.length - 1 && area.carryOut.length > 0
+    // A clipped area gives its last line to the "continued…" marker.
+    const entries = clipped ? withMarkerLine(area.entries) : area.entries
     const d: DrawnArea = {
       height: area.height,
       top: r.style.top,
       lineHeight: r.style.lineHeight,
       separator: r.style.separator,
       continued: area.continued,
-      clipped: i === r.pages.areas.length - 1 && area.carryOut.length > 0,
+      clipped,
       css,
-      notes: area.entries.map((e) => ({ node: r.refs[e.note].node, label: r.refs[e.note].label, ordinal: e.note, start: e.start, count: e.count })),
+      notes: entries.map((e) => ({ node: r.refs[e.note].node, label: r.refs[e.note].label, ordinal: e.note, start: e.start, count: e.count })),
     }
     if (sameArea(prev[i], d)) next[i] = prev[i]
     else {

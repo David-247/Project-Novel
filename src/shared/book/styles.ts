@@ -397,18 +397,71 @@ const declarationText = (s: StyleFormat) => styleDeclarations(s).map(([p, v]) =>
 
 /**
  * True when a block of style `id` directly after a block of style `prevId` continues a heading
- * group: the previous style breaks, names this one as its next style, and this one breaks too
- * (e.g. Chapter Number followed by Chapter Title). The group breaks once, before its first block,
- * and its later blocks get no space before.
+ * group: both styles break, and either the previous style names this one as its next style, or the
+ * pair is a chapter number then a chapter title (`chapterRole`: Chapter Number or a style based on
+ * it, then Chapter Title or a style based on it, e.g. their duplicates). The group breaks once,
+ * before its first block, and its later blocks get no space before. The chapter model
+ * (`getChapters`) groups the same pairs.
  */
 export function continuesHeadingGroup(prevId: string | null, id: string, styles: ResolvedStyles): boolean {
   if (!prevId || prevId === id) return false
   const prev = styles.get(prevId)
   const cur = styles.get(id)
-  return !!prev && !!cur && prev.nextStyle === id && isBreaking(prev) && isBreaking(cur)
+  if (!prev || !cur || !isBreaking(prev) || !isBreaking(cur)) return false
+  return prev.nextStyle === id || (chapterRole(styles, prevId) === 'number' && chapterRole(styles, id) === 'title')
 }
 
 const isBreaking = (s: StyleFormat) => s.breakBefore === 'page' || s.breakBefore === 'recto'
+
+// ---- chapter openings -------------------------------------------------------------------------
+
+/**
+ * What a style does for the chapter model: 'title' opens a chapter (its text is the chapter title),
+ * 'number' introduces the chapter whose title follows it directly; null: neither.
+ */
+export type ChapterRole = 'title' | 'number'
+
+const roleMemo = new WeakMap<ResolvedStyles, ReadonlyMap<string, ChapterRole>>()
+
+/**
+ * The rule (docs/design.md, "Chapters"): a style is a chapter title when it is a chapter style
+ * (`kind: 'chapter'`) at outline level 1 and its Based on chain reaches Chapter Title (Chapter Title
+ * itself included); likewise a chapter number when the chain reaches Chapter Number first. So Chapter
+ * Title, its duplicates (a duplicate is based on its source) and styles created from it open chapters;
+ * Part Title and styles based on it do not; a style based on Chapter Title but made a paragraph style or
+ * a level 2-3 heading (a subtitle, say) does not either. Memoized per resolved sheet: O(styles x depth).
+ */
+export function chapterRoles(styles: ResolvedStyles): ReadonlyMap<string, ChapterRole> {
+  let roles = roleMemo.get(styles)
+  if (roles) return roles
+  const out = new Map<string, ChapterRole>()
+  for (const s of styles.values()) {
+    if (s.kind !== 'chapter' || (s.outlineLevel ?? 1) !== 1) continue
+    for (let cur: ResolvedStyle | undefined = s, guard = 0; cur && guard < 64; cur = cur.basedOn ? styles.get(cur.basedOn) : undefined, guard++) {
+      if (cur.id === STYLE_IDS.chapterTitle) {
+        out.set(s.id, 'title')
+        break
+      }
+      if (cur.id === STYLE_IDS.chapterNumber) {
+        out.set(s.id, 'number')
+        break
+      }
+    }
+  }
+  roles = out
+  roleMemo.set(styles, roles)
+  return roles
+}
+
+/** The chapter role of style `id` in `styles` (null for none, or an unknown id). */
+export function chapterRole(styles: ResolvedStyles, id: string): ChapterRole | null {
+  return chapterRoles(styles).get(id) ?? null
+}
+
+/** Changes exactly when the chapter role of some style changes (for listeners that re-derive chapters). */
+export function chapterRoleSignature(styles: ResolvedStyles): string {
+  return [...chapterRoles(styles)].map(([id, role]) => `${id}:${role}`).join('|')
+}
 
 /**
  * The generated stylesheet: one rule per style keyed by `[data-style="<id>"]` under `scope`, so
@@ -423,11 +476,17 @@ export function buildStyleSheetCSS(styles: ResolvedStyles, scope: string): strin
     if (!STYLE_ID_PATTERN.test(s.id)) continue
     rules.push(`${scope} [data-style="${s.id}"] { ${declarationText(s)} }`)
   }
-  for (const prev of styles.values()) {
-    if (prev.nextStyle && continuesHeadingGroup(prev.id, prev.nextStyle, styles)) {
-      rules.push(`${scope} [data-style="${prev.id}"] + [data-style="${prev.nextStyle}"] { margin-top: 0; }`)
-    }
+  // Heading groups: a next-style pair, and every chapter number style then chapter title style.
+  const pairs = new Set<string>()
+  const group = (a: string, b: string) => {
+    const key = `${a} ${b}`
+    if (pairs.has(key) || !continuesHeadingGroup(a, b, styles)) return
+    pairs.add(key)
+    rules.push(`${scope} [data-style="${a}"] + [data-style="${b}"] { margin-top: 0; }`)
   }
+  for (const prev of styles.values()) if (prev.nextStyle) group(prev.id, prev.nextStyle)
+  const roles = [...chapterRoles(styles)]
+  for (const [numberId, r] of roles) if (r === 'number') for (const [titleId, t] of roles) if (t === 'title') group(numberId, titleId)
   // Paragraphs inside list items keep the list's own geometry.
   rules.push(`${scope} li > [data-style] { text-indent: 0; margin-top: 0; margin-bottom: 0; }`)
   return rules.join('\n')

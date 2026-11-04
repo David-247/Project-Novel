@@ -226,6 +226,9 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
   // Tab / Shift-Tab cycle between the note and Done (the popover is portalled: never tab out of it).
   const onKeyDown = (e: ReactKeyboardEvent) => {
     if (e.defaultPrevented) return
+    // During an IME composition, Escape cancels the candidate and Tab may pick one: the keys belong to
+    // the IME, not to the popover (keyCode 229: engines that report composition keys that way).
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
     if (e.key === 'Escape') {
       e.preventDefault()
       back()

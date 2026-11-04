@@ -205,11 +205,18 @@ describe('an unreadable or damaged book.json is not silently overwritten', () =>
     await saveProject()
     expect(backend.files.get(BOOK)).toBe('{"trimSize": "uk-a5", ')
     expect(asides()).toEqual([])
+    // View and paper are display toggles: they never replace a guarded book.json.
     bookActions().setSurface('dark')
+    bookActions().setView('single')
+    await saveProject()
+    expect(backend.files.get(BOOK)).toBe('{"trimSize": "uk-a5", ')
+    expect(asides()).toEqual([])
+    expect(book().dirty).toBe(false)
+    bookActions().setTrimSize('us-6x9')
     await saveProject()
     expect(asides()).toHaveLength(1)
     expect(backend.files.get(asides()[0])).toBe('{"trimSize": "uk-a5", ')
-    expect(onDisk()).toMatchObject({ trimSize: 'us-5.5x8.5', surface: 'dark' })
+    expect(onDisk()).toMatchObject({ trimSize: 'us-6x9', surface: 'dark', view: 'single' })
     expect(useStore.getState().project.bookWarning).toBeNull()
   })
 
@@ -222,6 +229,114 @@ describe('an unreadable or damaged book.json is not silently overwritten', () =>
     await saveProject()
     expect(onDisk().trimSize).toBe('us-5.5x8.5')
     expect(asides()).toEqual([])
+  })
+
+  it('a book.json from a newer Novel loads with a warning, is left alone until a book change, then is copied aside', async () => {
+    await createProject()
+    const newer = JSON.stringify({ format: 'novel-book', version: 2, trimSize: 'uk-a5', surface: 'dark', margins: { top: 50, gutterMirror: true } })
+    backend.files.set(BOOK, newer)
+    await launch()
+    await reopen()
+    expect(book()).toMatchObject({ trimSize: 'uk-a5', surface: 'dark' })
+    expect(useStore.getState().project.bookWarning).toMatch(/newer version of Novel.*left as it is/)
+    const newerAsides = () => [...backend.files.keys()].filter((k) => k.startsWith(`${ROOT}/book.newer-`))
+    // A text-only save (and an autosave snapshot) never rewrites it.
+    editor.update(textDoc('typed'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(BOOK)).toBe(newer)
+    expect(newerAsides()).toEqual([])
+    // Switching view or paper does not replace it.
+    bookActions().setView('single')
+    bookActions().setSurface('book')
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(BOOK)).toBe(newer)
+    expect(newerAsides()).toEqual([])
+    // A real book change: the original is kept aside first, then the file is written by this version.
+    bookActions().setStyles((st) => ({ ...st, body: { fontSize: 12 } }))
+    expect(await saveProject()).toBe(true)
+    expect(newerAsides()).toHaveLength(1)
+    expect(backend.files.get(newerAsides()[0])).toBe(newer)
+    expect(onDisk()).toMatchObject({ version: 1, trimSize: 'uk-a5', surface: 'book', view: 'single', styles: { body: { fontSize: 12 } } })
+    expect(asides()).toEqual([])
+    expect(useStore.getState().project.bookWarning).toBeNull()
+  })
+
+  it('REGRESSION: a text-only crash restore never replaces a newer book.json', async () => {
+    await createProject()
+    const newer = JSON.stringify({ format: 'novel-book', version: 2, trimSize: 'uk-a5' })
+    backend.files.set(BOOK, newer)
+    await launch()
+    await reopen()
+    editor.update(textDoc('typed after opening'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    await launch() // crash
+    await reopen()
+    expect(await restoreRecovery()).toBe(true)
+    expect(editor.getDocJSON()).toEqual(textDoc('typed after opening'))
+    expect(book().dirty).toBe(false)
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(BOOK)).toBe(newer)
+    expect([...backend.files.keys()].filter((k) => k.startsWith(`${ROOT}/book.newer-`))).toEqual([])
+  })
+
+  it('REGRESSION: if the copy cannot be kept, book.json is not replaced; the settings stay unsaved with a warning', async () => {
+    await createProject()
+    backend.files.set(BOOK, 'garbage')
+    await launch()
+    await reopen()
+    bookActions().setTrimSize('us-6x9')
+    backend.failWrite = (p: string) => (p.includes('/book.damaged-') ? { kind: 'disk_full', message: 'full' } : null)
+    expect(await saveProject()).toBe(true) // the manuscript is saved
+    expect(backend.files.get(BOOK)).toBe('garbage')
+    expect(asides()).toEqual([])
+    expect(book().dirty).toBe(true)
+    expect(useStore.getState().project.bookWarning).toMatch(/could not keep a copy.*left as it is/)
+    // The next save retries and, with the copy kept, writes the settings.
+    backend.failWrite = null
+    expect(await saveProject()).toBe(true)
+    expect(asides()).toHaveLength(1)
+    expect(onDisk()).toMatchObject({ trimSize: 'us-6x9' })
+    expect(book().dirty).toBe(false)
+    expect(useStore.getState().project.bookWarning).toBeNull()
+  })
+
+  it('REGRESSION: after a save whose book copy failed, a crash still offers the unsaved book settings', async () => {
+    await createProject()
+    backend.files.set(BOOK, 'garbage')
+    await launch()
+    await reopen()
+    bookActions().setTrimSize('us-6x9')
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS) // snapshot on top of the opened save
+    backend.failWrite = (p: string) => (p.includes('/book.damaged-') ? { kind: 'disk_full', message: 'full' } : null)
+    expect(await saveProject()).toBe(true) // manuscript saved, updatedAt moved, book still unsaved
+    backend.failWrite = null
+    expect(book().dirty).toBe(true)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS) // no further edits: the snapshot is retaken anyway
+    await launch() // crash
+    await reopen()
+    expect(useStore.getState().project.recoveryPrompt).toMatchObject({ kind: 'restore' })
+    expect(await restoreRecovery()).toBe(true)
+    expect(book().trimSize).toBe('us-6x9')
+    expect(backend.files.get(BOOK)).toBe('garbage')
+  })
+
+  it('REGRESSION: a crash 1 s after a save whose book copy failed still offers the unsaved book settings', async () => {
+    await createProject()
+    backend.files.set(BOOK, 'garbage')
+    await launch()
+    await reopen()
+    bookActions().setTrimSize('us-6x9')
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    backend.failWrite = (p: string) => (p.includes('/book.damaged-') ? { kind: 'disk_full', message: 'full' } : null)
+    expect(await saveProject()).toBe(true)
+    backend.failWrite = null
+    await vi.advanceTimersByTimeAsync(1000)
+    await launch() // crash
+    await reopen()
+    expect(useStore.getState().project.recoveryPrompt).toMatchObject({ kind: 'restore' })
+    expect(await restoreRecovery()).toBe(true)
+    expect(book().trimSize).toBe('us-6x9')
   })
 
   it('the warning survives a later set-aside note and clears when the project closes', async () => {

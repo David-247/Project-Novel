@@ -1,12 +1,13 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { footnoteLabel, resolveFootnoteOptions, type FootnoteOptions } from '@/shared/book'
+import { chapterRoleSignature, footnoteLabel, resolveFootnoteOptions, type FootnoteOptions } from '@/shared/book'
 import { useStore } from '@/shared/store'
 import { chapterIndexAt, getChapters } from '../breaks/chapters'
+import { resolveStyles } from '../styles/resolved'
+import { FOOTNOTE_NODE } from './name'
 
-/** Name of the footnote node type. */
-export const FOOTNOTE_NODE = 'footnote'
+export { FOOTNOTE_NODE }
 
 /**
  * A footnote reference in the document, with its derived number. Numbers are never stored: they
@@ -144,10 +145,24 @@ export function footnoteNumberingPlugin(): Plugin<NumberingState> {
     },
     view: (view) => {
       let prevOptions = useStore.getState().book.footnotes
+      let prevStyles = useStore.getState().book.styles
+      let prevRoles = chapterRoleSignature(resolveStyles(prevStyles))
       const unsub = useStore.subscribe((s) => {
-        if (s.book.footnotes === prevOptions) return
-        prevOptions = s.book.footnotes
-        if (!view.isDestroyed) view.dispatch(view.state.tr.setMeta(footnoteNumberingKey, true).setMeta('addToHistory', false))
+        let renumber = false
+        if (s.book.footnotes !== prevOptions) {
+          prevOptions = s.book.footnotes
+          renumber = true
+        }
+        // Which styles open a chapter is part of the style sheet: per-chapter numbers follow it.
+        if (s.book.styles !== prevStyles) {
+          prevStyles = s.book.styles
+          const roles = chapterRoleSignature(resolveStyles(prevStyles))
+          if (roles !== prevRoles) {
+            prevRoles = roles
+            if (resolveFootnoteOptions(s.book.footnotes).numbering === 'chapter') renumber = true
+          }
+        }
+        if (renumber && !view.isDestroyed) view.dispatch(view.state.tr.setMeta(footnoteNumberingKey, true).setMeta('addToHistory', false))
       })
       return {
         update: (v, prevState) => {

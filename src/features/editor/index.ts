@@ -62,12 +62,17 @@ export {
   saveStyle,
 } from './styles/actions'
 // Chapter, page and scene breaks (Phase 2).
-// getChapters(doc) -> [{ index, title, from, to }] from Chapter Title blocks (0-based; content before the
-// first chapter is front matter, chapter index FRONT_MATTER_INDEX = -1; chapterIndexAt(chapters, pos)).
+// getChapters(doc, styles?) -> [{ index, title, from, to }] from chapter title blocks (see below; 0-based;
+// content before the first chapter is front matter, chapter index FRONT_MATTER_INDEX = -1;
+// chapterIndexAt(chapters, pos)). A chapter number block directly before a title joins its chapter.
 // Page breaks: the pageBreak atom makes the FOLLOWING block render data-break-before="page" (or "recto"
 // when that block's style says so). See docs/pagination.md.
 // Insert menu: add an item with one entry in INSERT_ITEMS (breaks/controls.ts).
+// A chapter opens at a block whose style is a chapter title style (Chapter Title, or a level-1 chapter
+// style based on it, e.g. its duplicate: chapterRoles in @/shared/book), so getChapters follows book.styles.
 export { getChapters, chapterIndexAt, FRONT_MATTER_INDEX } from './breaks/chapters'
+// A block's text without the text of its footnotes (chapter titles, previews): use instead of textContent.
+export { blockPlainText } from './block-text'
 export type { Chapter } from './breaks/chapters'
 export { getChaptersStartOn, setChaptersStartOn } from './breaks/chapter-start'
 export type { ChaptersStartOn } from './breaks/chapter-start'

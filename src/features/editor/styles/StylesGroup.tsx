@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode } from 'react'
 import { DEFAULT_STYLE_ID } from '@/shared/book'
 import { IconButton, Select, ToolbarGroup, Tooltip } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
+import { blockPlainText } from '../block-text'
 import { TOOLBAR_CONTROLS } from '../toolbar/controls'
 import { ManageStylesDialog } from './ManageStylesDialog'
 import { ModifyStyleDialog } from './ModifyStyleDialog'
@@ -67,7 +68,10 @@ export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }
   }
   if (!styleId) options.unshift({ value: '', label: 'No style' })
 
-  const currentText = () => editor?.state.selection.$from.parent.textContent.slice(0, 280)
+  const currentText = () => {
+    const block = editor?.state.selection.$from.parent
+    return block ? blockPlainText(block).slice(0, 280) : undefined
+  }
   const picker = TOOLBAR_CONTROLS.stylePicker
   const edit = TOOLBAR_CONTROLS.styleEdit
   const manage = TOOLBAR_CONTROLS.styleManage

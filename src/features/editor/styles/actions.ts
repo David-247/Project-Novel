@@ -64,14 +64,19 @@ export function createStyle(basedOn: string = DEFAULT_STYLE_ID, name = 'New styl
   return id
 }
 
-/** Copy of a style (its own settings and parent) under a new name. Returns the new id. */
+/**
+ * Copy of a style under a new name, with the same own settings, so it looks identical. Returns the new
+ * id. A copy of a custom style keeps its parent. A copy of a built-in is based on the built-in itself:
+ * it carries every setting the built-in has, so it still looks identical, and it keeps the built-in's
+ * role (a copy of Chapter Title opens chapters, see `chapterRoles`).
+ */
 export function duplicateStyle(sourceId: string): string | null {
   const styles = resolveStyles(book().styles)
   const source = styleDefinitions(book().styles).get(sourceId)
   if (!source) return null
   const id = newStyleId(styles.keys())
-  // Same own settings and the same parent, so the copy looks identical.
   const def = { ...ownDef(source), name: uniqueName(`${source.name} copy`) }
+  if (source.builtIn) def.basedOn = sourceId
   setStyles((s) => writeStyle(s, id, def))
   return id
 }

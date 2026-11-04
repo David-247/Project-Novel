@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildStyleSheetCSS,
   builtInStyles,
+  chapterRole,
+  chapterRoles,
+  chapterRoleSignature,
   continuesHeadingGroup,
   newStyleId,
   registerBuiltInStyle,
@@ -132,5 +135,53 @@ describe('generated stylesheet', () => {
     expect(continuesHeadingGroup(STYLE_IDS.chapterNumber, STYLE_IDS.chapterTitle, r)).toBe(true)
     expect(continuesHeadingGroup(STYLE_IDS.partTitle, STYLE_IDS.chapterTitle, r)).toBe(false)
     expect(continuesHeadingGroup(STYLE_IDS.chapterTitle, STYLE_IDS.firstParagraph, r)).toBe(false)
+  })
+
+  it('REGRESSION: a chapter number style then a chapter title style is a group, duplicates included', () => {
+    const copy = (basedOn: string) => ({ builtIn: false, name: `${basedOn} copy`, kind: 'chapter', outlineLevel: 1, basedOn })
+    const r = resolveStyleSheet({ 'num-copy': copy('chapter-number'), 'title-copy': copy('chapter-title'), 'part-copy': copy('part-title') })
+    for (const n of ['chapter-number', 'num-copy']) {
+      for (const t of ['chapter-title', 'title-copy']) expect(continuesHeadingGroup(n, t, r), `${n} + ${t}`).toBe(true)
+    }
+    expect(continuesHeadingGroup('title-copy', 'num-copy', r)).toBe(false)
+    expect(continuesHeadingGroup('num-copy', 'part-copy', r)).toBe(false)
+    const css = buildStyleSheetCSS(r, SCOPE)
+    expect(css).toContain('.ed [data-style="chapter-number"] + [data-style="title-copy"] { margin-top: 0; }')
+    expect(css).toContain('.ed [data-style="num-copy"] + [data-style="title-copy"] { margin-top: 0; }')
+    expect(css).toContain('.ed [data-style="num-copy"] + [data-style="chapter-title"] { margin-top: 0; }')
+    expect(css.split('\n').filter((l) => l.includes('"chapter-number"] + [data-style="chapter-title"]'))).toHaveLength(1)
+  })
+})
+
+describe('chapter roles', () => {
+  const custom = (def: Record<string, unknown>) => ({ builtIn: false, name: 'X', ...def })
+
+  it('Chapter Title and level-1 chapter styles based on it are titles; Chapter Number and its kin are numbers', () => {
+    const styles = resolveStyleSheet({
+      'dup-title': custom({ kind: 'chapter', outlineLevel: 1, basedOn: 'chapter-title' }),
+      'grand-title': custom({ kind: 'chapter', basedOn: 'dup-title' }), // outline level unset = 1
+      'dup-number': custom({ kind: 'chapter', outlineLevel: 1, basedOn: 'chapter-number' }),
+      subtitle: custom({ kind: 'chapter', outlineLevel: 2, basedOn: 'chapter-title' }),
+      'title-para': custom({ kind: 'paragraph', basedOn: 'chapter-title' }),
+      'dup-part': custom({ kind: 'chapter', outlineLevel: 1, basedOn: 'part-title' }),
+      'plain-chapter': custom({ kind: 'chapter', outlineLevel: 1, basedOn: 'body' }),
+    })
+    expect(Object.fromEntries(chapterRoles(styles))).toEqual({
+      'chapter-title': 'title',
+      'chapter-number': 'number',
+      'dup-title': 'title',
+      'grand-title': 'title',
+      'dup-number': 'number',
+    })
+    expect(chapterRole(styles, 'part-title')).toBeNull()
+    expect(chapterRole(styles, 'nope')).toBeNull()
+  })
+
+  it('the signature changes only when a role changes', () => {
+    const a = resolveStyleSheet({})
+    const b = resolveStyleSheet({ body: { fontSize: 12 } })
+    const c = resolveStyleSheet({ 'dup-title': custom({ kind: 'chapter', basedOn: 'chapter-title' }) })
+    expect(chapterRoleSignature(a)).toBe(chapterRoleSignature(b))
+    expect(chapterRoleSignature(c)).not.toBe(chapterRoleSignature(a))
   })
 })

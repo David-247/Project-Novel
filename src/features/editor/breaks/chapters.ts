@@ -1,11 +1,13 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
-import { STYLE_IDS } from '@/shared/book'
-import { effectiveStyleId } from '../styles/block-styles'
+import { chapterRoles, type ResolvedStyles } from '@/shared/book'
+import { blockPlainText } from '../block-text'
+import { renderedStyleId } from '../styles/block-styles'
+import { getResolvedStyles } from '../styles/resolved'
 
 export interface Chapter {
   /** 0-based position among the chapters. */
   index: number
-  /** Text of the Chapter Title block ('' when empty). */
+  /** Text of the chapter title block, without footnote text ('' when empty). */
   title: string
   /** Document position where the chapter starts (a top-level block boundary). */
   from: number
@@ -17,23 +19,26 @@ export interface Chapter {
 export const FRONT_MATTER_INDEX = -1
 
 /**
- * Chapters of a document, derived from its top-level Chapter Title blocks (a level-1 heading with no
- * style also counts: the Phase 1 mapping). A Chapter Number block directly before a title belongs to
- * the chapter it introduces. Content before the first chapter is front matter (`FRONT_MATTER_INDEX`).
- * Pure; O(top-level blocks).
+ * Chapters of a document, derived from its top-level chapter title blocks: blocks whose rendered style
+ * is a chapter title style (`chapterRoles`: Chapter Title, a style based on it such as its duplicate,
+ * at outline level 1; a level-1 heading with no style is Chapter Title, the Phase 1 mapping). A chapter
+ * number block (Chapter Number, or a style based on it) directly before a title belongs to the chapter
+ * it introduces. Content before the first chapter is front matter (`FRONT_MATTER_INDEX`).
+ * Depends on the style sheet: `styles` defaults to the current book's. Pure otherwise; O(top-level blocks).
  */
-export function getChapters(doc: PMNode): Chapter[] {
+export function getChapters(doc: PMNode, styles: ResolvedStyles = getResolvedStyles()): Chapter[] {
+  const roles = chapterRoles(styles)
   const chapters: Chapter[] = []
   let numberFrom = -1
   doc.forEach((node, offset) => {
     const styled = node.type.name === 'paragraph' || node.type.name === 'heading'
-    const id = styled ? effectiveStyleId(node) : null
-    if (id === STYLE_IDS.chapterNumber) {
+    const role = styled ? roles.get(renderedStyleId(node, styles)) : undefined
+    if (role === 'number') {
       if (numberFrom < 0) numberFrom = offset
       return
     }
-    if (id === STYLE_IDS.chapterTitle) {
-      chapters.push({ index: chapters.length, title: node.textContent, from: numberFrom >= 0 ? numberFrom : offset, to: doc.content.size })
+    if (role === 'title') {
+      chapters.push({ index: chapters.length, title: blockPlainText(node), from: numberFrom >= 0 ? numberFrom : offset, to: doc.content.size })
     }
     numberFrom = -1
   })

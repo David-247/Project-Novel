@@ -278,10 +278,13 @@ reservation test).
 ### (c) Chapters
 
 `PageInfo.chapterIndex` uses the editor's chapter model by default (`getChapters`, breaks ticket): a
-chapter opens at a Chapter Title block (an unstyled level-1 heading is one), or at the Chapter Number
-directly before it; content before the first opening is front matter (−1).
-`defaultChapterOpenings(doc)` gives those positions. `setChapterPredicate((node) => boolean)`
-replaces the model with a per-block predicate; `null` restores the default. Both re-break only.
+chapter opens at a block whose style is a chapter title style (Chapter Title, or a level-1 chapter style based
+on it such as its duplicate; an unstyled level-1 heading is Chapter Title; docs/design.md "Chapters"), or at
+the chapter number block directly before it; content before the first opening is front matter (−1).
+The model depends on `book.styles`: a style edit that changes which styles open chapters reaches the engine
+as a style change (every pass recomputes the openings). `defaultChapterOpenings(doc)` gives those positions.
+`setChapterPredicate((node) => boolean)` replaces the model with a per-block predicate; `null` restores the
+default. Both re-break only.
 
 **Two chapter models.** `PageInfo.chapterIndex` follows `setChapterPredicate` when one is set; chapter *titles* and
 positions used by other slices (running heads, `getChapters`) always come from the editor's `getChapters`. With a

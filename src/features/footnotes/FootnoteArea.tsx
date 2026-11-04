@@ -21,7 +21,8 @@ export const FootnoteArea = memo(function FootnoteArea({ pageIndex }: { pageInde
       ))}
       {area.clipped && (
         // The last page has no next page for the rest of the note (footnote-only pages: follow-up).
-        <span className="nv-fn-clipped" data-footnote-clipped="">
+        // Its own line: the last line of the area, which the notes leave free when clipped.
+        <span className="nv-fn-clipped" data-footnote-clipped="" style={{ height: area.lineHeight, lineHeight: `${area.lineHeight}px` }}>
           continued…
         </span>
       )}

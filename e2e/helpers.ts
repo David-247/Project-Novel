@@ -77,6 +77,10 @@ export async function seedProject(
  * Click on the first character of an editor block, as a user would on the page. On paginated pages a
  * block's layout box is not where its lines are painted (a paragraph continued on the next page keeps
  * a tall, partly empty box), so the target is the painted text itself, scrolled into view first.
+ * The editor then reads the click's caret now: ProseMirror otherwise picks it up on the async
+ * `selectionchange`, and a toolbar select changed right after the click (Playwright's selectOption
+ * needs no focus move) could act on the previous selection (seen on macOS CI: the style went to the
+ * block at the old caret).
  */
 export async function clickBlockStart(page: Page, block: Locator): Promise<void> {
   const point = async () =>
@@ -100,6 +104,7 @@ export async function clickBlockStart(page: Page, block: Locator): Promise<void>
     p = await point()
   }
   await page.mouse.click(p.x, p.y)
+  await page.evaluate(() => window.__nvE2E?.syncSelection())
 }
 
 /** Wait until the pagination engine has laid out the current document (no reflow pending) and painted. */

@@ -2,8 +2,13 @@ import type { DocJSON, DocNodeJSON } from '@/shared/document'
 
 /** Marker identifying a Novel project.json. */
 export const PROJECT_FORMAT = 'novel-project'
-/** Current project.json schema version. Bump on breaking format changes. */
-export const PROJECT_SCHEMA_VERSION = 1
+/**
+ * Current project.json schema version. Bump on format changes an older Novel must not write over.
+ * 2: `author` (Phase 2). Version 1 files are migrated on read (a no-op: a missing author is '') and
+ * written back as 2, so a Phase 1 build refuses them ("saved by a newer version") instead of
+ * dropping the author on its next save.
+ */
+export const PROJECT_SCHEMA_VERSION = 2
 
 export const PROJECT_FILE = 'project.json'
 export const MANUSCRIPT_FILE = 'manuscript.json'
@@ -22,6 +27,17 @@ export interface ProjectMeta {
   /** ISO 8601 timestamps. */
   createdAt: string
   updatedAt: string
+  /** Top-level keys this version does not know (a newer Novel's): kept and written back as they are. */
+  extra?: Record<string, unknown>
+}
+
+/** Keys this version owns; every other top-level key of project.json is kept in `extra`. */
+const KNOWN_META_KEYS = new Set(['format', 'schemaVersion', 'id', 'title', 'author', 'createdAt', 'updatedAt'])
+
+/** Older schema versions, upgraded one step at a time. Each step may only add or reinterpret fields. */
+const MIGRATIONS: Record<number, (data: Record<string, unknown>) => Record<string, unknown>> = {
+  // 1 -> 2: `author` became part of the format. A missing author already reads as '': nothing to do.
+  1: (data) => data,
 }
 
 export type ProjectErrorCode =
@@ -113,20 +129,41 @@ export function parseProjectMeta(text: string): ProjectMeta {
       throw new ProjectError('corrupt-file', `${PROJECT_FILE} is damaged: "${key}" is missing or invalid.`)
     }
   }
-  // Future: migrate older schema versions here before returning.
-  return {
+  let migrated: Record<string, unknown> = data
+  for (let from = v; from < PROJECT_SCHEMA_VERSION; from++) migrated = MIGRATIONS[from](migrated)
+  const meta: ProjectMeta = {
     format: PROJECT_FORMAT,
-    schemaVersion: v,
-    id: data.id as string,
-    title: data.title as string,
-    author: typeof data.author === 'string' ? data.author : '',
-    createdAt: data.createdAt as string,
-    updatedAt: data.updatedAt as string,
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    id: migrated.id as string,
+    title: migrated.title as string,
+    author: typeof migrated.author === 'string' ? migrated.author : '',
+    createdAt: migrated.createdAt as string,
+    updatedAt: migrated.updatedAt as string,
   }
+  const extra = unknownKeys(migrated)
+  if (extra) meta.extra = extra
+  return meta
 }
 
+function unknownKeys(data: Record<string, unknown>): Record<string, unknown> | undefined {
+  const entries = Object.entries(data).filter(([k]) => !KNOWN_META_KEYS.has(k))
+  return entries.length ? Object.fromEntries(entries) : undefined
+}
+
+/** Pretty-printed project.json: the known fields (always from the typed values), then the unknown keys. */
 export function serializeProjectMeta(meta: ProjectMeta): string {
-  return JSON.stringify(meta, null, 2) + '\n'
+  const { extra, ...known } = meta
+  const out = {
+    format: known.format,
+    schemaVersion: known.schemaVersion,
+    id: known.id,
+    title: known.title,
+    author: known.author,
+    createdAt: known.createdAt,
+    updatedAt: known.updatedAt,
+    ...(extra ? unknownKeys(extra) : undefined),
+  }
+  return JSON.stringify(out, null, 2) + '\n'
 }
 
 function isDocNode(v: unknown, depth: number): v is DocNodeJSON {
