@@ -475,4 +475,7 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
   identical page model. It caught a load-order bug: opening a project replaces trim, margins and
   styles at once, and the geometry pass ran before React rendered the loaded style sheet; the engine
   now also re-measures the restyled blocks after a geometry pass (regression test in
-  `e2e/styles.spec.ts`).
+  `e2e/styles.spec.ts`). Measuring the trim change through the picker (not `setTrimSize` alone)
+  also showed two full reflows per change: the picker set the new size's default margins and then
+  the size, two geometry updates. `bookActions.setTrimSize(id, margins?)` now takes both in one
+  update (WebKit, 100k words: about 0.7 s down to 0.4 s per change).
