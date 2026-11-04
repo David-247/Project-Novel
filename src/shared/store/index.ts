@@ -5,6 +5,7 @@ import { createProjectSlice } from './project-slice'
 import { createFindSlice } from './find-slice'
 import { createBookSlice } from './book-slice'
 import { createLayoutSlice } from './layout-slice'
+import { createPreferencesSlice } from './preferences-slice'
 import type { RootState } from './types'
 
 /**
@@ -21,6 +22,7 @@ export const useStore = create<RootState>()((...a) => ({
   ...createFindSlice(...a),
   ...createBookSlice(...a),
   ...createLayoutSlice(...a),
+  ...createPreferencesSlice(...a),
 }))
 
 export { useColorSchemeSync } from './use-color-scheme-sync'
@@ -30,4 +32,15 @@ export type { ProjectSlice, ProjectState, RecentProject, RecoveryPrompt, SaveSta
 export type { FindSlice } from './find-slice'
 export type { BookSlice } from './book-slice'
 export type { LayoutSlice, PageInfo, PageSide, VisibleSpread, ZoomMode } from './layout-slice'
+export type { PreferencesSlice, Preferences, PreferenceValues, PageNavigation, ReduceMotion } from './preferences-slice'
+export {
+  parsePreferences,
+  serializePreferences,
+  defaultPreferenceValues,
+  PREFERENCES_VERSION,
+  MAX_AUTHOR_NAME,
+  PAPER_SURFACES,
+} from './preferences-file'
+export type { ParsedPreferences } from './preferences-file'
+export { setSystemAuthorName } from './preferences-slice'
 export type { RootState, SliceCreator } from './types'

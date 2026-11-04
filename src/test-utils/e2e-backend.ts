@@ -31,6 +31,8 @@ export interface E2EConfig {
   failFonts?: boolean
   /** Families list_system_fonts returns. */
   fonts?: string[]
+  /** The OS user's name preferences_default_author returns ('' = none known). */
+  defaultAuthor?: string
 }
 
 // ---- IndexedDB persistence -------------------------------------------------
@@ -140,6 +142,9 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     /** Add a folder to the Rust-owned recent list (as if opened before). */
     addRecent: (path: string, name: string) => core.seedRecent(path, name),
     recentMenu: () => state.menu,
+    /** preferences.json as stored (null = no file); and replace it, even with damaged text. */
+    preferencesFile: () => state.preferences,
+    setPreferencesFile: (text: string | null) => core.seedPreferences(text),
     exits: () => state.exits,
     /** auditTooltipCoverage over the whole page incl. portals (the fake native dialog excluded). */
     auditTooltips: () =>
@@ -286,6 +291,7 @@ export async function installE2EBackend(): Promise<void> {
   const config = window.__nvE2EConfig ?? {}
   core.state.failFonts = !!config.failFonts
   if (config.fonts) core.state.fonts = config.fonts
+  if (config.defaultAuthor !== undefined) core.state.defaultAuthor = config.defaultAuthor
   mockWindows('main')
   mockIPC(
     async (cmd, args) => {

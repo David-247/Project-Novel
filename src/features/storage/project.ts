@@ -1,4 +1,4 @@
-import { defaultBookSettings, type BookSettings } from '@/shared/book'
+import { defaultBookSettings, newProjectBookSettings, type BookSettings } from '@/shared/book'
 import { emptyDoc, getDocumentProvider, isEmptyDocJSON, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { useStore, type RecentProject } from '@/shared/store'
 import {
@@ -343,8 +343,9 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   const content = doc ?? p.getDocJSON()
   const meta = newProjectMeta(baseName(folder))
   await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), serializeManuscript(content), MANUSCRIPT_FILE)
-  // A new project starts with default book settings; Save As keeps the current ones.
-  const book = doc ? defaultBookSettings() : currentBookSettings()
+  // A new project starts with the default book settings plus the user's new-project preferences
+  // (paper, trim size); Save As keeps the current ones.
+  const book = doc ? newProjectBookSettings(useStore.getState().preferences) : currentBookSettings()
   const bookVersion = getBookVersion()
   await writeFileAtomic(joinPath(folder, BOOK_FILE), serializeBook(book), BOOK_FILE)
   await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(meta), PROJECT_FILE)

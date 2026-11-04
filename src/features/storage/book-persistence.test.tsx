@@ -92,6 +92,19 @@ describe('book.json persistence', () => {
     expect(book().dirty).toBe(false)
   })
 
+  it('a new project starts with the paper and trim size chosen in Settings (and that size\'s margins)', async () => {
+    const prefs = useStore.getState().preferencesActions
+    prefs.set('defaultPaper', 'book')
+    prefs.set('defaultTrimSize', 'uk-a5')
+    try {
+      await createProject()
+      expect(onDisk()).toMatchObject({ trimSize: 'uk-a5', surface: 'book', margins: { top: 56, inside: 64, outside: 46 } })
+      expect(book()).toMatchObject({ trimSize: 'uk-a5', surface: 'book', dirty: false })
+    } finally {
+      prefs.reset()
+    }
+  })
+
   it('a trim size change marks the project unsaved, survives save, close and reopen', async () => {
     await createProject()
     bookActions().setTrimSize('uk-a5')

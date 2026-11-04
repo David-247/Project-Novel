@@ -93,6 +93,9 @@ export const HANDLED_COMMANDS = [
   'storage_exit_app',
   'storage_probe_recent_recovery',
   'storage_list_dir',
+  'preferences_read',
+  'preferences_write',
+  'preferences_default_author',
   'list_system_fonts',
   'plugin:dialog|message',
   'plugin:sql|load',
@@ -139,6 +142,10 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     active: null as string | null,
     previous: null as string | null,
     recent: [] as RecentEntry[],
+    /** Raw preferences.json in the app config dir (null = no file), and the OS user's name. */
+    preferences: null as string | null,
+    preferenceWrites: 0,
+    defaultAuthor: 'Test Writer',
     menu: [] as unknown[],
     /** Result of the native folder dialog (null = cancelled); see `pickOnce`. */
     pick: null as string | null,
@@ -168,6 +175,9 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     state.writes.length = 0
     state.active = state.previous = null
     state.recent = []
+    state.preferences = null
+    state.preferenceWrites = 0
+    state.defaultAuthor = 'Test Writer'
     state.menu = []
     state.pick = null
     state.exits = 0
@@ -191,6 +201,7 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
       if (r.kind === 'file') state.files.set(r.key.slice('file:'.length), r.value)
       else if (r.kind === 'dir') state.dirs.add(r.value)
       else if (r.key === 'meta:recent') state.recent = JSON.parse(r.value) as RecentEntry[]
+      else if (r.key === 'meta:preferences') state.preferences = JSON.parse(r.value) as string | null
       else if (r.key === 'meta:sql') {
         for (const [k, v] of JSON.parse(r.value) as [string, number][]) state.sqlVersions.set(k, v)
       }
@@ -368,6 +379,18 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
         await persist.meta('recent', state.recent)
         return recentJSON()
       }
+      case 'preferences_read':
+        return state.preferences
+      case 'preferences_write': {
+        const contents = args.contents as string
+        if (contents.length > 256 * 1024) throw { kind: 'invalid_path', message: 'Preferences are too large' }
+        state.preferences = contents
+        state.preferenceWrites++
+        await persist.meta('preferences', contents)
+        return null
+      }
+      case 'preferences_default_author':
+        return state.defaultAuthor
       case 'storage_set_recent_menu':
         state.menu = args.entries as unknown[]
         return null
@@ -426,5 +449,11 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     }
   }
 
-  return { state, handle, reset, hydrate, seedFile, seedRecent, ensureFolderExists }
+  /** Test setup: put raw text (even damaged JSON) in preferences.json, or remove the file (null). */
+  async function seedPreferences(text: string | null) {
+    state.preferences = text
+    await persist.meta('preferences', text)
+  }
+
+  return { state, handle, reset, hydrate, seedFile, seedRecent, seedPreferences, ensureFolderExists }
 }
