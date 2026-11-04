@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { docEnd, docStart, editor, launch, lineEnd, newProject, openRecent, readFile, saveStatus, waitForLayout } from './helpers'
+import { docEnd, docStart, editor, launch, lineEnd, menu, MENU, newProject, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Footnotes (Phase 2): the reference in the text, the note at the bottom of the page it falls on,
@@ -338,4 +338,117 @@ test('footnote controls: keyboard reachable dialog, tooltips, 32 px reference ta
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
   await escapeDialog(page, 'Footnote options')
   await expect(btn).toBeFocused()
+})
+
+test('CRITICAL: opening another project while a note is open closes it; nothing typed reaches the other book', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await launch(page)
+  await seedProject(page, '/projects/Other', 'Other', { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The other book.' }] }] })
+  await newProject(page, '/projects/First')
+  await editor(page).click()
+  await page.keyboard.type('First book')
+  await page.keyboard.press('ControlOrMeta+Alt+f')
+  await page.keyboard.type('Open note')
+  await menu(page, MENU.save)
+  await expect(saveStatus(page)).toHaveText('First: Saved')
+  await expect(page.getByTestId('footnote-editor')).toBeFocused()
+  // File > Open Recent > Other, with the note still open.
+  await openRecent(page, '/projects/Other')
+  await expect(saveStatus(page)).toHaveText('Other: All changes saved')
+  await expect(page.getByTestId('footnote-popover')).toHaveCount(0)
+  await page.keyboard.type('XYZ')
+  await expect(editor(page)).toHaveText('The other book.')
+  expect(await page.evaluate(() => window.__nvE2E.footnotes())).toEqual([])
+  expect(errors).toEqual([])
+})
+
+test('a slow press on Done (down, 150 ms, up) returns the caret after the reference', async ({ page }) => {
+  await setup(page, 3)
+  await docStart(page)
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ControlOrMeta+Alt+f')
+  await page.keyboard.type('Slow done.')
+  const done = (await page.locator('[data-control-id="footnote.done"]').boundingBox())!
+  await page.mouse.move(done.x + done.width / 2, done.y + done.height / 2)
+  await page.mouse.down()
+  await page.waitForTimeout(150)
+  // Still open and focused while the button is held (no blur-close before the click lands).
+  await expect(page.getByTestId('footnote-editor')).toBeFocused()
+  await page.mouse.up()
+  await expect(page.getByTestId('footnote-popover')).toHaveCount(0)
+  await expect(editor(page)).toBeFocused()
+  await page.keyboard.type('Z')
+  const ref = editor(page).locator('[data-footnote-ref]')
+  expect(await ref.evaluate((el) => el.nextSibling?.textContent?.startsWith('Z'))).toBe(true)
+  expect(await page.evaluate(() => window.__nvE2E.footnotes().map((f) => f.text))).toEqual(['Slow done.'])
+})
+
+test('find highlights a match inside a note on its reference; Replace All replaces note text', async ({ page }) => {
+  await setup(page, 3)
+  await page.evaluate(() => window.__nvE2E.insertFootnoteAt(5, 'See the zebra index.'))
+  await waitForLayout(page)
+  await page.keyboard.press('ControlOrMeta+f')
+  await page.locator('[data-control-id="find.query"]').fill('zebra')
+  await expect(page.getByTestId('find-status')).toHaveText(/1 of 1/)
+  const ref = editor(page).locator('[data-footnote-ref]')
+  await expect(ref).toHaveClass(/nv-find-match-current/)
+  await page.locator('[data-control-id="find.replacement"]').fill('okapi')
+  await page.locator('[data-control-id="find.replaceAll"]').click()
+  await expect(page.getByTestId('find-status')).toHaveText('Replaced 1')
+  await waitForLayout(page)
+  expect(await page.evaluate(() => window.__nvE2E.footnotes().map((f) => f.text))).toEqual(['See the okapi index.'])
+  await expect(page.locator('.nv-frames .nv-page[data-page-index="0"] .nv-fn-area')).toHaveText('1 See the okapi index.')
+})
+
+test('a note too long for the last page shows a "continued" marker', async ({ page }) => {
+  await setup(page, 1)
+  await page.evaluate((t) => window.__nvE2E.insertFootnoteAt(5, t), words(1500))
+  await waitForLayout(page)
+  const last = (await layout(page)).pageCount - 1
+  await expect(page.locator(`.nv-frames .nv-page[data-page-index="${last}"] [data-footnote-clipped]`)).toHaveText('continued…')
+})
+
+test('REGRESSION: a relabelled reference ("9" -> "10") is re-measured even when a second transaction lands in the same frame', async ({ page }) => {
+  await setup(page, 1)
+  // Paragraph A: 8 footnotes; paragraph B: one long unbreakable word ending in reference 9, grown
+  // until a two-digit label would wrap B onto one more line.
+  const fn = (t: string) => ({ type: 'footnote', content: [{ type: 'text', text: t }] })
+  const a = { type: 'paragraph', content: [{ type: 'text', text: 'Notes' }, ...Array.from({ length: 8 }, (_, i) => fn(`n${i + 1}`))] }
+  const grow = async (n: number) => {
+    await page.evaluate((doc) => window.__nvE2E.setDoc(doc), {
+      type: 'doc',
+      content: [a, { type: 'paragraph', content: [{ type: 'text', text: 'x'.repeat(n) }, fn('nine')] }],
+    })
+    return page.evaluate(() => {
+      const ps = document.querySelectorAll<HTMLElement>('.ProseMirror p')
+      const b = ps[1]
+      const ref = b.querySelector<HTMLElement>('[data-footnote-ref]')!
+      const h9 = b.getBoundingClientRect().height
+      ref.setAttribute('data-fn-num', '10')
+      const h10 = b.getBoundingClientRect().height
+      ref.setAttribute('data-fn-num', '9')
+      return h10 > h9
+    })
+  }
+  let n = 40
+  while (!(await grow(n)) && n < 200) n++
+  expect(n).toBeLessThan(200)
+  await waitForLayout(page)
+  const before = (await page.evaluate(() => window.__nvE2E.paginationLines())).lineCount
+  // Two transactions in one frame: a footnote at the start (B's reference becomes "10" and wraps),
+  // then a long paragraph inserted before everything (every position shifts past B's size).
+  await page.evaluate(() => {
+    window.__nvE2E.insertFootnoteAt(1, 'first')
+    window.__nvE2E.insertParagraphAt(0, 'shift '.repeat(80))
+  })
+  await waitForLayout(page)
+  expect(await page.evaluate(() => window.__nvE2E.footnotes().map((f) => f.label))).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'])
+  const incremental = (await page.evaluate(() => window.__nvE2E.paginationLines())).lineCount
+  expect(incremental).toBeGreaterThan(before)
+  // A full re-measure finds exactly what the incremental pass measured (B's extra line included).
+  await page.evaluate(() => window.__nvE2E.remeasureAll())
+  await waitForLayout(page)
+  expect((await page.evaluate(() => window.__nvE2E.paginationLines())).lineCount).toBe(incremental)
 })

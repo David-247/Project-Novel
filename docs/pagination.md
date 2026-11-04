@@ -303,9 +303,11 @@ deletes it).
 
 - `relayoutPagination()`: re-break the pages on the next frame from the measured lines (reservation
   answers, `data-break-before` decorations, a new chapter predicate). Cheap.
-- `invalidatePaginationAt(positions)`: re-measure only the top-level blocks holding these document
-  positions, then reflow (a decoration that changes a block's line boxes without a document change: a
-  footnote reference renumbered from "9" to "10"). About a keystroke per block.
+- `invalidatePaginationAt(positions)`: re-measure only the top-level blocks holding these positions of
+  the editor's *current* document, then reflow (a decoration that changes a block's line boxes without a
+  document change: a footnote reference renumbered from "9" to "10"). The positions are resolved to block
+  nodes at the call and those nodes' measurements dropped, so a second transaction in the same frame
+  cannot make them point at another block (e2e regression test). About a keystroke per block.
 - `invalidatePagination()`: re-measure every block and reflow (metrics changed without a document or
   `book.styles` change, e.g. a style sheet injected by other code). About a trim change's cost.
 
@@ -342,6 +344,12 @@ bottom reservation, the footnote area and the Footnote options dialog.
   reference point. Its content is the note text, so the note travels with copy/paste, undo, find &
   replace, save and recovery, and deleting the reference deletes the note in the same step. Additive to
   the schema: Phase 1 and earlier Phase 2 manuscripts load unchanged. Plain-text copies drop the note.
+- **Find & replace searches note text.** In the find text a note is LEAF + its text + LEAF (LEAF is the
+  object replacement character, which a typed query never matches), so note text maps 1:1 to the
+  positions after the reference and a match never spans the reference's boundary. A match inside a note
+  is highlighted on its reference, and going to it selects the reference (the note's text is not in the
+  line); the find field keeps the focus, Enter on the selected reference after closing the panel opens
+  the note. Replace and Replace All edit note text like body text (Replace All: one undo step).
 - **Numbers are derived, never stored**: a plugin numbers the references in document order (per book, or
   restarting in each chapter of `getChapters`; arabic or `*, †, ‡, §, ‖, ¶`, then doubled) and draws the
   mark as a node decoration (`data-fn-num`, shown by a pseudo-element raised by relative positioning, so
@@ -394,15 +402,25 @@ How it meets the requirements:
   manuscript stays the only source of truth and its history the only history. Mod-z / Mod-Shift-z / Mod-y
   in the note run the manuscript's undo / redo; changes from outside are mirrored back into the note.
 - **Escape returns to the reference** (so do Enter and Done): caret right after the reference, focus in the
-  manuscript. Moving focus elsewhere just closes the popover.
+  manuscript. Moving focus elsewhere just closes the popover. A press anywhere in the popover but the
+  note field never takes the focus (WebKit blurs to nothing on a button press, which closed the popover
+  before Done's click landed). The first edit after opening starts its own undo step, so the first Mod-z
+  takes back the typing, not the inserted footnote with it. Pasted paragraphs are joined by spaces.
+- **Safety.** A document load (open, open recent, new project, recovery restore: each replaces the
+  editor state without a transaction) closes the popover. Before forwarding, the popover checks that
+  the manuscript still holds an identical note at its position, and any step that does not apply
+  closes it: its edits can never land in another document.
 - **Keyboard and touch.** Insert > Footnote or Mod-Alt-f inserts after the selection and opens the note;
   arrowing onto a reference selects it and Enter opens it; a click or tap on the reference opens it (32 ×
   32 px target around the mark, out of flow). The popover sits under the reference (above it near the
-  window bottom), follows it on scroll, zoom and reflow, and has a Done button.
+  window bottom) and is placed again on scroll, resize, layout changes, its own resizes and manuscript
+  transactions (listeners, no polling). Tab and Shift-Tab cycle between the note and Done, so focus never
+  leaves the portalled popover for the page behind it.
 
-Known limitations: find & replace does not search inside notes (a note is one atom in the find text);
-notes are not edited from the footnote area itself (press the reference); a note longer than the whole
-last page is clipped.
+Known limitations: notes are not edited from the footnote area itself (press the reference); revealing a
+find match inside a note selects its reference rather than the matched text. Notes that do not fit on the
+last page are clipped, with an italic "continued…" marker on the area's last line: the book has no page
+after it to continue on. Footnote-only trailing pages are a follow-up.
 
 ## View, zoom and keys
 
