@@ -19,6 +19,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getEditor, getFootnotes, setDocJSON } from '@/features/editor'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
+import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
@@ -145,6 +146,10 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     /** preferences.json as stored (null = no file); and replace it, even with damaged text. */
     preferencesFile: () => state.preferences,
     setPreferencesFile: (text: string | null) => core.seedPreferences(text),
+    /** Ask for the author name as a tracked change or comment would (shows the one-time question). */
+    ensureAuthorName: () => ensureAuthorName(),
+    /** The preferences slice as the app holds it. */
+    preferences: () => useStore.getState().preferences,
     exits: () => state.exits,
     /** auditTooltipCoverage over the whole page incl. portals (the fake native dialog excluded). */
     auditTooltips: () =>

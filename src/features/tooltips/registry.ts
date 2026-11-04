@@ -16,6 +16,7 @@ import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
+import { SETTINGS_CONTROLS } from '@/features/settings'
 import { SURFACE_CONTROLS } from '@/shared/theme'
 import { TRIM_SIZES } from '@/shared/book'
 import type { TooltipCopy } from '@/shared/ui'
@@ -248,6 +249,23 @@ const FOOTNOTE_TOOLTIPS: Record<string, TooltipCopy> = {
   ...fromMeta(FOOTNOTE_EDITOR_CONTROLS, { done: 'Finish the footnote and put the cursor back after its number in the text.' }),
 }
 
+/** Settings dialog and the one-time author question (settings slice). */
+const SETTINGS_DESCRIPTIONS: Record<keyof typeof SETTINGS_CONTROLS, string> = {
+  open: 'Your name, how pages turn, and what new projects start with. Applies to every project.',
+  authorName: 'The name on your tracked changes and comments. Starts as your computer account name.',
+  authorColor: 'The colour of your tracked changes and comments.',
+  authorColorAuto: 'Let Novel pick your colour instead of using the one you chose.',
+  pageNavigation: 'Applies to page navigation in the writing view: turn pages like a book, or scroll through them.',
+  reduceMotion: 'Follow your computer, or always reduce or allow animation such as page turns.',
+  defaultPaper: 'The paper a new project starts with. Projects you already have keep theirs.',
+  defaultTrimSize: 'The page size a new project starts with. Projects you already have keep theirs.',
+  reset: 'Put every setting back the way it came, including your name from your computer account.',
+  done: 'Close Settings. Changes are already applied.',
+  promptName: 'The name that goes on your tracked changes and comments. You can change it later in Settings.',
+  promptSave: 'Keep this name and continue.',
+  promptSkip: 'Continue without a name. You can add one later in Settings.',
+}
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -266,6 +284,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...fromMeta(HEADER_FOOTER_CONTROLS, HEADER_FOOTER_DESCRIPTIONS),
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
+  ...fromMeta(SETTINGS_CONTROLS, SETTINGS_DESCRIPTIONS),
   ...fromMeta(STYLE_DIALOG_CONTROLS, STYLE_DIALOG_DESCRIPTIONS),
   ...SURFACE_TOOLTIPS,
   ...FILE_TOOLTIPS,
