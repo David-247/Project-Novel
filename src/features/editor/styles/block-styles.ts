@@ -14,6 +14,7 @@ import {
   type ResolvedStyles,
 } from '@/shared/book'
 import { useStore } from '@/shared/store'
+import { currentMarkupView, isBlockHidden, MARKUP_VIEW_META } from '@/shared/track-changes'
 import { inListItem } from '../toolbar/block-format'
 import { getResolvedStyles, resolveStyles } from './resolved'
 
@@ -175,7 +176,10 @@ function computeBreaks(doc: PMNode, styles: ResolvedStyles): DecorationSet {
   const decos: Decoration[] = []
   let prev: string | null = null
   let afterPageBreak = false
+  // Track changes: a block (or page break) the markup view hides is not there for breaking.
+  const view = currentMarkupView()
   doc.forEach((node, offset) => {
+    if (view !== 'all' && isBlockHidden(node, view)) return
     if (node.type.name === 'pageBreak') {
       // A manual page break makes the block after it start a page (recto, when its style says so).
       afterPageBreak = true
@@ -218,8 +222,10 @@ function breaksPlugin(): Plugin<BreakState> {
       apply: (tr, value, oldState, newState) => {
         const meta = tr.getMeta(STYLES_META) as ResolvedStyles | undefined
         if (meta) return { decorations: computeBreaks(newState.doc, meta), signature: breakSignature(meta) }
+        if (tr.getMeta(MARKUP_VIEW_META) !== undefined) return { ...value, decorations: computeBreaks(newState.doc, getResolvedStyles()) }
         if (!tr.docChanged) return value
-        if (sameTopLevelShape(oldState.doc, newState.doc)) {
+        // Outside All Markup a text edit can hide or show a whole block: recompute (O(top-level blocks)).
+        if (sameTopLevelShape(oldState.doc, newState.doc) && currentMarkupView() === 'all') {
           return { ...value, decorations: value.decorations.map(tr.mapping, tr.doc) }
         }
         return { ...value, decorations: computeBreaks(newState.doc, getResolvedStyles()) }

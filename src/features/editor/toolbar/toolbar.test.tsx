@@ -403,16 +403,16 @@ describe('Keyboard shortcuts', () => {
     expect(firstBlock(ed).type.name).toBe('orderedList')
   })
 
-  it('Mod-Shift-l/e/r/j set alignment', () => {
+  it('Mod-e and Mod-Shift-l/r/j set alignment (Mod-Shift-e is Track Changes)', () => {
     const ed = setup()
     run(() => ed.commands.insertContent('aligned'))
-    for (const [k, v] of [
-      ['e', 'center'],
-      ['r', 'right'],
-      ['j', 'justify'],
-      ['l', 'left'],
+    for (const [k, v, shift] of [
+      ['e', 'center', false],
+      ['r', 'right', true],
+      ['j', 'justify', true],
+      ['l', 'left', true],
     ] as const) {
-      key(ed, k, { shift: true })
+      key(ed, k, { shift })
       expect(firstBlock(ed).attrs.textAlign).toBe(v)
     }
     expect(ctl('toolbar.alignLeft')).toHaveAttribute('aria-pressed', 'true')

@@ -5,6 +5,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { DecorationSet } from '@tiptap/pm/view'
 import { useStore } from '@/shared/store'
+import { currentMarkupView, type MarkupView } from '@/shared/track-changes'
 import { getEditor, subscribeEditor } from '../controller'
 import { FOOTNOTE_NODE } from '../footnote/name'
 import {
@@ -58,10 +59,11 @@ function findState() {
   return useStore.getState().find
 }
 
-function searchParams(): { query: string; options: FindOptions; key: string } {
+function searchParams(): { query: string; options: FindOptions; key: string; markupView: MarkupView } {
   const f = findState()
   const options = { caseSensitive: f.caseSensitive, wholeWord: f.wholeWord }
-  return { query: f.query, options, key: `${f.caseSensitive ? 1 : 0}${f.wholeWord ? 1 : 0}:${f.query}` }
+  const markupView = currentMarkupView()
+  return { query: f.query, options, markupView, key: `${f.caseSensitive ? 1 : 0}${f.wholeWord ? 1 : 0}${markupView}:${f.query}` }
 }
 
 function publish() {
@@ -99,9 +101,9 @@ export function scanNow(opts: ScanOptions = {}): void {
     publish()
     return
   }
-  const { query, options, key } = searchParams()
+  const { query, options, key, markupView } = searchParams()
   const state = ed.state
-  matches = findMatches(state.doc, query, options)
+  matches = findMatches(state.doc, query, options, markupView)
   scannedDoc = state.doc
   scannedKey = key
   current = indexAtOrAfter(matches, opts.anchor ?? state.selection.from)
@@ -306,6 +308,9 @@ export function startFindEngine(): () => void {
       scheduleScan(QUERY_DEBOUNCE_MS, { reveal: true })
     } else if (s.editor.docVersion !== prev.editor.docVersion) {
       scheduleScan(DOC_DEBOUNCE_MS)
+    } else if (s.trackChanges.markupView !== prev.trackChanges.markupView) {
+      // Track changes: what can be found follows the markup view.
+      scheduleScan(0)
     }
   })
   const unsubEditor = subscribeEditor(() => {

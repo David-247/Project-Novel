@@ -1,5 +1,6 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { chapterRoles, type ResolvedStyles } from '@/shared/book'
+import { currentMarkupView, isBlockHidden, type MarkupView } from '@/shared/track-changes'
 import { blockPlainText } from '../block-text'
 import { renderedStyleId } from '../styles/block-styles'
 import { getResolvedStyles } from '../styles/resolved'
@@ -25,12 +26,15 @@ export const FRONT_MATTER_INDEX = -1
  * number block (Chapter Number, or a style based on it) directly before a title belongs to the chapter
  * it introduces. Content before the first chapter is front matter (`FRONT_MATTER_INDEX`).
  * Depends on the style sheet: `styles` defaults to the current book's. Pure otherwise; O(top-level blocks).
+ * Track changes: follows `markupView` (default: the current one): a title block the view hides opens
+ * no chapter, and titles leave out hidden text (running heads show what the page shows).
  */
-export function getChapters(doc: PMNode, styles: ResolvedStyles = getResolvedStyles()): Chapter[] {
+export function getChapters(doc: PMNode, styles: ResolvedStyles = getResolvedStyles(), markupView: MarkupView = currentMarkupView()): Chapter[] {
   const roles = chapterRoles(styles)
   const chapters: Chapter[] = []
   let numberFrom = -1
   doc.forEach((node, offset) => {
+    if (markupView !== 'all' && isBlockHidden(node, markupView)) return
     const styled = node.type.name === 'paragraph' || node.type.name === 'heading'
     const role = styled ? roles.get(renderedStyleId(node, styles)) : undefined
     if (role === 'number') {
@@ -38,7 +42,7 @@ export function getChapters(doc: PMNode, styles: ResolvedStyles = getResolvedSty
       return
     }
     if (role === 'title') {
-      chapters.push({ index: chapters.length, title: blockPlainText(node), from: numberFrom >= 0 ? numberFrom : offset, to: doc.content.size })
+      chapters.push({ index: chapters.length, title: blockPlainText(node, { markupView }), from: numberFrom >= 0 ? numberFrom : offset, to: doc.content.size })
     }
     numberFrom = -1
   })
