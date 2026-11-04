@@ -91,11 +91,6 @@ async function overlap(page: Page, p: number) {
   }, p)
 }
 
-async function scrollToPage(page: Page, p: number) {
-  await page.locator(`.nv-frames .nv-page[data-page-index="${p}"]`).scrollIntoViewIfNeeded()
-  await waitForLayout(page)
-}
-
 test('Insert > Footnote: superscript number in the text, the note at the bottom of the same page; Escape returns', async ({ page }) => {
   await setup(page)
   await docStart(page)

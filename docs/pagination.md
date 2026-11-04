@@ -368,7 +368,11 @@ page's footnote area; (B) an anchored popover holding the same nested editor.
   where WebKit and Chromium caret and selection handling differ most; the popover keeps the nested view
   outside the manuscript DOM, so the manuscript's measurement and typing path are untouched.
 - Cost: none while not editing (the popover does not exist). Typing in the main text with 200 footnotes
-  at 100k words: see the perf table below (budget < 50 ms median).
+  at 100k words, in a paragraph holding a reference (`e2e/perf.spec.ts`, local Windows 11, budget < 50 ms
+  median): Chromium 16.8 / 27.5 ms median / p95, WebKit 40 / 50 ms (Windows WebKit's bimodal frame mode,
+  see above; the same run's footnote-free Phase 1 typing was 37 ms). A keystroke's pass: 2.4 ms Chromium,
+  3 ms WebKit (one block measured; the reservation asked for every page). macOS WebKit and Windows
+  Chromium (the blocking pairs) are measured by CI.
 
 How it meets the requirements:
 
