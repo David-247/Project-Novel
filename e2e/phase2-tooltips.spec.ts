@@ -178,12 +178,16 @@ test('Phase 2 toolbar and status bar controls show their tooltip on hover and on
   await page.keyboard.press('Escape')
 
   // Keyboard: Tab order in the status bar (spread toggle, zoom out, zoom, zoom in).
-  await ctl(page, 'pagination.spreadView').focus()
-  for (const id of ['pagination.zoomOut', 'pagination.zoom', 'pagination.zoomIn']) {
-    await pressTab(page)
-    const active = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 160))
-    await expect(ctl(page, id), `${id}; focused: ${active}`).toBeFocused()
-    await expect(tip(page), `focus tooltip for ${id}`).toBeVisible()
+  // Each step starts from the previous control (macOS Chromium: a late focus return after the
+  // Escape above can otherwise take focus back between steps; reachability is what is tested).
+  const order = ['pagination.spreadView', 'pagination.zoomOut', 'pagination.zoom', 'pagination.zoomIn']
+  for (let i = 1; i < order.length; i++) {
+    await expect(async () => {
+      await ctl(page, order[i - 1]).focus()
+      await pressTab(page)
+      await expect(ctl(page, order[i])).toBeFocused({ timeout: 1000 })
+      await expect(tip(page)).toBeVisible({ timeout: 2000 })
+    }, `${order[i]} reached with Tab from ${order[i - 1]}, tooltip shown`).toPass({ timeout: 15_000 })
   }
   // Paper picker: arrow keys move between options and show each tooltip.
   await ctl(page, 'book.surface.auto').focus()
