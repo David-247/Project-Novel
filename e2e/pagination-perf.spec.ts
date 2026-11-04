@@ -31,6 +31,8 @@ async function openFixture(page: Page, folder: string) {
   await openRecent(page, folder)
   await expect(saveStatus(page)).toHaveText(`${title}: All changes saved`, { timeout: 60_000 })
   await waitForLayout(page)
+  // Running heads and page numbers are on (the defaults): the budgets below include them.
+  await expect(page.locator('.nv-frames [data-hf="text"], .nv-frames [data-hf="number"]').first()).toBeAttached()
   return { fx, openMs: Date.now() - t0 }
 }
 
