@@ -599,9 +599,11 @@ for (const [trim, at] of [
         const fin = { x: (r.left - c.left) / c.s, y: (r.top - c.top) / c.s }
         for (const p of list) if (Math.abs(p.x - fin.x) > 1 || Math.abs(p.y - fin.y) > 1) stale.push(`${Math.round(p.y)}->${Math.round(fin.y)}`)
       }
-      return { frames, checked: seen.size, stale }
+      return { frames, checked: seen.size, stale, hiddenLeft: document.querySelectorAll('.nv-stale').length }
     }, trim)
     expect(result.checked).toBeGreaterThan(0)
+    // Once settled, no block is left hidden.
+    expect(result.hiddenLeft).toBe(0)
     expect(result.stale, `stale paints over ${result.frames} frames`).toEqual([])
   })
 }

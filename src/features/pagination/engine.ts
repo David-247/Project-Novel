@@ -122,6 +122,8 @@ function sigPart(spec: ShiftSpec, fromRel: number, toRel: number) {
 
 /** Signature of the (mapped) decorations currently drawn on a block. */
 function signatureOf(decos: Decoration[], pos: number, end: number) {
+  // A block still hidden as stale must be redrawn, even if its offsets happen to be right already.
+  if (decos.some((d) => (d.spec as { nvStale?: boolean }).nvStale === true && d.from >= pos && d.to <= end + 1)) return '!stale'
   return decos
     .filter((d) => (d.spec as Partial<ShiftSpec>).nvShift !== undefined && d.from >= pos && d.to <= end + 1)
     .sort((a, b) => a.from - b.from || Number((a.spec as ShiftSpec).inline) - Number((b.spec as ShiftSpec).inline))
@@ -601,10 +603,21 @@ export class PaginationEngine {
           }
         }
         if (removed.length + added.length > 64) {
-          // Many blocks: rebuild from the kept decorations (DecorationSet.remove with large unsorted
-          // lists proved unreliable: some removed blocks lost their new decorations too).
-          const drop = new Set(removed)
-          next = DecorationSet.create(doc, next.find().filter((d) => !drop.has(d)).concat(added))
+          // Many blocks: rebuild. Keep every decoration except this slice's own inside a redrawn block
+          // (by range: DecorationSet.find returns fresh copies, so identity cannot be used).
+          const ranges = apply.map((d) => [d.pos, d.pos + d.size] as const).sort((x, y) => x[0] - y[0])
+          const inRedrawn = (from: number, to: number) => {
+            let lo = 0
+            let hi = ranges.length - 1
+            while (lo <= hi) {
+              const mid = (lo + hi) >> 1
+              if (ranges[mid][1] < to) lo = mid + 1
+              else if (ranges[mid][0] > from) hi = mid - 1
+              else return true
+            }
+            return false
+          }
+          next = DecorationSet.create(doc, next.find().filter((d) => !(ours(d.spec) && inRedrawn(d.from, d.to))).concat(added))
         } else next = next.remove(removed).add(doc, added)
       }
       for (const d of apply) {
