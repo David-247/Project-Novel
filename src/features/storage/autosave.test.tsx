@@ -24,6 +24,7 @@ import {
   SaveStatusIndicator,
   saveProject,
   startAutosave,
+  updateProjectDetails,
 } from './index'
 import { __resetAutosaveForTests } from './autosave'
 import { __resetStorageForTests, clearRecoveryData, offerReopenAfterCrash, unrestoredNotice } from './project'
@@ -375,6 +376,52 @@ describe('crash recovery', () => {
     await launch()
     await offerReopenAfterCrash(await loadRecentProjects())
     expect(project().recoveryPrompt).toBeNull()
+  })
+})
+
+describe('book details and crash recovery', () => {
+  // project.json `updatedAt` is the last save (docs/project-format.md); a details edit is not a save,
+  // so it must not change the base a recovery snapshot is matched against.
+  it('REGRESSION: create, edit, autosave, edit book details, crash: reopen still offers Restore', async () => {
+    await createProject()
+    editor.update(textDoc('typed, then the author was set'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    const updatedAt = metaOnDisk().updatedAt
+    expect(await updateProjectDetails({ title: 'The Long Road', author: 'Ada Quill' })).toBe(true)
+    expect(metaOnDisk()).toMatchObject({ title: 'The Long Road', author: 'Ada Quill', updatedAt })
+
+    await launch() // crash
+    await offerReopenAfterCrash(await loadRecentProjects())
+    expect(project().recoveryPrompt).toMatchObject({ kind: 'reopen', path: ROOT })
+    await reopen()
+    expect(project().recoveryPrompt).toMatchObject({ kind: 'restore' })
+    expect(unrestoredFiles()).toEqual([])
+    expect(await restoreRecovery()).toBe(true)
+    expect(editor.getDocJSON()).toEqual(textDoc('typed, then the author was set'))
+    expect(project()).toMatchObject({ title: 'The Long Road', author: 'Ada Quill' })
+  })
+
+  it('REGRESSION: an unanswered backup ("Decide later") is still offered after a book details edit and a crash', async () => {
+    const savedAt = await withUnansweredSnapshot('decide later text')
+    expect(await updateProjectDetails({ author: 'Ada Quill' })).toBe(true)
+    expect(hasPendingRecovery()).toBe(true)
+    await launch() // crash
+    await reopen()
+    expect(project().recoveryPrompt).toMatchObject({ kind: 'restore', savedAt })
+    expect(unrestoredFiles()).toEqual([])
+    expect(await restoreRecovery()).toBe(true)
+    expect(editor.getDocJSON()).toEqual(textDoc('decide later text'))
+  })
+
+  it('a real save after a details edit still moves the base forward', async () => {
+    await createProject()
+    expect(await updateProjectDetails({ author: 'Ada Quill' })).toBe(true)
+    const before = metaOnDisk().updatedAt
+    await vi.advanceTimersByTimeAsync(5)
+    editor.update(textDoc('saved'))
+    expect(await saveProject()).toBe(true)
+    expect(metaOnDisk().updatedAt).not.toBe(before)
+    expect(metaOnDisk()).toMatchObject({ author: 'Ada Quill' })
   })
 })
 

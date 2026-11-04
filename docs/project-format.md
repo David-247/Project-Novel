@@ -27,9 +27,9 @@ Pretty-printed UTF-8 JSON.
 | `schemaVersion` | integer | Format version. Current: `1`.                                    |
 | `id`            | string  | Random UUID, assigned at creation, never changes.                 |
 | `title`         | string  | Project title (the book title shown in running heads).           |
-| `author`        | string  | Author name shown in running heads. Optional: a file without it (every earlier project) reads as `""`. Edited in the "Book details" dialog, which rewrites project.json at once. |
+| `author`        | string  | Author name shown in running heads. Optional: a file without it (every earlier project) reads as `""`. Edited in the "Book details" dialog, which rewrites project.json at once (without changing `updatedAt`). |
 | `createdAt`     | string  | ISO 8601 timestamp (UTC).                                        |
-| `updatedAt`     | string  | ISO 8601 timestamp (UTC) of the last save.                        |
+| `updatedAt`     | string  | ISO 8601 timestamp (UTC) of the last save. Only a save changes it: a Book details edit does not, because crash recovery matches snapshots to the last save by this value (`baseUpdatedAt`). |
 
 ```json
 {

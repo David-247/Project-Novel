@@ -163,6 +163,10 @@ export function getCurrentProjectMeta(): ProjectMeta | null {
  * (atomically, under the write lock) rather than waiting for the next save, so a crash cannot lose
  * it and it needs no unsaved-changes bookkeeping. Resolves false when no project is open, nothing
  * changed, or the write failed (an error dialog is shown). A blank title keeps the old one.
+ *
+ * `updatedAt` is NOT changed: it means "the last save" (docs/project-format.md), and crash recovery
+ * matches a snapshot to that save by `baseUpdatedAt`. A details edit is not a save of the manuscript,
+ * so bumping it would make every snapshot taken before the edit look like it belongs to another save.
  */
 export async function updateProjectDetails(details: { title?: string; author?: string }): Promise<boolean> {
   const folder = getCurrentProjectPath()
@@ -174,7 +178,7 @@ export async function updateProjectDetails(details: { title?: string; author?: s
   try {
     await withWriteLock(async () => {
       const base = currentMeta && currentMeta.id === meta.id ? currentMeta : meta
-      const updated: ProjectMeta = { ...base, title, author, updatedAt: new Date().toISOString() }
+      const updated: ProjectMeta = { ...base, title, author }
       await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
       if (currentMeta === base) currentMeta = updated
     })
