@@ -214,8 +214,11 @@ export class PaginationEngine {
       // Re-break only (reservations, data-break-before, chapters): measurements stay valid.
       onRelayout(() => this.schedule()),
       // Re-measure the blocks holding these positions (decorations that change line boxes).
+      // Re-measure the blocks holding these positions (decorations that change line boxes). The
+      // positions are resolved to block nodes now, while they are current: a later transaction in
+      // the same frame cannot make them point at another block.
       onInvalidateBlocks((positions) => {
-        this.remeasureAt = [...(this.remeasureAt ?? []), ...positions].sort((a, b) => a - b)
+        this.forgetBlocksAt(positions)
         this.schedule()
       }),
     )
@@ -228,8 +231,16 @@ export class PaginationEngine {
     this.schedule()
   }
 
-  /** Positions whose top-level blocks must be re-measured in the next pass (sorted). */
-  private remeasureAt: number[] | null = null
+  /** Drop the measurements of the top-level blocks holding `positions` (in the current document). */
+  forgetBlocksAt(positions: readonly number[]) {
+    const doc = this.view.state.doc
+    for (const p of positions) {
+      if (p < 0 || p > doc.content.size) continue
+      const $p = doc.resolve(p)
+      const block = $p.depth > 0 ? $p.node(1) : doc.nodeAt(p)
+      if (block) this.cache.delete(block)
+    }
+  }
 
   /** Style ids whose resolved definition changed and whose blocks must be re-measured. */
   private restyled: Set<string> | null = null
@@ -406,9 +417,7 @@ export class PaginationEngine {
     const prevTops = key === this.lastKey ? this.prevTops : new Map<PMNode, number>()
     const restyled = this.restyled
     this.restyled = null
-    const remeasure = this.remeasureAt
-    this.remeasureAt = null
-    let rm = 0
+
     const nextTops = new Map<PMNode, number>()
     let delta = 0
     let anchor = true
@@ -436,10 +445,7 @@ export class PaginationEngine {
       let m = this.cache.get(node)
       let fresh = false
       if (m && restyled && usesStyle(dom, restyled)) m = undefined
-      if (remeasure) {
-        while (rm < remeasure.length && remeasure[rm] < pos) rm++
-        if (m && rm < remeasure.length && remeasure[rm] < pos + node.nodeSize) m = undefined
-      }
+
       if (!m || m.key !== key) {
         m = measureBlock(view, node, pos, dom, scale, key)
         this.cache.set(node, m)

@@ -175,8 +175,9 @@ export function relayoutPagination(): void {
 const relayoutListeners = new Set<() => void>()
 
 /**
- * Re-measure only the top-level blocks containing `positions` (document positions), then reflow,
- * on the next frame. For a decoration that changes a block's line boxes without a document change
+ * Re-measure only the top-level blocks containing `positions` (positions in the editor's CURRENT
+ * document, resolved to block nodes at once, so later transactions cannot make them stale), then
+ * reflow on the next frame. For a decoration that changes a block's line boxes without a document change
  * (a footnote reference whose derived number got wider). About a keystroke's cost per block.
  */
 export function invalidatePaginationAt(positions: readonly number[]): void {
