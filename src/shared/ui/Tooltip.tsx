@@ -174,8 +174,9 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
   const manual = useRef(false)
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const cancelLeave = () => clearTimeout(leaveTimer.current)
-  const leaveSoon = () => {
-    if (!manual.current) return
+  const leaveSoon = (e: { pointerType?: string }) => {
+    // A long-press tooltip must outlive the finger: touch fires pointerleave right after pointerup.
+    if (!manual.current || e.pointerType === 'touch') return
     cancelLeave()
     // Long enough to cross the gap onto the tooltip itself (which stays hoverable).
     leaveTimer.current = setTimeout(() => setOpen(false), 150)
@@ -252,7 +253,7 @@ export function Tooltip({ children, controlId, copy, side = 'bottom', wrap = fal
     },
     onPointerLeave: (e: PointerEvent) => {
       fwdPointerLeave?.(e)
-      leaveSoon()
+      leaveSoon(e)
     },
     onPointerEnter: (e: PointerEvent) => {
       fwdPointerEnter?.(e)
