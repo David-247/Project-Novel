@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allocateArea, capacityLines, notesInRange } from './layout'
+import { allocateArea, capacityLines, notesInRange, withMarkerLine } from './layout'
 
 const m = { lineHeight: 10, top: 12, maxHeight: 112 } // capacity 10 lines
 
@@ -71,5 +71,18 @@ describe('notesInRange', () => {
     expect(notesInRange(pos, 10, 21)).toEqual([1, 2, 3])
     expect(notesInRange(pos, 31, 32)).toEqual([4])
     expect(notesInRange(pos, 32, 40)).toEqual([])
+  })
+})
+
+describe('withMarkerLine (the "continued…" marker of a clipped last area)', () => {
+  it('frees the last line of the area for the marker', () => {
+    expect(withMarkerLine([{ note: 0, start: 0, count: 3 }, { note: 1, start: 0, count: 4 }])).toEqual([
+      { note: 0, start: 0, count: 3 },
+      { note: 1, start: 0, count: 3 },
+    ])
+    // A last entry of one line goes; the one before it keeps its lines.
+    expect(withMarkerLine([{ note: 0, start: 2, count: 5 }, { note: 1, start: 0, count: 1 }])).toEqual([{ note: 0, start: 2, count: 5 }])
+    expect(withMarkerLine([{ note: 0, start: 9, count: 1 }])).toEqual([])
+    expect(withMarkerLine([])).toEqual([])
   })
 })

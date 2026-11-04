@@ -290,8 +290,9 @@ live region. Colours are existing token pairs only (selected row `accent` on `ac
   left), `--page-fg` on the paper: the same AA pair as body text. Each note starts with its raised mark.
   A third-width hairline rule sets the notes off; a page whose area starts with the rest of a note gets a
   full-width rule (the printer's continuation rule). The rule is decorative (75 % opacity) and can be
-  turned off. When the last page cannot hold all its notes, an italic "continued…" marker on the paper
-  colour covers the end of the area's last line. No new colours.
+  turned off. When the last page cannot hold all its notes, an italic "continued…" marker, right-aligned,
+  takes the area's last line for itself (the notes show one line less there), so it never covers note
+  text. It is `--page-fg` on the paper, the body-text pair. No new colours.
 - **Footnote editor.** An anchored popover (`surface-raised`, `border`, `shadow-raised`, the panel
   radius) under the reference, flipping above it near the window bottom: header "Footnote 3", the hint
   "Esc returns to the text" in `text-muted`, a Done button, and a field-styled editable line in the UI

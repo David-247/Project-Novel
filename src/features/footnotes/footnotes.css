@@ -31,12 +31,15 @@
   font-size: 0.75em;
   line-height: 0;
 }
-/* The last page could not hold every line of its notes: say so on the last line. */
+/* The last page could not hold every line of its notes: say so on a line of its own, the area's last
+   (the notes leave it free; height and line-height come from the Footnote Text line). */
 .nv-fn-clipped {
   position: absolute;
+  left: 0;
   right: 0;
   bottom: 0;
-  padding-left: 0.75em;
-  background: var(--page-bg);
+  overflow: hidden;
+  text-align: right;
+  white-space: nowrap;
   font-style: italic;
 }

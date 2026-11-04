@@ -84,6 +84,20 @@ export function allocateArea(carryIn: readonly PendingNote[], notes: readonly nu
   }
 }
 
+/**
+ * The lines a clipped area shows when it also says "continued…": the marker takes the area's last line
+ * (its own line, never drawn over a line of a note), so one line less of the notes is shown. Display
+ * only: the area keeps its height, and the page model (what is reserved, what is carried) is unchanged.
+ */
+export function withMarkerLine(entries: readonly AreaEntry[]): AreaEntry[] {
+  const out = entries.map((e) => ({ ...e }))
+  const last = out[out.length - 1]
+  if (!last) return out
+  if (last.count > 1) last.count--
+  else out.pop()
+  return out
+}
+
 /** Index of the first `positions[i] >= pos` (positions sorted ascending). */
 export function lowerBound(positions: readonly number[], pos: number): number {
   let lo = 0
