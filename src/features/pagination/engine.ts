@@ -103,6 +103,8 @@ interface DirtyBlock {
   /** First and last page holding the block's lines. */
   p0: number
   p1: number
+  /** Not decorated in this pass: drawn in a later frame. */
+  lazy: boolean
 }
 
 /** Spec carried by this slice's decorations (also identifies them). */
@@ -171,6 +173,10 @@ export class PaginationEngine {
   private flushPending = false
   /** Per block node: signature of its decorations in the last pass (positions relative to the block). */
   private lastSigs = new WeakMap<PMNode, string>()
+  /** Blocks waiting to be redrawn after a progressive reflow (hidden meanwhile). */
+  private pendingNodes = new Set<PMNode>()
+  /** Document of the last pass. */
+  private lastDoc: PMNode | null = null
   /** Per block node: its stream top in the last pass. */
   private prevTops = new Map<PMNode, number>()
   private lastKey = ''
@@ -479,8 +485,42 @@ export class PaginationEngine {
     const current = pluginState?.set ?? DecorationSet.empty
     const unmapped = !!pluginState?.unmapped
     const geometryChanged = key !== this.lastKey
+    const pages = this.pageModel(ranges, lines, units, unitRef, blockNodes, unitNodes, posOfLine, doc.content.size)
+
+    // Which blocks to draw in this pass. After a geometry change or a huge transaction every block
+    // is redrawn: the blocks on the pages in view (and around the caret) now, the rest progressively,
+    // and those are not even decorated in this pass ("lazy"). A pure catch-up pass (nothing changed
+    // since) only decorates the next pending blocks.
+    const win = this.viewWindow(root, scale, placement)
+    const caretPage = pageAt(pages, view.state.selection.head)
+    const inWin = (p0: number, p1: number) => (p1 >= win[0] && p0 <= win[1]) || (p1 >= caretPage - 1 && p0 <= caretPage + 1)
+    const allDirty = geometryChanged || unmapped
+    const pureCatchUp = this.catchUpOnly && !allDirty && restyled === null && doc === this.lastDoc
+    const spans: [number, number][] = []
+    {
+      let c = 0
+      for (const m of blockMetrics) {
+        const n = m.units.reduce((s, u) => s + u.lines.length, 0)
+        spans.push([pageOfLine[c] ?? 0, pageOfLine[Math.max(c, c + n - 1)] ?? 0])
+        c += n
+      }
+    }
+    let chosen: Set<number> | null = null
+    if ((allDirty && blockNodes.length > PROGRESSIVE_MIN) || pureCatchUp) {
+      const centre = (win[0] + win[1]) / 2
+      const candidates: number[] = []
+      blockNodes.forEach((node, bi) => {
+        if (inWin(spans[bi][0], spans[bi][1])) return
+        if (pureCatchUp && !this.pendingNodes.has(node)) return
+        candidates.push(bi)
+      })
+      candidates.sort((x, y) => Math.abs(spans[x][0] - centre) - Math.abs(spans[y][0] - centre))
+      chosen = new Set(candidates.slice(0, CHUNK))
+    }
+
     // Blocks whose decorations differ from what is drawn.
     const dirty: DirtyBlock[] = []
+    let lazy = 0
     let lineCursor = 0
     for (let bi = 0; bi < blockNodes.length; bi++) {
       const m = blockMetrics[bi]
@@ -489,51 +529,55 @@ export class PaginationEngine {
       const nLines = m.units.reduce((s, u) => s + u.lines.length, 0)
       const first = lineCursor
       lineCursor += nLines
+      const [p0, p1] = spans[bi]
+      if (chosen) {
+        if (pureCatchUp && !this.pendingNodes.has(node)) continue
+        if (!inWin(p0, p1) && !chosen.has(bi)) {
+          // Redrawn in a later frame; hidden until then (below).
+          dirty.push({ a: 0, z: 0, pos, size: node.nodeSize, node, sig: '', p0, p1, lazy: true })
+          this.lastSigs.delete(node)
+          lazy++
+          continue
+        }
+      }
       const sigParts: string[] = []
       const start = decos.length
       this.decorateBlock(node, pos, first, m, pageOfLine, offsets, (li) => posOfLine(li), decos, sigParts)
       const sig = sigParts.join(',')
       // An unchanged node compares with its last applied signature; an edited one (or a node instance
       // used twice) with the decorations ProseMirror mapped through the edit.
-      const known = !geometryChanged && this.prevTops.has(node) ? this.lastSigs.get(node) : undefined
-      const last = geometryChanged ? null : (known ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1))
+      const known = !allDirty && this.prevTops.has(node) && !this.pendingNodes.has(node) ? this.lastSigs.get(node) : undefined
+      const last = allDirty ? null : (known ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1))
       if (last !== sig) {
-        const lastLine = Math.max(first, first + nLines - 1)
-        dirty.push({ a: start, z: decos.length, pos, size: node.nodeSize, node, sig, p0: pageOfLine[first] ?? 0, p1: pageOfLine[lastLine] ?? 0 })
+        dirty.push({ a: start, z: decos.length, pos, size: node.nodeSize, node, sig, p0, p1, lazy: false })
         // Recorded as applied only once it is drawn (below).
         this.lastSigs.delete(node)
       }
     }
 
     const t3 = performance.now()
-    // ---- 4. Page model.
-    const pages = this.pageModel(ranges, lines, units, unitRef, blockNodes, unitNodes, posOfLine, doc.content.size)
-
     const t4 = performance.now()
     this.lastKey = key
+    this.lastDoc = doc
     let deferred = 0
     if (dirty.length) {
-      // Apply the blocks on the pages in view (and around the caret) now; on a long book, the rest
-      // in later frames, CHUNK blocks at a time, nearest first (see "Reflow complete", pagination.md).
-      const win = this.viewWindow(root, scale, placement)
-      const caretPage = pageAt(pages, view.state.selection.head)
-      const inWin = (d: DirtyBlock) => (d.p1 >= win[0] && d.p0 <= win[1]) || (d.p1 >= caretPage - 1 && d.p0 <= caretPage + 1)
-      let apply = dirty
-      // Progressive only for wholesale reflows (geometry, a restyle, a huge transaction). A line
-      // moving between pages while typing redraws everything at once: one slower keystroke, not a
-      // chunk added to each of the next several keystrokes.
-      const wholesale = geometryChanged || restyled !== null || unmapped || this.catchUpOnly
-      if (wholesale && dirty.length > PROGRESSIVE_MIN) {
-        const near = dirty.filter(inWin)
-        const rest = dirty.filter((d) => !inWin(d))
+      let apply = dirty.filter((d) => !d.lazy)
+      deferred = lazy
+      // Progressive also for a restyle that moved many blocks (all decorated, so pick by place).
+      const wholesale = restyled !== null || this.catchUpOnly
+      if (!chosen && wholesale && apply.length > PROGRESSIVE_MIN) {
+        const near = apply.filter((d) => inWin(d.p0, d.p1))
+        const rest = apply.filter((d) => !inWin(d.p0, d.p1))
         const centre = (win[0] + win[1]) / 2
         rest.sort((x, y) => Math.abs(x.p0 - centre) - Math.abs(y.p0 - centre))
-        apply = near.concat(rest.slice(0, CHUNK))
-        deferred = dirty.length - apply.length
+        const now = near.concat(rest.slice(0, CHUNK))
+        deferred += apply.length - now.length
+        apply = now
       }
       const applied = new Set(apply)
       let next: DecorationSet
-      if (apply.length === dirty.length && (geometryChanged || dirty.length > 8)) {
+      // A full rebuild needs every block decorated in this pass (not a lazy or catch-up pass).
+      if (apply.length === dirty.length && !chosen && (geometryChanged || dirty.length > 8)) {
         next = DecorationSet.create(doc, decos)
       } else {
         // Patch the drawn set block by block, so ProseMirror redraws only those blocks.
@@ -551,6 +595,7 @@ export class PaginationEngine {
         if (deferred) {
           for (const d of dirty) {
             if (applied.has(d)) continue
+            this.pendingNodes.add(d.node)
             const has = next.find(d.pos, d.pos + d.size, (spec) => (spec as { nvStale?: boolean }).nvStale === true).some((o) => o.from === d.pos && o.to === d.pos + d.size)
             if (!has) added.push(Decoration.node(d.pos, d.pos + d.size, { class: STALE_CLASS }, { nvStale: true }))
           }
@@ -562,7 +607,11 @@ export class PaginationEngine {
           next = DecorationSet.create(doc, next.find().filter((d) => !drop.has(d)).concat(added))
         } else next = next.remove(removed).add(doc, added)
       }
-      for (const d of apply) this.lastSigs.set(d.node, d.sig)
+      for (const d of apply) {
+        this.lastSigs.set(d.node, d.sig)
+        this.pendingNodes.delete(d.node)
+      }
+      if (!deferred) this.pendingNodes.clear()
       const tr = view.state.tr.setMeta(paginationKey, next).setMeta('addToHistory', false)
       if (this.scrollAfterPass && view.hasFocus()) tr.scrollIntoView()
       view.dispatch(tr)
@@ -778,7 +827,16 @@ export function createPaginationPlugin(handlers: {
       return {
         update: (v, prev) => {
           if (v.state.doc !== prev.doc) engine.schedule(true)
-          else if (!v.state.selection.eq(prev.selection)) engine.selectionChanged(v.state)
+          else if (!v.state.selection.eq(prev.selection)) {
+            engine.selectionChanged(v.state)
+            // A caret moved natively (Mod-End, arrows) while off-screen blocks are still hidden at
+            // their old place: the browser scrolled to that stale place. Finish and scroll again.
+            if (engine.catchingUp && v.hasFocus())
+              queueMicrotask(() => {
+                engine.drain()
+                if (!v.isDestroyed) v.dispatch(v.state.tr.scrollIntoView().setMeta('addToHistory', false))
+              })
+          }
         },
         destroy: () => engine.destroy(),
       }

@@ -131,6 +131,8 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     }
     const plugin = createPaginationPlugin({
       keyDown: (v, e) => {
+        const docKey = documentEdgeKey(e)
+        if (docKey) return moveToDocumentEdge(v, docKey, e.shiftKey)
         if (e.altKey || e.ctrlKey || e.metaKey) return false
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') return moveLineAcrossPages(v, e.key === 'ArrowDown' ? 1 : -1, e.shiftKey)
         if (e.key !== 'PageDown' && e.key !== 'PageUp') return false
@@ -251,6 +253,30 @@ function posAtPaintedPoint(view: EditorView, x: number, y: number): number | nul
     }
   }
   return view.posAtCoords({ left: x, top: y })?.pos ?? null
+}
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+
+/**
+ * Document start / end: Ctrl+Home / Ctrl+End, and Cmd+Up / Cmd+Down on macOS. The browser computes
+ * them from the layout column and its own notion of "last line", which on pages lands on an
+ * arbitrary page; the slice moves the caret itself.
+ */
+function documentEdgeKey(e: KeyboardEvent): 1 | -1 | null {
+  if (e.altKey) return null
+  if (IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) {
+    if (e.key === (IS_MAC ? 'ArrowUp' : 'Home')) return -1
+    if (e.key === (IS_MAC ? 'ArrowDown' : 'End')) return 1
+  }
+  return null
+}
+
+function moveToDocumentEdge(view: EditorView, dir: 1 | -1, extend: boolean): boolean {
+  freshSnapshot()
+  const edge = dir > 0 ? Selection.atEnd(view.state.doc) : Selection.atStart(view.state.doc)
+  const sel = extend ? TextSelection.create(view.state.doc, view.state.selection.anchor, edge.head) : edge
+  view.dispatch(view.state.tr.setSelection(sel).scrollIntoView())
+  return true
 }
 
 /**
