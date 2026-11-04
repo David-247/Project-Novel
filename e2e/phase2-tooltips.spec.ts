@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
 import { clickBlockStart, editor, launch, openRecent, pressTab, saveStatus, seedProject, waitForLayout } from './helpers'
+import { logFocusOnRetry } from './focus-log'
 
 /**
  * Phase 2 acceptance, tooltip coverage: the app-level audit (window.__nvE2E.auditTooltips, i.e.
@@ -182,12 +183,16 @@ test('Phase 2 toolbar and status bar controls show their tooltip on hover and on
   // Escape above can otherwise take focus back between steps; reachability is what is tested).
   const order = ['pagination.spreadView', 'pagination.zoomOut', 'pagination.zoom', 'pagination.zoomIn']
   for (let i = 1; i < order.length; i++) {
-    await expect(async () => {
-      await ctl(page, order[i - 1]).focus()
-      await pressTab(page)
-      await expect(ctl(page, order[i])).toBeFocused({ timeout: 1000 })
-      await expect(tip(page)).toBeVisible({ timeout: 2000 })
-    }, `${order[i]} reached with Tab from ${order[i - 1]}, tooltip shown`).toPass({ timeout: 15_000 })
+    const label = `${order[i]} reached with Tab from ${order[i - 1]}, tooltip shown`
+    await expect(
+      logFocusOnRetry(page, label, async () => {
+        await ctl(page, order[i - 1]).focus()
+        await pressTab(page)
+        await expect(ctl(page, order[i])).toBeFocused({ timeout: 1000 })
+        await expect(tip(page)).toBeVisible({ timeout: 2000 })
+      }),
+      label,
+    ).toPass({ timeout: 15_000 })
   }
   // Paper picker: arrow keys move between options and show each tooltip.
   await ctl(page, 'book.surface.auto').focus()
