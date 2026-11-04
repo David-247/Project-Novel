@@ -121,6 +121,11 @@ export class FootnoteRun {
   private carryIn: PendingNote[][] = []
   private lastIndex = -1
 
+  /** Highest page asked so far (-1: none); a new breaking run starts again at page 0. */
+  get lastPage(): number {
+    return this.lastIndex
+  }
+
   constructor(
     /** Reference positions, ascending. */
     readonly positions: readonly number[],

@@ -19,6 +19,12 @@ export const FootnoteArea = memo(function FootnoteArea({ pageIndex }: { pageInde
       {area.notes.map((n) => (
         <NoteLines key={`${n.ordinal}:${n.start}`} note={n} lineHeight={area.lineHeight} />
       ))}
+      {area.clipped && (
+        // The last page has no next page for the rest of the note (footnote-only pages: follow-up).
+        <span className="nv-fn-clipped" data-footnote-clipped="">
+          continued…
+        </span>
+      )}
     </div>
   )
 })

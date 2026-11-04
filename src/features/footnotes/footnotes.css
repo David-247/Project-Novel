@@ -31,3 +31,12 @@
   font-size: 0.75em;
   line-height: 0;
 }
+/* The last page could not hold every line of its notes: say so on the last line. */
+.nv-fn-clipped {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  padding-left: 0.75em;
+  background: var(--page-bg);
+  font-style: italic;
+}

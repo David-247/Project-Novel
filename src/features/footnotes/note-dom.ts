@@ -76,6 +76,9 @@ export function clearNoteMeasurements(): void {
   epoch++
 }
 
+/** Changes when the measurements were cleared. */
+export const noteMeasurementEpoch = () => epoch
+
 /**
  * Line count of each note set in `style` (cached by note node, label and style). Unmeasured notes
  * are laid out together in one hidden, contained element: one layout for all of them.
