@@ -4,7 +4,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { resolveStyleSheet, type BookView, type StyleSheetJSON } from '@/shared/book'
 import { useStore, type PageInfo } from '@/shared/store'
 import { breakPages, sideOf, type LineBox, type PageRange, type UnitInfo } from './breaker'
-import { chapterOpenings, hasReservations, onInvalidate, onRelayout, totalReservation } from './extension-points'
+import { chapterOpenings, hasReservations, onInvalidate, onInvalidateBlocks, onRelayout, totalReservation } from './extension-points'
 import { resolvePageGeometry, type PageGeometry } from './geometry'
 import { blockBreakBefore, lineStart, measureBlock, ownShift, scaleOf, SHIFT_ATTR, type BlockMetrics } from './measure'
 import { placePages, type Placement } from './placement'
@@ -213,6 +213,11 @@ export class PaginationEngine {
       onInvalidate(() => this.invalidate()),
       // Re-break only (reservations, data-break-before, chapters): measurements stay valid.
       onRelayout(() => this.schedule()),
+      // Re-measure the blocks holding these positions (decorations that change line boxes).
+      onInvalidateBlocks((positions) => {
+        this.remeasureAt = [...(this.remeasureAt ?? []), ...positions].sort((a, b) => a - b)
+        this.schedule()
+      }),
     )
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts
     if (fonts?.addEventListener) {
@@ -222,6 +227,9 @@ export class PaginationEngine {
     }
     this.schedule()
   }
+
+  /** Positions whose top-level blocks must be re-measured in the next pass (sorted). */
+  private remeasureAt: number[] | null = null
 
   /** Style ids whose resolved definition changed and whose blocks must be re-measured. */
   private restyled: Set<string> | null = null
@@ -398,6 +406,9 @@ export class PaginationEngine {
     const prevTops = key === this.lastKey ? this.prevTops : new Map<PMNode, number>()
     const restyled = this.restyled
     this.restyled = null
+    const remeasure = this.remeasureAt
+    this.remeasureAt = null
+    let rm = 0
     const nextTops = new Map<PMNode, number>()
     let delta = 0
     let anchor = true
@@ -425,6 +436,10 @@ export class PaginationEngine {
       let m = this.cache.get(node)
       let fresh = false
       if (m && restyled && usesStyle(dom, restyled)) m = undefined
+      if (remeasure) {
+        while (rm < remeasure.length && remeasure[rm] < pos) rm++
+        if (m && rm < remeasure.length && remeasure[rm] < pos + node.nodeSize) m = undefined
+      }
       if (!m || m.key !== key) {
         m = measureBlock(view, node, pos, dom, scale, key)
         this.cache.set(node, m)

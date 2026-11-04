@@ -57,6 +57,9 @@ export interface BreakOptions {
    * again until the answer fits what is reserved. The reservation only grows within a page, so the
    * loop cannot oscillate; it is capped at `maxReserveIterations` (default 8) and then keeps the
    * last (largest) reservation tried. Assumes fewer lines never need more space.
+   * When the loop ends over-reserved (the lines that needed the space moved on), the unneeded space
+   * is given back by a bounded bisection that keeps the page valid. The last call for a page is
+   * always with its final range (callers may keep per-page state, e.g. footnotes continued onward).
    */
   reserve?: (pageIndex: number, startLine: number, endLine: number) => number
   maxReserveIterations?: number
@@ -65,6 +68,8 @@ export interface BreakOptions {
 export const DEFAULT_WIDOWS = 2
 export const DEFAULT_ORPHANS = 2
 export const MAX_RESERVE_ITERATIONS = 8
+/** Bisection steps that give back over-reserved space (see `breakPages`). */
+const TIGHTEN_STEPS = 8
 const EPS = 0.01
 
 export const sideOf = (pageIndex: number) => (pageIndex % 2 === 0 ? 'recto' : 'verso')
@@ -118,14 +123,47 @@ export function breakPages(lines: readonly LineBox[], units: readonly UnitInfo[]
     let end = fill(i, H)
     let capped = false
     if (opts.reserve) {
+      const reserve = opts.reserve
+      let asked = -1
+      const ask = (e: number) => {
+        asked = e
+        return clamp(reserve(pages.length, i, e), 0, H)
+      }
+      let need = 0
       let it = 0
       for (; it < maxIter; it++) {
-        const need = clamp(opts.reserve(pages.length, i, end), 0, H)
+        need = ask(end)
         if (need <= reserved + EPS) break
         reserved = need
         end = fill(i, H - reserved)
       }
       capped = it === maxIter
+      // Over-reserved: the lines that needed the space moved to the next page (a footnote reference
+      // on the last line). Give back what the page does not need, as far as the page stays valid:
+      // bisection on the available height, bounded; never more than the plain fill.
+      if (!capped && need < reserved - EPS) {
+        let lo = H - reserved
+        let hi = H - need
+        let best = end
+        let bestNeed = need
+        for (let k = 0; k < TIGHTEN_STEPS && hi - lo > 0.5; k++) {
+          const a = (lo + hi) / 2
+          const e = fill(i, a)
+          const r = ask(e)
+          if (r <= H - a + EPS) {
+            lo = a
+            if (e > best) {
+              best = e
+              bestNeed = r
+            }
+          } else hi = a
+        }
+        end = best
+        reserved = Math.max(bestNeed, 0)
+      }
+      // The last answer asked for a page is for its final range: stateful reservations (footnotes
+      // continued from page to page) rely on it. The answer is <= `reserved` (fewer lines never need more).
+      if (asked !== end) ask(end)
     }
     pages.push(capped ? { startLine: i, endLine: end, blank: false, reserved, reserveCapped: true } : { startLine: i, endLine: end, blank: false, reserved })
     i = end

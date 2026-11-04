@@ -56,6 +56,7 @@ function PageFrame({
   const c = placement.content(page.index)
   const header = slots.filter((s) => s.region === 'header')
   const footer = slots.filter((s) => s.region === 'footer')
+  const reserved = page.isBlank ? [] : slots.filter((s) => s.region === 'reserved')
   const ctx = (height: number): PageSlotContext => ({ page, pageCount, geometry, width: geometry.contentWidth, height })
   return (
     <div
@@ -74,6 +75,18 @@ function PageFrame({
           {header.map((s) => (
             <div key={s.id} data-slot-id={s.id}>
               {s.render(ctx(geometry.margins.top))}
+            </div>
+          ))}
+        </div>
+      )}
+      {reserved.length > 0 && (
+        <div
+          className="nv-slot-reserved"
+          style={{ left: c.x - f.x, top: c.y - f.y, width: geometry.contentWidth, height: geometry.contentHeight }}
+        >
+          {reserved.map((s) => (
+            <div key={s.id} data-slot-id={s.id}>
+              {s.render(ctx(geometry.contentHeight))}
             </div>
           ))}
         </div>
