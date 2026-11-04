@@ -80,7 +80,7 @@ test('the Insert menu is keyboard operable', async ({ page }) => {
   await newProject(page, '/projects/KeyMenu')
   await insert(page).focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('menuitem')).toHaveCount(3)
+  await expect(page.getByRole('menuitem')).toHaveCount(4) // Page break, New chapter, Scene break, Footnote
   await page.keyboard.press('Enter')
   await expect(surface(page).locator('[data-page-break]')).toHaveCount(1)
 })

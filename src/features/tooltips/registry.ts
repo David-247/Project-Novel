@@ -11,7 +11,8 @@
  * Shortcut specs use Tiptap notation ("Mod" = Cmd on macOS, Ctrl elsewhere) and are rendered per
  * platform by the shared Tooltip.
  */
-import { FIND_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
@@ -236,6 +237,17 @@ const INSERT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   INSERT_CONTROLS.map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: c.shortcut }]),
 )
 
+/** Footnotes: the options button and dialog (footnotes slice), the footnote editor's Done (editor slice). */
+const FOOTNOTE_TOOLTIPS: Record<string, TooltipCopy> = {
+  ...Object.fromEntries(
+    Object.values(FOOTNOTE_OPTION_CONTROLS).map((c): [string, TooltipCopy] => [
+      c.id,
+      { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+    ]),
+  ),
+  ...fromMeta(FOOTNOTE_EDITOR_CONTROLS, { done: 'Finish the footnote and put the cursor back after its number in the text.' }),
+}
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -259,6 +271,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...FILE_TOOLTIPS,
   ...BOOK_TOOLTIPS,
   ...INSERT_TOOLTIPS,
+  ...FOOTNOTE_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
 })

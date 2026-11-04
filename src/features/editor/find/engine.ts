@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/core'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { closeHistory } from '@tiptap/pm/history'
-import { TextSelection } from '@tiptap/pm/state'
+import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { DecorationSet } from '@tiptap/pm/view'
 import { useStore } from '@/shared/store'
@@ -12,6 +12,8 @@ import {
   clearFindDecorations,
   CURRENT_CLASS,
   findMatchesKey,
+  matchDecoration,
+  noteAround,
   setFindDecorations,
 } from './plugin'
 import { findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
@@ -128,14 +130,17 @@ function windowDecorations(state: EditorState, force: boolean): DecorationSet | 
     const shown = findMatchesKey.getState(state)?.find() ?? []
     if (shown.length === slice.length) {
       shown.sort((a, b) => a.from - b.from)
-      if (shown.every((d, i) => d.from === slice[i].from && d.to === slice[i].to)) return undefined
+      const drawn = slice.map((m) => matchDecoration(state, m, {}))
+      if (shown.every((d, i) => d.from === drawn[i].from && d.to === drawn[i].to)) return undefined
     }
   }
   return buildMatchDecorations(state, slice)
 }
 
 function selectMatch(tr: Transaction, m: MatchRange) {
-  tr.setSelection(TextSelection.create(tr.doc, m.from, m.to)).scrollIntoView()
+  // A match inside a footnote: its text is not in the line, so the reference is selected.
+  const note = noteAround(tr.doc, m.from)
+  tr.setSelection(note ? NodeSelection.create(tr.doc, note[0]) : TextSelection.create(tr.doc, m.from, m.to)).scrollIntoView()
 }
 
 let beforeReveal: (() => void) | null = null

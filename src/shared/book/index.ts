@@ -18,8 +18,19 @@ export interface Margins {
 
 /** Style definitions keyed by style id. Shape owned by the styles ticket. */
 export type StyleSheetJSON = Record<string, Record<string, unknown>>
-/** Footnote numbering settings. Shape owned by the footnotes ticket. */
-export type FootnoteSettings = Record<string, unknown>
+/**
+ * Footnote options as stored in book.json (footnotes ticket). Every field is optional (`{}` = the
+ * defaults); unknown keys are kept. Read through `resolveFootnoteOptions` (./footnotes.ts).
+ */
+export interface FootnoteSettings {
+  /** 'book' (default): numbered through the book; 'chapter': restart in each chapter. */
+  numbering?: 'book' | 'chapter'
+  /** 'arabic' (default): 1, 2, 3; 'symbols': *, †, ‡ ... */
+  format?: 'arabic' | 'symbols'
+  /** Short rule above the footnotes of a page (default true). */
+  separator?: boolean
+  [key: string]: unknown
+}
 
 export type PaperSurface = 'auto' | 'book' | 'white' | 'dark'
 export type BookView = 'spread' | 'single'
@@ -63,3 +74,6 @@ export function defaultBookSettings(): BookSettings {
 // Paragraph and chapter styles (styles ticket): concrete style shape, built-ins, resolution and
 // the generated stylesheet. See ./styles.ts.
 export * from './styles'
+
+// Footnote options, labels and the Footnote Text built-in style (footnotes ticket).
+export * from './footnotes'

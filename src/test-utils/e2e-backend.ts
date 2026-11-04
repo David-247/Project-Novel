@@ -17,9 +17,10 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { getEditor } from '@/features/editor'
-import { getPaginationDebug, registerBottomReservation, relayoutPagination } from '@/features/pagination'
+import { getEditor, getFootnotes, setDocJSON } from '@/features/editor'
+import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
 import { autosaveNow } from '@/features/storage'
+import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
@@ -215,6 +216,27 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     reserveBottom: (pos: number | null, px = 0) => {
       e2eReservation?.()
       e2eReservation = pos === null ? null : registerBottomReservation('e2e', (p) => (p.from <= pos && pos < p.to ? px : 0))
+    },
+    /** Footnotes: px of the footnote area of each page, and the note lines placed on each page. */
+    footnoteAreas: () => ({ heights: footnoteAreaHeights(), placement: footnotePlacement() }),
+    /** The manuscript's footnotes in order: reference position, derived label, note text. */
+    footnotes: () => getFootnotes().map((r) => ({ pos: r.pos, label: r.label, text: r.node.textContent })),
+    /** Replace the document (as a project load does). */
+    setDoc: (doc: unknown) => setDocJSON(doc as Parameters<typeof setDocJSON>[0]),
+    /** Insert a paragraph holding `text` at top-level position `pos`. */
+    insertParagraphAt: (pos: number, text: string) => {
+      const ed = getEditor()
+      if (!ed) return
+      ed.view.dispatch(ed.state.tr.insert(pos, ed.schema.nodes.paragraph.create(null, ed.schema.text(text))))
+    },
+    /** Re-measure every block (pagination), e.g. to check that incremental measurement was right. */
+    remeasureAll: () => invalidatePagination(),
+    /** Insert a footnote with `text` at document position `pos` (no editor opened). */
+    insertFootnoteAt: (pos: number, text: string) => {
+      const ed = getEditor()
+      if (!ed) return
+      const schema = ed.schema
+      ed.view.dispatch(ed.state.tr.insert(pos, schema.nodes.footnote.create(null, text ? schema.text(text) : null)))
     },
     /** Editor document version (bumps on every document change; style edits must not bump it). */
     docVersion: () => useStore.getState().editor.docVersion,

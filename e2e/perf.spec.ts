@@ -296,3 +296,40 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
   budget(testInfo, 'restyle reflow complete ms', result.repaginatedMs, 1000)
   budget(testInfo, 'restyle all drawn ms', result.allDrawnMs, 3000)
 })
+
+test('100k-word manuscript with 200 footnotes: typing in the main text stays within budget', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const built = buildManuscript()
+  // A footnote after the bold words of every 4th paragraph (200 in all; paragraph 500 has one, so
+  // every keystroke re-measures a block holding a reference and re-reserves its page).
+  let notes = 0
+  let paragraph = 0
+  const content = (built.doc.content as Array<{ type: string; content?: unknown[] }>).map((b) => {
+    if (b.type !== 'paragraph') return b
+    const withNote = paragraph++ % 4 === 0 && notes < 200
+    if (!withNote) return b
+    notes++
+    const note = { type: 'footnote', content: [{ type: 'text', text: `Note ${notes}: ${VOCAB.slice(0, 6 + (notes % 12)).join(' ')}.` }] }
+    return { ...b, content: [...b.content!.slice(0, 2), note, ...b.content!.slice(2)] }
+  })
+  expect(notes).toBe(200)
+  const doc = { type: 'doc', content }
+  const openMs = await openEpic(page, '/projects/Footnoted', doc)
+  await expect(page.locator('main [contenteditable="true"] [data-footnote-ref]')).toHaveCount(200)
+  // Footnote areas are drawn for the pages in view.
+  await expect(page.locator('.nv-fn-area').first()).toBeVisible()
+  await installLatencyProbe(page)
+  const typing = await measureTyping(page)
+  const pass = await page.evaluate(() => window.__nvE2E.paginationLines().lastPass)
+
+  await report(testInfo, 'perf-footnotes', {
+    manuscript: { words: built.words, blocks: content.length, footnotes: notes },
+    openMs,
+    typing,
+    lastPass: pass,
+    budgets: { typingMedianMs: 50 },
+  })
+
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  budget(testInfo, 'typing median ms (200 footnotes)', typing.medianMs, 50)
+})

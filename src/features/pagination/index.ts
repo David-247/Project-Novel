@@ -18,6 +18,7 @@ export {
   setChapterPredicate,
   defaultChapterOpenings,
   invalidatePagination,
+  invalidatePaginationAt,
   relayoutPagination,
 } from './extension-points'
 export type {

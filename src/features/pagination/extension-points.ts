@@ -15,13 +15,19 @@ import type { PageGeometry } from './geometry'
 
 // ---- (a) Header / footer slots ---------------------------------------------------------------
 
-export type PageSlotRegion = 'header' | 'footer'
+/**
+ * 'header' / 'footer': the top / bottom margin. 'reserved': the text block itself (behind the text),
+ * for content drawn in the space a bottom reservation keeps free (footnotes): anchor it at the
+ * bottom of the region and keep it no taller than the reservation.
+ */
+export type PageSlotRegion = 'header' | 'footer' | 'reserved'
 
 export interface PageSlotContext {
   page: PageInfo
   pageCount: number
   geometry: PageGeometry
-  /** Size of the region (px, unscaled): the text block width, and the top / bottom margin height. */
+  /** Size of the region (px, unscaled): the text block width, and the top / bottom margin height
+   *  (the text block height for 'reserved'). */
   width: number
   height: number
 }
@@ -167,6 +173,24 @@ export function relayoutPagination(): void {
 }
 
 const relayoutListeners = new Set<() => void>()
+
+/**
+ * Re-measure only the top-level blocks containing `positions` (positions in the editor's CURRENT
+ * document, resolved to block nodes at once, so later transactions cannot make them stale), then
+ * reflow on the next frame. For a decoration that changes a block's line boxes without a document change
+ * (a footnote reference whose derived number got wider). About a keystroke's cost per block.
+ */
+export function invalidatePaginationAt(positions: readonly number[]): void {
+  if (positions.length) blockListeners.forEach((l) => l(positions))
+}
+
+const blockListeners = new Set<(positions: readonly number[]) => void>()
+
+/** Internal: the engine listens for block re-measure requests. */
+export function onInvalidateBlocks(cb: (positions: readonly number[]) => void): () => void {
+  blockListeners.add(cb)
+  return () => blockListeners.delete(cb)
+}
 
 /** Internal: the engine listens for invalidations. */
 export function onInvalidate(cb: () => void): () => void {

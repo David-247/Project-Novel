@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import type { Ref } from 'react'
 import { Button, cn, focusRing, formatShortcut, detectPlatform, Tooltip } from '@/shared/ui'
 import { getEditor } from '../controller'
+import { getFootnoteEditing } from '../footnote/editing'
 import { setChaptersStartOn, type ChaptersStartOn } from './chapter-start'
 import { CHAPTER_START_CONTROLS, INSERT_ITEMS, INSERT_MENU_CONTROL, ORNAMENT_CONTROLS } from './controls'
 import { getNewSceneBreakOrnament, setNewSceneBreakOrnament } from './nodes'
@@ -78,7 +79,8 @@ export function InsertMenu({ ref, ...forwarded }: InsertMenuProps) {
             if (!inserted.current) return
             inserted.current = false
             e.preventDefault()
-            getEditor()?.commands.focus()
+            // An inserted footnote has its own editor, which holds the focus.
+            if (!getFootnoteEditing()) getEditor()?.commands.focus()
           }}
           className="z-40 min-w-64 max-w-[calc(100vw-1rem)] rounded-control border border-border bg-surface-raised p-1 text-text shadow-raised"
         >

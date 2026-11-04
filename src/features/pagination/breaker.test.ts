@@ -153,9 +153,27 @@ describe('breakPages', () => {
         },
       })
       // With 25px reserved only 7 lines fit, so line 8 is no longer on page 0: need 0 <= 25, stop.
-      expect(ranges(pages)[0]).toEqual([0, 7])
-      expect(pages[0].reserved).toBe(25)
-      expect(calls.length).toBeLessThan(10)
+      // The space is then given back up to the line before the reference (lines 0-7: 8 lines).
+      expect(ranges(pages)[0]).toEqual([0, 8])
+      expect(pages[0].reserved).toBe(0)
+      expect(ranges(pages)[1]).toEqual([8, 15])
+      expect(pages[1].reserved).toBe(25)
+      expect(calls.length).toBeLessThan(30)
+    })
+
+    it('asks last for the final range of every page (stateful reservations rely on it)', () => {
+      const { lines, units } = stream([{ lines: 30 }])
+      const last = new Map<number, [number, number]>()
+      const pages = breakPages(lines, units, {
+        contentHeight: 100,
+        reserve: (p, s, e) => {
+          last.set(p, [s, e])
+          return s <= 8 && 8 < e ? 25 : s <= 19 && 19 < e ? 45 : 0
+        },
+      })
+      pages.forEach((r, p) => expect(last.get(p)).toEqual([r.startLine, r.endLine]))
+      // Every page: lines + reservation fit.
+      for (const r of pages) expect((r.endLine - r.startLine) * 10 + r.reserved).toBeLessThanOrEqual(100)
     })
 
     it('cannot oscillate: an ever-growing need stops at the iteration cap', () => {
@@ -168,6 +186,7 @@ describe('breakPages', () => {
       })
       expect(pages[0].reserveCapped).toBe(true)
       expect(pages[0].reserved).toBe(20)
+      // 4 iterations (the final range equals the last one asked, so no extra call).
       expect(n).toBe(4)
     })
 

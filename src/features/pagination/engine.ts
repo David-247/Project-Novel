@@ -4,7 +4,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { resolveStyleSheet, type BookView, type StyleSheetJSON } from '@/shared/book'
 import { useStore, type PageInfo } from '@/shared/store'
 import { breakPages, sideOf, type LineBox, type PageRange, type UnitInfo } from './breaker'
-import { chapterOpenings, hasReservations, onInvalidate, onRelayout, totalReservation } from './extension-points'
+import { chapterOpenings, hasReservations, onInvalidate, onInvalidateBlocks, onRelayout, totalReservation } from './extension-points'
 import { resolvePageGeometry, type PageGeometry } from './geometry'
 import { blockBreakBefore, lineStart, measureBlock, ownShift, scaleOf, SHIFT_ATTR, type BlockMetrics } from './measure'
 import { placePages, type Placement } from './placement'
@@ -213,6 +213,14 @@ export class PaginationEngine {
       onInvalidate(() => this.invalidate()),
       // Re-break only (reservations, data-break-before, chapters): measurements stay valid.
       onRelayout(() => this.schedule()),
+      // Re-measure the blocks holding these positions (decorations that change line boxes).
+      // Re-measure the blocks holding these positions (decorations that change line boxes). The
+      // positions are resolved to block nodes now, while they are current: a later transaction in
+      // the same frame cannot make them point at another block.
+      onInvalidateBlocks((positions) => {
+        this.forgetBlocksAt(positions)
+        this.schedule()
+      }),
     )
     const fonts = (document as Document & { fonts?: FontFaceSet }).fonts
     if (fonts?.addEventListener) {
@@ -221,6 +229,17 @@ export class PaginationEngine {
       this.unsubs.push(() => fonts.removeEventListener('loadingdone', onFonts))
     }
     this.schedule()
+  }
+
+  /** Drop the measurements of the top-level blocks holding `positions` (in the current document). */
+  forgetBlocksAt(positions: readonly number[]) {
+    const doc = this.view.state.doc
+    for (const p of positions) {
+      if (p < 0 || p > doc.content.size) continue
+      const $p = doc.resolve(p)
+      const block = $p.depth > 0 ? $p.node(1) : doc.nodeAt(p)
+      if (block) this.cache.delete(block)
+    }
   }
 
   /** Style ids whose resolved definition changed and whose blocks must be re-measured. */
@@ -398,6 +417,7 @@ export class PaginationEngine {
     const prevTops = key === this.lastKey ? this.prevTops : new Map<PMNode, number>()
     const restyled = this.restyled
     this.restyled = null
+
     const nextTops = new Map<PMNode, number>()
     let delta = 0
     let anchor = true
@@ -425,6 +445,7 @@ export class PaginationEngine {
       let m = this.cache.get(node)
       let fresh = false
       if (m && restyled && usesStyle(dom, restyled)) m = undefined
+
       if (!m || m.key !== key) {
         m = measureBlock(view, node, pos, dom, scale, key)
         this.cache.set(node, m)
@@ -738,6 +759,19 @@ export class PaginationEngine {
         push(nPos, nPos + n.nodeSize, o0.dx - parent.dx, o0.dy - parent.dy, false)
         if (!n.isTextblock) return
         const end = nPos + n.nodeSize - 1
+        // Inline nodes with content (footnote references) never take inline decorations: ProseMirror
+        // passes those on to their content. They get a node decoration with the same offset.
+        let inlineNodes: [number, number][] | null = null
+        n.forEach((child, off) => {
+          if (child.isInline && !child.isLeaf) (inlineNodes ??= []).push([nPos + 1 + off, child.nodeSize])
+        })
+        const pushLines = (from: number, to: number, dx: number, dy: number, atEnd: boolean) => {
+          const inside = inlineNodes ? inlineNodes.filter(([p]) => p >= from && p < to) : []
+          // Signature order (see signatureOf): by position, a node decoration before an inline one.
+          if (inside.length && inside[0][0] === from) push(from, from + inside[0][1], dx, dy, false)
+          push(from, to, dx, dy, true, atEnd)
+          for (const [p, size] of inside) if (p !== from) push(p, p + size, dx, dy, false)
+        }
         let li = lo + 1
         while (li <= hi) {
           if (pageOfLine[li] === pageOfLine[li - 1]) {
@@ -750,7 +784,7 @@ export class PaginationEngine {
           const from = posOfLine(li)
           const to = lj <= hi ? posOfLine(lj) : end
           const o = offsets[p]
-          if (to > from) push(from, to, o.dx - o0.dx, o.dy - o0.dy, true, lj > hi)
+          if (to > from) pushLines(from, to, o.dx - o0.dx, o.dy - o0.dy, lj > hi)
           li = lj
         }
         return

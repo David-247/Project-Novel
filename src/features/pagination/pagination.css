@@ -45,6 +45,11 @@
   font-size: calc(9 * var(--nv-pt));
 }
 
+/* The text block, behind the text: content drawn in a bottom reservation (footnotes). */
+.nv-slot-reserved {
+  position: absolute;
+}
+
 /* ---- Text layer: the editor's one view ----------------------------------------------------
    The root covers the whole canvas (so presses on margins and the desk reach the editor) while
    its content box is exactly the text block width: the natural "stream" the engine measures.

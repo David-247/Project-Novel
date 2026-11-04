@@ -64,12 +64,20 @@ export function buildMatcher(query: string, options: FindOptions): RegExp | null
   }
 }
 
-/** The text of one textblock with one char per position (inline leaves become LEAF). */
-function blockText(block: PMNode): string {
+/**
+ * The text of one textblock with one char per position (inline leaves become LEAF). An inline node
+ * with text content (a footnote) becomes LEAF + its text + LEAF: its text is searched, positions
+ * stay 1:1 (the note's text starts at the node's position + 1), and a match never spans the
+ * reference's boundary (LEAF never matches a typed query).
+ */
+export function blockText(block: PMNode): string {
   if (block.childCount === 1 && block.firstChild!.isText) return block.firstChild!.text!
   let out = ''
   block.forEach((child) => {
-    out += child.isText ? child.text! : LEAF.repeat(child.nodeSize)
+    if (child.isText) out += child.text!
+    else if (!child.isLeaf && child.inlineContent && child.content.size === child.textContent.length)
+      out += LEAF + child.textContent + LEAF
+    else out += LEAF.repeat(child.nodeSize)
   })
   return out
 }
