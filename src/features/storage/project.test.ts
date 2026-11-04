@@ -33,6 +33,7 @@ let unregister = () => {}
 async function freshSession() {
   await __resetStorageForTests()
   useStore.setState({ project: initialProjectState })
+  useStore.getState().bookActions.resetBook()
   unregister()
   editor = createMemoryDocumentProvider()
   unregister = registerDocumentProvider(editor)
@@ -301,6 +302,36 @@ describe('project storage', () => {
     backend.pick = '/books/novel'
     expect(await newProject()).toBe(false)
     expect(backend.messages[0].text).toMatch(/editor is not ready/)
+  })
+
+  describe('unsaved-changes prompt in an untitled session', () => {
+    it('REGRESSION: no prompt when no project is open and the document is empty, even if view or paper toggles made the book unsaved', async () => {
+      useStore.getState().bookActions.setView('single')
+      useStore.getState().bookActions.setSurface('dark')
+      expect(useStore.getState().book.dirty).toBe(true)
+      expect(await confirmUnsavedChanges('closing')).toBe(true)
+      expect(backend.messages).toEqual([])
+      // Text typed and deleted again leaves nothing to lose either.
+      editor.update({ type: 'doc', content: [{ type: 'paragraph' }] })
+      expect(await confirmUnsavedChanges('closing')).toBe(true)
+      expect(backend.messages).toEqual([])
+    })
+
+    it('still asks when the untitled document has text, or when a project is open', async () => {
+      editor.update(textDoc('a first line'))
+      backend.answer = 'Cancel'
+      expect(await confirmUnsavedChanges('closing')).toBe(false)
+      expect(backend.messages).toHaveLength(1)
+
+      backend.answer = "Don't Save" // New Project asks about the untitled text first
+      await createAt('/books/novel')
+      expect(backend.messages).toHaveLength(2)
+      useStore.getState().bookActions.setView('single')
+      expect(editor.isDirty()).toBe(false)
+      backend.answer = 'Cancel'
+      expect(await confirmUnsavedChanges('closing')).toBe(false)
+      expect(backend.messages).toHaveLength(3)
+    })
   })
 
   describe('unsaved-changes prompt', () => {

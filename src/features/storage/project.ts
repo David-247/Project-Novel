@@ -1,5 +1,5 @@
 import { defaultBookSettings, type BookSettings } from '@/shared/book'
-import { emptyDoc, getDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
+import { emptyDoc, getDocumentProvider, isEmptyDocJSON, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { useStore, type RecentProject } from '@/shared/store'
 import {
   BOOK_FILE,
@@ -479,6 +479,9 @@ async function saveAsNewProjectUnguarded(): Promise<boolean> {
 export async function confirmUnsavedChanges(action = 'continuing'): Promise<boolean> {
   const p = getDocumentProvider()
   if (!p || !isProjectDirty(p)) return true
+  // An untitled session with an empty document has nothing worth a prompt: only view or paper toggles
+  // (book.dirty) can have changed, and there is no project they would be saved into.
+  if (!getCurrentProjectPath() && isEmptyDocJSON(p.getDocJSON())) return true
   try {
     const choice = await askUnsavedChanges(useStore.getState().project.title, action)
     if (choice === 'save') {
