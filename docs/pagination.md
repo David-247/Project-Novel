@@ -466,4 +466,13 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
   `perf-results/pagination-fixture-<browser>-<platform>.json` for the acceptance comparison. Logged
   tolerance (Vibeless decision): total pages differ by at most max(2, 1 %); chapter openings differ by
   at most 1 in `page` mode and at most 2 in `recto` mode (a one-page drift moves a right-hand opening
-  by two).
+  by two). CI (job "Cross-engine page breaks") collects the four JSONs (chromium and webkit on
+  macos-latest and windows-latest) and applies this with `scripts/compare-pagination.mjs` (unit test:
+  `tests/compare-pagination.test.ts`), shipping pair (WebKit-macOS vs Chromium-Windows) first, every
+  pair blocking.
+- Phase 2 acceptance (`e2e/phase2-acceptance.spec.ts`): paste the fixture, trim sizes through the
+  picker, a Chapter Title edit, a footnote, page numbers, surfaces, then save and reopen with an
+  identical page model. It caught a load-order bug: opening a project replaces trim, margins and
+  styles at once, and the geometry pass ran before React rendered the loaded style sheet; the engine
+  now also re-measures the restyled blocks after a geometry pass (regression test in
+  `e2e/styles.spec.ts`).
