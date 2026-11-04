@@ -317,6 +317,18 @@ describe('project storage', () => {
       expect(backend.messages).toEqual([])
     })
 
+    it.each([
+      ['a trim size change', () => useStore.getState().bookActions.setTrimSize('uk-a5')],
+      ['a style change', () => useStore.getState().bookActions.setStyles((s) => ({ ...s, body: { fontSize: 12 } }))],
+      ['a margin change', () => useStore.getState().bookActions.setMargins({ top: 60, bottom: 60, inside: 70, outside: 50 })],
+    ])('REGRESSION: an empty untitled session still asks after %s (it works without a project)', async (_what, change) => {
+      useStore.getState().bookActions.setView('single')
+      change()
+      backend.answer = 'Cancel'
+      expect(await confirmUnsavedChanges('closing')).toBe(false)
+      expect(backend.messages).toHaveLength(1)
+    })
+
     it('still asks when the untitled document has text, or when a project is open', async () => {
       editor.update(textDoc('a first line'))
       backend.answer = 'Cancel'

@@ -205,11 +205,18 @@ describe('an unreadable or damaged book.json is not silently overwritten', () =>
     await saveProject()
     expect(backend.files.get(BOOK)).toBe('{"trimSize": "uk-a5", ')
     expect(asides()).toEqual([])
+    // View and paper are display toggles: they never replace a guarded book.json.
     bookActions().setSurface('dark')
+    bookActions().setView('single')
+    await saveProject()
+    expect(backend.files.get(BOOK)).toBe('{"trimSize": "uk-a5", ')
+    expect(asides()).toEqual([])
+    expect(book().dirty).toBe(false)
+    bookActions().setTrimSize('us-6x9')
     await saveProject()
     expect(asides()).toHaveLength(1)
     expect(backend.files.get(asides()[0])).toBe('{"trimSize": "uk-a5", ')
-    expect(onDisk()).toMatchObject({ trimSize: 'us-5.5x8.5', surface: 'dark' })
+    expect(onDisk()).toMatchObject({ trimSize: 'us-6x9', surface: 'dark', view: 'single' })
     expect(useStore.getState().project.bookWarning).toBeNull()
   })
 
@@ -239,13 +246,58 @@ describe('an unreadable or damaged book.json is not silently overwritten', () =>
     expect(await saveProject()).toBe(true)
     expect(backend.files.get(BOOK)).toBe(newer)
     expect(newerAsides()).toEqual([])
-    // A book change: the original is kept aside first, then the file is written by this version.
+    // Switching view or paper does not replace it.
     bookActions().setView('single')
+    bookActions().setSurface('book')
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(BOOK)).toBe(newer)
+    expect(newerAsides()).toEqual([])
+    // A real book change: the original is kept aside first, then the file is written by this version.
+    bookActions().setStyles((st) => ({ ...st, body: { fontSize: 12 } }))
     expect(await saveProject()).toBe(true)
     expect(newerAsides()).toHaveLength(1)
     expect(backend.files.get(newerAsides()[0])).toBe(newer)
-    expect(onDisk()).toMatchObject({ version: 1, trimSize: 'uk-a5', surface: 'dark', view: 'single' })
+    expect(onDisk()).toMatchObject({ version: 1, trimSize: 'uk-a5', surface: 'book', view: 'single', styles: { body: { fontSize: 12 } } })
     expect(asides()).toEqual([])
+    expect(useStore.getState().project.bookWarning).toBeNull()
+  })
+
+  it('REGRESSION: a text-only crash restore never replaces a newer book.json', async () => {
+    await createProject()
+    const newer = JSON.stringify({ format: 'novel-book', version: 2, trimSize: 'uk-a5' })
+    backend.files.set(BOOK, newer)
+    await launch()
+    await reopen()
+    editor.update(textDoc('typed after opening'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    await launch() // crash
+    await reopen()
+    expect(await restoreRecovery()).toBe(true)
+    expect(editor.getDocJSON()).toEqual(textDoc('typed after opening'))
+    expect(book().dirty).toBe(false)
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(BOOK)).toBe(newer)
+    expect([...backend.files.keys()].filter((k) => k.startsWith(`${ROOT}/book.newer-`))).toEqual([])
+  })
+
+  it('REGRESSION: if the copy cannot be kept, book.json is not replaced; the settings stay unsaved with a warning', async () => {
+    await createProject()
+    backend.files.set(BOOK, 'garbage')
+    await launch()
+    await reopen()
+    bookActions().setTrimSize('us-6x9')
+    backend.failWrite = (p: string) => (p.includes('/book.damaged-') ? { kind: 'disk_full', message: 'full' } : null)
+    expect(await saveProject()).toBe(true) // the manuscript is saved
+    expect(backend.files.get(BOOK)).toBe('garbage')
+    expect(asides()).toEqual([])
+    expect(book().dirty).toBe(true)
+    expect(useStore.getState().project.bookWarning).toMatch(/could not keep a copy.*left as it is/)
+    // The next save retries and, with the copy kept, writes the settings.
+    backend.failWrite = null
+    expect(await saveProject()).toBe(true)
+    expect(asides()).toHaveLength(1)
+    expect(onDisk()).toMatchObject({ trimSize: 'us-6x9' })
+    expect(book().dirty).toBe(false)
     expect(useStore.getState().project.bookWarning).toBeNull()
   })
 

@@ -202,6 +202,14 @@ built-in Footnote Text style in `styles` (`footnote-text`).
   before the first overwrite, the original is copied to `book.damaged-<timestamp>.json` in the project folder (best
   effort; an unreadable file is read again at that moment). Novel never deletes these copies. Creating a project
   (New Project, Save As) always writes book.json. The warning clears when book.json is written or the project closes.
+  - *A book setting* here means anything but the page view (`view`) and the paper surface (`surface`): those two are
+    display toggles. Switching them never replaces a guarded book.json, and while the file is guarded they are not
+    written (the next open shows the file's values).
+  - If the copy cannot be written (disk full, permissions), book.json is **not** replaced: the manuscript is still
+    saved, the book settings stay unsaved (prompts and autosave snapshots keep them), the status bar says so, and the
+    next save tries again.
+  - Restoring a crash-recovery snapshot whose book settings equal the loaded ones changes no book setting, so a
+    text-only restore never replaces a guarded book.json.
 - A `version` higher than this Novel's (an integer above `1`): the file was written by a newer Novel. Its fields are
   read as usual (invalid ones fall back to defaults, unknown top-level keys are kept), and the status bar warns
   "book.json was saved by a newer version of Novel ...". The file is then guarded exactly like a damaged one: saves

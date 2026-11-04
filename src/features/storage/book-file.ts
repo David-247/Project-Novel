@@ -113,10 +113,11 @@ export function parseBook(text: string): BookParseResult {
  */
 export function bookWarningText(warnings: string[], keptOnDisk = false, newerVersion?: number): string {
   if (newerVersion !== undefined) {
+    const replaced = warnings.length ? ` Values this version could not use were replaced by defaults (${warnings.join(', ')}).` : ''
     return (
       `${BOOK_FILE} was saved by a newer version of Novel (format version ${newerVersion}), so its settings are used ` +
-      `as far as this version understands them. Your manuscript was not changed. The file is left as it is until you ` +
-      `change a book setting; a copy is kept before it is replaced.`
+      `as far as this version understands them.${replaced} Your manuscript was not changed. The file is left as it is ` +
+      `until you change a book setting; a copy is kept before it is replaced.`
     )
   }
   const whole = warnings.length === 1 && warnings[0] === 'the whole file'

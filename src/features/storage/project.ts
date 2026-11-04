@@ -117,20 +117,24 @@ async function readBookFile(folder: string): Promise<{
     return {
       settings: defaultBookSettings(),
       warning: bookWarningText(['the whole file'], true),
-      guard: { original: null, kind: 'damaged' },
+      guard: { original: null, kind: 'damaged', loaded: guardKey(defaultBookSettings()) },
     }
   }
   const { settings, warnings, newerVersion } = parseBook(text)
   if (newerVersion !== undefined) {
     // Written by a newer Novel: rewriting it would drop what this version does not know (nested keys
     // included), so it is only replaced once the user changes a book setting, after a copy is kept.
-    return { settings, warning: bookWarningText(warnings, true, newerVersion), guard: { original: text, kind: 'newer' } }
+    return {
+      settings,
+      warning: bookWarningText(warnings, true, newerVersion),
+      guard: { original: text, kind: 'newer', loaded: guardKey(settings) },
+    }
   }
   const whole = warnings.length === 1 && warnings[0] === 'the whole file'
   return {
     settings,
     warning: warnings.length ? bookWarningText(warnings, whole) : null,
-    guard: whole ? { original: text, kind: 'damaged' } : null,
+    guard: whole ? { original: text, kind: 'damaged', loaded: guardKey(settings) } : null,
   }
 }
 
@@ -142,20 +146,58 @@ async function readBookFile(folder: string): Promise<{
 interface BookGuard {
   original: string | null
   kind: 'damaged' | 'newer'
+  /** `guardKey` of the settings loaded at open: a real book change is a difference from it. */
+  loaded: string
 }
 let bookGuard: BookGuard | null = null
 
 /**
- * Copy the guarded book.json aside as `book.damaged-<timestamp>.json` (damaged / unreadable) or
- * `book.newer-<timestamp>.json` (from a newer Novel). Best effort; never throws.
+ * Book settings compared for "a real book change" while book.json is guarded: everything but the page
+ * view and the paper surface. Those two are display toggles: switching them never replaces a guarded
+ * book.json (while it is guarded they are not written; docs/project-format.md).
  */
-async function keepGuardedBook(folder: string, guard: BookGuard): Promise<void> {
+function guardKey(settings: BookSettings): string {
+  const d = defaultBookSettings()
+  return serializeBook({ ...settings, view: d.view, surface: d.surface })
+}
+
+/** The guarded book.json may be replaced: a book setting other than view / surface differs from the file's. */
+function guardedBookChanged(guard: BookGuard): boolean {
+  return guardKey(currentBookSettings()) !== guard.loaded
+}
+
+/** The book settings are the defaults, apart from view and surface. */
+function onlyDisplayTogglesChanged(): boolean {
+  return guardKey(currentBookSettings()) === guardKey(defaultBookSettings())
+}
+
+/** Status-bar text when the copy of a guarded book.json could not be kept (book.json was then not replaced). */
+const GUARD_COPY_FAILED =
+  `Your book settings were not saved: Novel could not keep a copy of the existing ${BOOK_FILE} before replacing it, ` +
+  `so ${BOOK_FILE} was left as it is. The manuscript was saved. Saving again will retry.`
+
+/**
+ * Copy the guarded book.json aside as `book.damaged-<timestamp>.json` (damaged / unreadable) or
+ * `book.newer-<timestamp>.json` (from a newer Novel). Never throws: resolves false when no copy could be
+ * kept, and the caller must then not replace book.json. A file that is gone has nothing to keep (true).
+ */
+async function keepGuardedBook(folder: string, guard: BookGuard): Promise<boolean> {
   try {
-    const original = guard.original ?? (await readTextFile(joinPath(folder, BOOK_FILE), BOOK_FILE))
+    let original = guard.original
+    if (original === null) {
+      try {
+        original = await readTextFile(joinPath(folder, BOOK_FILE), BOOK_FILE)
+      } catch (e) {
+        if (e instanceof ProjectError && e.code === 'missing-file') return true
+        throw e
+      }
+    }
     const stamp = new Date().toISOString().replace(/[^0-9A-Za-z-]/g, '-')
     await writeFileAtomic(joinPath(folder, `book.${guard.kind}-${stamp}.json`), original, 'book.json copy')
+    return true
   } catch (e) {
-    console.warn(`Keeping a copy of the ${guard.kind} book.json failed:`, e)
+    console.warn(`Keeping a copy of the ${guard.kind} book.json failed; it is not replaced:`, e)
+    return false
   }
 }
 
@@ -404,12 +446,18 @@ async function writeProject(
     // The write lock keeps this from overlapping an autosave snapshot.
     await withWriteLock(async () => {
       await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), text, MANUSCRIPT_FILE)
-      // An unreadable / damaged / newer book.json is only replaced once the user changed a book setting.
-      if (!bookGuard || isBookDirty()) {
-        if (bookGuard) await keepGuardedBook(folder, bookGuard)
-        await writeFileAtomic(joinPath(folder, BOOK_FILE), bookText, BOOK_FILE)
-        bookGuard = null
-        actions().setBookWarning(null)
+      // An unreadable / damaged / newer book.json is only replaced once the user changed a book setting
+      // other than view / surface, and only after a copy of it was kept.
+      let bookSaved = true
+      if (!bookGuard || (isBookDirty() && guardedBookChanged(bookGuard))) {
+        if (bookGuard && !(await keepGuardedBook(folder, bookGuard))) {
+          bookSaved = false
+          actions().setBookWarning(GUARD_COPY_FAILED)
+        } else {
+          await writeFileAtomic(joinPath(folder, BOOK_FILE), bookText, BOOK_FILE)
+          bookGuard = null
+          actions().setBookWarning(null)
+        }
       }
       // Book details may have been edited while this save was queued: write the latest of this project.
       const base = currentMeta && currentMeta.id === meta.id ? currentMeta : meta
@@ -417,7 +465,8 @@ async function writeProject(
       await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
       if (currentMeta === base) currentMeta = updated
       p.markClean(version)
-      bookActions().markBookClean(bookVersion)
+      // Book settings that could not be written stay unsaved (prompts, autosave snapshots keep them).
+      if (bookSaved) bookActions().markBookClean(bookVersion)
       // A clean save makes any crash-recovery snapshot obsolete.
       if (!isProjectDirty(p)) await clearRecoveryUnlocked(folder)
     })
@@ -479,9 +528,11 @@ async function saveAsNewProjectUnguarded(): Promise<boolean> {
 export async function confirmUnsavedChanges(action = 'continuing'): Promise<boolean> {
   const p = getDocumentProvider()
   if (!p || !isProjectDirty(p)) return true
-  // An untitled session with an empty document has nothing worth a prompt: only view or paper toggles
-  // (book.dirty) can have changed, and there is no project they would be saved into.
-  if (!getCurrentProjectPath() && isEmptyDocJSON(p.getDocJSON())) return true
+  // An untitled session whose document is empty and whose book settings are the defaults, apart from the
+  // page view and the paper surface, has nothing worth a prompt: those two are display toggles. Any other
+  // book change (trim, margins, styles, footnote or header/footer options) works without a project and
+  // is worth saving, so it still prompts.
+  if (!getCurrentProjectPath() && isEmptyDocJSON(p.getDocJSON()) && onlyDisplayTogglesChanged()) return true
   try {
     const choice = await askUnsavedChanges(useStore.getState().project.title, action)
     if (choice === 'save') {
@@ -735,7 +786,10 @@ export async function restoreRecovery(): Promise<boolean> {
     loadDocument(p, pending.snapshot.doc)
     p.markDirty()
     // Unsaved book settings come back with the text (snapshots from before book settings have none).
-    if (pending.snapshot.book) bookActions().restoreBook(pending.snapshot.book)
+    // Only when they differ: restoring equal settings would mark the book unsaved, and the next save would
+    // then replace a guarded (newer / damaged) book.json after a text-only restore.
+    const book = pending.snapshot.book
+    if (book && serializeBook(book) !== serializeBook(currentBookSettings())) bookActions().restoreBook(book)
     setPendingRecovery(null)
     // The editor content is exactly what the recovery file holds: it is backed up.
     const savedAt = Date.parse(pending.snapshot.savedAt)
