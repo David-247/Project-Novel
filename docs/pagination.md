@@ -95,6 +95,12 @@ layer behind the editor.
   and ArrowUp on its first line are therefore handled by the slice: the caret goes to the painted
   first (last) line of the next (previous) page at the same column, hit-tested with the browser's
   caret-from-point on painted boxes (Shift extends). Every other arrow press stays native.
+- Passes make frames longer, which widens timing windows elsewhere. Found on macOS Chromium CI: a
+  pointer click on a formatting button focused the button, and the command's editor focus is
+  deferred to the next animation frame; typing that started sooner went to the button, whose
+  Space / Enter re-ran it (the list toggled off, the text was dropped). Formatting buttons now
+  never take focus on a pointer press (`e2e/toolbar-focus.spec.ts`, which fails without the fix in
+  both engines).
 - Off-screen cost is bounded: unchanged blocks are never re-measured (cache keyed by node identity),
   page frames are virtualised to the rows near the viewport, and the browser lays out only changed
   blocks. `content-visibility` was not needed to meet the budget (see the perf numbers below) and is
@@ -104,6 +110,14 @@ layer behind the editor.
 
 `CI=1 pnpm exec playwright test e2e/pagination-perf.spec.ts --project=perf-chromium --project=perf-webkit --no-deps --workers=1`
 (deterministic 100k-word, 30-chapter fixture, real app with ProseMirror, project opened from disk):
+
+**Which budgets block CI (Vibeless decision afbe3475).** Perf budgets block only on the shipping
+pairs: **macOS + WebKit** (WKWebView) and **Windows + Chromium** (WebView2). On macOS Chromium and
+Windows WebKit every perf test still runs and records its numbers, but a budget miss is a warning
+(a `perf-budget-warning` test annotation and a console line), not a failure. The gate is
+`budget(testInfo, name, value, limit)` in `e2e/budget.ts`, used by the perf specs and by the
+paste-keystroke check in `e2e/editor.spec.ts`. Functional assertions and the cross-engine
+pagination tolerance stay blocking everywhere.
 
 CI (GitHub Actions, run 41766944510, commit 5f3eeab) and a local Windows 11 run. macOS WebKit is
 the real WKWebView platform.

@@ -143,8 +143,13 @@ test('typing, selection across pages, undo and find work on any page; PageDown m
 
   // A selection across a page boundary (Shift+PageDown) deletes as one range.
   await docStart(page)
+  await expect.poll(async () => (await layout(page)).currentPage).toBe(0)
   await page.keyboard.press('Shift+PageDown')
+  await expect.poll(async () => (await layout(page)).currentPage).toBe(1)
   await page.keyboard.press('Shift+PageDown')
+  await expect.poll(async () => (await layout(page)).currentPage).toBe(3)
+  // The selection runs from the start of the book to the top of page 4.
+  expect(await page.evaluate(() => getSelection()!.toString().length)).toBeGreaterThan(2000)
   await page.keyboard.press('Delete')
   await waitForLayout(page)
   expect((await layout(page)).pageCount).toBeLessThan(pageCount - 1)
