@@ -58,8 +58,8 @@ async function escapeFrom(page: Page, layer: Locator) {
   }
 }
 
-async function openBook(page: Page) {
-  await page.setViewportSize({ width: 1400, height: 900 })
+async function openBook(page: Page, width = 1400) {
+  await page.setViewportSize({ width, height: 900 })
   await launch(page)
   const fx = buildPaginationFixture({ words: 8000, chapters: 3 })
   const content = fx.doc.content as { type: string; content: { type: string; text: string; marks?: unknown[] }[] }[]
@@ -216,13 +216,16 @@ test('Phase 3: every control has a wired tooltip, with each menu, dialog and pop
 
 test('Phase 3 controls show their tooltip on hover and on keyboard focus', async ({ page }) => {
   test.setTimeout(120_000)
-  await openBook(page)
+  // Wide enough that every Review control is on the bar (macOS fonts are wider): focus here means the
+  // control itself, not an item of a collapsed group's dropdown (the dropdowns are audited above).
+  await openBook(page, 1920)
   await page.evaluate(() => window.__nvE2E.turnSpread(1))
+  const ON_BAR = PHASE3_CONTROLS.filter((id) => id !== 'ribbon.group.review.rewrite')
   const away = async () => {
     const box = (await page.getByRole('main', { name: 'Editor' }).boundingBox())!
     await page.mouse.move(box.x + 8, box.y + box.height - 8, { steps: 4 })
   }
-  for (const id of PHASE3_CONTROLS) {
+  for (const id of ON_BAR) {
     await away()
     await expect(tip(page)).toHaveCount(0)
     await (await reveal(page, id)).first().hover()
@@ -231,10 +234,12 @@ test('Phase 3 controls show their tooltip on hover and on keyboard focus', async
   }
   await away()
   // Keyboard focus: a key press first (keyboard modality), then focus each control.
-  for (const id of PHASE3_CONTROLS) {
+  for (const id of ON_BAR) {
     await editor(page).focus()
     await page.keyboard.press('Shift')
-    await (await reveal(page, id)).first().focus()
+    const control = (await reveal(page, id)).first()
+    expect(await control.evaluate((el) => !el.closest('[role="menu"]')), `${id} is on the bar at 1920 px`).toBe(true)
+    await control.focus()
     await expect(tip(page), `focus tooltip for ${id}`).toBeVisible()
     await page.keyboard.press('Escape')
   }

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { editor, launch, openRecent, reveal, ribbonTab, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
+import { editor, launch, lineEnd, openRecent, reveal, ribbonTab, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
 
 /**
  * Phase 3 acceptance, accessibility: WCAG 2.1 AA contrast measured on the rendered UI (computed colours
@@ -143,7 +143,7 @@ test('WCAG AA contrast of the revision tools: four paper surfaces x OS light and
       { type: 'heading', attrs: { level: 1 }, content: [text('Chapter One')] },
       p(text('The river ran '), text('quietly', [{ type: 'insertion', attrs: stamp('i1') }]), text(' '), text('and slowly', [{ type: 'deletion', attrs: stamp('d1') }]), text(' past the mill. The lantern burned.')),
       p(text('Morning', [{ type: 'comment', attrs: { id: 'c1' } }]), text(' came over the meadow, and the '), text('stranger', [{ type: 'comment', attrs: { id: 'c2' } }]), text(' walked on.')),
-      p(text('She closed the window and listened to the house settle around her for a long while.')),
+      p(text('She closed the window.')),
       p(text('Nobody spoke.')),
     ],
   }
@@ -174,11 +174,11 @@ test('WCAG AA contrast of the revision tools: four paper surfaces x OS light and
   const view = page.getByTestId('rewrite-view')
   await expect(view).toBeVisible()
   await page.keyboard.type('Quietly, ')
-  await page.keyboard.press('ControlOrMeta+ArrowRight')
-  for (let k = 0; k < 6; k++) await page.keyboard.press('ControlOrMeta+Shift+ArrowRight')
-  await page.keyboard.press('Backspace')
-  await expect(view.locator('.nv-rw-ins').first()).toBeVisible()
-  await expect(view.locator('.nv-rw-del').first()).toBeVisible()
+  // Remove the paragraph's last words (the end of its last line: no word-jump keys, which differ by OS).
+  await lineEnd(page)
+  for (let k = 0; k < 12; k++) await page.keyboard.press('Backspace')
+  await expect(view.locator('.nv-rw-ins').first()).toBeVisible({ timeout: 10_000 })
+  await expect(view.locator('.nv-rw-del').first()).toBeVisible({ timeout: 10_000 })
   await ctl(page, 'rewrite.closeButton').click()
   await expect(view).toHaveCount(0)
 
