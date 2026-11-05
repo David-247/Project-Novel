@@ -1,0 +1,34 @@
+/* T6 step 1 prototypes (dev flag ?toolbar=...): one row, never wraps. Unlayered, so these win over
+   the utilities the shipping toolbar uses (flex-wrap). */
+[data-toolbar-proto-mode] [role='toolbar'] {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  align-items: center;
+}
+[data-toolbar-proto-mode] [role='toolbar'] > *,
+[data-toolbar-proto-mode] > * {
+  flex-shrink: 0;
+}
+[data-toolbar-proto-mode] > [role='toolbar'] {
+  flex-shrink: 1;
+}
+[data-toolbar-proto-mode] [role='group'] {
+  flex-wrap: nowrap;
+}
+[data-toolbar-proto-mode] [data-proto-hidden] {
+  display: none !important;
+}
+[data-toolbar-proto-mode]:not([data-proto-icons]) [data-proto-glyph] {
+  display: none;
+}
+[data-toolbar-proto-mode][data-proto-icons] [data-proto-label] {
+  display: none;
+}
+/* Narrowest step of the "groups" prototype: icon dropdowns packed tighter. */
+[data-toolbar-proto-mode][data-proto-icons] [role='toolbar'] > [role='separator'] {
+  margin-inline: 2px;
+}
+[data-toolbar-proto-mode][data-proto-icons] [data-proto-ph] > button {
+  padding-inline: 4px;
+  gap: 1px;
+}

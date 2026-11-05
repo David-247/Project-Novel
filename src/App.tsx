@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { AppShell, useReloadGuard } from '@/features/app-shell'
+import { AppShell, readToolbarProtoFlag, useReloadGuard } from '@/features/app-shell'
 import {
   FindButton,
   FindReplacePanel,
@@ -88,6 +88,9 @@ export function commentAuthor(): { name: string; color: string | null } {
  */
 const afterDialogFocus = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
 
+/** T6 step 1: `?toolbar=overflow|tabs|groups` shows a single-row toolbar prototype (dev/e2e builds). */
+const TOOLBAR_PROTO = readToolbarProtoFlag()
+
 export function App() {
   useThemeFollow()
   useSurfaceFollow()
@@ -143,9 +146,12 @@ export function App() {
     <TooltipProvider lookup={getTooltipCopy}>
       <AppShell
         menuBar={<AppMenuBar />}
+        toolbarProto={TOOLBAR_PROTO}
         toolbar={
           <>
-            <span className="px-1 text-ui font-semibold">Novel</span>
+            <span data-proto-brand="" className="px-1 text-ui font-semibold">
+              Novel
+            </span>
             <Toolbar
               leadingGroups={
                 <ToolbarGroup label="History">
