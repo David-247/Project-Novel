@@ -233,14 +233,20 @@ test('Phase 3 controls show their tooltip on hover and on keyboard focus', async
     await expect(tip(page), `hover tooltip for ${id}`).toHaveText(/\w.{8,}/)
   }
   await away()
-  // Keyboard focus: a key press first (keyboard modality), then focus each control.
+  // Keyboard focus: a key press first (keyboard modality), then focus each control. Retried as a whole
+  // (macOS: a late focus return from the previous Escape can take the focus back; see phase2-tooltips).
   for (const id of ON_BAR) {
-    await editor(page).focus()
-    await page.keyboard.press('Shift')
     const control = (await reveal(page, id)).first()
     expect(await control.evaluate((el) => !el.closest('[role="menu"]')), `${id} is on the bar at 1920 px`).toBe(true)
-    await control.focus()
-    await expect(tip(page), `focus tooltip for ${id}`).toBeVisible()
-    await page.keyboard.press('Escape')
+    await expect(async () => {
+      await page.keyboard.press('Escape')
+      await expect(tip(page)).toHaveCount(0, { timeout: 1000 })
+      await editor(page).focus()
+      await page.keyboard.press('Shift')
+      await control.focus()
+      await expect(control).toBeFocused({ timeout: 1000 })
+      await expect(tip(page)).toBeVisible({ timeout: 2000 })
+    }, `focus tooltip for ${id}`).toPass({ timeout: 15_000 })
   }
+  await page.keyboard.press('Escape')
 })

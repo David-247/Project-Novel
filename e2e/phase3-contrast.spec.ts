@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { editor, launch, lineEnd, openRecent, reveal, ribbonTab, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
+import { editor, launch, lineEnd, lineStart, openRecent, reveal, ribbonTab, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
 
 /**
  * Phase 3 acceptance, accessibility: WCAG 2.1 AA contrast measured on the rendered UI (computed colours
@@ -173,6 +173,11 @@ test('WCAG AA contrast of the revision tools: four paper surfaces x OS light and
   await page.keyboard.press('ControlOrMeta+Alt+w')
   const view = page.getByTestId('rewrite-view')
   await expect(view).toBeVisible()
+  // Into the revision (a click: the focus hand-over after opening is not what this test is about).
+  const revision = page.getByRole('textbox', { name: 'Revised passage' })
+  await revision.locator('p').first().click()
+  await expect(revision).toBeFocused()
+  await lineStart(page)
   await page.keyboard.type('Quietly, ')
   // Remove the paragraph's last words (the end of its last line: no word-jump keys, which differ by OS).
   await lineEnd(page)
