@@ -125,8 +125,34 @@ export function getCommand(id: string): Command | undefined {
   return commands.get(id)
 }
 
+/** The command's guard: its own, else 'manuscript' for text commands (Insert, Format, Edit history / clipboard). */
+export function commandGuard(cmd: Command): 'manuscript' | 'modal' | 'none' {
+  if (cmd.guard) return cmd.guard
+  const m = cmd.menu
+  if (!m) return 'none'
+  const text = m.id === 'insert' || m.id === 'format' || (m.id === 'edit' && (m.group === 'history' || m.group === 'clipboard'))
+  return text ? 'manuscript' : 'none'
+}
+
+/**
+ * A gate over every command (menus, native menu, shortcuts, runCommand): while one is set, a command
+ * it refuses is disabled. A mode that replaces the manuscript view registers one (the re-write view:
+ * Find, New Comment, page navigation ... make no sense there). One gate at a time.
+ */
+let gate: ((cmd: Command) => boolean) | null = null
+export function setCommandGate(fn: ((cmd: Command) => boolean) | null): () => void {
+  gate = fn
+  notifyCommandStateChanged()
+  return () => {
+    if (gate !== fn) return
+    gate = null
+    notifyCommandStateChanged()
+  }
+}
+
 export function isCommandEnabled(cmd: Command): boolean {
   try {
+    if (gate && !gate(cmd)) return false
     return cmd.isEnabled ? cmd.isEnabled() : true
   } catch {
     return false

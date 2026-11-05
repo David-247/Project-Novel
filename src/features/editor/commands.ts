@@ -3,7 +3,7 @@ import { STYLE_IDS } from '@/shared/book'
 import { notifyCommandStateChanged, registerCommands, type Command } from '@/shared/commands'
 import { useStore } from '@/shared/store'
 import { detectPlatform, type Platform } from '@/shared/ui'
-import { getEditor, subscribeDocLoad, subscribeEditor } from './controller'
+import { getActiveEditor, onActiveEditorChange, subscribeDocLoad, subscribeEditor } from './controller'
 import { fontFamilyCss, loadSystemFonts } from './fonts'
 import { INSERT_ITEMS } from './breaks/controls'
 import { FIND_CONTROLS } from './find/controls'
@@ -20,21 +20,22 @@ import { readToolbarState } from './toolbar/toolbar-state'
 /**
  * The editor's commands for the Edit, Insert and Format menus (and their shortcuts). Ids reuse the
  * toolbar's control ids, so the tooltip copy and shortcut are the toolbar's. Every command acts
- * through the controller (`getEditor()`), the same way the toolbar buttons do.
+ * through the controller's active editor (`getActiveEditor()`): the manuscript, or the re-write's
+ * revision while the re-write view is open.
  */
 
 const ready = (): Editor | null => {
-  const ed = getEditor()
+  const ed = getActiveEditor()
   return ed && ed.isEditable ? ed : null
 }
 const can = () => ready() !== null
-const state = () => readToolbarState(getEditor())
+const state = () => readToolbarState(getActiveEditor())
 
 /** A text field other than the manuscript has focus (find field, a dialog's input). */
 function focusedTextField(): HTMLInputElement | HTMLTextAreaElement | HTMLElement | null {
   const el = document.activeElement
   if (!(el instanceof HTMLElement)) return null
-  const manuscript = getEditor()?.view.dom
+  const manuscript = getActiveEditor()?.view.dom
   if (manuscript && (el === manuscript || manuscript.contains(el))) return null
   if (el instanceof HTMLTextAreaElement) return el
   if (el instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color'].includes(el.type)) return el
@@ -47,14 +48,14 @@ const isNestedEditor = (el: HTMLElement) => el.isContentEditable && !!el.closest
 function historyEnabled(cmd: 'undo' | 'redo'): boolean {
   const field = focusedTextField()
   if (field && !isNestedEditor(field)) return true
-  return can() && getEditor()!.can()[cmd]()
+  return can() && getActiveEditor()!.can()[cmd]()
 }
 
 /** Undo / Redo: the focused text field's own history, else the manuscript's (footnote notes included). */
 function runHistory(cmd: 'undo' | 'redo'): void {
   const field = focusedTextField()
   if (field && !isNestedEditor(field)) document.execCommand(cmd)
-  else if (field) getEditor()?.commands[cmd]() // focus stays in the note
+  else if (field) getActiveEditor()?.commands[cmd]() // focus stays in the note
   else ready()?.chain().focus()[cmd]().run()
 }
 
@@ -221,7 +222,7 @@ export function editorCommands(platform: Platform = detectPlatform()): Command[]
         const field = focusedTextField()
         if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) field.select()
         else if (field) document.execCommand('selectAll')
-        else getEditor()?.chain().focus().selectAll().run()
+        else getActiveEditor()?.chain().focus().selectAll().run()
       },
     },
     {
@@ -418,14 +419,17 @@ export function registerEditorCommands(): () => void {
   let watched: Editor | null = null
   const watch = () => {
     watched?.off('transaction', notifyCommandStateChanged)
-    watched = getEditor()
+    watched = getActiveEditor()
     watched?.on('transaction', notifyCommandStateChanged)
     notifyCommandStateChanged()
   }
   watch()
   const offEditor = subscribeEditor(watch)
+  // The active editor changed (the re-write view opened or closed, or the focus moved in it).
+  const offActive = onActiveEditorChange(watch)
   const offLoad = subscribeDocLoad(notifyCommandStateChanged)
   return () => {
+    offActive()
     offLoad()
     offEditor()
     watched?.off('transaction', notifyCommandStateChanged)

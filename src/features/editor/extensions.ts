@@ -80,7 +80,8 @@ export function createEditorExtensions({ detached = false }: EditorExtensionOpti
     // Shortcuts (from UndoRedo): Mod-z undo; Mod-Shift-z and Mod-y redo.
     UndoRedo.configure({ depth: HISTORY_DEPTH }),
     // Search-result highlighting + Mod-f (open find) / Escape (close find).
-    FindHighlight,
+    // Detached views: the highlights only; Mod-f / Escape belong to the manuscript.
+    detached ? FindHighlight.extend({ addKeyboardShortcuts: () => ({}) }) : FindHighlight,
     // --- end task 4 -----------------------------------------------------------------------
 
     // --- Paragraph and chapter styles (Phase 2): additive only ----------------------------
@@ -105,9 +106,9 @@ export function createEditorExtensions({ detached = false }: EditorExtensionOpti
     // --- Track changes (Phase 3): additive only. insertion / deletion / formatChange marks, the
     // trackedInsert / trackedDelete / trackedStyleChange block attrs, the recorder (dispatch hook),
     // Mod-Shift-e and the markup view decorations (docs/track-changes.md).
-    detached ? TrackChanges.configure({ isEnabled: () => false }) : TrackChanges,
+    detached ? TrackChanges.configure({ isEnabled: () => false, detached: true }) : TrackChanges,
     // --- Re-write (Phase 3): additive only. The `rewriteId` block attribute (passage anchor), the
-    // read-only lock on passages in re-write and their side bar, Mod-Alt-r (Re-write Passage…).
+    // read-only lock on passages in re-write and their side bar, Mod-Alt-w (Re-write Passage…).
     RewriteAnchor.configure({ detached }),
   ]
 }

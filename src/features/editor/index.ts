@@ -26,6 +26,9 @@ export {
   getDocVersion,
   onDocChange,
   getEditor,
+  getActiveEditor,
+  setActiveEditorSource,
+  activeEditorChanged,
 } from './controller'
 export type { DocChangeListener } from './controller'
 export { createEditorExtensions } from './extensions'
