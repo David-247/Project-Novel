@@ -73,7 +73,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
         'file.new_project',
         'file.open_project',
         // The in-app menu bar's titles (its items are covered in App.menus.test.tsx).
-        ...['file', 'edit', 'view', 'insert', 'format', 'help'].map((m) => `menu.${m}`),
+        ...['file', 'edit', 'view', 'insert', 'format', 'review', 'help'].map((m) => `menu.${m}`),
       ]),
     )
     const problems = auditTooltipCoverage(document.body)

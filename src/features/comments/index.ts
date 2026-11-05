@@ -16,8 +16,11 @@
 //   toolbar (wrap in the editor's ToolbarItem).
 // - setCommentAuthorSource(() => ({ name, color })) or CommentsExtension.configure({ getAuthor }):
 //   the author (default "Author"); the settings slice supplies it at integration.
-// Commands for the command registry / menus: newComment, nextComment, prevComment,
-// toggleCommentsPanel, toggleShowResolved, plus the per-thread actions.
+// - registerCommentsCommands(): Review > New Comment (Mod-Alt-m), Next / Previous Comment, Show
+//   Resolved Comments; Insert > Comment; View > Comments Panel (command registry; returns unregister).
+// - setBeforeNewComment(fn): a wait before the composer opens (the one-time author-name question).
+// Commands as plain functions: newComment, nextComment, prevComment, toggleCommentsPanel,
+// toggleShowResolved, plus the per-thread actions.
 export { CommentsExtension, setCommentAuthorSource, currentAuthor } from './extension'
 // The paste rule, for other views whose pasted content lands in the manuscript (the footnote editor).
 export { filterPastedComments } from './extension'
@@ -38,7 +41,9 @@ export {
   reopenThread,
   deleteThread,
   goToThread,
+  setBeforeNewComment,
 } from './commands'
+export { registerCommentsCommands, commentCommands } from './menu-commands'
 export { registerCommentsSideFile } from './persistence'
 export { CommentsLayout, commentsDebug } from './CommentsLayout'
 export { NewCommentButton, CommentsPanelButton } from './CommentButtons'

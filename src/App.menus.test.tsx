@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { cancelDraft, currentAuthor } from '@/features/comments'
 import { getEditor, setDocJSON } from '@/features/editor'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
 import { buildMenuModel, getCommands, shortcutKey, type MenuNode } from '@/shared/commands'
@@ -62,10 +63,10 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
     }
   })
 
-  it('lays out the full menu bar: File, Edit, View, Insert, Format, Help (Review once it has items)', async () => {
+  it('lays out the full menu bar: File, Edit, View, Insert, Format, Review, Help', async () => {
     await renderApp()
     const model = buildMenuModel(getCommands(), 'in-app')
-    expect(model.map((m) => m.label)).toEqual(['File', 'Edit', 'View', 'Insert', 'Format', 'Help'])
+    expect(model.map((m) => m.label)).toEqual(['File', 'Edit', 'View', 'Insert', 'Format', 'Review', 'Help'])
     const names = (nodes: MenuNode[]): string[] =>
       nodes.flatMap((n) => (n.kind === 'item' ? [n.command.label] : n.kind === 'submenu' ? [`${n.label} ▸`] : n.kind === 'separator' ? ['—'] : []))
     expect(names(model[0].children)).toEqual([
@@ -79,6 +80,8 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
       '—',
       'Book Details…',
       'Page Setup ▸',
+      '—',
+      'Settings…',
       '—',
       'Quit Novel',
     ])
@@ -97,15 +100,17 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
       '—',
       'Go to Page…',
     ])
-    expect(names(model[3].children)).toEqual(['Chapter Break', 'Page Break', 'Scene Break', '—', 'Footnote'])
-    expect(names(model[5].children)).toEqual(['Keyboard Shortcuts', 'Project Folder Format', '—', 'About Novel'])
+    expect(names(model[2].children)).toContain('Comments Panel')
+    expect(names(model[3].children)).toEqual(['Chapter Break', 'Page Break', 'Scene Break', '—', 'Footnote', 'Comment'])
+    expect(names(model[5].children)).toEqual(['New Comment', '—', 'Next Comment', 'Previous Comment', '—', 'Show Resolved Comments'])
+    expect(names(model[6].children)).toEqual(['Keyboard Shortcuts', 'Project Folder Format', '—', 'About Novel'])
   })
 
   it('opens every menu and submenu of the in-app menu bar; each item has a wired tooltip', async () => {
     await renderApp()
     const bar = screen.getByRole('menubar', { name: 'Menu bar' })
     const titles = Array.from(bar.querySelectorAll<HTMLElement>('[data-control-id^="menu."]'))
-    expect(titles.map((t) => t.textContent)).toEqual(['File', 'Edit', 'View', 'Insert', 'Format', 'Help'])
+    expect(titles.map((t) => t.textContent)).toEqual(['File', 'Edit', 'View', 'Insert', 'Format', 'Review', 'Help'])
     let items = 0
     for (const title of titles) {
       act(() => title.focus())
@@ -146,5 +151,57 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
     expect(cmd('book.surface.dark').isChecked!()).toBe(true)
     expect(cmd('book.surface.book').isChecked!()).toBe(false)
     act(() => useStore.getState().bookActions.setSurface('auto'))
+  })
+
+  it('comment commands: enabled and checked state from the comments slice', async () => {
+    await renderApp()
+    const cmd = (id: string) => getCommands().find((c) => c.id === id)!
+    const comments = useStore.getState().commentsActions
+    expect(cmd('comment.new').shortcut).toBe('Mod-Alt-m')
+    expect(cmd('comment.new').menu?.id).toBe('review')
+    expect(cmd('insert.comment').shortcut).toBeUndefined()
+    expect(cmd('comment.new').isEnabled!()).toBe(true)
+    expect(cmd('comment.next').isEnabled!()).toBe(false)
+    expect(cmd('comment.prev').isEnabled!()).toBe(false)
+    act(() => comments.setShowResolved(true))
+    expect(cmd('comment.showResolved').isChecked!()).toBe(true)
+    act(() => comments.setShowResolved(false))
+    expect(cmd('comment.showResolved').isChecked!()).toBe(false)
+    const panelOpen = useStore.getState().comments.panelOpen
+    expect(cmd('comment.panel').isChecked!()).toBe(panelOpen)
+    act(() => cmd('comment.panel').run())
+    expect(cmd('comment.panel').isChecked!()).toBe(!panelOpen)
+    act(() => cmd('comment.panel').run())
+  })
+
+  it('comments are by the Settings author ("Unknown author" without one); New Comment asks for a name first', async () => {
+    await renderApp()
+    await waitFor(() => expect(useStore.getState().preferences.loaded).toBe(true))
+    const prefs = useStore.getState().preferencesActions
+    act(() => prefs.load({ authorName: 'Ada Lovelace', authorColor: '#335577' }))
+    expect(currentAuthor()).toEqual({ name: 'Ada Lovelace', color: '#335577' })
+    act(() => prefs.load({ authorName: '', authorPrompted: true }))
+    expect(currentAuthor().name).toBe('Unknown author')
+
+    // No name known and never asked: the one-time question comes before the composer.
+    act(() => prefs.load({ authorName: '' }))
+    const ed = getEditor()!
+    act(() => {
+      ed.commands.insertContent('Words to comment on')
+      ed.commands.selectAll()
+    })
+    act(() => getCommands().find((c) => c.id === 'comment.new')!.run())
+    const field = await screen.findByRole('textbox', { name: 'Your name' })
+    expect(useStore.getState().comments.draft).toBeNull()
+    fireEvent.change(field, { target: { value: 'Grace Hopper' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
+    await waitFor(() => expect(useStore.getState().comments.draft).not.toBeNull())
+    expect(currentAuthor().name).toBe('Grace Hopper')
+    expect(useStore.getState().preferences.authorPrompted).toBe(true)
+    // Asked once: the next New Comment opens the composer straight away.
+    act(() => void cancelDraft())
+    act(() => getCommands().find((c) => c.id === 'comment.new')!.run())
+    expect(useStore.getState().comments.draft).not.toBeNull()
+    act(() => void cancelDraft())
   })
 })

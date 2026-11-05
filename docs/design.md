@@ -364,7 +364,7 @@ an optional shortcut (ProseMirror syntax, the only place a shortcut is declared)
 (`{ id, group, order, submenu? }`), live `isEnabled()` / `isChecked()` and `run()`. Slices register their commands
 through their public index (`registerStorageCommands`, `registerEditorCommands`, `registerPaginationCommands`,
 `registerSurfaceCommands`, `registerBookSettingsCommands`, `registerHeaderFooterCommands`,
-`registerFootnoteCommands`; the menu slice adds its own) and the composition root calls them. Ids reuse the matching
+`registerFootnoteCommands`, `registerSettingsCommands`, `registerCommentsCommands`; the menu slice adds its own) and the composition root calls them. Ids reuse the matching
 control's `data-control-id`, so a menu item, its toolbar button and its tooltip share one copy. A duplicate id or
 shortcut, or a missing description, throws in development; `App.menus.test.tsx` checks the whole app's registry
 (one-line descriptions of at most 100 characters, no shortcut twice, the same shortcut on a command and on its
@@ -380,14 +380,15 @@ control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
   the themed **in-app menu bar** (Radix Menubar, menu slice) sits above the toolbar in the app shell. The web and e2e
   builds render the in-app bar too (`menuBarKind()`), so Playwright covers it on both engines. Both are built by
   `buildMenuModel`, so labels, order and shortcuts match. Menu `app` (About, Settings, Quit) is the macOS app menu;
-  elsewhere About moves to Help and the rest to the end of File. An empty menu is left out (Review appears with the
-  revision tools).
+  elsewhere About moves to Help and the rest to the end of File. An empty menu is left out.
 - **Structure**: File (New Project…, Open Project…, Open Recent ▸, Close Project | Save, Save a Copy… | Book
-  Details…, Page Setup ▸ | Quit Novel), Edit (Undo, Redo | Cut, Copy, Paste, Paste as Plain Text, Select All | Find…,
+  Details…, Page Setup ▸ | Settings… | Quit Novel; on macOS Settings… and Quit are in the Novel menu), Edit (Undo, Redo | Cut, Copy, Paste, Paste as Plain Text, Select All | Find…,
   Replace… | Go to Page…), View (Single Page, Two-Page Spread | Zoom In, Zoom Out, Fit Spread, Fit Width, Actual
-  Size | Paper ▸ | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote), Format (Bold, Italic,
+  Size | Paper ▸ | Comments Panel | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote,
+  Comment), Format (Bold, Italic,
   Underline | Font ▸ (System Default and the installed families, as in the picker), Font Size ▸ | Paragraph Style ▸, Alignment ▸, Lists ▸ | Clear Formatting | Modify Style…, Manage Styles… |
-  Headers & Page Numbers…, Footnote Options…), Help (Keyboard Shortcuts, Project Folder Format | About Novel).
+  Headers & Page Numbers…, Footnote Options…), Review (New Comment | Next Comment, Previous Comment | Show Resolved
+  Comments), Help (Keyboard Shortcuts, Project Folder Format | About Novel).
 - **Keyboard** (one window listener, `installCommandShortcuts`): bubble phase, so a key the editor's keymap already
   handled is not run again; Cut/Copy/Paste keep the webview's own handling (`nativeShortcut`); text commands (Edit
   history and clipboard, Insert, Format) do not act on the manuscript while another text field or a dialog has
@@ -431,4 +432,9 @@ Slice `src/features/comments/` (public interface `index.ts`). Format: docs/proje
 - **Commands**: New Comment (Mod-Alt-m; opens a focused composer, Mod-Enter adds, Escape cancels and returns to the
   text), Next / Previous Comment (the anchor is centred so its spread is the one in view; both page views), Show
   Resolved, Comments Panel toggle. Mod-z / Mod-Shift-z in the panel (outside its text fields) undo in the manuscript.
-  Toolbar: `comment.new`, `comment.panel`; every panel and card control has a registry tooltip.
+  Toolbar: `comment.new`, `comment.panel`; every panel and card control has a registry tooltip. Menus (command
+  registry): Review > New Comment (Mod-Alt-m), Next / Previous Comment, Show Resolved Comments (check); Insert >
+  Comment (the same action; the shortcut is shown on Review's); View > Comments Panel (check). Next / Previous are
+  enabled while some thread is shown (resolved ones only with Show Resolved).
+- **Author**: the Settings author (`getAuthor()`), "Unknown author" when no name is known. When no name is known
+  and the one-time question was never asked, New Comment asks it first and opens the composer after the answer.

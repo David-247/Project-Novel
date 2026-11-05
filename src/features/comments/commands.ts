@@ -30,6 +30,9 @@ function view(): EditorView | null {
   return getCommentsView()
 }
 
+/** The manuscript is mounted and editable (New Comment can act). */
+export const getCommentsViewEditable = (): boolean => !!view()?.editable
+
 function threadsOf(state: EditorState): ReadonlyMap<string, CommentThread> {
   return commentsKey.getState(state)?.threads ?? new Map()
 }
@@ -88,15 +91,43 @@ export function wordAt(state: EditorState, pos: number): { from: number; to: num
 }
 
 /**
+ * Something to wait for before the composer opens (the composition root: the one-time author-name
+ * question), or null when there is nothing to wait for. Injected, like the author source.
+ */
+let beforeNewComment: (() => Promise<unknown> | null) | null = null
+export function setBeforeNewComment(fn: (() => Promise<unknown> | null) | null): void {
+  beforeNewComment = fn
+}
+
+function commentRange(state: EditorState): { from: number; to: number } | null {
+  const { selection } = state
+  const range = selection.empty ? wordAt(state, selection.head) : { from: selection.from, to: selection.to }
+  return range && state.doc.textBetween(range.from, range.to, '', '').trim() !== '' ? range : null
+}
+
+/**
  * New Comment (Mod-Alt-m): open the composer for the selection, or for the word at a collapsed
- * caret. The thread is created when the composer is submitted (`submitDraft`).
+ * caret. The thread is created when the composer is submitted (`submitDraft`). With a
+ * `setBeforeNewComment` wait pending, the composer opens once it settles (for the selection then).
  */
 export function newComment(): boolean {
   const v = view()
+  if (!v || !v.editable || !commentRange(v.state)) return false
+  let wait: Promise<unknown> | null = null
+  try {
+    wait = beforeNewComment?.() ?? null
+  } catch (e) {
+    console.warn('Preparing a new comment failed:', e)
+  }
+  if (!wait) return openComposer()
+  void wait.catch((e) => console.warn('Preparing a new comment failed:', e)).then(() => openComposer())
+  return true
+}
+
+function openComposer(): boolean {
+  const v = view()
   if (!v || !v.editable) return false
-  const { selection } = v.state
-  let range: { from: number; to: number } | null = selection.empty ? wordAt(v.state, selection.head) : { from: selection.from, to: selection.to }
-  if (range && v.state.doc.textBetween(range.from, range.to, '', '').trim() === '') range = null
+  const range = commentRange(v.state)
   if (!range) return false
   v.dispatch(v.state.tr.setMeta(commentsKey, { draft: range } satisfies CommentsMeta).setMeta('addToHistory', false))
   actions().setActive(null)

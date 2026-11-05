@@ -30,8 +30,23 @@ import {
 import { PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
 import { FootnoteOptionsButton, registerFootnoteCommands, useFootnotePagination } from '@/features/footnotes'
 import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
-import { SettingsButton, SettingsDialog, useSettingsIntegration } from '@/features/settings'
-import { CommentsLayout, CommentsPanelButton, NewCommentButton, registerCommentsSideFile } from '@/features/comments'
+import {
+  ensureAuthorName,
+  getAuthor,
+  registerSettingsCommands,
+  SettingsButton,
+  SettingsDialog,
+  useSettingsIntegration,
+} from '@/features/settings'
+import {
+  CommentsLayout,
+  CommentsPanelButton,
+  NewCommentButton,
+  registerCommentsCommands,
+  registerCommentsSideFile,
+  setBeforeNewComment,
+  setCommentAuthorSource,
+} from '@/features/comments'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
@@ -49,6 +64,15 @@ export const editorDocumentProvider: DocumentProvider = {
 }
 
 /** Composition root: the only place that wires slices together. */
+/** Shown on comments when the author has no name (the one-time question was dismissed). */
+export const UNKNOWN_AUTHOR = 'Unknown author'
+
+/** The comments' author: the Settings name and colour (`Unknown author` without a name). */
+export function commentAuthor(): { name: string; color: string | null } {
+  const a = getAuthor()
+  return { name: a.name || UNKNOWN_AUTHOR, color: a.color }
+}
+
 export function App() {
   useThemeFollow()
   useSurfaceFollow()
@@ -57,7 +81,7 @@ export function App() {
   useReloadGuard(!import.meta.env.DEV)
   useEffect(() => registerDocumentProvider(editorDocumentProvider), [])
   useStorageIntegration()
-  // App preferences: load/save preferences.json, Mod-, opens Settings, the Motion preference.
+  // App preferences: load/save preferences.json and the Motion preference (Settings… is a command).
   useSettingsIntegration()
   // Footnotes at the bottom of their page (bottom reservations + the footnote area page slot).
   useFootnotePagination()
@@ -71,12 +95,23 @@ export function App() {
       registerBookSettingsCommands(),
       registerHeaderFooterCommands(),
       registerFootnoteCommands(),
+      registerSettingsCommands(),
+      registerCommentsCommands(),
     ]
     return () => offs.forEach((off) => off())
   }, [])
   useAppMenus()
   // comments.json is saved, autosaved and recovered with the manuscript (storage side file).
   useEffect(() => registerCommentsSideFile(), [])
+  // Comments are by the Settings author; with no name known, New Comment first asks once.
+  useEffect(() => {
+    setCommentAuthorSource(commentAuthor)
+    setBeforeNewComment(() => (getAuthor().name ? null : ensureAuthorName()))
+    return () => {
+      setCommentAuthorSource(null)
+      setBeforeNewComment(null)
+    }
+  }, [])
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
