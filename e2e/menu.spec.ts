@@ -56,8 +56,12 @@ test('menu bar keyboard: Alt and F10 focus File, arrows move, Escape returns to 
 
   // Keyboard choice: the command runs on the restored selection.
   await page.keyboard.press('F10')
-  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight') // File -> Format
-  await expect(title(page, 'format')).toBeFocused()
+  await expect(title(page, 'file')).toBeFocused()
+  // Radix moves focus on a timer: wait for each step like a human would.
+  for (const m of ['edit', 'view', 'insert', 'format']) {
+    await page.keyboard.press('ArrowRight')
+    await expect(title(page, m)).toBeFocused()
+  }
   await page.keyboard.press('Enter')
   await expect(item(page, 'toolbar.italic')).toBeVisible()
   await item(page, 'toolbar.italic').focus()
