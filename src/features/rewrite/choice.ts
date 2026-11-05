@@ -3,6 +3,7 @@ import { TextSelection, type EditorState, type Transaction } from '@tiptap/pm/st
 import { closeHistory } from '@tiptap/pm/history'
 import type { Editor } from '@tiptap/core'
 import { blockPlainText, chapterIndexAt, getChapters, getEditor } from '@/features/editor'
+import { revealPosition } from '@/features/pagination'
 import { currentTrackAuthor, isTracking, trackTransaction, TRACK_FAILED_META, TRACK_FAILED_NOTICE, TRACK_SKIP_META, TRACKED_META } from '@/features/track-changes'
 import type { DocNodeJSON } from '@/shared/document'
 import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
@@ -86,6 +87,8 @@ function backToManuscript(ed: Editor): void {
   if (ed.isDestroyed) return
   ed.view.dispatch(ed.state.tr.scrollIntoView())
   ed.view.focus()
+  // Book mode turns to the passage's spread (continuous scroll centres it), as Go to Passage does.
+  revealPosition(ed.state.selection.from)
 }
 
 /** The open re-write (or `id`), its passage now, and the manuscript editor; a notice and null when it cannot be resolved. */
@@ -403,6 +406,9 @@ export function reopenRewrite(id: string): boolean {
   }
   dispatchAlone(ed, tr, null)
   if (getRewrite(id)?.status !== 'open') return false
+  // The manuscript behind the view shows the passage (Book mode turns to its spread), so a choice or
+  // Close comes back to it.
+  revealPosition(found.from + 1)
   const shown = record.choice && record.choice !== CHOICE_ORIGINAL && record.versions.some((v) => v.id === record.choice) ? record.choice : undefined
   return openRewrite(id, shown)
 }

@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
+  acrossSpreads,
   editor,
   launch,
   nativeDialog,
@@ -9,6 +10,7 @@ import {
   reveal,
   saveStatus,
   seedProject,
+  turnSettled,
   waitForLayout,
   writeFile,
 } from './helpers'
@@ -218,9 +220,12 @@ function bookDoc() {
   }
 }
 
+/** The running heads of the first spreads (Book mode, the default, paints one spread: turn through them). */
 async function headers(page: Page): Promise<string[]> {
   await waitForLayout(page)
-  return page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page [data-hf-region="header"] [data-hf="text"]'), (e) => e.textContent ?? ''))
+  return acrossSpreads(page, () =>
+    page.evaluate(() => Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page [data-hf-region="header"] [data-hf="text"]'), (e) => e.textContent ?? '')),
+  )
 }
 
 test('chapter title: a renamed title updates the running heads; removing one asks first; footnote numbers follow', async ({ page }) => {
@@ -379,4 +384,81 @@ test('Space on the focused Keep This Version button keeps the version (keyboard 
   await expect(view(page)).toHaveCount(0)
   expect((await blocks(page))[1]).toMatch(/^Briefly, The rain came/)
   expect((await rw(page)).rewrites[0].status).toBe('resolved')
+})
+
+test("Book mode: Keep and Reopen show the passage's spread; after Keep or Discard closes the view, the pages turn again (PageUp / PageDown, wheel, turns)", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  const long = (i: number) => p(`${i}. The river ran on past the mill and the bridge and the quiet houses by the water. `.repeat(10).trim())
+  await project(page, 'BookTurns', { type: 'doc', content: [h('One'), ...Array.from({ length: 30 }, (_, i) => long(i))] })
+  await expect(page.locator('.nv-desk[data-navigation="book"]')).toHaveCount(1)
+  const state = () =>
+    page.evaluate(() => {
+      const l = window.__nvE2E.layout()
+      const sel = window.__nvE2E.selection()!
+      const pg = l.pages.findIndex((x, i) => sel.from >= x.from && (sel.from < x.to || i === l.pages.length - 1))
+      return { page: pg, first: l.visibleSpread.first, last: l.visibleSpread.last, index: l.visibleSpread.index }
+    })
+  const caretShown = async () => {
+    const s = await state()
+    return s.page >= s.first && s.page <= s.last
+  }
+  const spread = async () => (await state()).index
+  const main = page.getByRole('main', { name: 'Editor' })
+  /** With the view closed: PageDown / PageUp with the focus outside the manuscript, the wheel and direct turns all turn. */
+  const turnsWork = async () => {
+    await expect(view(page)).toHaveCount(0)
+    await page.evaluate(() => window.__nvE2E.edgeSpread(-1))
+    await turnSettled(page)
+    expect(await spread()).toBe(0)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press('PageDown')
+    await expect.poll(spread).toBe(1)
+    await turnSettled(page)
+    await page.keyboard.press('PageUp')
+    await expect.poll(spread).toBe(0)
+    await turnSettled(page)
+    const box = (await main.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.wheel(0, 400)
+    await expect.poll(spread).toBe(1)
+    await turnSettled(page)
+    expect(await page.evaluate(() => window.__nvE2E.turnSpread(1))).toBe(true)
+    await expect.poll(spread).toBe(2)
+  }
+
+  // Keep This Version deep in the book: back on the passage's spread, then the pages turn.
+  await openOn(page, 20, 21)
+  await page.keyboard.type('Kept. ')
+  await ctl(page, 'rewrite.keepVersion').click()
+  await expect(view(page)).toHaveCount(0)
+  await expect.poll(caretShown).toBe(true)
+  const kept = await state()
+  expect(kept.index).toBeGreaterThan(0)
+  expect((await blocks(page))[20]).toMatch(/^Kept\. 19\. The river/)
+  await turnsWork()
+
+  // Reopen from the Re-writes list while the first spread is shown: the manuscript behind the view
+  // turns to the passage, so the choice comes back to it.
+  await page.evaluate(() => window.__nvE2E.edgeSpread(-1))
+  await turnSettled(page)
+  expect(await spread()).toBe(0)
+  await page.evaluate(() => window.__nvE2E.runCommand('rewrite.list'))
+  const list = page.getByRole('dialog', { name: 'Re-writes' })
+  await ctl(list, 'rewrite.listReopen').click()
+  await expect(view(page)).toBeVisible()
+  await expect.poll(spread).toBe(kept.index)
+  // Keep Original: the view closes on the passage's spread; the pages turn again.
+  await expect(list).toHaveCount(0)
+  await ctl(page, 'rewrite.keepOriginal').click()
+  await expect(view(page)).toHaveCount(0)
+  await expect.poll(caretShown).toBe(true)
+  expect(await spread()).toBe(kept.index)
+  await turnsWork()
+
+  // Discard Re-write on another passage: the view closes; the pages turn again.
+  await openOn(page, 25, 25)
+  await ctl(page, 'rewrite.discard').click()
+  await expect(view(page)).toHaveCount(0)
+  await expect.poll(caretShown).toBe(true)
+  await turnsWork()
 })
