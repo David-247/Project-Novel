@@ -227,7 +227,11 @@ test('Book mode: with the view open the pages behind it never turn (keys, wheel,
   expect(await page.evaluate(() => !!document.querySelector('.nv-desk[data-navigation="book"]'))).toBe(true)
   const spread = () => page.evaluate(() => window.__nvE2E.layout().visibleSpread.index)
   expect(await spread()).toBe(0)
+  const width = () => page.getByRole('main', { name: 'Editor' }).evaluate((m) => m.clientWidth)
+  const before = await width()
   await openOn(page, 1, 1)
+  // The desk fits the window (no scrollbar): opening reserves no gutter, so the pages do not refit.
+  expect(await width()).toBe(before)
   const menuTitle = page.locator('[data-control-id="menu.view"]')
   const menuItem = (id: string) => page.locator(`[role="menu"] [data-control-id="${id}"]`)
   await menuTitle.click()
@@ -253,6 +257,15 @@ test('Book mode: with the view open the pages behind it never turn (keys, wheel,
   await expect(view(page)).toBeHidden()
   expect(await page.evaluate(() => window.__nvE2E.turnSpread(1))).toBe(true)
   await expect.poll(spread).toBe(1)
+  // Continuous scroll (the pages overflow: a scrollbar where scrollbars take room, as in WebView2; none
+  // in headless browsers or with macOS overlay scrollbars): the width does not change either.
+  await page.evaluate(() => window.__nvE2E.setPageNavigation('scroll'))
+  await waitForLayout(page)
+  const main = page.getByRole('main', { name: 'Editor' })
+  await expect.poll(() => main.evaluate((m) => m.scrollHeight > m.clientHeight)).toBe(true)
+  const scrollWidth = await width()
+  await openOn(page, 1, 1)
+  expect(await width()).toBe(scrollWidth)
 })
 
 test('several versions: create, rename, switch by keyboard and pointer; focus keys and Flip', async ({ page }) => {
