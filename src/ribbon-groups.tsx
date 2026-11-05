@@ -15,7 +15,8 @@ import {
 } from '@/features/editor'
 import { FootnoteOptionsButton } from '@/features/footnotes'
 import { HeaderFooterButton } from '@/features/header-footer'
-import { MarkupViewMenu, TrackChangesButton } from '@/features/track-changes'
+import { SplitCommandButton } from '@/features/ribbon'
+import { BY_AUTHOR_SUBMENU, MarkupViewMenu, TRACK_CHANGES_CONTROLS as TC, TrackChangesButton } from '@/features/track-changes'
 import { registerRibbonGroups, type RibbonGroupSpec, type RibbonMenuEntry } from '@/shared/ribbon'
 import { SurfacePicker } from '@/shared/theme'
 
@@ -103,6 +104,16 @@ const icons = {
   changes: () => (
     <Icon>
       <path d="M3 10.5l3.5 3.5L13 6.5M12 14l2 2 3.5-4" />
+    </Icon>
+  ),
+  accept: () => (
+    <Icon>
+      <path d="M3.5 10.5l4 4 9-9" />
+    </Icon>
+  ),
+  reject: () => (
+    <Icon>
+      <path d="M5 5l10 10M15 5L5 15" />
     </Icon>
   ),
   rewrite: () => (
@@ -253,8 +264,49 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     ),
     menu: [cmd('review.track'), sub('view', 'Markup')],
   },
-  // Accept / Reject (T7) place their commands here.
-  { id: 'review.changes', tab: 'review', label: 'Changes', order: 20, priority: 85, icon: icons.changes },
+  // Previous / Next Change are placed by their commands (buttons first); Accept ▾ / Reject ▾ are Word's
+  // split buttons: the main half accepts / rejects the change, the arrow lists the rest.
+  {
+    id: 'review.changes',
+    tab: 'review',
+    label: 'Changes',
+    order: 20,
+    priority: 85,
+    icon: icons.changes,
+    buttons: 'before',
+    Content: () => (
+      <>
+        <SplitCommandButton
+          commandId={TC.accept.id}
+          label="Accept"
+          icon={icons.accept}
+          menuControlId={TC.acceptOptions.id}
+          menuLabel={TC.acceptOptions.label}
+          entries={[cmd(TC.accept.id), cmd(TC.acceptNext.id), cmd(TC.acceptAll.id), sub('review', BY_AUTHOR_SUBMENU.accept)]}
+        />
+        <SplitCommandButton
+          commandId={TC.reject.id}
+          label="Reject"
+          icon={icons.reject}
+          menuControlId={TC.rejectOptions.id}
+          menuLabel={TC.rejectOptions.label}
+          entries={[cmd(TC.reject.id), cmd(TC.rejectNext.id), cmd(TC.rejectAll.id), sub('review', BY_AUTHOR_SUBMENU.reject)]}
+        />
+      </>
+    ),
+    menu: [
+      cmd(TC.prevChange.id),
+      cmd(TC.nextChange.id),
+      cmd(TC.accept.id),
+      cmd(TC.acceptNext.id),
+      cmd(TC.acceptAll.id),
+      sub('review', BY_AUTHOR_SUBMENU.accept),
+      cmd(TC.reject.id),
+      cmd(TC.rejectNext.id),
+      cmd(TC.rejectAll.id),
+      sub('review', BY_AUTHOR_SUBMENU.reject),
+    ],
+  },
   { id: 'review.comments', tab: 'review', label: 'Comments', order: 30, priority: 80, icon: icons.comment, Content: () => item(<NewCommentButton />), menu: [cmd('comment.new')] },
   // Re-write (T8) places its commands here.
   { id: 'review.rewrite', tab: 'review', label: 'Re-write', order: 40, priority: 70, icon: icons.rewrite },

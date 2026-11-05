@@ -1,6 +1,6 @@
 import * as RToolbar from '@radix-ui/react-toolbar'
 import { Fragment, useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { ComponentType, KeyboardEvent, ReactNode } from 'react'
 import { getEditor } from '@/features/editor'
 import { isCommandEnabled, useCommands, useCommandStateVersion, type Command } from '@/shared/commands'
 import {
@@ -58,7 +58,16 @@ const buttons = (g: RibbonGroupSpec, placed: Placed) => (placed.get(g.id) ?? [])
  * COMMAND_STATE_DEBOUNCE_MS late after a change made elsewhere, e.g. a shortcut), and the button
  * re-renders at once after its own click.
  */
-function CommandButton({ command }: { command: Command }) {
+export interface CommandButtonProps {
+  command: Command
+  /** Icon before the label (16px, currentColor). */
+  icon?: ComponentType
+  /** Shorter visible label than the command's (Word's "Accept"); the tooltip keeps the command's label. */
+  label?: string
+  className?: string
+}
+
+export function CommandButton({ command, icon: Icon, label, className }: CommandButtonProps) {
   useCommandStateVersion()
   const [, clicked] = useReducer((n: number) => n + 1, 0)
   const enabled = isCommandEnabled(command)
@@ -87,13 +96,53 @@ function CommandButton({ command }: { command: Command }) {
           className={cn(
             controlBase,
             'whitespace-nowrap px-2 font-normal',
+            Icon && 'gap-1.5',
             checked ? 'bg-accent-soft text-accent' : 'text-text hover:bg-surface-hover',
+            className,
           )}
         >
-          {command.label.replace(/…$/, '')}
+          {Icon ? (
+            <span className="inline-flex size-4 items-center justify-center" aria-hidden="true">
+              <Icon />
+            </span>
+          ) : null}
+          {label ?? command.label.replace(/…$/, '')}
         </button>
       </Tooltip>
     </RToolbar.Button>
+  )
+}
+
+export interface SplitCommandButtonProps {
+  /** The registry command the main half runs. */
+  commandId: string
+  /** Visible label of the main half (its tooltip is the command's). */
+  label?: string
+  icon?: ComponentType
+  /** The dropdown half: its control id (needs a tooltips registry entry), accessible name and entries. */
+  menuControlId: string
+  menuLabel: string
+  entries: RibbonMenuEntry[]
+}
+
+/**
+ * Word's split button ("Accept ▾"): the main half runs a registry command, the arrow opens a registry
+ * dropdown with the related commands and submenus. Both halves are toolbar items (32px targets). For a
+ * group's `Content` (src/ribbon-groups.tsx); the command should not also have a `ribbon` placement.
+ */
+export function SplitCommandButton({ commandId, label, icon, menuControlId, menuLabel, entries }: SplitCommandButtonProps) {
+  const command = useCommands().find((c) => c.id === commandId)
+  return (
+    <span className="inline-flex shrink-0 items-center" data-ribbon-split={commandId}>
+      {command ? <CommandButton command={command} icon={icon} label={label} className="rounded-r-none pr-1" /> : null}
+      <RegistryMenu
+        controlId={menuControlId}
+        label={menuLabel}
+        sections={[{ title: menuLabel, entries }]}
+        trigger={<Chevron />}
+        className={cn('px-0', command && 'rounded-l-none')}
+      />
+    </span>
   )
 }
 

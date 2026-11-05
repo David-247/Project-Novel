@@ -3,6 +3,7 @@ import { AppShell, useReloadGuard } from '@/features/app-shell'
 import {
   FindReplacePanel,
   getDocJSON,
+  getEditor,
   getDocVersion,
   isDirty,
   markClean,
@@ -15,6 +16,7 @@ import {
 import { registerBookSettingsCommands } from '@/features/book-settings'
 import { HeaderFooter, registerHeaderFooterCommands } from '@/features/header-footer'
 import {
+  askConfirm,
   NoProjectActions,
   RecoveryDialog,
   RecoveryStatus,
@@ -40,8 +42,12 @@ import {
   setCommentAuthorSource,
 } from '@/features/comments'
 import {
+  ChangePopover,
+  ChangesIndicator,
   registerTrackChangesCommands,
   setMarkupViewRepaginate,
+  setReviewConfirm,
+  setReviewViewSource,
   setOnTrackingSwitchedOn,
   setTrackChangesAuthorSource,
   TrackChangesNotice,
@@ -132,6 +138,16 @@ export function App() {
   }, [])
   // Track changes: a markup view switch re-measures the blocks holding changes (hidden text).
   useEffect(() => setMarkupViewRepaginate(invalidatePaginationAt), [])
+  // Accept / Reject All above 50 changes asks with the app's native message dialog.
+  useEffect(() => {
+    setReviewConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
+    // The review commands, the change popover and the count act on the manuscript only.
+    setReviewViewSource(() => getEditor()?.view)
+    return () => {
+      setReviewConfirm(null)
+      setReviewViewSource(null)
+    }
+  }, [])
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
@@ -159,6 +175,7 @@ export function App() {
             <SaveStatusIndicator />
             <RecoveryStatus />
             <TrackChangesNotice />
+            <ChangesIndicator />
             <span className="flex-1" />
             <NoProjectActions />
             <PageIndicator />
@@ -174,6 +191,8 @@ export function App() {
       <RecoveryDialog />
       {/* Help and Go to Page dialogs (portal). */}
       <MenuDialogs />
+      {/* Tracked change details with Accept / Reject (portal). */}
+      <ChangePopover />
     </TooltipProvider>
   )
 }
