@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { docEnd, docStart, editor, launch, lineEnd, menu, MENU, newProject, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
+import { docEnd, docStart, editor, launch, lineEnd, menu, MENU, newProject, openRecent, readFile, saveStatus, seedProject, waitForLayout, reveal } from './helpers'
 
 /**
  * Footnotes (Phase 2): the reference in the text, the note at the bottom of the page it falls on,
@@ -95,7 +95,7 @@ test('Insert > Footnote: superscript number in the text, the note at the bottom 
   await setup(page)
   await docStart(page)
   await lineEnd(page)
-  await page.locator('[data-control-id="insert.menu"]').click()
+  await (await reveal(page, 'insert.menu')).click()
   await page.locator('[data-control-id="footnote.insert"]').click()
   const box = page.getByTestId('footnote-editor')
   await expect(box).toBeFocused()
@@ -165,7 +165,7 @@ test('Mod-Alt-f inserts; numbers follow document order and update live; the sele
   await waitForLayout(page)
   await expect(area.locator('.nv-fn-note')).toHaveText(['1 Second note.'])
   // Footnote options: symbols.
-  await page.locator('[data-control-id="footnote.options"]').click()
+  await (await reveal(page, 'footnote.options')).click()
   await page.locator('[data-control-id="footnote.options.format"]').selectOption('symbols')
   await escapeDialog(page, 'Footnote options')
   await waitForLayout(page)
@@ -236,7 +236,7 @@ test('footnotes survive save and reopen, and the book.json footnote options too'
   await page.keyboard.type('Smith, 1999, p. 4.')
   await page.keyboard.press('Escape')
   await page.keyboard.type(' and more.')
-  await page.locator('[data-control-id="footnote.options"]').click()
+  await (await reveal(page, 'footnote.options')).click()
   await page.locator('[data-control-id="footnote.options.separator"]').uncheck()
   await page.locator('[data-control-id="footnote.options.done"]').click()
   await page.keyboard.press('ControlOrMeta+s')
@@ -328,9 +328,9 @@ test('footnote controls: keyboard reachable dialog, tooltips, 32 px reference ta
     })
   expect(target.w).toBeGreaterThanOrEqual(32)
   expect(target.h).toBeGreaterThanOrEqual(32)
-  const btn = page.locator('[data-control-id="footnote.options"]')
-  // Keyboard: roving focus from the Insert menu button to Footnotes; keyboard focus shows the tooltip.
-  await page.locator('[data-control-id="insert.menu"]').focus()
+  const btn = (await reveal(page, 'footnote.options'))
+  // Keyboard: roving focus from the Footnote button to Footnote options; keyboard focus shows the tooltip.
+  await (await reveal(page, 'ribbon.cmd.footnote.insert')).focus()
   await page.keyboard.press('ArrowRight')
   await expect(btn).toBeFocused()
   await expect(page.locator('[data-tooltip-body]')).toContainText('numbered')

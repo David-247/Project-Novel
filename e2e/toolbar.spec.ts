@@ -44,24 +44,31 @@ test('formatting toolbar: shortcuts, active state and roving keyboard focus', as
   await expect(editor).toBeFocused()
 })
 
-test('toolbar controls have 32px targets and wrap at narrow widths', async ({ page }) => {
-  await page.setViewportSize({ width: 380, height: 700 })
+test('ribbon controls have 32px targets, one row and no horizontal scroll at the minimum width', async ({ page }) => {
+  await page.setViewportSize({ width: 2400, height: 700 })
   await page.goto('/')
   const toolbar = page.getByRole('toolbar', { name: 'Formatting' })
-  const controls = toolbar.locator('[data-control-id]')
-  // 16 formatting controls + 4 in the Styles group + undo, redo, find.open + book.trimSize + book.headerFooter +
-  // insert.menu + footnote.options + the paper picker (group + 4 options) + settings.open +
-  // comment.new + comment.panel + review.track + review.markup, wired in App; waits for the app to boot.
-  await expect(controls).toHaveCount(37)
-  const n = await controls.count()
-  for (let i = 0; i < n; i++) {
-    const box = await controls.nth(i).boundingBox()
-    expect(box!.height).toBeGreaterThanOrEqual(32)
-    expect(box!.width).toBeGreaterThanOrEqual(32)
+  // Every tab stays mounted, so the toolbar holds every control at a wide window (58): 5 tabs, 16 formatting
+  // controls + 4 Styles + undo, redo, find.open, Replace (Home); insert.menu + 3 break buttons +
+  // footnote.options + Footnote + Comment (Insert); book.trimSize + book.headerFooter + the paper picker
+  // (group + 4 options) + Book Details (Layout); review.track + review.markup + comment.new + Previous /
+  // Next Comment (Review); Single Page, Two-Page Spread, 5 zoom buttons, comment.panel, Full Screen (View).
+  // (5 + 24 + 7 + 8 + 5 + 9.)
+  await expect(toolbar.locator('[data-control-id]')).toHaveCount(58)
+  await expect(toolbar.locator('[data-control-id^="ribbon.group."], [data-control-id="ribbon.more"]')).toHaveCount(0)
+
+  await page.setViewportSize({ width: 480, height: 700 })
+  const header = page.getByRole('banner', { name: 'App controls' })
+  for (const tab of ['home', 'insert', 'layout', 'review', 'view'] as const) {
+    await page.locator(`[data-control-id="ribbon.tab.${tab}"]`).click()
+    const visible = toolbar.locator('[data-control-id]:visible')
+    expect(await visible.count()).toBeGreaterThan(5)
+    for (const box of await visible.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON() as DOMRect))) {
+      expect(box.height).toBeGreaterThanOrEqual(32)
+      expect(box.width).toBeGreaterThanOrEqual(32)
+      expect(box.right).toBeLessThanOrEqual(480)
+    }
+    expect((await header.boundingBox())!.height).toBeLessThan(90)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(480)
   }
-  const scrollW = await page.evaluate(() => document.documentElement.scrollWidth)
-  expect(scrollW).toBeLessThanOrEqual(380)
-  await page.screenshot({ path: 'test-results/toolbar-380.png' })
-  await page.setViewportSize({ width: 1200, height: 700 })
-  await page.screenshot({ path: 'test-results/toolbar-1200.png' })
 })

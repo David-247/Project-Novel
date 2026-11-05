@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { budget } from './budget'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
+import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, waitForLayout, writeFile, reveal } from './helpers'
 
 /**
  * Comments performance (serial perf projects, like pagination-perf.spec.ts): the 100,000-word
@@ -185,7 +185,7 @@ test('500 comment threads: margin panel re-layout after a reflow < 100 ms', asyn
   }
   // Baseline for the report: the same trims with the panel hidden (publish -> painted is then the
   // reflow's own paint); the difference is what the panel adds.
-  await page.locator('[data-control-id="comment.panel"]').click()
+  await (await reveal(page, 'comment.panel')).click()
   await expect(page.locator('[data-testid="comments-panel"]')).toHaveCount(0)
   const baseline: { trim: string; readyMs: number }[] = []
   for (const trim of ['us-6x9', 'uk-a5', 'us-5.5x8.5']) {

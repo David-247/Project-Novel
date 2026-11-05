@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { editor, launch, newProject, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
+import { editor, launch, newProject, openRecent, readFile, saveStatus, seedProject, waitForLayout, reveal } from './helpers'
 
 /**
  * Track changes (docs/track-changes.md): recording through the toolbar and Mod-Shift-e, the four
@@ -9,13 +9,13 @@ import { editor, launch, newProject, openRecent, readFile, saveStatus, seedProje
  * (Original).
  */
 
-const track = (page: Page) => page.locator('[data-control-id="review.track"]')
-const markup = (page: Page) => page.locator('[data-control-id="review.markup"]')
+const track = (page: Page) => reveal(page, 'review.track')
+const markup = (page: Page) => reveal(page, 'review.markup')
 
 async function chooseView(page: Page, label: 'All Markup' | 'Simple Markup' | 'No Markup' | 'Original') {
-  await markup(page).click()
+  await (await markup(page)).click()
   await page.getByRole('menuitemradio', { name: label }).click()
-  await expect(markup(page)).toContainText(label)
+  await expect((await markup(page))).toContainText(label)
   await waitForLayout(page)
 }
 
@@ -29,9 +29,9 @@ test('recording: the toggle and Mod-Shift-e, typed and deleted text, undo; saved
   await newProject(page, '/projects/Tracked')
   await editor(page).click()
   await page.keyboard.type('Hello there')
-  await expect(track(page)).toHaveAttribute('aria-pressed', 'false')
+  await expect((await track(page))).toHaveAttribute('aria-pressed', 'false')
   await page.keyboard.press('ControlOrMeta+Shift+E')
-  await expect(track(page)).toHaveAttribute('aria-pressed', 'true')
+  await expect((await track(page))).toHaveAttribute('aria-pressed', 'true')
 
   // Backspace over existing text: struck through, still there; typing goes in as an insertion.
   await page.keyboard.press('Backspace')
@@ -56,10 +56,10 @@ test('recording: the toggle and Mod-Shift-e, typed and deleted text, undo; saved
   await expect(editor(page).locator('.nv-ins')).toHaveText('world')
 
   // The toolbar toggle turns recording off; existing marks stay.
-  await track(page).click()
-  await expect(track(page)).toHaveAttribute('aria-pressed', 'false')
-  await track(page).click()
-  await expect(track(page)).toHaveAttribute('aria-pressed', 'true')
+  await (await track(page)).click()
+  await expect((await track(page))).toHaveAttribute('aria-pressed', 'false')
+  await (await track(page)).click()
+  await expect((await track(page))).toHaveAttribute('aria-pressed', 'true')
 
   await editor(page).click()
   await page.keyboard.press('ControlOrMeta+s')
@@ -75,7 +75,7 @@ test('recording: the toggle and Mod-Shift-e, typed and deleted text, undo; saved
   await launch(again)
   await openRecent(again, '/projects/Tracked')
   await expect(saveStatus(again)).toHaveText('Tracked: All changes saved')
-  await expect(track(again)).toHaveAttribute('aria-pressed', 'true')
+  await expect(await track(again)).toHaveAttribute('aria-pressed', 'true')
   await expect(editor(again).locator('.nv-del')).toHaveText('there')
   await expect(editor(again).locator('.nv-ins')).toHaveText('world')
 })

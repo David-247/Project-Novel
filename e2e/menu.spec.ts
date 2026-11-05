@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { contrastRatio } from '../src/shared/theme/contrast'
-import { editor, editorHTML, launch, newProject, readFile, saveStatus } from './helpers'
+import { editor, editorHTML, launch, newProject, readFile, saveStatus, reveal } from './helpers'
 
 /**
  * The in-app menu bar (Windows, and every e2e engine), rendered from the command registry. The native
@@ -294,9 +294,14 @@ test('menu bar text meets WCAG AA in every state, on the four papers in light an
     await page.emulateMedia({ colorScheme: scheme })
     await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
     for (const surface of ['auto', 'book', 'white', 'dark']) {
-      await page.locator(`[data-control-id="book.surface.${surface}"]`).click()
+      await (await reveal(page, `book.surface.${surface}`)).click()
+      // Off the swatch: its tooltip (just under the menu bar since the ribbon) would cover the Edit menu.
+      await page.mouse.move(700, 600)
+      await expect(page.locator('[data-tooltip-body]')).toHaveCount(0)
       await title(page, 'edit').click()
       await item(page, 'history.undo').hover() // highlighted
+      // WebKit under load can miss the hover's pointermove; focus gives the same highlighted state.
+      await item(page, 'history.undo').focus()
       await expect(item(page, 'history.undo')).toHaveAttribute('data-highlighted', '')
       await page.evaluate(() => new Promise((r) => setTimeout(r, 350)))
       const states: [string, string][] = [

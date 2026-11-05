@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
-import { editor, launch, newProject } from './helpers'
+import { editor, launch, newProject, reveal } from './helpers'
 
-const insert = (page: Page) => page.locator('[data-control-id="insert.menu"]')
+const insert = (page: Page) => reveal(page, 'insert.menu')
 const item = (page: Page, id: string) => page.locator(`[data-control-id="${id}"]`)
 const surface = (page: Page) => page.locator('.novel-editor-content')
 
 async function choose(page: Page, id: string) {
-  await insert(page).click()
+  await (await insert(page)).click()
   await item(page, id).click()
   // The menu closes and hands focus back to the manuscript; typing before that is lost.
   await expect(editor(page)).toBeFocused()
@@ -65,20 +65,20 @@ test('Chapters start on right-hand page updates the break, and the menu passes t
   await page.keyboard.type('Chapter')
   await expect(surface(page).locator('h1')).toHaveAttribute('data-break-before', 'page')
 
-  await insert(page).hover()
+  await (await insert(page)).hover()
   await expect(page.locator('[data-tooltip-body]')).toContainText('page break')
-  await insert(page).click()
+  await (await insert(page)).click()
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
   await item(page, 'insert.chapterStart.recto').click()
   await expect(surface(page).locator('h1')).toHaveAttribute('data-break-before', 'recto')
-  await insert(page).click()
+  await (await insert(page)).click()
   await expect(item(page, 'insert.chapterStart.recto')).toHaveAttribute('aria-checked', 'true')
 })
 
 test('the Insert menu is keyboard operable', async ({ page }) => {
   await launch(page)
   await newProject(page, '/projects/KeyMenu')
-  await insert(page).focus()
+  await (await insert(page)).focus()
   await page.keyboard.press('Enter')
   // Page break, New chapter, Scene break, Footnote (the menu bar's titles are menu items too: scope to the menu).
   await expect(page.getByRole('menu').getByRole('menuitem')).toHaveCount(4)

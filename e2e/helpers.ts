@@ -167,3 +167,29 @@ export async function docEnd(page: Page): Promise<void> {
   await page.keyboard.press(IS_MAC ? 'Meta+ArrowDown' : 'Control+End')
   await page.evaluate(() => window.__nvE2E?.syncSelection())
 }
+
+/** Ribbon tab ids (the toolbar shows one tab's controls at a time). */
+export type RibbonTab = 'home' | 'insert' | 'layout' | 'review' | 'view'
+
+/**
+ * Select a ribbon tab. A click event without moving the pointer: focus, selection and hover stay where
+ * the test put them (a real pointer would leave the tab's tooltip open over the row below it).
+ */
+export async function ribbonTab(page: Page, tab: RibbonTab): Promise<void> {
+  const button = page.locator(`[data-control-id="ribbon.tab.${tab}"]`)
+  if ((await button.getAttribute('aria-selected')) !== 'true') await button.dispatchEvent('click')
+  await expect(button).toHaveAttribute('aria-selected', 'true')
+}
+
+/**
+ * The ribbon control `id`, with its tab selected first (a control on another tab is mounted but
+ * hidden). For controls outside the ribbon it is just the locator.
+ */
+export async function reveal(page: Page, id: string): Promise<Locator> {
+  const tab = await page.evaluate(
+    (cid) => document.querySelector(`[data-ribbon-panel] [data-control-id="${cid}"]`)?.closest('[data-ribbon-panel]')?.getAttribute('data-ribbon-panel') ?? null,
+    id,
+  )
+  if (tab) await ribbonTab(page, tab as RibbonTab)
+  return page.locator(`[data-control-id="${id}"]`)
+}
