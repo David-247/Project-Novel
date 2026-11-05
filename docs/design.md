@@ -357,3 +357,47 @@ running head is clipped (one line, `overflow: hidden`, ellipsis) and can never m
 - **Touch and keyboard**: the toolbar button is the keyboard route (no hover-only access); every field is a native
   select, text field or checkbox with a visible label and a registry tooltip.
 
+## Menus and commands (Phase 3)
+
+One **command registry** (`src/shared/commands`) holds every user-facing action: id, label, a one-line description,
+an optional shortcut (ProseMirror syntax, the only place a shortcut is declared), its menu place
+(`{ id, group, order, submenu? }`), live `isEnabled()` / `isChecked()` and `run()`. Slices register their commands
+through their public index (`registerStorageCommands`, `registerEditorCommands`, `registerPaginationCommands`,
+`registerSurfaceCommands`, `registerBookSettingsCommands`, `registerHeaderFooterCommands`,
+`registerFootnoteCommands`; the menu slice adds its own) and the composition root calls them. Ids reuse the matching
+control's `data-control-id`, so a menu item, its toolbar button and its tooltip share one copy. A duplicate id or
+shortcut, or a missing description, throws in development; `App.menus.test.tsx` checks the whole app's registry
+(one-line descriptions of at most 100 characters, no shortcut twice, the same shortcut on a command and on its
+control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
+
+- **Rendering** (decision 4ec247fc): the macOS desktop app shows the **native global menu bar**, built in Rust
+  (`src-tauri/src/menu.rs`, `menu_set`) from a serialized snapshot of the registry (ids, labels, accelerators,
+  enabled/checked state, structure). The snapshot is re-sent when the registry changes and, debounced, when
+  `notifyCommandStateChanged()` reports a state change; Rust updates enabled/checked in place when the structure is
+  unchanged. Every item emits `menu://command` with its id. Cut, Copy, Paste, Select All, Services and Hide are the
+  OS's own items there. Native macOS menu items cannot show tooltips: decision 4ec247fc exempts them; their
+  description surface is the label, the accelerator and Help > Keyboard Shortcuts. **Windows** has no native menu:
+  the themed **in-app menu bar** (Radix Menubar, menu slice) sits above the toolbar in the app shell. The web and e2e
+  builds render the in-app bar too (`menuBarKind()`), so Playwright covers it on both engines. Both are built by
+  `buildMenuModel`, so labels, order and shortcuts match. Menu `app` (About, Settings, Quit) is the macOS app menu;
+  elsewhere About moves to Help and the rest to the end of File. An empty menu is left out (Review appears with the
+  revision tools).
+- **Structure**: File (New Project…, Open Project…, Open Recent ▸, Close Project | Save, Save a Copy… | Book
+  Details…, Page Setup ▸ | Quit Novel), Edit (Undo, Redo | Cut, Copy, Paste, Paste as Plain Text, Select All | Find…,
+  Replace… | Go to Page…), View (Single Page, Two-Page Spread | Zoom In, Zoom Out, Fit Spread, Fit Width, Actual
+  Size | Paper ▸ | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote), Format (Bold, Italic,
+  Underline | Font ▸ | Paragraph Style ▸, Alignment ▸, Lists ▸ | Clear Formatting | Modify Style…, Manage Styles… |
+  Headers & Page Numbers…, Footnote Options…), Help (Keyboard Shortcuts, Project Folder Format | About Novel).
+- **Keyboard** (one window listener, `installCommandShortcuts`): bubble phase, so a key the editor's keymap already
+  handled is not run again; Cut/Copy/Paste keep the webview's own handling (`nativeShortcut`); text commands (Edit
+  history and clipboard, Insert, Format) do not act on the manuscript while another text field or a dialog has
+  focus. On macOS, a native menu event right after the same key press in the webview is ignored (`wasJustPressed`).
+- **In-app bar**: Alt alone or F10 moves focus to File (again: back to the text), Alt+underlined letter opens a menu
+  (not on macOS, where Option types characters), arrows move between menus and items, Enter/Space choose, Escape
+  closes. Closing gives focus back to where it was (normally the manuscript, through its view, so the selection is
+  exactly the one the user made) and only then runs the chosen command, as the toolbar does. Rows are 40px (touch),
+  titles 32px; colours are the chrome tokens, so it follows light/dark and stays AA. Every title, submenu title and
+  item has a tooltip (a registry entry, else its command's description) and is in the coverage audit.
+- **Help**: Keyboard Shortcuts is generated from the registry (searchable); Project Folder Format renders the
+  bundled `docs/project-format.md` (no network); About Novel shows the version from the app config (`getVersion`).
+

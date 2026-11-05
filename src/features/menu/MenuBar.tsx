@@ -13,7 +13,7 @@ import {
   type MenuNode,
 } from '@/shared/commands'
 import { cn, detectPlatform, focusRing, formatShortcut, Tooltip } from '@/shared/ui'
-import { restoreFocus, trackFocusOutsideMenus } from './focus'
+import { restoreFocus, syncEditorSelection, trackFocusOutsideMenus } from './focus'
 
 const contentClass = cn(
   'z-40 min-w-60 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-control border border-border',
@@ -92,7 +92,11 @@ export function MenuBar() {
 
   useEffect(() => trackFocusOutsideMenus(), [])
 
-  const trigger = (id: MenuId) => rootRef.current?.querySelector<HTMLElement>(`[data-control-id="${menuControlId(id)}"]`)
+  const trigger = (id: MenuId) => {
+    // Leaving the manuscript: it must hold the latest selection, which is given back afterwards.
+    syncEditorSelection()
+    return rootRef.current?.querySelector<HTMLElement>(`[data-control-id="${menuControlId(id)}"]`)
+  }
   const inBar = () => !!document.activeElement?.closest('[data-nv-menubar], [data-nv-menu-content]')
 
   // Alt alone and F10 focus the menu bar; Alt+<mnemonic> opens a menu (not on macOS).
@@ -174,8 +178,10 @@ export function MenuBar() {
   }
 
   const onRootKeyDown = (e: ReactKeyboardEvent) => {
-    // Escape on a closed menu's title: back to the manuscript.
-    if (e.key === 'Escape' && !valueRef.current) {
+    // Escape on a closed menu's title: back to the manuscript. (Escape inside an open menu closes it;
+    // the close then gives focus back.)
+    const inMenu = e.target instanceof Element && e.target.closest('[data-nv-menu-content]')
+    if (e.key === 'Escape' && !valueRef.current && !inMenu) {
       e.preventDefault()
       restoreFocus()
     }
@@ -254,6 +260,7 @@ export function MenuBar() {
       data-alt={altHint || undefined}
       aria-label="Menu bar"
       onKeyDown={onRootKeyDown}
+      onPointerDownCapture={syncEditorSelection}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAltHint(false)
       }}
