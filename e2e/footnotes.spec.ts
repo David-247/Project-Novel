@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { docEnd, docStart, editor, launch, lineEnd, menu, MENU, newProject, openRecent, readFile, saveStatus, seedProject, showPage, waitForLayout } from './helpers'
+import { docEnd, docStart, editor, launch, lineEnd, menu, MENU, newProject, openRecent, readFile, saveStatus, seedProject, seedProjectNavigation, showPage, waitForLayout } from './helpers'
+
+// Book mode (default) and, in the *-scroll projects, continuous scroll (playwright.config.ts BOTH_MODES).
+test.beforeEach(async ({ page }, testInfo) => seedProjectNavigation(page, testInfo))
 
 /**
  * Footnotes (Phase 2): the reference in the text, the note at the bottom of the page it falls on,

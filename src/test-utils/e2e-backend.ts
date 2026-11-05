@@ -352,6 +352,13 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       if (!view) return
       view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)))
     },
+    /** Where the caret at `pos` is painted (ProseMirror coordsAtPos; side -1: the end of the line before). */
+    coordsAt: (pos: number, side: 1 | -1 = 1) => {
+      const view = getEditor()?.view
+      if (!view) return null
+      const c = view.coordsAtPos(pos, side)
+      return { left: c.left, top: c.top, bottom: c.bottom }
+    },
     /** Selection of the manuscript. */
     selection: () => {
       const s = getEditor()?.state.selection

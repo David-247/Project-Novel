@@ -1,5 +1,15 @@
 import { expect, test, type Page } from '@playwright/test'
-import { chooseScrollNavigation, docEnd, docStart, editor, launch, openRecent, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
+import { chooseScrollNavigation, docEnd, docStart, editor, launch, openRecent, projectNavigation, saveStatus, seedProject, seedProjectNavigation, waitForLayout, writeFile } from './helpers'
+
+// Book mode flows. In the *-scroll projects (continuous scroll) only the tests that hold in both modes run.
+const BOTH_MODES = new Set([
+  'keys in the manuscript: PageDown / PageUp and Ctrl+Home / Ctrl+End turn with the caret; Go to Page',
+  "comments margin panel shows the shown spread's comments; Next Comment turns to the next one",
+])
+test.beforeEach(async ({ page }, testInfo) => {
+  test.skip(projectNavigation(testInfo) === 'scroll' && !BOTH_MODES.has(testInfo.title), 'Book mode only')
+  await seedProjectNavigation(page, testInfo)
+})
 
 /**
  * Book mode, the default page navigation (docs/pagination.md "Navigation modes"): one spread on the
@@ -357,10 +367,12 @@ test('comments margin panel shows the shown spread\'s comments; Next Comment tur
   const sizer = (await page.locator('.nv-sizer').boundingBox())!
   expect(cardBox.y).toBeGreaterThanOrEqual(sizer.y - 2)
   expect(cardBox.y).toBeLessThan(sizer.y + sizer.height)
-  // A press on the panel never turns the page.
-  const before = await spread(page)
-  await panel.click({ position: { x: 150, y: 400 } })
-  expect(await spread(page)).toEqual(before)
+  // Book mode: a press on the panel never turns the page.
+  if (await desk(page).getAttribute('data-navigation') === 'book') {
+    const before = await spread(page)
+    await panel.click({ position: { x: 150, y: 400 } })
+    expect(await spread(page)).toEqual(before)
+  }
 })
 
 test('header double-click on a spread turned to by hand opens the dialog without turning away', async ({ page }) => {
@@ -434,4 +446,89 @@ test('turn controls: tooltips on hover and keyboard focus; the coverage audit pa
   await expect(nextCtl(page)).toBeFocused()
   await expect(page.locator('[data-tooltip-body]')).toContainText('Next pages')
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
+})
+
+/** Dispatch a synthetic wheel stream on the desk: `deltas[i]` every 16 ms. Resolves with how many were prevented. */
+async function wheelStream(page: Page, deltas: number[], axis: 'x' | 'y' = 'y') {
+  return desk(page).evaluate(
+    async (el, [ds, ax]) => {
+      const r = el.getBoundingClientRect()
+      let prevented = 0
+      for (const d of ds as number[]) {
+        const e = new WheelEvent('wheel', {
+          deltaX: ax === 'x' ? d : 0,
+          deltaY: ax === 'y' ? d : 0,
+          clientX: r.left + r.width / 2,
+          clientY: r.top + 200,
+          bubbles: true,
+          cancelable: true,
+        })
+        el.dispatchEvent(e)
+        if (e.defaultPrevented) prevented++
+        await new Promise((res) => setTimeout(res, 16))
+      }
+      return prevented
+    },
+    [deltas, axis] as const,
+  )
+}
+
+const decay = (n: number, peak: number, tau: number) => Array.from({ length: n }, (_, i) => Math.max(1, peak * Math.exp(-i / tau)))
+
+test('wheel: a long momentum tail (~1.2 s) turns once; a new flick inside a decaying stream turns again', async ({ page }) => {
+  const pageCount = await book(page)
+  // 75 events over 1.2 s, smoothly decaying: one gesture.
+  await wheelStream(page, decay(75, 90, 20))
+  await expect(indicator(page)).toHaveText(`Pages 2–3 of ${pageCount}`)
+  await page.waitForTimeout(400)
+  expect((await spread(page)).index).toBe(1)
+  // A flick, its momentum decaying, then a second strong flick before the stream stops: two turns.
+  const ramp = [15, 40, 80, 90]
+  await wheelStream(page, [...ramp, ...decay(30, 90, 6), ...ramp, ...decay(30, 90, 6)])
+  await expect(indicator(page)).toHaveText(`Pages 6–7 of ${pageCount}`)
+  await page.waitForTimeout(400)
+  expect((await spread(page)).index).toBe(3)
+})
+
+test('wheel: zoomed in past the window width, a horizontal gesture pans the spread and turns only from its edge', async ({ page }) => {
+  const pageCount = await book(page)
+  await page.locator('[data-control-id="pagination.zoom"]').selectOption('200')
+  await expect.poll(async () => (await layout(page)).scale).toBe(2)
+  const main = page.getByRole('main', { name: 'Editor' })
+  expect(await main.evaluate((m) => m.scrollWidth - m.clientWidth)).toBeGreaterThan(100)
+  await main.evaluate((m) => (m.scrollLeft = 0))
+  // Panning right from the left edge: the browser scrolls (nothing prevented), no turn.
+  expect(await wheelStream(page, decay(20, 40, 8), 'x')).toBe(0)
+  await page.waitForTimeout(300)
+  expect((await spread(page)).index).toBe(0)
+  // At the right edge, a new gesture turns.
+  await main.evaluate((m) => (m.scrollLeft = m.scrollWidth))
+  await page.waitForTimeout(300)
+  expect(await wheelStream(page, decay(20, 40, 8), 'x')).toBeGreaterThan(0)
+  await expect(indicator(page)).toHaveText(`Pages 2–3 of ${pageCount}`)
+  // Turning back while zoomed in lands at the bottom of the previous spread (where reading went on).
+  await main.evaluate((m) => (m.scrollTop = 0))
+  await page.waitForTimeout(300)
+  await prevCtl(page).click()
+  await expect(indicator(page)).toHaveText(`Page 1 of ${pageCount}`)
+  expect(await main.evaluate((m) => m.scrollHeight - m.clientHeight - m.scrollTop)).toBeLessThanOrEqual(2)
+})
+
+test('the page indicator is a button that opens Go to Page (pointer and keyboard), with a tooltip', async ({ page }) => {
+  const pageCount = await book(page)
+  await indicator(page).hover()
+  await expect(page.locator('[data-tooltip-body]')).toContainText('Go to page')
+  await indicator(page).click()
+  const field = page.locator('[data-control-id="goToPage.number"]')
+  await expect(field).toBeVisible()
+  await field.fill('9')
+  await page.keyboard.press('Enter')
+  await expect(indicator(page)).toHaveText(`Pages 8–9 of ${pageCount}`)
+  // Keyboard: focus it and press Enter.
+  await indicator(page).focus()
+  await page.keyboard.press('Enter')
+  await expect(field).toBeVisible()
+  await page.keyboard.press('Escape')
+  if (await field.count()) await page.keyboard.press('Escape')
+  await expect(field).toHaveCount(0)
 })

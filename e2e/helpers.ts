@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, type Locator, type Page, type TestInfo } from '@playwright/test'
 
 /**
  * Helpers for driving the app through the e2e fake Tauri backend
@@ -174,6 +174,19 @@ export async function seedPreferences(page: Page, values: Record<string, unknown
   await page.addInitScript((t) => {
     ;(window as unknown as { __nvE2EPreferences?: string }).__nvE2EPreferences = t
   }, text)
+}
+
+/** The page navigation a Playwright project runs in: 'scroll' for the *-scroll projects, else 'book' (the default). */
+export function projectNavigation(testInfo: TestInfo): 'book' | 'scroll' {
+  return (testInfo.project.metadata as { pageNavigation?: string } | undefined)?.pageNavigation === 'scroll' ? 'scroll' : 'book'
+}
+
+/**
+ * For specs that run in both navigation modes (playwright.config.ts BOTH_MODES): call in a
+ * beforeEach; the *-scroll projects seed continuous scroll before the app boots.
+ */
+export async function seedProjectNavigation(page: Page, testInfo: TestInfo): Promise<void> {
+  if (projectNavigation(testInfo) === 'scroll') await seedPreferences(page, { pageNavigation: 'scroll' })
 }
 
 /** Wait until the pagination engine has laid out the current document (no reflow pending) and painted. */

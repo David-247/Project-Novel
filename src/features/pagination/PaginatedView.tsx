@@ -860,7 +860,10 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean, ens
   // The browser's answer past the end of a short line can be on another line (a paragraph continued
   // from the page before: its layout box is not where the line is painted). Then walk the target line
   // itself, from the page edge, for the position painted nearest to x.
-  if (hit === null || !paintedOnLine(view, hit, py)) hit = nearestOnLine(view, dir > 0 ? pages[q].from : pages[q].to, dir, px, py) ?? hit
+  // Also when the answer is well off the column (past the end of the line the browser can answer
+  // with the last word's start rather than the line end).
+  if (hit === null || !paintedOnLine(view, hit, py) || Math.abs(paintedLeft(view, hit) - px) > 8)
+    hit = nearestOnLine(view, dir > 0 ? pages[q].from : pages[q].to, dir, px, py) ?? hit
   if (hit === null) return false
   const $pos = view.state.doc.resolve(hit)
   const sel = extend ? extendTo(view.state.doc, view.state.selection.anchor, $pos.pos, dir) : TextSelection.near($pos)
@@ -889,6 +892,15 @@ function caretToLineEnd(view: EditorView, pos: number) {
     view.dom.ownerDocument.getSelection()?.collapse(node, offset)
   } catch {
     // Position without DOM: leave the caret where ProseMirror put it.
+  }
+}
+
+/** Client x where the caret at `pos` is painted (NaN without layout). */
+function paintedLeft(view: EditorView, pos: number): number {
+  try {
+    return view.coordsAtPos(pos, 1).left
+  } catch {
+    return NaN
   }
 }
 

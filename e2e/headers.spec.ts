@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { acrossSpreads, clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, recoveryControl, saveStatus, seedPreferences, seedProject, showPage, waitForLayout } from './helpers'
+import { acrossSpreads, isBookMode, clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, recoveryControl, saveStatus, seedPreferences, seedProject, seedProjectNavigation, showPage, waitForLayout } from './helpers'
+
+// Book mode (default) and, in the *-scroll projects, continuous scroll (playwright.config.ts BOTH_MODES).
+test.beforeEach(async ({ page }, testInfo) => seedProjectNavigation(page, testInfo))
 
 /**
  * Running headers, footers and page numbers (Phase 2, headers/footers ticket). They are drawn in the
@@ -210,7 +213,8 @@ test('headers and numbers do not change body pagination: identical page breaks a
   await ctl(page, 'book.headerFooter.recto').selectOption('custom')
   await ctl(page, 'book.headerFooter.rectoText').fill('An exceedingly long running head '.repeat(30))
   await ctl(page, 'book.headerFooter.done').click()
-  await showPage(page, 2)
+  const book = await isBookMode(page)
+  if (book) await showPage(page, 2) // (continuous scroll: in view already)
   const clipped = await page.evaluate(() => {
     const f = document.querySelector<HTMLElement>('.nv-frames .nv-page[data-page-index="2"]')!
     const slot = f.querySelector<HTMLElement>('.nv-slot-header')!
@@ -218,7 +222,7 @@ test('headers and numbers do not change body pagination: identical page breaks a
     return { slot: slot.getBoundingClientRect().height, line: line ? line.getBoundingClientRect().height : 0, overflow: getComputedStyle(slot).overflow }
   })
   expect(clipped.line).toBeLessThanOrEqual(clipped.slot + 0.5)
-  await showPage(page, 0) // the first lines are compared where they were painted
+  if (book) await showPage(page, 0) // the first lines are compared where they were painted
   const long = await snapshot()
   expect(long.pages).toEqual(on.pages)
   expect(long.firstLines).toEqual(on.firstLines)
