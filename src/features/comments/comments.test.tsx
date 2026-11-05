@@ -87,7 +87,7 @@ describe('anchoring', () => {
     const ed = mount()
     const id = addComment(ed, 5, 10)
     expect(ed.state.doc.textBetween(5, 10)).toBe('quick')
-    expect(collectAnchors(ed.state.doc).get(id)).toEqual({ id, from: 5, to: 10 })
+    expect(collectAnchors(ed.state.doc).get(id)).toEqual({ id, from: 5, to: 10, deletedOnly: false })
     expect(threads()).toHaveLength(1)
     expect(threads()[0]).toMatchObject({ id, author: 'Ada', authorColor: '#c0392b', messages: [{ text: 'A note' }] })
     expect(isDirty()).toBe(true)

@@ -90,7 +90,9 @@ export function filterPastedComments(slice: Slice, state: EditorState, moving = 
   if (!found) return slice
   const threads = commentsKey.getState(state)?.threads ?? new Map()
   const anchored = collectAnchors(state.doc)
-  const keep = (id: unknown) => typeof id === 'string' && threads.has(id) && !anchored.has(id)
+  // A thread still anchored in live text is copied, so the copy loses the mark. One whose text is gone,
+  // or is only a pending tracked deletion (a cut while Track Changes records), is moved: the mark stays.
+  const keep = (id: unknown) => typeof id === 'string' && threads.has(id) && !(anchored.get(id) && !anchored.get(id)!.deletedOnly)
   const strip = (fragment: Fragment): Fragment => {
     const nodes: PMNode[] = []
     fragment.forEach((node) => {

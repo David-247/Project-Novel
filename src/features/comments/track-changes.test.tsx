@@ -2,14 +2,14 @@ import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Editor } from '@tiptap/core'
 import { undo } from '@tiptap/pm/history'
-import type { Node as PMNode } from '@tiptap/pm/model'
+import type { Node as PMNode, Slice } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import { getEditor, NovelEditor, setDocJSON, type JSONContent } from '@/features/editor'
 import { acceptAll, listChanges, rejectAll } from '@/features/track-changes'
 import { useStore } from '@/shared/store'
 import { collectAnchors } from './anchors'
 import { deleteThread, newComment, replyToThread, resolveThread, submitDraft } from './commands'
-import { setCommentAuthorSource } from './extension'
+import { filterPastedComments, setCommentAuthorSource } from './extension'
 import { __resetCommentsFileForTests } from './persistence'
 
 /**
@@ -117,5 +117,90 @@ describe('comments while Track Changes records', () => {
     const accepted = afterDelete.apply(acceptAll(afterDelete)!)
     expect(accepted.doc.textContent).toBe('The brown fox jumps.')
     expect(commented(accepted.doc, id)).toBe('brown')
+  })
+})
+
+/** End of the first paragraph's text. */
+const END = 27
+
+/** Paste `slice` at `at` as ProseMirror does: the comment paste rule, then replace the selection. */
+function paste(ed: Editor, slice: Slice, at: number) {
+  const filtered = filterPastedComments(slice, ed.state, false)
+  act(() => {
+    const tr = ed.state.tr.setSelection(TextSelection.create(ed.state.doc, at)).replaceSelection(filtered)
+    ed.view.dispatch(tr.setMeta('uiEvent', 'paste'))
+  })
+}
+
+/** Drag `from..to` to `at` (after it) with move, as ProseMirror's drop does. */
+function dragMove(ed: Editor, from: number, to: number, at: number) {
+  const filtered = filterPastedComments(ed.state.doc.slice(from, to), ed.state, true)
+  act(() => {
+    const tr = ed.state.tr.replace(at, at, filtered).delete(from, to)
+    ed.view.dispatch(tr.setMeta('uiEvent', 'drop'))
+  })
+}
+
+/** One live anchor, on exactly `text`. */
+function expectOneAnchor(doc: PMNode, id: string, text: string) {
+  const a = collectAnchors(doc).get(id)
+  expect(a, 'anchored').toBeTruthy()
+  expect(doc.textBetween(a!.from, a!.to)).toBe(text)
+  expect(commented(doc, id)).toBe(text)
+}
+
+describe('moving commented text (cut and paste, drag)', () => {
+  for (const how of ['cut and paste', 'drag-move'] as const) {
+    it(`${how} while Track Changes records moves the comment; accept and reject each leave one anchor`, () => {
+      const ed = mount()
+      const id = addComment(ed, Q.from, Q.to)
+      if (how === 'cut and paste') {
+        const slice = ed.state.doc.slice(Q.from, Q.to)
+        act(() => {
+          select(ed, Q.from, Q.to)
+          ed.commands.deleteSelection()
+        })
+        paste(ed, slice, END)
+      } else dragMove(ed, Q.from, Q.to, END)
+      // Pending: the original is a tracked deletion; the anchor is the new place only.
+      const a = collectAnchors(ed.state.doc).get(id)!
+      expect(a.deletedOnly).toBe(false)
+      expect(ed.state.doc.textBetween(a.from, a.to)).toBe('quick brown')
+      expect(a.from).toBeGreaterThanOrEqual(END)
+      const pending = ed.state
+      const accepted = pending.apply(acceptAll(pending)!)
+      expect(accepted.doc.textContent).toBe('The  fox jumps.quick brown')
+      expectOneAnchor(accepted.doc, id, 'quick brown')
+      const rejected = pending.apply(rejectAll(pending)!)
+      expect(rejected.doc.textContent).toBe('The quick brown fox jumps.')
+      expectOneAnchor(rejected.doc, id, 'quick brown')
+    })
+  }
+
+  it('without Track Changes: copy and paste does not duplicate the comment, cut and paste moves it', () => {
+    useStore.getState().bookActions.setTrackChanges(false)
+    const ed = mount()
+    const id = addComment(ed, Q.from, Q.to)
+    const slice = ed.state.doc.slice(Q.from, Q.to)
+    paste(ed, slice, END)
+    expectOneAnchor(ed.state.doc, id, 'quick brown')
+    expect(collectAnchors(ed.state.doc).get(id)!.from).toBe(Q.from)
+    act(() => void undo(ed.state, ed.view.dispatch))
+    act(() => {
+      select(ed, Q.from, Q.to)
+      ed.commands.deleteSelection()
+    })
+    paste(ed, slice, END - (Q.to - Q.from))
+    expect(ed.state.doc.textContent).toBe('The  fox jumps.quick brown')
+    expectOneAnchor(ed.state.doc, id, 'quick brown')
+  })
+
+  it('without Track Changes: drag-move keeps one anchor at the new place', () => {
+    useStore.getState().bookActions.setTrackChanges(false)
+    const ed = mount()
+    const id = addComment(ed, Q.from, Q.to)
+    dragMove(ed, Q.from, Q.to, END)
+    expect(ed.state.doc.textContent).toBe('The  fox jumps.quick brown')
+    expectOneAnchor(ed.state.doc, id, 'quick brown')
   })
 })

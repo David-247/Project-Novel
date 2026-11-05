@@ -1,20 +1,28 @@
 import type { Mark, Node as PMNode } from '@tiptap/pm/model'
 import type { EditorState } from '@tiptap/pm/state'
+import { DELETION_MARK, TRACKED_DELETE_ATTR } from '@/shared/track-changes'
 
 /** The inline mark that anchors a thread: `comment` with attr `id` (docs/project-format.md). */
 export const COMMENT_MARK = 'comment'
 
 export interface Anchor {
   id: string
-  /** First and last position of the marked text (a thread split by edits spans all its pieces). */
+  /**
+   * First and last position of the marked text (a thread split by edits spans all its pieces). Text
+   * that is a pending tracked deletion counts only when the thread has no other text: after a
+   * tracked cut and paste, or a tracked drag-move, the anchor is the new place, not both.
+   */
   from: number
   to: number
+  /** All of the anchor text is a pending tracked deletion (the text "has left" once accepted). */
+  deletedOnly: boolean
 }
 
 interface Piece {
   id: string
   from: number
   to: number
+  deleted: boolean
 }
 
 /** Marked pieces of one top-level block, relative to its content start. Cached by node identity. */
@@ -34,12 +42,14 @@ function blockPieces(block: PMNode): readonly Piece[] {
   if (hit) return hit
   let out: Piece[] | null = null
   if (!block.isLeaf) {
+    const blockDeleted = !!block.attrs[TRACKED_DELETE_ATTR]
     block.descendants((node, pos) => {
       if (!node.isInline) return true
       const ids = commentIds(node.marks)
       if (ids) {
         out ??= []
-        for (const id of ids) out.push({ id, from: pos, to: pos + node.nodeSize })
+        const deleted = blockDeleted || node.marks.some((m) => m.type.name === DELETION_MARK)
+        for (const id of ids) out.push({ id, from: pos, to: pos + node.nodeSize, deleted })
       }
       // An inline node with content (a footnote) may carry marked text of its own.
       return !node.isLeaf
@@ -66,10 +76,16 @@ export function collectAnchors(doc: PMNode): ReadonlyMap<string, Anchor> {
     const base = offset + 1
     for (const p of pieces) {
       const a = out.get(p.id)
-      if (a) {
+      if (!a) out.set(p.id, { id: p.id, from: base + p.from, to: base + p.to, deletedOnly: p.deleted })
+      else if (a.deletedOnly && !p.deleted) {
+        // The first live piece: deleted pieces no longer count.
+        a.from = base + p.from
+        a.to = base + p.to
+        a.deletedOnly = false
+      } else if (a.deletedOnly || !p.deleted) {
         a.from = Math.min(a.from, base + p.from)
         a.to = Math.max(a.to, base + p.to)
-      } else out.set(p.id, { id: p.id, from: base + p.from, to: base + p.to })
+      }
     }
   })
   lastDoc = doc
