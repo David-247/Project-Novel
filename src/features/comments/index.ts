@@ -19,6 +19,8 @@
 // Commands for the command registry / menus: newComment, nextComment, prevComment,
 // toggleCommentsPanel, toggleShowResolved, plus the per-thread actions.
 export { CommentsExtension, setCommentAuthorSource, currentAuthor } from './extension'
+// The paste rule, for other views whose pasted content lands in the manuscript (the footnote editor).
+export { filterPastedComments } from './extension'
 export type { CommentsOptions } from './extension'
 export {
   newComment,

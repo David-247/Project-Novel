@@ -9,6 +9,7 @@ import { EditorView } from '@tiptap/pm/view'
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { filterPastedComments } from '@/features/comments'
 import { useStore } from '@/shared/store'
 import { Button, cn, fieldBase, Tooltip } from '@/shared/ui'
 import { useMountedEditor } from '../use-mounted-editor'
@@ -136,7 +137,10 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
           'data-testid': 'footnote-editor',
           class: cn(fieldBase, 'nv-fn-editor block w-full whitespace-pre-wrap break-words py-1.5 text-ui'),
         },
-        transformPasted: (slice) => flattenPasted(slice, schema),
+        // The pasted text lands in the manuscript: the comment paste rule applies against the manuscript
+        // (a copy of commented text does not duplicate the thread; after a cut the paste moves it).
+        transformPasted: (slice, view) =>
+          filterPastedComments(flattenPasted(slice, schema), outerView.state, !!(view as unknown as { dragging?: { move?: boolean } }).dragging?.move),
         clipboardTextParser: (text) => {
           const t = text.replace(/\s*[\r\n]+\s*/g, ' ').trim()
           return t ? new Slice(Fragment.from(schema.text(t)), 0, 0) : Slice.empty
