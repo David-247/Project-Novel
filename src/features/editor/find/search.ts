@@ -1,5 +1,6 @@
-import type { Mark, Node as PMNode, Schema } from '@tiptap/pm/model'
+import { Fragment, Slice, type Mark, type Node as PMNode, type Schema } from '@tiptap/pm/model'
 import type { Transaction } from '@tiptap/pm/state'
+import { ReplaceStep } from '@tiptap/pm/transform'
 import { DELETION_MARK, isBlockHidden, isInlineHidden, TRACKING_MARKS, type MarkupView } from '@/shared/track-changes'
 
 export interface FindOptions {
@@ -168,21 +169,34 @@ export function deletedRange(doc: PMNode, range: MatchRange): boolean {
 /** Replace one range with literal text in `tr`, keeping the marks of the first matched char. */
 export function replaceRange(tr: Transaction, schema: Schema, range: MatchRange, replacement: string): Transaction {
   if (deletedRange(tr.doc, range)) return tr
-  if (replacement.length === 0) return tr.delete(range.from, range.to)
-  const marks = marksAt(tr.doc, range.from)
-  return tr.replaceWith(range.from, range.to, schema.text(replacement, marks))
+  return replaceText(tr, schema, range, replacement)
+}
+
+/**
+ * The replacement step itself. Text in a textblock is one plain ReplaceStep (what tr.replaceWith
+ * makes of it, without fitting the slice: Replace All makes one per match); anything else goes
+ * through tr.replaceWith / tr.delete.
+ */
+function replaceText(tr: Transaction, schema: Schema, range: MatchRange, replacement: string): Transaction {
+  const content = replacement.length ? Fragment.from(schema.text(replacement, marksAt(tr.doc, range.from))) : Fragment.empty
+  if (!tr.maybeStep(new ReplaceStep(range.from, range.to, new Slice(content, 0, 0))).failed) return tr
+  return replacement.length ? tr.replaceWith(range.from, range.to, content) : tr.delete(range.from, range.to)
 }
 
 /**
  * Replace every range in ONE transaction (one undo step). Ranges must be in document order and
- * non-overlapping; they are applied from last to first so earlier positions never shift.
+ * non-overlapping; they are applied from last to first so earlier positions never shift. Ranges
+ * that are all deleted text are skipped; `replaceable` (from countReplaceable) saves checking again.
  */
 export function replaceAllRanges(
   tr: Transaction,
   schema: Schema,
   ranges: readonly MatchRange[],
   replacement: string,
+  replaceable?: readonly boolean[],
 ): Transaction {
-  for (let i = ranges.length - 1; i >= 0; i--) replaceRange(tr, schema, ranges[i], replacement)
+  for (let i = ranges.length - 1; i >= 0; i--) {
+    if (replaceable ? replaceable[i] : !deletedRange(tr.doc, ranges[i])) replaceText(tr, schema, ranges[i], replacement)
+  }
   return tr
 }

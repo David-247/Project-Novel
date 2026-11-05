@@ -281,9 +281,10 @@ export function replaceAll(): number {
   if (!ed) return 0
   if (!isFresh(ed)) scanNow()
   const doc = ed.state.doc
-  const count = matches.filter((m) => !deletedRange(doc, m)).length
+  const replaceable = matches.map((m) => !deletedRange(doc, m))
+  const count = replaceable.filter(Boolean).length
   if (count === 0) return 0
-  const tr = replaceAllRanges(ed.state.tr, ed.schema, matches, findState().replacement)
+  const tr = replaceAllRanges(ed.state.tr, ed.schema, matches, findState().replacement, replaceable)
   closeHistory(clearFindDecorations(tr))
   ed.view.dispatch(tr)
   scanNow({ closeUndoGroup: true })
