@@ -62,6 +62,7 @@ export function menuCommands(platform = detectPlatform()): Command[] {
       // macOS convention Ctrl+Cmd+F; F11 elsewhere.
       shortcut: platform === 'mac' ? 'Ctrl-Mod-f' : 'F11',
       menu: { id: 'view', group: 'window', order: 50 },
+      ribbon: { group: 'view.window', order: 10 },
       isChecked: () => fullScreen,
       run: () => void toggleFullScreen(),
     },

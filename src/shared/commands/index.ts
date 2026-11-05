@@ -27,7 +27,7 @@ export {
   COMMAND_STATE_DEBOUNCE_MS,
   __resetCommandsForTests,
 } from './registry'
-export type { Command, MenuId } from './registry'
+export type { Command, MenuId, RibbonPlacement } from './registry'
 export {
   buildMenuModel,
   nativeMenuSnapshot,

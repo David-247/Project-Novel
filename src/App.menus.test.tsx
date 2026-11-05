@@ -135,7 +135,7 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
       await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     }
     expect(items).toBeGreaterThan(50)
-  })
+  }, 20_000) // every submenu and its items (T6 added Line Spacing, Space After and First-Line Indent)
 
   it('checked and enabled state is live: Bold in bold text, the current paper, Undo with history', async () => {
     await renderApp()
