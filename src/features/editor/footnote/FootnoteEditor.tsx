@@ -252,6 +252,9 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
       unstore()
       ro?.disconnect()
       outer.off('transaction', onTransaction)
+      // Closed mid-composition (Escape, Done, blur, a failed forward): the note's compositionend
+      // handler goes with the view, so mark what was composed now (in its own undo step).
+      flushComposedText(outerView, { force: true })
       inner.destroy()
       if (active === inner) active = null
     }

@@ -361,6 +361,54 @@ describe('footnote editor with Track Changes on (real inner / outer round trip)'
     expect(noteOf(ed).textContent).toBe('note')
   })
 
+  it('IME in the note, closed (Escape) before compositionend: marked in its own undo step; a later composition is unaffected', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    const composing = composingFlag(inner)
+    composing(true)
+    act(() => void inner.dispatch(inner.state.tr.insertText('か', 4).setMeta('composition', 9)))
+    expect(insertedText(ed)).toBe('')
+    act(() => void inner.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(getFootnoteEditing()).toBeNull()
+    expect(insertedText(ed)).toBe('か')
+    expect((ed.storage as unknown as { trackChanges: { pending: unknown[] } }).trackChanges.pending).toEqual([])
+
+    // A later composition in the manuscript: only its own text, in its own undo step.
+    let outerComposing = false
+    Object.defineProperty(ed.view, 'composing', { configurable: true, get: () => outerComposing })
+    const end = ed.state.doc.firstChild!.nodeSize - 1
+    act(() => void ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, end))))
+    outerComposing = true
+    act(() => void ed.view.dispatch(ed.state.tr.insertText('字').setMeta('composition', 1)))
+    outerComposing = false
+    act(() => void ed.view.dom.dispatchEvent(new CompositionEvent('compositionend', { data: '字', bubbles: true })))
+    await act(() => new Promise((r) => setTimeout(r, 60)))
+    const marked = ed.state.doc.firstChild!.lastChild!
+    expect(marked.text).toBe('字')
+    expect(marked.marks.map((m) => m.type.name)).toEqual(['insertion'])
+    act(() => void ed.commands.undo())
+    expect(ed.state.doc.firstChild!.textContent).toBe('anoteかb')
+    act(() => void ed.commands.undo())
+    expect(noteOf(ed).textContent).toBe('note')
+  })
+
+  it('IME in the note with Track Changes turned off before it ends: the text stays unmarked', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    const composing = composingFlag(inner)
+    composing(true)
+    act(() => void inner.dispatch(inner.state.tr.insertText('か', 4).setMeta('composition', 2)))
+    act(() => useStore.getState().bookActions.setTrackChanges(false))
+    composing(false)
+    act(() => void inner.dom.dispatchEvent(new CompositionEvent('compositionend', { data: 'か', bubbles: true })))
+    await act(() => new Promise((r) => setTimeout(r, 80)))
+    expect(noteOf(ed).textContent).toBe('noteか')
+    expect(insertedText(ed)).toBe('')
+    expect((ed.storage as unknown as { trackChanges: { pending: unknown[] } }).trackChanges.pending).toEqual([])
+  })
+
   it("IME in the note: the composition's last change carries the mark", async () => {
     act(() => useStore.getState().bookActions.setTrackChanges(true))
     const ed = mount([p(text('a'), fn('note'), text('b'))])

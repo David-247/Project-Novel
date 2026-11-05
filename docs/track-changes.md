@@ -107,7 +107,10 @@ click, never takes the mark), or else in a transaction of its own after `composi
 footnote editor forwards its compositions the same way: its steps carry `COMPOSING_META` while the note
 is composing and the note's composition id; it calls `flushComposedText` on the note's
 `compositionend`, and while composing it mirrors the manuscript back only for text differences, never
-for marks alone.
+for marks alone. Closing the note mid-composition (Escape, Done, blur) flushes first
+(`flushComposedText(view, { force: true })`). Pending text is kept per composition id and each
+composition is marked in its own transaction, so leftovers never join a later composition's undo step;
+if Track Changes was turned off before the composition ended, the text stays unmarked.
 
 **Footnote text.** The footnote editor forwards its steps into the manuscript transaction
 (`StepMap.offset`), so they go through the same dispatch hook: edits inside a note are recorded like
