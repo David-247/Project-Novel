@@ -5,8 +5,10 @@
 //   question (both portal).
 // - <SettingsButton />: toolbar gear (data-control-id `settings.open`); wrap in the editor's ToolbarItem.
 // - useSettingsIntegration(): call once at the composition root. Loads preferences.json, writes
-//   changes (debounced), binds Mod-, and applies the Motion preference.
-// - openSettings(): the same dialog, for commands (the Settings… menu item).
+//   changes (debounced) and applies the Motion preference.
+// - registerSettingsCommands(): Settings… (Mod-,) in the command registry (app menu on macOS, end of
+//   File elsewhere). The composition root calls it with the other slices' registrations.
+// - openSettings(): the dialog the gear and Settings… open.
 // - getAuthor() / useAuthor(): { name, color } to attribute tracked changes and comments to.
 // - ensureAuthorName(): the name, asking once (when none is known) the first time it is needed.
 // - prefersReducedMotion() / useReducedMotion(): the Motion preference resolved against the OS.
@@ -17,6 +19,7 @@ export { SettingsDialog } from './SettingsDialog'
 export { SettingsButton } from './SettingsButton'
 export type { SettingsButtonProps } from './SettingsButton'
 export { useSettingsIntegration } from './integration'
+export { registerSettingsCommands } from './commands'
 export { openSettings, closeSettings } from './dialog-state'
 export { getAuthor, useAuthor, ensureAuthorName } from './author'
 export type { Author } from './author'

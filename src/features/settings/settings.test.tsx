@@ -4,6 +4,7 @@ import { setSystemAuthorName, useStore } from '@/shared/store'
 import { TooltipProvider } from '@/shared/ui'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy } from '@/features/tooltips'
 import { backend } from '@/test-utils/fake-tauri'
+import { getCommand, installCommandShortcuts } from '@/shared/commands'
 
 vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
 
@@ -13,6 +14,7 @@ import {
   getAuthor,
   openSettings,
   prefersReducedMotion,
+  registerSettingsCommands,
   SETTINGS_CONTROLS,
   SettingsButton,
   SettingsDialog,
@@ -316,10 +318,18 @@ describe('Settings dialog', () => {
 
   // Last on purpose: a key press arms the tooltips' keyboard-focus window (1 s), and a focus tooltip
   // on the gear would take the next Escape in a following test.
-  it('opens on Mod-, (Ctrl+, off macOS) from anywhere', async () => {
-    renderApp()
-    fireEvent.keyDown(window, { key: ',', ctrlKey: true })
-    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+  it('opens on Mod-, (Ctrl+, off macOS) from anywhere, through the command registry', async () => {
+    const offCommands = registerSettingsCommands()
+    const offKeys = installCommandShortcuts({ manuscript: () => null, platform: 'other' })
+    try {
+      expect(getCommand(SETTINGS_CONTROLS.open.id)?.menu).toMatchObject({ id: 'app', group: 'settings' })
+      renderApp()
+      fireEvent.keyDown(window, { key: ',', ctrlKey: true })
+      expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+    } finally {
+      offKeys()
+      offCommands()
+    }
   })
 })
 
