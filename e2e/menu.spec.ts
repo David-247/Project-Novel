@@ -296,7 +296,9 @@ test('menu bar text meets WCAG AA in every state, on the four papers in light an
     for (const surface of ['auto', 'book', 'white', 'dark']) {
       await page.locator(`[data-control-id="book.surface.${surface}"]`).click()
       await title(page, 'edit').click()
-      await item(page, 'history.undo').hover() // highlighted
+      // Highlight Undo (the first item) from the keyboard: Radix sets data-highlighted on keyboard
+      // focus, which a hover does not do reliably under full-suite load (WebKit on Windows).
+      await page.keyboard.press('ArrowDown')
       await expect(item(page, 'history.undo')).toHaveAttribute('data-highlighted', '')
       await page.evaluate(() => new Promise((r) => setTimeout(r, 350)))
       const states: [string, string][] = [
