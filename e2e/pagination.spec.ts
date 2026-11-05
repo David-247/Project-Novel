@@ -342,6 +342,7 @@ test('trim size reflows; margins mirror on verso and recto; bottom reservations 
   await docStart(page)
   await page.keyboard.press('PageDown')
   await waitForLayout(page)
+  await turnSettled(page) // Book mode: the turn's ease-in slides the spread a few px
   expect(await leftOfText(1)).toBe(60)
   expect(await leftOfText(2)).toBe(84)
 
