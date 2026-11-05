@@ -191,11 +191,19 @@ function computeBreaks(doc: PMNode, styles: ResolvedStyles): DecorationSet {
     let value: 'page' | 'recto' | undefined =
       id && (b === 'page' || b === 'recto') && !continuesHeadingGroup(prev, id, styles) ? b : undefined
     if (afterPageBreak && value !== 'recto') value = 'page'
-    if (value) decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': value }))
+    if (value) decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': value }, { nvBreak: value }))
     afterPageBreak = false
     prev = id
   })
   return DecorationSet.create(doc, decos)
+}
+
+/** Same data-break-before decorations at the same places. */
+function sameBreaks(a: DecorationSet, b: DecorationSet): boolean {
+  const x = a.find()
+  const y = b.find()
+  if (x.length !== y.length) return false
+  return x.every((d, i) => d.from === y[i].from && d.to === y[i].to && d.spec.nvBreak === y[i].spec.nvBreak)
 }
 
 /** True when both docs have the same top-level block types and attrs (typing inside a block). */
@@ -222,7 +230,11 @@ function breaksPlugin(): Plugin<BreakState> {
       apply: (tr, value, oldState, newState) => {
         const meta = tr.getMeta(STYLES_META) as ResolvedStyles | undefined
         if (meta) return { decorations: computeBreaks(newState.doc, meta), signature: breakSignature(meta) }
-        if (tr.getMeta(MARKUP_VIEW_META) !== undefined) return { ...value, decorations: computeBreaks(newState.doc, getResolvedStyles()) }
+        if (tr.getMeta(MARKUP_VIEW_META) !== undefined) {
+          // Keep the same set when the view hides no block that breaks (no decoration work in the view).
+          const next = computeBreaks(newState.doc, getResolvedStyles())
+          return sameBreaks(next, value.decorations) ? value : { ...value, decorations: next }
+        }
         if (!tr.docChanged) return value
         // Outside All Markup a text edit can hide or show a whole block: recompute (O(top-level blocks)).
         if (sameTopLevelShape(oldState.doc, newState.doc) && currentMarkupView() === 'all') {

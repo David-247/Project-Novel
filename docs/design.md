@@ -357,3 +357,12 @@ running head is clipped (one line, `overflow: hidden`, ellipsis) and can never m
 - **Touch and keyboard**: the toolbar button is the keyboard route (no hover-only access); every field is a native
   select, text field or checkbox with a visible label and a registry tooltip.
 
+## Track changes: Review group (Phase 3)
+
+Toolbar group "Review": the Track Changes toggle (`review.track`, Mod-Shift-e; a toggle button with a pen icon,
+its label shown from the `xl` breakpoint, pressed while recording) and the Markup picker (`review.markup`, a
+dropdown whose trigger shows the current view, radio items All Markup / Simple Markup / No Markup / Original, 40 px
+rows). On the page, marks never recolour text, so text contrast is the page's own on every paper; insertions get a
+2 px underline, deletions a 2 px strike-through, formatting changes a dotted rule, and changed blocks / lines a 3 px
+bar 12 px into the inside margin, all in per-surface `--page-tc-*` colours with at least 3:1 against the paper (or
+the author's colour when settings give one). Details: docs/track-changes.md.

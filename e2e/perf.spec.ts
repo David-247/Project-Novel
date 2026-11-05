@@ -395,3 +395,90 @@ test('100k-word manuscript, paginated combined hot path: spread view + 200 footn
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
   budget(testInfo, 'typing median ms (paginated combined hot path)', typing.medianMs, 50)
 })
+
+/**
+ * Track changes: the 100k-word manuscript with 2,000 tracked changes (a deleted and an inserted run
+ * in every block: 960 paragraphs and 40 headings).
+ */
+function buildTrackedManuscript() {
+  const built = buildManuscript()
+  const stamp = (id: string) => ({ id, author: 'Ann', date: '2026-01-01T00:00:00.000Z', authorColor: null })
+  let changes = 0
+  const content = (built.doc.content as Array<{ type: string; content: Array<{ type: string; text: string }> }>).map((b, i) => {
+    const last = b.content[b.content.length - 1]
+    const words = last.text.split(' ')
+    const cut = Math.min(8, words.length - 4)
+    changes += 2
+    return {
+      ...b,
+      content: [
+        ...b.content.slice(0, -1),
+        { type: 'text', text: words.slice(0, cut).join(' ') + ' ' },
+        { type: 'text', marks: [{ type: 'deletion', attrs: stamp(`d${i}`) }], text: words.slice(cut, cut + 3).join(' ') + ' ' },
+        { type: 'text', marks: [{ type: 'insertion', attrs: stamp(`i${i}`) }], text: 'fresh words here ' },
+        { type: 'text', text: words.slice(cut + 3).join(' ') },
+      ],
+    }
+  })
+  return { ...built, doc: { type: 'doc', content }, changes }
+}
+
+test('100k-word manuscript with 2,000 tracked changes: typing with tracking on, and markup view switches', async ({ page }, testInfo) => {
+  test.setTimeout(240_000)
+  const { doc, words, changes } = buildTrackedManuscript()
+  expect(changes).toBe(2000)
+  const openMs = await openEpic(page, '/projects/Tracked', doc)
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBe(2000)
+  await page.evaluate(() => window.__nvE2E.setTracking(true))
+  await installLatencyProbe(page)
+  const typing = await measureTyping(page)
+  // Every typed character went in as (one) tracked insertion.
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBe(2001)
+
+  // View switches: "reflow complete" (the new page model published, the pages in view drawn).
+  const switchTo = (view: string) =>
+    page.evaluate(async (v) => {
+      const before = window.__nvE2E.layout()
+      const t0 = performance.now()
+      window.__nvE2E.setMarkupView(v as 'all' | 'simple' | 'none' | 'original')
+      await new Promise<void>((resolve) => {
+        const check = () =>
+          window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > before.layoutVersion ? resolve() : requestAnimationFrame(check)
+        requestAnimationFrame(check)
+      })
+      const pass = window.__nvE2E.paginationLines().lastPass as Record<string, number>
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+      const ms = performance.now() - t0
+      await new Promise<void>((resolve) => {
+        const check = () => (window.__nvE2E.paginationSettled() ? resolve() : requestAnimationFrame(check))
+        check()
+      })
+      const passStartMs = +(pass.startedAt - t0).toFixed(1)
+      return { ms, allDrawnMs: performance.now() - t0, pagesBefore: before.pageCount, pagesAfter: window.__nvE2E.layout().pageCount, passStartMs, passMs: +pass.totalMs.toFixed(1) }
+    }, view)
+  const toNone = await switchTo('none')
+  const toOriginal = await switchTo('original')
+  const toAll = await switchTo('all')
+  expect(toNone.pagesAfter).not.toBe(toNone.pagesBefore)
+  const worst = Math.max(toNone.ms, toOriginal.ms, toAll.ms)
+
+  await report(testInfo, 'perf-track-changes', {
+    manuscript: { words, blocks: doc.content.length, changes },
+    openMs,
+    typing,
+    markupSwitch: {
+      toNoMarkupMs: +toNone.ms.toFixed(1),
+      toOriginalMs: +toOriginal.ms.toFixed(1),
+      toAllMarkupMs: +toAll.ms.toFixed(1),
+      allDrawnWorstMs: +Math.max(toNone.allDrawnMs, toOriginal.allDrawnMs, toAll.allDrawnMs).toFixed(1),
+      pages: [toNone.pagesBefore, toNone.pagesAfter, toOriginal.pagesAfter, toAll.pagesAfter],
+      // When the engine's pass started after the switch (style recalc, first frame) and how long it took.
+      passes: [toNone, toOriginal, toAll].map((s) => ({ startMs: s.passStartMs, totalMs: s.passMs })),
+    },
+    budgets: { typingMedianMs: 50, markupSwitchMs: 1000 },
+  })
+
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  budget(testInfo, 'typing median ms (tracking on, 2,000 changes)', typing.medianMs, 50)
+  budget(testInfo, 'markup view switch reflow complete ms', worst, 1000)
+})

@@ -11,6 +11,7 @@ directly on the pages: there is one ProseMirror view, and it stays the single so
 - [Extension points](#extension-points)
 - [View, zoom, keys](#view-zoom-and-keys)
 - [Tests and fixtures](#tests-and-fixtures)
+- Track changes and hidden text (Phase 3): [docs/track-changes.md](track-changes.md#pagination)
 
 ---
 
@@ -308,6 +309,14 @@ page, or leave a page holding only the break). It stays in the document and keep
 below the last line, in the bottom margin, outside layout. Known limitation: with zero height it cannot
 be selected with the mouse, only with the keyboard (Backspace after it selects it, a second one
 deletes it).
+
+### Hidden text (track changes)
+
+Markup views hide text (deleted text in No Markup, inserted text in Original). Hidden inline text is
+`display: none`; a hidden block collapses to zero height with nothing inside it laid out, leaving one
+zero-height line. A view switch re-measures the blocks holding changes (`invalidatePaginationAt`). The
+rules, and the e2e check that a view's breaks equal the manuscript with its changes applied or rejected,
+are in [docs/track-changes.md](track-changes.md#pagination).
 
 ### Invalidation
 
