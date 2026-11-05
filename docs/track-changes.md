@@ -103,6 +103,13 @@ If the rewrite throws, the edit is applied untracked (never a lost keystroke), t
 and the status bar shows a warning (`TrackChangesNotice`, store `trackChanges.notice`) until Track
 Changes is turned off or on again.
 
+**Re-write: Keep This Version** (rewrite slice, `choice.ts`). The kept version is applied as a minimal
+word-level edit (descending ReplaceSteps, mark steps for formatting, setNodeMarkup for a paragraph
+style), and the rewrite slice runs `trackTransaction` on it itself before adding the re-write's own
+steps (anchor attributes, the `RewriteStateStep`): those are never recorded as style changes. The result
+is ordinary insertions, deletions and formatting / style changes by the current author, reviewed with
+Accept / Reject like any other; one undo reverts the whole Keep.
+
 **IME composition.** While the view is composing, the composed text is inserted **without** its
 insertion mark: wrapping the composing text node in a mark span mid-composition cancels or doubles the
 composition in Safari. The extension keeps the unmarked ranges (mapped through every transaction) and

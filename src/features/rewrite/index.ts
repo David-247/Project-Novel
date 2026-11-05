@@ -20,9 +20,12 @@
 // - While the view is open it registers the editor slice's active editor source (text commands act on
 //   the revision while it has the focus) and the registry's command gate (manuscript-wide commands off).
 //
-// For T9 (keep original / keep this version): getRewrite, passageRange (null when missing or split:
-// passageProblem), flushLiveVersions, versionDoc, setAnchor, withStatus, REWRITE_ALLOW_META (see
-// commands.ts).
+// The choice (T9; choice.ts): Keep Original (Mod-Alt-Shift-o), Keep This Version (Mod-Alt-Shift-v),
+// Discard Re-write, and Reopen from the Re-writes list. Each is one manuscript transaction with a
+// RewriteStateStep (step.ts), so one undo reverts it (the re-write open again with every version) and
+// redo applies it again; the store / rewrites.json follow the step. Keep This Version is a word-level
+// edit (replacePassage), tracked when Track Changes records. setRewriteConfirm(fn): how it asks before
+// adding or removing a chapter title (the composition root: the app's message dialog).
 export { RewriteAnchor, REWRITE_ALLOW_META, REWRITE_SHORTCUT, passageRange, passageRanges, passageProblem, stripAnchors, setAnchor, lockedAtSelection } from './anchor'
 export type { RewriteAnchorOptions, LockedRange } from './anchor'
 export {
@@ -43,12 +46,17 @@ export {
   goToPassage,
 } from './commands'
 export { registerRewriteCommands, rewriteCommands } from './menu-commands'
+export { keepOriginal, keepVersion, keepVersionNow, discardRewrite, reopenRewrite, locatePassage, setRewriteConfirm } from './choice'
+export type { RewriteConfirm, RewriteConfirmRequest } from './choice'
+export { replacePassage } from './apply'
+export { RewriteStateStep } from './step'
+export type { RewriteStepState } from './step'
 export { registerRewritesSideFile } from './persistence'
 export { RewriteHost } from './RewriteHost'
 export type { RewriteHostProps } from './RewriteHost'
 export { rewriteDebug } from './RewriteView'
 export { REWRITE_CONTROLS } from './controls'
 export type { RewriteControlMeta, RewriteControlKey } from './controls'
-export { REWRITES_FILE, REWRITES_VERSION, withStatus } from './model'
+export { REWRITES_FILE, REWRITES_VERSION, CHOICE_ORIGINAL, withStatus } from './model'
 export { alignBlocks, diffPassages, similarity } from './align'
 export type { AlignedRow, PassageDiff } from './align'

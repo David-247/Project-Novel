@@ -25,6 +25,7 @@ import {
   toggleShowCurrent,
   toggleShowDiff,
 } from './commands'
+import { canChoose, discardRewrite, keepOriginal, keepVersion } from './choice'
 import { REWRITE_CONTROLS as C } from './controls'
 import { rewriteCommandGate } from './gate'
 import './rewrite.css'
@@ -50,7 +51,12 @@ export const rewriteDebug = { mountedAt: 0, readyAt: 0, layouts: 0, rows: [] as 
 export function RewriteView() {
   const openId = useStore((s) => s.rewrite.openId)
   const record = useStore((s) => (openId ? s.rewrite.rewrites.find((r) => r.id === openId) : undefined))
-  if (!record) return null
+  // Resolved or removed while shown (an undo / redo of a choice): back to the manuscript.
+  const gone = !!openId && (!record || record.status !== 'open')
+  useEffect(() => {
+    if (gone) closeRewrite()
+  }, [gone])
+  if (!record || record.status !== 'open') return null
   return <Comparison key={record.id} record={record} />
 }
 
@@ -262,7 +268,12 @@ function Comparison({ record }: { record: RewriteRecord }) {
         const leftIsRevision = useStore.getState().rewrite.flipped
         const target = (side === 'left') === leftIsRevision ? 'rev' : 'orig'
         if (live.current.narrow) actions.setNarrowSide(target === 'rev' ? 'revised' : 'original')
-        requestAnimationFrame(() => (target === 'rev' ? e.rev.commands.focus() : e.orig.view.dom.focus()))
+        requestAnimationFrame(() => {
+          // Closed in the meantime (a choice made): nothing to focus.
+          if (e.rev.isDestroyed || e.orig.isDestroyed) return
+          if (target === 'rev') e.rev.commands.focus()
+          else e.orig.view.dom.focus()
+        })
       },
     })
     // The revised page takes the focus, at the start of the passage.
@@ -344,6 +355,13 @@ function Comparison({ record }: { record: RewriteRecord }) {
       return
     }
     if (e.defaultPrevented) return
+    if (mod && e.altKey && e.shiftKey && (e.code === 'KeyO' || e.code === 'KeyV')) {
+      e.preventDefault()
+      if (!canChoose()) return
+      if (e.code === 'KeyO') keepOriginal()
+      else void keepVersion()
+      return
+    }
     if (mod && e.altKey && !e.shiftKey) {
       if (e.code === 'KeyK') toggleFlip()
       else if (e.key === 'ArrowLeft') focusSide('left')
@@ -375,6 +393,7 @@ function Comparison({ record }: { record: RewriteRecord }) {
       >
         <div ref={origMount} />
       </section>
+      <ChoiceButton side="original" disabled={!!problem} />
     </div>
   )
   const revSide = (
@@ -392,6 +411,7 @@ function Comparison({ record }: { record: RewriteRecord }) {
       >
         <div ref={revMount} />
       </section>
+      <ChoiceButton side="revised" disabled={!!problem} versionName={version.name} />
     </div>
   )
 
@@ -546,9 +566,41 @@ function RewriteBar({ record, activeId, passageLabel, narrow, revisedName }: { r
           </IconButton>
         </Tooltip>
       )}
+      <Tooltip controlId={C.discard.id}>
+        <Button data-control-id={C.discard.id} variant="ghost" onClick={() => discardRewrite()}>
+          Discard
+        </Button>
+      </Tooltip>
       <Tooltip controlId={C.closeButton.id}>
         <Button data-control-id={C.closeButton.id} aria-keyshortcuts="Escape" onClick={() => closeRewrite()}>
           Close
+        </Button>
+      </Tooltip>
+    </div>
+  )
+}
+
+/**
+ * The choice, under each page (sticky at the bottom of the view while the page is taller than it):
+ * Keep Original under the original, Keep This Version (the primary action) under the revision.
+ * Disabled while the passage is missing or split in the manuscript (nothing to replace).
+ */
+function ChoiceButton({ side, disabled, versionName }: { side: 'original' | 'revised'; disabled: boolean; versionName?: string }) {
+  const c = side === 'original' ? C.keepOriginal : C.keepVersion
+  return (
+    <div className="nv-rw-choice">
+      <Tooltip controlId={c.id}>
+        <Button
+          data-control-id={c.id}
+          variant={side === 'revised' ? 'primary' : 'secondary'}
+          size="lg"
+          disabled={disabled}
+          aria-keyshortcuts={ariaKeyshortcuts(c.shortcut)}
+          aria-label={side === 'revised' && versionName ? `${c.label}: ${versionName}` : undefined}
+          className="min-w-48 px-6 font-semibold shadow-raised"
+          onClick={() => (side === 'original' ? keepOriginal() : void keepVersion())}
+        >
+          {c.label}
         </Button>
       </Tooltip>
     </div>

@@ -21,6 +21,7 @@ import { REWRITE_CONTROLS as RW } from '@/features/rewrite'
 import { BY_AUTHOR_SUBMENU, MarkupViewMenu, TRACK_CHANGES_CONTROLS as TC, TrackChangesButton } from '@/features/track-changes'
 import { getCommand, isCommandEnabled, useCommandStateVersion, useCommands } from '@/shared/commands'
 import { registerRibbonGroups, type RibbonGroupSpec, type RibbonMenuEntry } from '@/shared/ribbon'
+import { useStore } from '@/shared/store'
 import { SurfacePicker } from '@/shared/theme'
 
 /**
@@ -168,6 +169,18 @@ const gated = (commandId: string, node: ReactElement) => <GatedItem commandId={c
 function RibbonCommand({ commandId, icon, label }: { commandId: string; icon?: () => ReactElement; label?: string }) {
   const command = useCommands().find((c) => c.id === commandId)
   return command ? <CommandButton command={command} icon={icon} label={label} /> : null
+}
+
+/** Keep Original / Keep This Version: contextual, only while a re-write is open (the group keeps its width otherwise). */
+function RewriteChoiceButtons() {
+  const open = useStore((s) => s.rewrite.openId !== null)
+  if (!open) return null
+  return (
+    <>
+      <RibbonCommand commandId={RW.keepOriginal.id} label="Keep Original" />
+      <RibbonCommand commandId={RW.keepVersion.id} label="Keep Version" />
+    </>
+  )
 }
 
 export const RIBBON_GROUPS: RibbonGroupSpec[] = [
@@ -332,8 +345,9 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     ],
   },
   { id: 'review.comments', tab: 'review', label: 'Comments', order: 30, priority: 80, icon: icons.comment, Content: () => gated(COMMENT_CONTROLS.new.id, <NewCommentButton />), menu: [cmd('comment.new')] },
-  // Re-write Passage… (icon), Re-writes…, Previous / Next Re-write: the group's own buttons; the commands'
-  // `ribbon` placements (display 'menu') list all four in the dropdown, in order.
+  // Re-write Passage… (icon), Re-writes…, Previous / Next Re-write and, while a re-write is open, Keep Original /
+  // Keep This Version: the group's own buttons; the commands' `ribbon` placements (display 'menu') list them
+  // (and Discard Re-write) in the dropdown, in order.
   {
     id: 'review.rewrite',
     tab: 'review',
@@ -349,6 +363,7 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
         <RibbonCommand commandId={RW.list.id} label="Re-writes" />
         <RibbonCommand commandId={RW.prev.id} label="Previous" />
         <RibbonCommand commandId={RW.next.id} label="Next" />
+        <RewriteChoiceButtons />
       </>
     ),
   },

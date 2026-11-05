@@ -372,6 +372,8 @@ A re-write:
 | `currentVersionId` | string  | Optional: the version shown when the re-write is opened again (the last one viewed). |
 | `status`           | string  | `"open"`: in progress; the passage is read-only in the manuscript. `"resolved"`: a version was chosen; no lock. |
 | `originalChanged`  | boolean | Optional, `true` once a bulk edit (Replace All, accepting or rejecting a tracked change, undo) changed the passage after the snapshot. |
+| `choice`           | string  | Optional, resolved re-writes only (Phase 3, T9): `"original"` (Keep Original) or the `id` of the version kept (Keep This Version). Read only when `status` is not `"open"` and it names `"original"` or an existing version; otherwise dropped. |
+| `resolvedAt`       | string  | Optional, resolved re-writes only: ISO 8601 time of the choice. |
 
 ```json
 {
@@ -407,6 +409,15 @@ A re-write:
   open; a block typed or pasted there is never anchored). Otherwise the versions stay readable in the re-write view.
 - **One run.** Pasted, dropped and drag-copied blocks never carry `rewriteId`. If the blocks carrying an anchor are
   not one contiguous run (a file edited by hand), the passage counts as damaged: it is not shown or replaced.
+- **The choice.** Keep This Version replaces the passage with the version (the smallest word-level edit; tracked
+  changes when Track Changes records) and sets `status` `"resolved"`, `choice` and `resolvedAt`; Keep Original sets
+  them without changing the text; Discard Re-write removes the entry. Each also removes the passage's `rewriteId`
+  from manuscript.json: a resolved re-write leaves no anchor (an undo or redo that would put a stale one back has it
+  removed). The choice is part of the manuscript's undo history: one undo restores the text, the anchor and
+  `status` `"open"` (with every version) at once, and redo applies the choice again; the file follows. Reopening a
+  resolved re-write (Review ▸ Re-writes…) finds its text in the manuscript (the kept text, word for word, else the
+  most similar run of paragraphs), anchors it again, takes it as the new `original` and sets `status` back to
+  `"open"`, also in one undo step. Projects without these keys open unchanged.
 - **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the
   version being typed is written into the side file at every save and every recovery snapshot.
 

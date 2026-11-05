@@ -270,6 +270,8 @@ export function reopenRewrite(id: string): boolean {
   const kept = toNode(ed, keptJSON)
   const found = kept ? locatePassage(ed.state.doc, kept, openAnchorsIn(ed.state)) : null
   if (!found) {
+    // The list closes, so the notice can be read.
+    actions().setListOpen(false)
     actions().setNotice({ kind: 'notFound', seq: nextSeq() })
     return false
   }

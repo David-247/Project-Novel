@@ -286,3 +286,18 @@
     transition: none;
   }
 }
+
+/* The choice under each page: Keep Original / Keep This Version. Sticky at the bottom of the scroller
+   while the page runs past it, so the choice is always one click away. */
+.nv-rw-choice {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  padding: 14px 0 6px;
+  pointer-events: none;
+}
+.nv-rw-choice > * {
+  pointer-events: auto;
+}

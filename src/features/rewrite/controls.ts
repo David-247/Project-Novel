@@ -15,6 +15,8 @@ export const SHOW_DIFF_SHORTCUT = 'Mod-Shift-d'
 export const FLIP_SHORTCUT = 'Mod-Alt-k'
 export const FOCUS_LEFT_SHORTCUT = 'Mod-Alt-ArrowLeft'
 export const FOCUS_RIGHT_SHORTCUT = 'Mod-Alt-ArrowRight'
+export const KEEP_ORIGINAL_SHORTCUT = 'Mod-Alt-Shift-o'
+export const KEEP_VERSION_SHORTCUT = 'Mod-Alt-Shift-v'
 
 export const REWRITE_CONTROLS = {
   open: {
@@ -55,6 +57,23 @@ export const REWRITE_CONTROLS = {
     label: 'New Version',
     description: 'Start another version of the passage, as a copy of the one you are looking at.',
   },
+  keepOriginal: {
+    id: 'rewrite.keepOriginal',
+    label: 'Keep Original',
+    description: 'Leave the passage as it is and close the re-write. Your versions are kept; Undo reopens it.',
+    shortcut: KEEP_ORIGINAL_SHORTCUT,
+  },
+  keepVersion: {
+    id: 'rewrite.keepVersion',
+    label: 'Keep This Version',
+    description: 'Put the version you are looking at in the manuscript in place of the passage. Undo reverts it.',
+    shortcut: KEEP_VERSION_SHORTCUT,
+  },
+  discard: {
+    id: 'rewrite.discard',
+    label: 'Discard Re-write',
+    description: 'Delete this re-write and all its versions. The passage stays as it is; Undo brings it back.',
+  },
   close: {
     id: 'rewrite.close',
     label: 'Close Re-write',
@@ -88,6 +107,11 @@ export const REWRITE_CONTROLS = {
   noticeOpen: { id: 'rewrite.noticeOpen', label: 'Open re-write', description: 'Open the re-write of this passage beside its original.' },
   noticeDismiss: { id: 'rewrite.noticeDismiss', label: 'Dismiss', description: 'Hide this message.' },
   listItem: { id: 'rewrite.listItem', label: 'Open', description: 'Open this re-write.' },
+  listReopen: {
+    id: 'rewrite.listReopen',
+    label: 'Reopen',
+    description: 'Open this re-write again: the passage as it is in the manuscript now, beside your saved versions.',
+  },
   listClose: { id: 'rewrite.listClose', label: 'Close', description: 'Close the list of re-writes.', shortcut: 'Escape' },
 } as const satisfies Record<string, RewriteControlMeta>
 
