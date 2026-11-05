@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { launch, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
+import { launch, openRecent, saveStatus, seedProject, waitForLayout, reveal } from './helpers'
 
 /**
  * Phase 2 acceptance, accessibility: WCAG 2.1 AA contrast measured on the rendered spread (computed
@@ -103,7 +103,7 @@ test('WCAG AA contrast on the rendered spread: four paper surfaces x OS light an
     await page.emulateMedia({ colorScheme: scheme })
     await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
     for (const surface of SURFACES) {
-      await page.locator(`[data-control-id="book.surface.${surface}"]`).click()
+      await (await reveal(page, `book.surface.${surface}`)).click()
       const resolved = surface === 'auto' ? (scheme === 'light' ? 'white' : 'dark') : surface
       await expect(page.locator('html')).toHaveAttribute('data-surface', resolved)
       // Let the colour transitions (if any) finish before reading computed colours.

@@ -532,7 +532,7 @@ shown as "(missing)" and disabled in File > Open Recent. A damaged file is treat
 Not part of a project, and never written into a project folder. Per-user settings live in the same app config
 directory as the recent-projects list, as `preferences.json` (written atomically by `preferences_write` in
 `src-tauri/src/preferences.rs`, like every file Novel writes). They apply to every project on this computer and are edited
-in **Settings** (File > Settings… on Windows, Novel > Settings… on macOS, the gear in the toolbar, or Ctrl+, on
+in **Settings** (File > Settings… on Windows, Novel > Settings… on macOS, or Ctrl+, on
 Windows and Cmd+, on macOS).
 
 ```json

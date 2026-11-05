@@ -10,6 +10,12 @@ import { detectPlatform, shortcutSignature, type Platform, type ShortcutSpec } f
  */
 export type MenuId = 'file' | 'edit' | 'view' | 'insert' | 'format' | 'review' | 'help' | 'app'
 
+export interface RibbonPlacement {
+  group: string
+  order: number
+  display?: 'button' | 'menu'
+}
+
 export interface Command {
   /** Reuses the `data-control-id` of the matching control where one exists. */
   id: string
@@ -36,6 +42,13 @@ export interface Command {
    * but behind a modal dialog (Track Changes, the markup views). 'none': anywhere.
    */
   guard?: 'manuscript' | 'modal' | 'none'
+  /**
+   * Place in the ribbon (the toolbar): a group id from @/shared/ribbon (e.g. 'review.changes') and an
+   * order inside it. `display: 'button'` (default) adds a labelled button to the group; 'menu' only
+   * lists the command when the group is collapsed or in the overflow (the group already shows a control
+   * for it). See docs/design.md, "Ribbon".
+   */
+  ribbon?: RibbonPlacement
   isEnabled?: () => boolean
   /** Present on toggles and radio-like items (rendered as checkable). */
   isChecked?: () => boolean

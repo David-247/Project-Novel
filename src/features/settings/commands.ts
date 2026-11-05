@@ -4,7 +4,7 @@ import { openSettings } from './dialog-state'
 
 /**
  * Settings… (Mod-,): the macOS app menu, the end of File elsewhere. Same id and dialog as the
- * toolbar gear; the registry is the only place Mod-, is bound. Returns unregister.
+ * gear button (no longer on the toolbar); the registry is the only place Mod-, is bound. Returns unregister.
  */
 export function registerSettingsCommands(): () => void {
   return registerCommand({

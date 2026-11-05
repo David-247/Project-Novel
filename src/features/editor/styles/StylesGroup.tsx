@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/core'
-import { useEffect } from 'react'
+import { Fragment, useEffect } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { DEFAULT_STYLE_ID } from '@/shared/book'
 import { IconButton, Select, ToolbarGroup, Tooltip } from '@/shared/ui'
@@ -19,6 +19,8 @@ export interface StylesGroupProps {
   fallbackStyleId: string
   /** Wraps one focusable control as a toolbar item (roving focus). */
   item: (control: ReactElement) => ReactNode
+  /** Render the controls without their own labelled group (the ribbon wraps them in its group). */
+  bare?: boolean
 }
 
 function Icon({ children }: { children: ReactNode }) {
@@ -54,7 +56,7 @@ const ClearIcon = () => (
  * Toolbar "Styles" group: style picker (current block's style, applies on change), Modify style,
  * Manage styles and Clear direct formatting, plus the two dialogs.
  */
-export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }: StylesGroupProps) {
+export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item, bare = false }: StylesGroupProps) {
   const styles = useResolvedStyles()
   // Shared with the Format menu's Modify Style… / Manage Styles… commands.
   const { modifying, managing, sample } = useStyleDialogs()
@@ -76,12 +78,13 @@ export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }
   if (!styleId) options.unshift({ value: '', label: 'No style' })
 
   const picker = TOOLBAR_CONTROLS.stylePicker
+  const Wrapper = bare ? Fragment : StylesToolbarGroup
   const edit = TOOLBAR_CONTROLS.styleEdit
   const manage = TOOLBAR_CONTROLS.styleManage
   const clear = TOOLBAR_CONTROLS.clearFormatting
 
   return (
-    <ToolbarGroup label="Styles" className="gap-1">
+    <Wrapper>
       {item(
         <Tooltip>
           <Select
@@ -139,6 +142,14 @@ export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }
         onModify={modifyStyle}
       />
       <ModifyStyleDialog styleId={modifying} onClose={() => modifyStyle(null)} sample={sample} />
+    </Wrapper>
+  )
+}
+
+function StylesToolbarGroup({ children }: { children: ReactNode }) {
+  return (
+    <ToolbarGroup label="Styles" className="gap-1">
+      {children}
     </ToolbarGroup>
   )
 }

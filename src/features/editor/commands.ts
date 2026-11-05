@@ -14,7 +14,7 @@ import { modifyStyle, openModifyStyle, setManagingStyles } from './styles/dialog
 import { getResolvedStyles } from './styles/resolved'
 import { TOOLBAR_CONTROLS, type ToolbarControlKey, type ToolbarControlMeta } from './toolbar/controls'
 import { markChain } from './toolbar/mark-chain'
-import { FONT_SIZES } from './toolbar/presets'
+import { FIRST_LINE_INDENTS, FONT_SIZES, LINE_SPACINGS, PARAGRAPH_SPACINGS, type Preset } from './toolbar/presets'
 import { readToolbarState } from './toolbar/toolbar-state'
 
 /**
@@ -141,6 +141,7 @@ export function editorCommands(platform: Platform = detectPlatform()): Command[]
       description: item.description,
       shortcut: typeof item.shortcut === 'string' ? item.shortcut : undefined,
       menu: { id: 'insert', group: item.id === 'footnote.insert' ? 'notes' : 'breaks', order: order[item.id] ?? 50 + i },
+      ribbon: { group: item.id === 'footnote.insert' ? 'insert.footnotes' : 'insert.breaks', order: order[item.id] ?? 50 + i },
       isEnabled: can,
       run: () => {
         const ed = ready()
@@ -242,6 +243,7 @@ export function editorCommands(platform: Platform = detectPlatform()): Command[]
       description: 'Open find and replace with the cursor in the Replace with field.',
       shortcut: 'Mod-Shift-h',
       menu: edit('find', 20),
+      ribbon: { group: 'home.editing', order: 20 },
       run: () => {
         openFind()
         // After the panel focused its query field (an effect on open).
@@ -386,11 +388,47 @@ export function fontSizeCommands(): Command[] {
 }
 
 /**
+ * Format > Line Spacing / Space After / First-Line Indent: the toolbar's paragraph presets as commands,
+ * so the menu bar and the ribbon's collapsed Paragraph group offer them too.
+ */
+export function paragraphSpacingCommands(): Command[] {
+  const list = (
+    key: 'lineSpacing' | 'spaceAfter' | 'firstLineIndent',
+    submenu: string,
+    order: number,
+    presets: readonly Preset[],
+    read: () => string,
+    apply: (ed: Editor, v: string | null) => void,
+    describe: (label: string) => string,
+  ): Command[] =>
+    presets.map((p, i) => {
+      const label = p.label.replace(/^[^:]+:\s*/, '')
+      return {
+        id: `format.${key}.${p.value || 'default'}`,
+        label: p.value ? label.charAt(0).toUpperCase() + label.slice(1) : 'Default',
+        description: p.value ? describe(label) : 'Remove the value set by hand, so the paragraph style decides.',
+        menu: { id: 'format', group: 'paragraph', order: order + i / 1000, submenu },
+        isEnabled: can,
+        isChecked: () => can() && read() === p.value,
+        run: () => {
+          const ed = ready()
+          if (ed) apply(ed, p.value || null)
+        },
+      }
+    })
+  return [
+    ...list('lineSpacing', 'Line Spacing', 34, LINE_SPACINGS, () => state().lineHeight, (ed, v) => ed.chain().focus().setBlockLineHeight(v).run(), (l) => `Set the space between lines in the paragraph to ${l}.`),
+    ...list('spaceAfter', 'Space After', 35, PARAGRAPH_SPACINGS, () => state().paragraphSpacing, (ed, v) => ed.chain().focus().setBlockSpacing(v).run(), (l) => `Leave ${l === 'none' ? 'no' : `a ${l}`} space after the paragraph.`),
+    ...list('firstLineIndent', 'First-Line Indent', 36, FIRST_LINE_INDENTS, () => state().firstLineIndent, (ed, v) => ed.chain().focus().setFirstLineIndent(v).run(), (l) => (l === 'none' ? 'Do not indent the first line of the paragraph.' : `Indent the first line of the paragraph by ${l}.`)),
+  ]
+}
+
+/**
  * Register the editor's commands (Edit, Insert and Format menus). Enabled/checked state follows the
  * selection and the undo history; the style list follows book.styles. Returns unregister.
  */
 export function registerEditorCommands(): () => void {
-  const offFixed = registerCommands([...editorCommands(), ...fontSizeCommands()])
+  const offFixed = registerCommands([...editorCommands(), ...fontSizeCommands(), ...paragraphSpacingCommands()])
   let offStyles = registerCommands(styleCommands())
   // Font families: System Default now, the installed families once the OS list arrived.
   let disposed = false
