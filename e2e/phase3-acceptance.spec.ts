@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext, type Locator, type Page } from '@pla
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
 import {
   clickBlockStart,
+  crashAndRestore,
   docEnd,
   docStart,
   editor,
@@ -11,8 +12,9 @@ import {
   openRecent,
   projectNavigation,
   readFile,
-  recoveryControl,
+  reopenProject,
   reveal,
+  saveProject,
   saveStatus,
   seedProject,
   seedProjectNavigation,
@@ -28,14 +30,16 @@ import {
  *     and Reject All (each undone);
  *  2. comments: add one, reply, resolve;
  *  3. re-write: open it on a paragraph, toggle two versions, keep one, undo the choice (the original
- *     comes back and the re-write is open again with both versions), redo;
- *  4. after every step: save, reopen, and an unsaved follow-up edit restored after a crash;
+ *     comes back and the re-write opens again with both versions), keep it again;
+ *  4. after every step: save and reopen; then more of the step's own work, unsaved, restored after a crash;
  *  5. page-turn navigation and caret follow throughout (the caret's page is on the spread shown).
  * The navigation and caret-follow checks also run in continuous scroll (the *-scroll projects).
  */
 
+/** Tests tagged BOTH_MODES also run in the *-scroll projects (continuous scroll); the rest are Book mode only. */
+const BOTH_MODES = '@both-modes'
 test.beforeEach(async ({ page }, testInfo) => {
-  test.skip(projectNavigation(testInfo) === 'scroll' && !testInfo.title.startsWith('navigation'), 'Book mode scenario (navigation runs in both)')
+  test.skip(projectNavigation(testInfo) === 'scroll' && !testInfo.tags.includes(BOTH_MODES), 'Book mode scenario (the navigation test runs in both)')
   await seedProjectNavigation(page, testInfo)
 })
 
@@ -137,38 +141,9 @@ async function reviewMenu(page: Page, id: string) {
   await page.locator(`[role="menu"] [data-control-id="${id}"]`).click()
 }
 
-async function save(page: Page) {
-  await editor(page).focus()
-  await page.keyboard.press('ControlOrMeta+s')
-  await expect(saveStatus(page)).toHaveText(`${TITLE}: Saved`, { timeout: 30_000 })
-}
-
-/** Close this window and open the project again from Open Recent (a plain reopen, no crash). */
-async function reopen(context: BrowserContext, page: Page): Promise<Page> {
-  await page.close()
-  const next = await context.newPage()
-  await launch(next)
-  await openRecent(next, FOLDER)
-  await expect(saveStatus(next)).toHaveText(`${TITLE}: All changes saved`, { timeout: 60_000 })
-  await waitForLayout(next)
-  return next
-}
-
-/** Back up the unsaved work now (the 30 s autosave), force-kill, relaunch and restore the backup. */
-async function crashAndRestore(context: BrowserContext, page: Page): Promise<Page> {
-  await expect(saveStatus(page)).toContainText('Unsaved changes')
-  expect(await page.evaluate(() => window.__nvE2E.autosaveNow())).toBe('written')
-  await expect(saveStatus(page)).toHaveText(new RegExp(`^${TITLE}: Unsaved changes · backed up \\d`))
-  await page.close({ runBeforeUnload: false })
-  const next = await context.newPage()
-  await launch(next)
-  await recoveryControl(next, 'reopen').click()
-  await expect(next.getByRole('dialog', { name: 'Restore unsaved changes?' })).toBeVisible()
-  await recoveryControl(next, 'restore').click()
-  await expect(saveStatus(next)).toContainText(`${TITLE}: Unsaved changes`, { timeout: 60_000 })
-  await waitForLayout(next)
-  return next
-}
+const save = (page: Page) => saveProject(page, TITLE)
+const reopen = (context: BrowserContext, page: Page) => reopenProject(context, page, FOLDER, TITLE)
+const crash = (context: BrowserContext, page: Page) => crashAndRestore(context, page, TITLE)
 
 /** Page-turn navigation on the long book: Ctrl+End / Ctrl+Home, PageDown / PageUp, the indicator. */
 async function checkPageNavigation(page: Page) {
@@ -279,13 +254,26 @@ test('Phase 3 acceptance: track changes, comments and a re-write on the 100k-wor
   expect((await blocks(page))[i1]).toBe(`${text(i1)} Added by the tester.`)
   await expect(await reveal(page, 'review.track')).toHaveAttribute('aria-pressed', 'true')
   await checkPageNavigation(page)
-  // An unsaved tracked edit, backed up, then a crash: restored as a change.
+  // Unsaved, then a crash: a new tracked edit, and the step's own review (accept one, reject one).
   await caretAtEnd(page, i5)
   await page.keyboard.type(' Recovered words.')
   await expect.poll(() => count(page)).toBe(3)
-  page = await crashAndRestore(context, page)
-  expect(await count(page)).toBe(3)
-  expect(await marked(page, 'insertion')).toEqual([' Second insert.', ' Recovered words.'])
+  await clickBlockStart(page, editor(page).locator('.nv-ins', { hasText: 'Second insert.' }))
+  await expect(popover(page)).toBeVisible()
+  await ctl(popover(page), 'review.popover.accept').click()
+  await expect.poll(() => count(page)).toBe(2)
+  await clickBlockStart(page, editor(page).locator('.nv-del').first())
+  await page.keyboard.press('Escape') // the popover the click opened
+  await reviewMenu(page, 'review.reject')
+  await expect.poll(() => count(page)).toBe(1)
+  page = await crash(context, page)
+  expect(await count(page)).toBe(1)
+  expect(await marked(page, 'insertion')).toEqual([' Recovered words.'])
+  expect(await marked(page, 'deletion')).toEqual([])
+  expect((await blocks(page))[i3]).toBe(`${text(i3)} Second insert.`) // accepted
+  expect((await blocks(page))[i4]).toBe(text(i4)) // rejected: the deleted words are back
+  expect((await blocks(page))[i5]).toBe(`${text(i5)} Recovered words.`)
+  await expect(await reveal(page, 'review.track')).toHaveAttribute('aria-pressed', 'true')
   await save(page)
 
   // ---- 2. Comments, in chapter 20 (recording off from the ribbon toggle).
@@ -330,7 +318,16 @@ test('Phase 3 acceptance: track changes, comments and a re-write on the 100k-wor
   await expect(cards(page)).toHaveCount(1)
   await expect(cards(page)).toContainText('Resolved by')
   await (await reveal(page, 'comment.showResolved')).click()
-  // An unsaved second comment, backed up, then a crash.
+  // Unsaved, then a crash: the thread reopened and replied to, and a second comment added and resolved.
+  await (await reveal(page, 'comment.showResolved')).click()
+  const firstCard = cards(page).filter({ hasText: 'Is this the right word?' })
+  await ctl(firstCard, 'comment.reopen').click()
+  await expect(ctl(firstCard, 'comment.resolve')).toBeVisible()
+  await (await reveal(page, 'comment.showResolved')).click()
+  await ctl(firstCard, 'comment.replyStart').click()
+  await ctl(firstCard, 'comment.replyField').fill('Reply after reopening.')
+  await ctl(firstCard, 'comment.reply').click()
+  await expect(firstCard.locator('[data-testid="comment-text"]')).toHaveCount(3)
   await clickBlockStart(page, blockEl(page, c2))
   const word2 = text(c2).split(' ')[0]
   await page.evaluate(([k, n]) => {
@@ -341,19 +338,23 @@ test('Phase 3 acceptance: track changes, comments and a re-write on the 100k-wor
   await page.keyboard.press('ControlOrMeta+Alt+m')
   await ctl(page, 'comment.composeField').fill('A second thought.')
   await page.keyboard.press('ControlOrMeta+Enter')
-  await expect(cards(page)).toHaveCount(1)
-  page = await crashAndRestore(context, page)
-  expect((await comments(page)).threads.map((t) => [t.resolved, t.messages.length])).toEqual([
-    [true, 2],
-    [false, 1],
+  const second = cards(page).filter({ hasText: 'A second thought.' })
+  await expect(second).toHaveCount(1)
+  await ctl(second, 'comment.resolve').click()
+  await expect(second).toHaveCount(0)
+  page = await crash(context, page)
+  const restored = (await comments(page)).threads.map((t) => ({ resolved: t.resolved, texts: t.messages.map((m) => m.text) }))
+  expect(restored).toEqual([
+    { resolved: false, texts: ['Is this the right word?', 'Yes, keep it.', 'Reply after reopening.'] },
+    { resolved: true, texts: ['A second thought.'] },
   ])
   // Next Comment from the start of the book turns to the open one (the resolved one is hidden).
   await editor(page).focus()
   await docStart(page)
   await page.evaluate(() => window.__nvE2E.runCommand('comment.next'))
-  await expect.poll(async () => (await page.evaluate(() => window.__nvE2E.selection()))!.from).toBeGreaterThan(await page.evaluate((k) => window.__nvE2E.blockPos(k), c2))
+  await expect.poll(async () => (await page.evaluate(() => window.__nvE2E.selection()))!.from).toBeGreaterThan(await page.evaluate((k) => window.__nvE2E.blockPos(k), c1))
   await expectCaretShown(page, 'Next Comment')
-  await expect(cards(page).filter({ hasText: 'A second thought.' })).toBeVisible()
+  await expect(cards(page).filter({ hasText: 'Reply after reopening.' })).toBeVisible()
   await save(page)
 
   // ---- 3. A re-write of one paragraph in chapter 25.
@@ -387,8 +388,16 @@ test('Phase 3 acceptance: track changes, comments and a re-write on the 100k-wor
   expect(back.status).toBe('open')
   expect(back.versions).toEqual(versions)
   await expect(editor(page).locator('.nv-rw-locked')).toHaveCount(1)
-  // Redo: kept again.
-  await page.keyboard.press('ControlOrMeta+Shift+z')
+  // Open it again in the view: both versions are there, each with its text; keep Version 2 again.
+  await page.evaluate(() => window.__nvE2E.runCommand('rewrite.next'))
+  await expect(rwView(page)).toBeVisible()
+  await rwView(page).getByRole('tab', { name: 'Version 1' }).click()
+  await expect(revision(page)).toContainText(`Suddenly ${text(r1).slice(0, 20)}`)
+  await expect(revision(page)).not.toContainText('It went on all night.')
+  await rwView(page).getByRole('tab', { name: 'Version 2' }).click()
+  await expect(revision(page)).toContainText('It went on all night.')
+  await ctl(page, 'rewrite.keepVersion').click()
+  await expect(rwView(page)).toHaveCount(0)
   await expect.poll(async () => (await blocks(page))[r1]).toBe(kept)
   expect((await rw(page)).rewrites[0]).toMatchObject({ status: 'resolved', choice: versions[1].id })
   // Save, reopen: the kept text and the resolved re-write with both versions.
@@ -400,19 +409,22 @@ test('Phase 3 acceptance: track changes, comments and a re-write on the 100k-wor
   expect((await blocks(page))[r1]).toBe(kept)
   expect((await rw(page)).rewrites[0]).toMatchObject({ status: 'resolved', choice: versions[1].id })
   await checkPageNavigation(page)
-  // An unsaved second re-write, kept as the original, backed up, then a crash.
+  // Unsaved, then a crash: a second re-write and its Keep This Version choice.
   await clickBlockStart(page, blockEl(page, r2))
   await page.keyboard.press('ControlOrMeta+Alt+w')
   await expect(revision(page)).toBeFocused()
   await page.keyboard.type('Quietly, ')
-  await ctl(page, 'rewrite.keepOriginal').click()
+  const secondVersion = (await rw(page)).rewrites[1].versions[0].id
+  await ctl(page, 'rewrite.keepVersion').click()
   await expect(rwView(page)).toHaveCount(0)
-  page = await crashAndRestore(context, page)
-  expect((await rw(page)).rewrites.map((r) => [r.status, r.choice === 'original'])).toEqual([
-    ['resolved', false],
-    ['resolved', true],
+  expect((await blocks(page))[r2]).toBe(`Quietly, ${text(r2)}`)
+  page = await crash(context, page)
+  expect((await rw(page)).rewrites.map((r) => [r.status, r.choice])).toEqual([
+    ['resolved', versions[1].id],
+    ['resolved', secondVersion],
   ])
-  expect((await blocks(page))[r2]).toBe(text(r2))
+  expect((await blocks(page))[r2]).toBe(`Quietly, ${text(r2)}`)
+  expect((await blocks(page))[r1]).toBe(kept)
 
   // Everything from every step together, after a final save and reopen.
   await save(page)
@@ -420,14 +432,15 @@ test('Phase 3 acceptance: track changes, comments and a re-write on the 100k-wor
   const all = await blocks(page)
   expect(all[r1]).toBe(kept)
   expect(all[i1]).toBe(`${text(i1)} Added by the tester.`)
-  expect(await count(page)).toBe(3)
+  expect(all[r2]).toBe(`Quietly, ${text(r2)}`)
+  expect(await count(page)).toBe(1)
   expect((await comments(page)).threads).toHaveLength(2)
   expect((await rw(page)).rewrites).toHaveLength(2)
   expect(all).toHaveLength(content.length)
   expect(headings.length).toBe(fx.chapters)
 })
 
-test('navigation and caret follow on the 100k-word book with changes and comments', async ({ page }, testInfo) => {
+test('navigation and caret follow on the 100k-word book with changes and comments', { tag: BOTH_MODES }, async ({ page }, testInfo) => {
   test.setTimeout(300_000)
   const { fx, content, paragraphsOf, text } = fixture()
   // A tracked insertion in chapter 8 and a comment in chapter 22, far apart in the book.

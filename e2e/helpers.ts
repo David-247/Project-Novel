@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, type TestInfo } from '@playwright/test'
+import { expect, type BrowserContext, type Locator, type Page, type TestInfo } from '@playwright/test'
 
 /**
  * Helpers for driving the app through the e2e fake Tauri backend
@@ -40,6 +40,43 @@ export async function newProject(page: Page, folder: string): Promise<void> {
   await menu(page, MENU.newProject)
   const name = folder.split('/').pop()!
   await expect(saveStatus(page)).toContainText(`${name}:`)
+}
+
+/** Save the open project (Mod-s from the manuscript) and wait for "<title>: Saved". */
+export async function saveProject(page: Page, title: string): Promise<void> {
+  await editor(page).focus()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(saveStatus(page)).toHaveText(`${title}: Saved`, { timeout: 30_000 })
+}
+
+/** Close this window and open `folder` again from Open Recent (a plain reopen, no crash); the new page. */
+export async function reopenProject(context: BrowserContext, page: Page, folder: string, title: string): Promise<Page> {
+  await page.close()
+  const next = await context.newPage()
+  await launch(next)
+  await openRecent(next, folder)
+  await expect(saveStatus(next)).toHaveText(`${title}: All changes saved`, { timeout: 60_000 })
+  await waitForLayout(next)
+  return next
+}
+
+/**
+ * Back up the unsaved work now (as the 30 s autosave would), force-kill the window, relaunch, and
+ * restore the backup from the recovery prompt; the new page, with the restored work unsaved.
+ */
+export async function crashAndRestore(context: BrowserContext, page: Page, title: string): Promise<Page> {
+  await expect(saveStatus(page)).toContainText('Unsaved changes')
+  expect(await page.evaluate(() => window.__nvE2E.autosaveNow())).toBe('written')
+  await expect(saveStatus(page)).toHaveText(new RegExp(`^${title}: Unsaved changes · backed up \\d`))
+  await page.close({ runBeforeUnload: false })
+  const next = await context.newPage()
+  await launch(next)
+  await recoveryControl(next, 'reopen').click()
+  await expect(next.getByRole('dialog', { name: 'Restore unsaved changes?' })).toBeVisible()
+  await recoveryControl(next, 'restore').click()
+  await expect(saveStatus(next)).toContainText(`${title}: Unsaved changes`, { timeout: 60_000 })
+  await waitForLayout(next)
+  return next
 }
 
 /** File > Open Recent > `folder` (must be in the Rust-owned recent list). */
