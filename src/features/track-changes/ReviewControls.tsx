@@ -105,7 +105,7 @@ export function TrackChangesNotice() {
   const notice = useStore((s) => s.trackChanges.notice)
   if (!notice) return null
   return (
-    <StatusText tone="warning" live role="status" data-testid="track-changes-notice" className="whitespace-normal">
+    <StatusText tone="warning" live role="status" data-testid="track-changes-notice" className="min-w-0 truncate" title={notice}>
       {notice}
     </StatusText>
   )
