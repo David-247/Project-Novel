@@ -673,11 +673,14 @@ The signature feature: a passage rewritten beside its original, compared like tw
   message dialog). Openings are compared by position: as many openings at the same block positions is a rename,
   however different the words; otherwise the paired blocks decide, so a version that demotes one title and promotes
   another asks. After a choice the view closes and the caret is
-  at the start of the passage, scrolled to its page or spread; the pages reflow from there. **Undo**: the choice is
+  at the start of the passage, brought into view through `revealPosition` (Book mode turns to its spread; continuous
+  scroll centres it); the pages reflow from there. Closing the view lifts the command gate, so page turns, the
+  wheel and PageUp / PageDown work again at once. **Undo**: the choice is
   one manuscript transaction with a `RewriteStateStep` (like the comments' thread step), so one Mod-z puts the text
   back and the re-write open again with every version; redo applies it again. Review ▸ Re-writes… lists re-writes in
   progress, then the resolved ones with their choice ("Kept Version 2", "Kept the original") and a Reopen button:
-  the passage as it is now becomes the original, beside the saved versions. Reopen takes the kept text if it is
+  the passage as it is now becomes the original, beside the saved versions (the manuscript behind the view is
+  revealed at the passage, so the choice comes back to it). Reopen takes the kept text if it is
   the only word-for-word match in the book; otherwise it ranks the candidates by the saved location (neighbouring
   paragraphs, the chapter by its title, the place in the chapter) and never guesses: a short paragraph such as
   "He nodded." elsewhere in the book is not taken; a tie, or nothing matching where it was, gives a notice.
