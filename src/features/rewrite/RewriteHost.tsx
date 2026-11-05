@@ -13,14 +13,6 @@ export interface RewriteHostProps {
   children: ReactNode
 }
 
-function scrollParent(el: HTMLElement | null): HTMLElement | null {
-  for (let n = el?.parentElement ?? null; n; n = n.parentElement) {
-    const o = getComputedStyle(n).overflowY
-    if (o === 'auto' || o === 'scroll') return n
-  }
-  return null
-}
-
 /**
  * Composition-root wrapper around the manuscript's canvas: while a re-write is open the comparison
  * view lies over it (the canvas stays mounted, laid out and scrolled where it was, so the
@@ -29,31 +21,14 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
  */
 export function RewriteHost({ children }: RewriteHostProps) {
   const open = useStore((s) => s.rewrite.openId !== null)
-  const canvasRef = useRef<HTMLDivElement>(null)
-  const saved = useRef<{ top: number; focus: boolean } | null>(null)
   const restore = useRef(false)
 
-  useEffect(
-    () =>
-      setViewHooks({
-        beforeOpen: () => {
-          const scroller = scrollParent(canvasRef.current)
-          const ed = getEditor()
-          saved.current = { top: scroller?.scrollTop ?? 0, focus: !!ed && ed.view.hasFocus() }
-        },
-        afterClose: () => {
-          restore.current = true
-        },
-      }),
-    [],
-  )
+  useEffect(() => setViewHooks({ afterClose: () => void (restore.current = true) }), [])
 
-  // Back to the manuscript: same scroll position, focus in the text (selection kept).
+  // Back to the manuscript (still scrolled where it was): the focus in the text, its selection kept.
   useLayoutEffect(() => {
     if (open || !restore.current) return
     restore.current = false
-    const scroller = scrollParent(canvasRef.current)
-    if (scroller && saved.current) scroller.scrollTop = saved.current.top
     const ed = getEditor()
     if (ed && !ed.isDestroyed) ed.view.focus()
   }, [open])
@@ -71,7 +46,6 @@ export function RewriteHost({ children }: RewriteHostProps) {
           the view's last control lands in the manuscript's view otherwise). Not `inert`: that restyles
           the whole manuscript on every open (over 200 ms at 100k words). */}
       <div
-        ref={canvasRef}
         aria-hidden={open || undefined}
         onFocusCapture={(e) => {
           if (!open) return

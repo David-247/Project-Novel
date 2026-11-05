@@ -40,7 +40,7 @@ export function setLiveView(v: LiveView | null): void {
   live = v
 }
 
-/** Host hooks: remember / restore the manuscript's scroll position around the view. */
+/** Host hooks around the view (the host gives the focus back to the manuscript after a close). */
 let hooks: { beforeOpen?: () => void; afterClose?: () => void } = {}
 export function setViewHooks(h: typeof hooks): () => void {
   hooks = h

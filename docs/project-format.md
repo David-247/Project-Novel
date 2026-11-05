@@ -9,6 +9,7 @@ My Novel/
 ├── manuscript.json   the manuscript as ProseMirror document JSON
 ├── book.json         book layout settings (trim size, margins, styles, ...); optional
 ├── comments.json     comment threads (a side file, Phase 3); optional
+├── rewrites.json     re-writes of passages and their versions (a side file, Phase 3); optional
 ├── index.sqlite      index (revisions); can be rebuilt, never the only copy of text
 └── .recovery/        crash-recovery data
     ├── manuscript.json                 current snapshot (only while there are unsaved changes)
@@ -100,6 +101,16 @@ crash recovery keep them:
 ```
 
 A manuscript without them (every Phase 1 and 2 project) loads and saves unchanged.
+
+### Re-write anchors in the manuscript
+
+Phase 3 ("rewrites.json" below). The top-level blocks of a passage being re-written (`paragraph`, `heading`,
+`bulletList`, `orderedList`, `pageBreak`, `sceneBreak`) carry `attrs.rewriteId`: the re-write's `anchor`. Written only
+when set; a manuscript without it loads and saves unchanged.
+
+```json
+{"type":"paragraph","attrs":{"rewriteId":"rw-6f1c1f0e4f4e4c559d432d6f1e0f3a10"},"content":[{"type":"text","text":"The rain came at dusk."}]}
+```
 
 ### Paragraph and chapter styles in the manuscript
 
@@ -260,8 +271,8 @@ and crash recovery treat them exactly like unsaved text.
 
 ## Side files
 
-A side file is a JSON file beside manuscript.json that belongs to one feature: `comments.json` (Phase 3; the
-re-write feature adds `rewrites.json`). All side files follow the same rules, implemented once in the storage slice
+A side file is a JSON file beside manuscript.json that belongs to one feature: `comments.json` and `rewrites.json`
+(Phase 3). All side files follow the same rules, implemented once in the storage slice
 (`src/features/storage/side-files.ts`):
 
 - **Optional.** A missing file is empty. A project without it (every Phase 1 and 2 project) opens unchanged, and
@@ -337,6 +348,59 @@ A thread:
   paste moves the comment). A comment mark without a thread (pasted from another manuscript) is dropped.
 - The SQLite index has no comments table yet (planned as an index only, rebuilt from comments.json; never the only
   copy).
+
+## rewrites.json
+
+Re-writes (Phase 3): a passage of the manuscript (whole paragraphs, at most one chapter) with the snapshot of how it
+was and one or more revised versions, compared side by side in the re-write view. Pretty-printed UTF-8 JSON; a side
+file (see "Side files": optional, saved with the manuscript, in crash recovery, guarded when damaged or newer).
+
+| Field      | Type    | Notes |
+| ---------- | ------- | ----- |
+| `version`  | integer | Format version. Current: `1`. |
+| `rewrites` | array   | Re-writes, oldest first. |
+
+A re-write:
+
+| Field              | Type    | Notes |
+| ------------------ | ------- | ----- |
+| `id`               | string  | Letters, digits, `-`, `_` (at most 64). |
+| `createdAt`        | string  | ISO 8601. |
+| `anchor`           | string  | The `rewriteId` on the passage's blocks in manuscript.json (Novel uses the `id`). |
+| `original`         | object  | The passage when the re-write began: `{"type":"doc","content":[blocks]}`, ProseMirror JSON like manuscript.json (no `rewriteId`). |
+| `versions`         | array   | Never empty: `{ id, name, doc, updatedAt }`. `doc` is a passage like `original`; `name` is the user's ("Version 1" by default). |
+| `currentVersionId` | string  | Optional: the version shown when the re-write is opened again (the last one viewed). |
+| `status`           | string  | `"open"`: in progress; the passage is read-only in the manuscript. `"resolved"`: a version was chosen; no lock. |
+| `originalChanged`  | boolean | Optional, `true` once a bulk edit (Replace All, accepting or rejecting a tracked change, undo) changed the passage after the snapshot. |
+
+```json
+{
+  "version": 1,
+  "rewrites": [
+    {
+      "id": "rw-6f1c1f0e4f4e4c559d432d6f1e0f3a10",
+      "createdAt": "2026-11-05T09:00:00.000Z",
+      "anchor": "rw-6f1c1f0e4f4e4c559d432d6f1e0f3a10",
+      "original": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "The rain came at dusk." }] }] },
+      "versions": [
+        { "id": "v-0b7d…", "name": "Version 1", "updatedAt": "2026-11-05T09:12:00.000Z",
+          "doc": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Rain came with the dusk." }] }] } }
+      ],
+      "currentVersionId": "v-0b7d…",
+      "status": "open"
+    }
+  ]
+}
+```
+
+- **Unknown keys** at the top level, in re-writes and in versions are kept. An entry this version cannot use (no valid
+  `id` or `anchor`, no `original`, no versions) is kept as it is and written back after the others; an unknown
+  `status` is kept and treated as not locking. A `rewrites` value that is not a list makes the whole file damaged.
+- **The lock.** While a re-write is `open`, typing, pasting, dropping or deleting inside its passage is refused in the
+  manuscript; Replace All, accepting or rejecting tracked changes and undo / redo still apply, and set
+  `originalChanged`. The anchor is not part of the undo history and never a tracked change.
+- **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the
+  version being typed is written into the side file at every save and every recovery snapshot.
 
 ## index.sqlite
 
