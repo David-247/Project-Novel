@@ -512,7 +512,8 @@ shown as "(missing)" and disabled in File > Open Recent. A damaged file is treat
 Not part of a project, and never written into a project folder. Per-user settings live in the same app config
 directory as the recent-projects list, as `preferences.json` (written atomically by `preferences_write` in
 `src-tauri/src/preferences.rs`, like every file Novel writes). They apply to every project on this computer and are edited
-in **Settings** (the gear in the toolbar, or Ctrl+, on Windows and Cmd+, on macOS).
+in **Settings** (File > Settings… on Windows, Novel > Settings… on macOS, the gear in the toolbar, or Ctrl+, on
+Windows and Cmd+, on macOS).
 
 ```json
 {
@@ -557,6 +558,8 @@ File > Save a Copy… writes the open project, as it is in the window (unsaved c
 folder chosen in the folder dialog, and keeps working in the open project (which stays unsaved if it was). It goes
 through the same confined storage commands as a save: the chosen folder is granted for the copy, the open project's
 folder is granted again afterwards. The copy has `manuscript.json`, `book.json` and a `project.json` with the same
-title and a new `id` (unknown keys are kept); other top-level text files of the project are copied unchanged.
+title and a new `id` (unknown keys are kept), and each side file (`comments.json`, ...) as it is in the window; a
+side file with nothing in it is not written. Other top-level text files of the project are copied unchanged (a
+damaged side file the user has not changed, too).
 `index.sqlite` and `.recovery/` are not copied (a new index is created when the copy is first opened). A folder that already
 holds a project, or the open project's own folder, is refused.

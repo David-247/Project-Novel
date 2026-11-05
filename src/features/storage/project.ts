@@ -48,6 +48,7 @@ import {
   resetSideFiles,
   restoreSideFiles,
   sideFileNames,
+  sideFilesForCopy,
   sideFilesForNewProject,
   sideFilesForSave,
   sideFilesKey,
@@ -754,10 +755,14 @@ export function closeProjectInteractive(): Promise<boolean> {
   return exclusiveFolderFlow(async () => {
     if (!getCurrentProjectPath()) return false
     if (!(await confirmUnsavedChanges('closing the project'))) return false
+    // As before New / Open: a saved project's side files get their close data (comment orphans pruned).
+    await finishSideFilesOnClose()
     const p = provider()
     if (!hasPendingRecovery() && !isProjectDirty(p)) await clearRecoveryData()
     await closeProject()
     loadDocument(p, emptyDoc())
+    // The untitled manuscript starts without the closed project's side-file data (its comments).
+    resetSideFiles(true)
     return true
   })
 }
@@ -769,16 +774,19 @@ export interface CopyDocument {
 }
 
 /**
- * INTEGRATION HOOK (Save a Copy, side files): the documents the copy takes from memory, as they are
- * in the window now (unsaved changes included). Disk copies of these names are never used. In-memory
- * side files of other features (comments.json, rewrites.json: the storage side-files registry) are
- * added HERE, so the copy gets their current state; project.json is written last, by the caller.
+ * Save a Copy: the documents the copy takes from memory, as they are in the window now (unsaved
+ * changes included), and every name whose disk copy must not be used (`handled`: these documents
+ * plus empty side files). The registered side files (comments.json, ...) come from the side-files
+ * registry; an empty one is not written. project.json is written last, by the caller.
  */
-function inMemoryCopyDocuments(p: DocumentProvider): CopyDocument[] {
-  return [
+export function inMemoryCopyDocuments(p: DocumentProvider): { docs: CopyDocument[]; handled: Set<string> } {
+  const side = sideFilesForCopy()
+  const docs = [
+    ...side.files,
     { name: MANUSCRIPT_FILE, text: serializeManuscript(p.getDocJSON()) },
     { name: BOOK_FILE, text: serializeBook(currentBookSettings()) },
   ]
+  return { docs, handled: new Set([...docs.map((d) => d.name), ...side.handled]) }
 }
 
 /**
@@ -800,10 +808,9 @@ async function saveProjectCopyUnguarded(): Promise<boolean> {
   let written: boolean
   try {
     const p = provider()
-    const docs = inMemoryCopyDocuments(p)
+    const { docs, handled: fromMemory } = inMemoryCopyDocuments(p)
     written = await withWriteLock(async () => {
       // Read before the copy's folder is granted (file commands reach only the granted root).
-      const fromMemory = new Set(docs.map((d) => d.name))
       const extras: CopyDocument[] = []
       for (const name of await listDir(source)) {
         // The index is secondary data (a new one is made on open); dot files are app internals.

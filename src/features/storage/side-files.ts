@@ -228,6 +228,24 @@ export function sideFilesForNewProject(folder: string): { files: BatchFile[]; wr
   return { files, written }
 }
 
+/**
+ * Save a Copy: each side file as it is in memory now (unsaved changes included). `files`: the ones
+ * with content (an empty one is not written). `handled`: every name the copy must not take from disk
+ * (an empty side file must not bring back a stale file). A guarded file the user has not changed is
+ * left to the disk copy, so the original (damaged, or from a newer Novel) travels unchanged.
+ */
+export function sideFilesForCopy(): { files: { name: string; text: string }[]; handled: string[] } {
+  const files: { name: string; text: string }[] = []
+  const handled: string[] = []
+  for (const { file, guard } of entries.values()) {
+    if (guard && file.getVersion() === guard.loadedVersion) continue
+    handled.push(file.name)
+    const { data, empty } = file.serialize()
+    if (!empty) files.push({ name: file.name, text: serialize(data) })
+  }
+  return { files, handled }
+}
+
 /** The batch holding these side files was written. */
 export function sideFilesSaved(names: readonly string[]): void {
   for (const name of names) {

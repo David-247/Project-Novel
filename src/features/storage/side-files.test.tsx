@@ -8,7 +8,18 @@ vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tau
 vi.mock('@tauri-apps/plugin-dialog', async () => (await import('@/test-utils/fake-tauri')).dialogModule)
 vi.mock('@tauri-apps/plugin-sql', async () => (await import('@/test-utils/fake-tauri')).sqlModule)
 
-import { AUTOSAVE_INTERVAL_MS, loadRecentProjects, newProject, openProject, registerSideFile, restoreRecovery, saveProject, startAutosave } from './index'
+import {
+  AUTOSAVE_INTERVAL_MS,
+  closeProjectInteractive,
+  loadRecentProjects,
+  newProject,
+  openProject,
+  registerSideFile,
+  restoreRecovery,
+  saveProject,
+  saveProjectCopy,
+  startAutosave,
+} from './index'
 import { __resetAutosaveForTests } from './autosave'
 import { prepareToExit } from './integration'
 import { __resetStorageForTests } from './project'
@@ -294,6 +305,56 @@ describe('project side files', () => {
     backend.pick = ROOT
     expect(await newProject()).toBe(false)
     expect(backend.messages.at(-1)?.text).toMatch(/notes\.json from an earlier project/)
+  })
+})
+
+describe('side files in Save a Copy and Close Project (File menu)', () => {
+  const COPY = '/books/copy'
+  const copyTo = async () => {
+    backend.dirs.add(COPY)
+    backend.pick = COPY
+    expect(await saveProjectCopy()).toBe(true)
+  }
+
+  it('Save a Copy takes each side file from memory, unsaved changes included', async () => {
+    await createProject()
+    side.change(['saved'])
+    expect(await saveProject()).toBe(true)
+    side.change(['saved', 'unsaved'])
+    await copyTo()
+    expect(JSON.parse(backend.files.get(`${COPY}/notes.json`)!).items).toEqual(['saved', 'unsaved'])
+    // The open project is untouched: still unsaved, its file as saved.
+    expect(onDisk().items).toEqual(['saved'])
+  })
+
+  it('Save a Copy writes no file for an empty side file, and never the stale one from disk', async () => {
+    await createProject()
+    side.change(['old'])
+    expect(await saveProject()).toBe(true)
+    side.change([])
+    await copyTo()
+    expect(backend.files.has(`${COPY}/notes.json`)).toBe(false)
+    expect(backend.files.has(`${COPY}/manuscript.json`)).toBe(true)
+  })
+
+  it('Save a Copy keeps an unchanged damaged side file as it is on disk', async () => {
+    await createProject()
+    backend.files.set(NOTES, '{ not json')
+    await launch()
+    await reopen()
+    await copyTo()
+    expect(backend.files.get(`${COPY}/notes.json`)).toBe('{ not json')
+  })
+
+  it('Close Project writes the close data of a saved project, then starts the untitled manuscript empty', async () => {
+    await createProject()
+    side.change(['keep', 'orphan'])
+    expect(await saveProject()).toBe(true)
+    side.closing = { version: 1, items: ['keep'] }
+    expect(await closeProjectInteractive()).toBe(true)
+    expect(onDisk().items).toEqual(['keep'])
+    expect(side.loads.at(-1)).toBeNull()
+    expect(side.items()).toBeUndefined()
   })
 })
 
