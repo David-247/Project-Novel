@@ -11,7 +11,7 @@ import { resolvePageGeometry } from './geometry'
 import { TurnControls } from './TurnControls'
 
 const fakeNav = (): Navigator & { [k: string]: ReturnType<typeof vi.fn> } =>
-  ({ goToPage: vi.fn(() => true), turn: vi.fn(() => true), edge: vi.fn(() => true), reveal: vi.fn(() => true) }) as never
+  ({ goToPage: vi.fn(() => true), turn: vi.fn(() => true), edge: vi.fn(() => true), reveal: vi.fn(() => true), showPage: vi.fn(() => true) }) as never
 
 const pages = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ index: i, side: i % 2 ? ('verso' as const) : ('recto' as const), from: i, to: i + 1, isBlank: false, startsBlockType: null, chapterIndex: 0 }))

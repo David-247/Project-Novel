@@ -330,6 +330,12 @@ export function PaginatedView({ children }: PaginatedViewProps) {
         scrollToRow(row)
         return true
       },
+      showPage: (index) => {
+        const count = useStore.getState().layout.pageCount
+        if (!count) return false
+        scrollToRow(live.current.placement.rowOf(Math.max(0, Math.min(count - 1, Math.trunc(index)))))
+        return true
+      },
       edge: (dir) => {
         if (!useStore.getState().layout.pageCount) return false
         scrollToRow(dir > 0 ? rowCount() - 1 : 0)

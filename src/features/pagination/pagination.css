@@ -66,7 +66,8 @@
   width: 36px;
   height: 64px;
   border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--page-fg) 22%, transparent);
+  /* Boundary at 3:1 or more against the desk on every surface (WCAG 1.4.11). */
+  border: 1px solid color-mix(in srgb, var(--page-fg) 80%, var(--page-bg));
   background: var(--page-bg);
   color: var(--page-fg);
   box-shadow: var(--page-shadow);

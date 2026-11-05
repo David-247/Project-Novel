@@ -9,6 +9,8 @@ export interface Navigator {
   /** First / last spread (view only). */
   edge: (dir: 1 | -1) => boolean
   reveal: (pos: number) => boolean
+  /** Show the spread holding page `index` (view only). */
+  showPage: (index: number) => boolean
 }
 
 let nav: Navigator | null = null
@@ -34,6 +36,14 @@ export function goToPage(index: number): boolean {
  */
 export function turnSpread(dir: 1 | -1): boolean {
   return nav?.turn(dir) ?? false
+}
+
+/**
+ * Show the spread holding page `index` (0-based): Book mode turns to it, continuous scroll scrolls it
+ * to the top. The caret does not move (Go to Page moves it).
+ */
+export function showPage(index: number): boolean {
+  return nav?.showPage(index) ?? false
 }
 
 /** Show the first (dir -1) or last (dir 1) spread. The caret does not move. */
