@@ -258,10 +258,14 @@ async function turnScenario(page: Page, testInfo: TestInfo, name: string, folder
     duringReflowMaxMs: +Math.max(...progressive.map((t) => t.ms)).toFixed(1),
     turns: all.map((t) => ({ ...t, ms: +t.ms.toFixed(1) })),
     budgets: { turnMs: 100 },
+    ciAdvisory: ['duringReflowMaxMs'],
   })
   // Functional (always blocking): every turn painted a complete spread in its first frame.
   for (const t of all) expect(t, JSON.stringify(t)).toMatchObject({ stale: 0, unpainted: 0, inside: true })
-  for (const t of all) budget(testInfo, 'page turn: fully drawn spread ms', t.ms, 100)
+  for (const t of turns) budget(testInfo, 'page turn: fully drawn spread ms', t.ms, 100)
+  // CI-advisory (decision f040009b): GitHub's free Windows runner misses this one for runner reasons
+  // (103-120 ms there, about 58 ms on a desktop). Reported in CI, blocking locally.
+  for (const t of progressive) budget(testInfo, 'page turn during a trim reflow: fully drawn spread ms', t.ms, 100, { ciAdvisory: true })
 }
 
 test('100k words, Book mode: a page turn shows a fully drawn spread < 100 ms (also during a progressive reflow)', async ({ page }, testInfo) => {

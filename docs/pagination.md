@@ -123,7 +123,12 @@ macOS runner is a shared 3-core M1 that misses the WebKit trim reflow and style 
 commits that change no app code, so in CI a macOS miss is also a warning; only Windows Chromium
 blocks. Outside CI (no `CI` env var) the macOS WebKit budgets block as before: run the perf specs on a
 real Mac to enforce them. Any other CI check that keeps failing for runner rather than app reasons
-is demoted or cut the same way. The gate is
+is demoted or cut the same way: a measure is made **CI-advisory** with `budget(..., { ciAdvisory: true })`
+(reported in CI on every pair, marked "CI-advisory: not blocking" in the perf summary through the
+result's `ciAdvisory` keys; blocking outside CI on the shipping pairs as usual). Only one is: Book
+mode's **page turn during a trim reflow** (`e2e/pagination-perf.spec.ts`, `duringReflowMaxMs`), which
+GitHub's free Windows runner misses at 103-120 ms while a desktop measures about 58 ms; the ordinary
+page turns stay blocking. The gate is
 `budget(testInfo, name, value, limit)` in `e2e/budget.ts`, used by the perf specs and by the
 paste-keystroke check in `e2e/editor.spec.ts`. Functional assertions and the cross-engine
 pagination tolerance stay blocking everywhere.

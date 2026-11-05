@@ -13,10 +13,16 @@ export const isShipping = (r) => SHIPPING.has(`${engineOf(r.browser)}|${r.platfo
 /** Whether a miss failed the CI job: a shipping pair, except macOS (decision f040009b). */
 export const isBlocking = (r) => isShipping(r) && r.platform !== 'darwin'
 const v = (n) => (n === undefined || n === null ? '–' : String(n))
-/** "12.3" plus a miss marker against `limit` (MISS where it blocks CI, warning elsewhere). */
-const cell = (r, n, limit) => {
+/** A measure the result lists as CI-advisory (e2e/budget.ts `ciAdvisory`): reported, never blocking in CI. */
+export const isAdvisory = (r, key) => Array.isArray(r.ciAdvisory) && r.ciAdvisory.includes(key)
+/**
+ * "12.3" plus a miss marker against `limit` (MISS where it blocks CI, warning elsewhere; a CI-advisory
+ * measure, named by its result key, is marked report-only).
+ */
+const cell = (r, n, limit, key) => {
   if (n === undefined || n === null) return '–'
   if (limit === undefined || n < limit) return String(n)
+  if (key && isAdvisory(r, key)) return `**${n}** (miss, CI-advisory: not blocking)`
   return `**${n}** (${isBlocking(r) ? 'MISS' : 'miss, warning'})`
 }
 const pair = (r) => `${engineOf(r.browser)} / ${r.platform}${isShipping(r) ? ' (shipping)' : ''}`
@@ -76,6 +82,15 @@ export function toMarkdown(results, dir = 'perf-results') {
         md.push(`| ${r.scenario} | ${pair(r)} | – | ${cell(r, e.ms, 1000)} | ${cell(r, e.allDrawnMs, 3000)} | – |`)
       }
     }
+    md.push('')
+  }
+
+  const turns = results.filter((r) => r.turnMedianMs !== undefined)
+  if (turns.length) {
+    md.push('#### Book mode page turn (fully drawn spread < 100 ms)', '')
+    md.push('| scenario | engine / OS | median ms | max ms | max during a trim reflow ms |', '| --- | --- | --- | --- | --- |')
+    for (const r of turns)
+      md.push(`| ${r.scenario} | ${pair(r)} | ${v(r.turnMedianMs)} | ${cell(r, r.turnMaxMs, 100)} | ${cell(r, r.duringReflowMaxMs, 100, 'duringReflowMaxMs')} |`)
     md.push('')
   }
 

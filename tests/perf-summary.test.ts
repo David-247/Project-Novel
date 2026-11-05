@@ -26,6 +26,21 @@ describe('perf summary', () => {
     expect(md).toMatch(/\| perf \| webkit \/ darwin \(shipping\) \| \*\*55\*\* \(miss, warning\) \|/)
   })
 
+  it('page turns: a CI-advisory measure is reported as not blocking, the others as usual (decision f040009b)', () => {
+    const md = toMarkdown([
+      {
+        scenario: 'pagination-turn',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        turnMedianMs: 10,
+        turnMaxMs: 120,
+        duringReflowMaxMs: 107.5,
+        ciAdvisory: ['duringReflowMaxMs'],
+      },
+    ])
+    expect(md).toMatch(/\| pagination-turn \| chromium \/ win32 \(shipping\) \| 10 \| \*\*120\*\* \(MISS\) \| \*\*107\.5\*\* \(miss, CI-advisory: not blocking\) \|/)
+  })
+
   it('tabulates typing, trim reflow, style edit and Replace All; marks misses by pair', () => {
     const md = toMarkdown([
       { scenario: 'perf-combined', browser: 'perf-webkit', platform: 'darwin', openMs: 900, typing: { medianMs: 12.5, p95Ms: 30, maxMs: 41 } },
