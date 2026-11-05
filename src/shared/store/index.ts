@@ -6,6 +6,7 @@ import { createFindSlice } from './find-slice'
 import { createBookSlice } from './book-slice'
 import { createLayoutSlice } from './layout-slice'
 import { createPreferencesSlice } from './preferences-slice'
+import { createCommentsSlice } from './comments-slice'
 import type { RootState } from './types'
 
 /**
@@ -23,6 +24,7 @@ export const useStore = create<RootState>()((...a) => ({
   ...createBookSlice(...a),
   ...createLayoutSlice(...a),
   ...createPreferencesSlice(...a),
+  ...createCommentsSlice(...a),
 }))
 
 export { useColorSchemeSync } from './use-color-scheme-sync'
@@ -43,4 +45,5 @@ export {
 } from './preferences-file'
 export type { ParsedPreferences } from './preferences-file'
 export { setSystemAuthorName } from './preferences-slice'
+export type { CommentsSlice, CommentThread, CommentMessage } from './comments-slice'
 export type { RootState, SliceCreator } from './types'

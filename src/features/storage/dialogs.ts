@@ -25,6 +25,18 @@ export async function showNotice(title: string, text: string): Promise<void> {
   }
 }
 
+/**
+ * After a Save that left something unsaved (`detail` says which file and why): stay (Cancel), or go on
+ * with the changes kept only in the crash-recovery backup (`continueLabel`).
+ */
+export async function askLeftUnsaved(detail: string, continueLabel: string): Promise<'continue' | 'cancel'> {
+  const result = await message(
+    `${detail} Your other changes were saved. If you go on now, the unsaved changes are kept only in the automatic backup, which Novel offers to restore the next time you open the project.`,
+    { title: 'Some changes were not saved', kind: 'warning', buttons: { ok: continueLabel, cancel: 'Cancel' } },
+  )
+  return result === continueLabel || result === 'Ok' ? 'continue' : 'cancel'
+}
+
 export type UnsavedChoice = 'save' | 'discard' | 'cancel'
 
 /** Three-way unsaved-changes prompt. */

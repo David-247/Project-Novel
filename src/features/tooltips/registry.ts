@@ -13,6 +13,7 @@
  */
 import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
+import { COMMENT_CONTROLS } from '@/features/comments'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
@@ -267,6 +268,13 @@ const SETTINGS_DESCRIPTIONS: Record<keyof typeof SETTINGS_CONTROLS, string> = {
   promptSave: 'Keep this name and continue.',
   promptSkip: 'Continue without a name. You can add one later in Settings.',
 }
+/** Comments: toolbar buttons, the margin panel / drawer and the thread cards (comments slice). */
+const COMMENT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(COMMENT_CONTROLS).map((c): [string, TooltipCopy] => [
+    c.id,
+    { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+  ]),
+)
 
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
@@ -323,6 +331,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...INSERT_TOOLTIPS,
   ...FOOTNOTE_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
+  ...COMMENT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,
 })

@@ -11,6 +11,7 @@ import { footnotesOf } from './numbering'
 import { getFootnotes } from './api'
 import { activeFootnoteView, flattenPasted } from './FootnoteEditor'
 import { Fragment, Slice } from '@tiptap/pm/model'
+import { newComment, submitDraft } from '@/features/comments'
 
 beforeAll(installLayoutPolyfills)
 afterEach(() => {
@@ -185,6 +186,32 @@ describe('footnote editor (nested view, unified undo)', () => {
     })
     expect(getFootnoteEditing()).toBeNull()
     expect(ed.state.selection.from).toBe(2 + ed.state.doc.firstChild!.child(1).nodeSize)
+  })
+
+  it('pasting commented text into a note follows the comment paste rule of the manuscript', async () => {
+    const ed = mount([p(text('quick'), fn('note'))])
+    act(() => void ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, 1, 6))))
+    act(() => void newComment())
+    let id: string | null = null
+    act(() => void (id = submitDraft('about this')))
+    expect(id).not.toBeNull()
+    const copied = ed.state.doc.slice(1, 6)
+    await openOn(ed, 6)
+    const inner = activeFootnoteView()!
+    const paste = (s: Slice) => {
+      let out = s
+      inner.someProp('transformPasted', (f) => void (out = f(out, inner, false)))
+      let marked = false
+      out.content.descendants((n) => void (marked ||= n.marks.some((m) => m.type.name === 'comment' && m.attrs.id === id)))
+      return marked
+    }
+    // A copy while the thread is anchored in the manuscript: no duplicate anchor in the note.
+    expect(paste(copied)).toBe(false)
+    // After a cut the thread is no longer anchored: pasting into the note moves it there.
+    act(() => void ed.view.dispatch(ed.state.tr.delete(1, 6)))
+    expect(paste(copied)).toBe(true)
+    act(() => closeFootnoteEditor())
+    act(() => useStore.getState().commentsActions.threadsChanged([], 0))
   })
 
   it('closes when its footnote is deleted from the manuscript', async () => {

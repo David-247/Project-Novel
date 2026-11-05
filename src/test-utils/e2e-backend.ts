@@ -15,12 +15,13 @@
  * and folder picker through `window.__nvE2E` (see e2e/helpers.ts).
  */
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getEditor, getFootnotes, setDocJSON } from '@/features/editor'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
 import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
+import { commentsDebug } from '@/features/comments'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
 import { getCommands } from '@/shared/commands'
@@ -274,6 +275,32 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     syncSelection: () => {
       const view = getEditor()?.view as unknown as { domObserver?: { flush(): void } } | undefined
       view?.domObserver?.flush()
+    },
+    // ---- Comments (Phase 3) ----
+    /** Start recording when each layoutVersion is published (performance.now()); returns the record. */
+    watchLayoutPublishes: () => {
+      const times: Record<number, number> = {}
+      useStore.subscribe((st, prev) => {
+        if (st.layout.layoutVersion !== prev.layout.layoutVersion) times[st.layout.layoutVersion] = performance.now()
+      })
+      ;(window as unknown as { __nvLayoutTimes: Record<number, number> }).__nvLayoutTimes = times
+    },
+    layoutPublishedAt: (version: number) => (window as unknown as { __nvLayoutTimes?: Record<number, number> }).__nvLayoutTimes?.[version] ?? null,
+    /** Select document positions `from..to` in the manuscript (as a mouse drag would). */
+    selectText: (from: number, to: number) => {
+      const view = getEditor()?.view
+      if (!view) return
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)))
+    },
+    /** Selection of the manuscript. */
+    selection: () => {
+      const s = getEditor()?.state.selection
+      return s ? { from: s.from, to: s.to } : null
+    },
+    /** The comments mirror (threads, active thread) and the last margin-panel layout. */
+    comments: () => {
+      const c = useStore.getState().comments
+      return { threads: c.threads, activeId: c.activeId, showResolved: c.showResolved, layout: { ...commentsDebug } }
     },
     /** book.styles as stored (overrides only). */
     bookStyles: () => useStore.getState().book.styles,

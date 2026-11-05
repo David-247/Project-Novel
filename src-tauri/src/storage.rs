@@ -96,6 +96,14 @@ fn is_symlink(path: &Path) -> bool {
 /// either the old file or the new one, never a partial file. A target that is
 /// a symlink is refused.
 pub fn write_atomic(target: &Path, contents: &[u8]) -> Result<()> {
+    let tmp = stage_atomic(target, contents)?;
+    commit_atomic(tmp, target)
+}
+
+/// First half of an atomic write: the checks, then the temp file written and
+/// fsynced next to `target`. Nothing visible changes yet; dropping the result
+/// deletes the temp file.
+fn stage_atomic(target: &Path, contents: &[u8]) -> Result<tempfile::NamedTempFile> {
     let file_name = target
         .file_name()
         .ok_or_else(|| StorageError::invalid(format!("No file name in {}", target.display())))?;
@@ -125,11 +133,43 @@ pub fn write_atomic(target: &Path, contents: &[u8]) -> Result<()> {
     // On any error below, dropping `tmp` deletes the temp file.
     tmp.write_all(contents).map_err(|e| StorageError::io(target, e))?;
     tmp.as_file().sync_all().map_err(|e| StorageError::io(target, e))?;
+    Ok(tmp)
+}
+
+/// Second half: rename the staged temp file over `target`, then persist the
+/// rename itself (directory entry; not supported on Windows).
+fn commit_atomic(tmp: tempfile::NamedTempFile, target: &Path) -> Result<()> {
     persist_retrying(tmp, target).map_err(|e| StorageError::io(target, e))?;
-    // Persist the rename itself (directory entry). Not supported on Windows.
     #[cfg(unix)]
-    if let Ok(d) = fs::File::open(dir) {
-        let _ = d.sync_all();
+    if let Some(dir) = target.parent() {
+        if let Ok(d) = fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
+}
+
+/// Write several files as one save, as close to all-or-nothing as the file
+/// system allows. Every file is staged first (temp file written and fsynced);
+/// if any staging step fails, every temp file is deleted and no target has
+/// changed. Only then are the temp files renamed over their targets, back to
+/// back, in the given order. A failure (or a crash) during that rename phase
+/// can leave the files renamed before it replaced and the rest unchanged; each
+/// file on its own is still wholly old or wholly new. Callers put the file the
+/// others depend on (the manuscript) last.
+pub fn write_atomic_batch(files: &[(PathBuf, Vec<u8>)]) -> Result<()> {
+    for (i, (a, _)) in files.iter().enumerate() {
+        if files[..i].iter().any(|(b, _)| b == a) {
+            return Err(StorageError::invalid(format!("{} is listed twice", a.display())));
+        }
+    }
+    let mut staged = Vec::with_capacity(files.len());
+    for (target, contents) in files {
+        staged.push((stage_atomic(target, contents)?, target));
+    }
+    for (tmp, target) in staged {
+        // On failure the temp files not renamed yet are dropped (deleted).
+        commit_atomic(tmp, target)?;
     }
     Ok(())
 }
@@ -336,6 +376,29 @@ pub async fn storage_write_file_atomic(
 ) -> Result<()> {
     let target = resolve_for_write(&current_root(&state)?, &path)?;
     tauri::async_runtime::spawn_blocking(move || write_atomic(&target, contents.as_bytes()))
+        .await
+        .map_err(lock_err)?
+}
+
+/// One file of a `storage_write_files_atomic` batch.
+#[derive(Debug, Deserialize)]
+pub struct FileWrite {
+    pub path: String,
+    pub contents: String,
+}
+
+/// Atomically write several UTF-8 text files inside the open project folder
+/// as one save (the manuscript and its side files such as `comments.json`):
+/// every file is staged before any is replaced (see `write_atomic_batch`).
+/// Runs off the main thread.
+#[tauri::command]
+pub async fn storage_write_files_atomic(state: State<'_, ProjectRoot>, files: Vec<FileWrite>) -> Result<()> {
+    let root = current_root(&state)?;
+    let mut resolved = Vec::with_capacity(files.len());
+    for f in files {
+        resolved.push((resolve_for_write(&root, &f.path)?, f.contents.into_bytes()));
+    }
+    tauri::async_runtime::spawn_blocking(move || write_atomic_batch(&resolved))
         .await
         .map_err(lock_err)?
 }
@@ -731,6 +794,44 @@ mod tests {
         write_atomic(&dir.join("manuscript.json"), b"doc").unwrap();
         assert_eq!(fs::read_to_string(&victim).unwrap(), "precious");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn batch_write_replaces_every_file_and_leaves_no_temp() {
+        let dir = temp_dir("batch");
+        fs::write(dir.join("manuscript.json"), "old").unwrap();
+        write_atomic_batch(&[
+            (dir.join("comments.json"), b"c".to_vec()),
+            (dir.join("manuscript.json"), b"m".to_vec()),
+        ])
+        .unwrap();
+        assert_eq!(fs::read_to_string(dir.join("comments.json")).unwrap(), "c");
+        assert_eq!(fs::read_to_string(dir.join("manuscript.json")).unwrap(), "m");
+        assert_eq!(entries(&dir), vec!["comments.json", "manuscript.json"]);
+    }
+
+    #[test]
+    fn batch_write_changes_nothing_when_a_file_cannot_be_staged() {
+        let dir = temp_dir("batch-fail");
+        fs::write(dir.join("manuscript.json"), "old").unwrap();
+        let err = write_atomic_batch(&[
+            (dir.join("comments.json"), b"c".to_vec()),
+            (dir.join("missing").join("x.json"), b"x".to_vec()),
+            (dir.join("manuscript.json"), b"m".to_vec()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.kind, "not_found");
+        assert_eq!(fs::read_to_string(dir.join("manuscript.json")).unwrap(), "old");
+        assert_eq!(entries(&dir), vec!["manuscript.json"]);
+    }
+
+    #[test]
+    fn batch_write_refuses_a_file_listed_twice() {
+        let dir = temp_dir("batch-dup");
+        let t = dir.join("comments.json");
+        let err = write_atomic_batch(&[(t.clone(), b"a".to_vec()), (t, b"b".to_vec())]).unwrap_err();
+        assert_eq!(err.kind, "invalid_path");
+        assert!(entries(&dir).is_empty());
     }
 
     #[test]

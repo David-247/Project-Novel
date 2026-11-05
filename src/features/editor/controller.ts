@@ -1,6 +1,6 @@
 import { getSchema, type Editor, type JSONContent } from '@tiptap/core'
 import type { Node as PMNode, Schema } from '@tiptap/pm/model'
-import { EditorState } from '@tiptap/pm/state'
+import { EditorState, type Transaction } from '@tiptap/pm/state'
 import { useStore } from '@/shared/store'
 import { createEditorExtensions } from './extensions'
 
@@ -92,10 +92,17 @@ export function attachEditor(editor: Editor): () => void {
     docListeners.forEach((cb) => cb())
   }
   editor.on('update', onUpdate)
+  // A document step that leaves the text equal (a comment thread change, its undo) is still an
+  // unsaved change: Tiptap emits no 'update' for it.
+  const onTransaction = ({ editor: ed, transaction: tr }: { editor: Editor; transaction: Transaction }) => {
+    if (tr.docChanged && !tr.getMeta('preventUpdate') && tr.before.eq(tr.doc)) onUpdate({ editor: ed })
+  }
+  editor.on('transaction', onTransaction)
   notify(editorListeners)
 
   return () => {
     editor.off('update', onUpdate)
+    editor.off('transaction', onTransaction)
     if (current !== editor) return
     if (!editor.isDestroyed) {
       // Keep the content reachable via getDocJSON() and restorable on remount.

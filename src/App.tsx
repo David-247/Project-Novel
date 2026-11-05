@@ -31,6 +31,7 @@ import { PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls 
 import { FootnoteOptionsButton, registerFootnoteCommands, useFootnotePagination } from '@/features/footnotes'
 import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
 import { SettingsButton, SettingsDialog, useSettingsIntegration } from '@/features/settings'
+import { CommentsLayout, CommentsPanelButton, NewCommentButton, registerCommentsSideFile } from '@/features/comments'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
@@ -74,6 +75,8 @@ export function App() {
     return () => offs.forEach((off) => off())
   }, [])
   useAppMenus()
+  // comments.json is saved, autosaved and recovered with the manuscript (storage side file).
+  useEffect(() => registerCommentsSideFile(), [])
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
@@ -120,6 +123,15 @@ export function App() {
                     </ToolbarItem>
                   </ToolbarGroup>
                   <ToolbarSeparator />
+                  <ToolbarGroup label="Comments">
+                    <ToolbarItem>
+                      <NewCommentButton />
+                    </ToolbarItem>
+                    <ToolbarItem>
+                      <CommentsPanelButton />
+                    </ToolbarItem>
+                  </ToolbarGroup>
+                  <ToolbarSeparator />
                   <ToolbarGroup label="App">
                     <ToolbarItem>
                       <SettingsButton />
@@ -138,9 +150,12 @@ export function App() {
             <div className="pointer-events-none sticky top-0 z-10 flex h-0 items-start justify-end px-2 sm:px-4">
               <FindReplacePanel className="pointer-events-auto mt-2" />
             </div>
-            <PaginatedView>
-              <NovelEditor paged />
-            </PaginatedView>
+            {/* The comments margin panel sits beside the pages (a drawer in a narrow window). */}
+            <CommentsLayout>
+              <PaginatedView>
+                <NovelEditor paged />
+              </PaginatedView>
+            </CommentsLayout>
           </>
         }
         statusBar={

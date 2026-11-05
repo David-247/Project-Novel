@@ -436,7 +436,9 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
 
 - **Spread** by default; **single page** when `book.view === 'single'` or when two pages would be
   narrower than 75 % of their size in the window (`MIN_READABLE_SPREAD_SCALE`). Page breaks never
-  depend on the view or the zoom.
+  depend on the view or the zoom. The width that counts is the desk's own (`PaginatedView`'s host),
+  so something beside it in the scrolling editor region (the comments margin panel, Phase 3) narrows
+  the room for the pages, and the fit zooms fit the pages into what is left.
 - **Zoom** (status bar): Fit spread (default; the whole spread fits the window), Fit width, and 50 %
   to 200 % steps; zoom out / in step through the presets. A CSS transform, so zoom never changes
   line breaking.

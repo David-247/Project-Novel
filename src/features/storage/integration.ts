@@ -8,6 +8,7 @@ import { exitApp, MENU_EVENTS } from './ipc'
 import {
   clearRecoveryData,
   confirmUnsavedChanges,
+  finishSideFilesOnClose,
   hasPendingRecovery,
   loadRecentProjects,
   newProject,
@@ -32,6 +33,7 @@ export function prepareToExit(action: 'closing' | 'quitting'): Promise<boolean> 
   exitFlow ??= (async () => {
     try {
       if (!(await confirmUnsavedChanges(action))) return false
+      await finishSideFilesOnClose()
       await stopAutosave()
       // A preference changed in the last 300 ms must not be lost to the exit (never rejects).
       await flushPreferences()

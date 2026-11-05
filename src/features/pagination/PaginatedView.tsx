@@ -89,7 +89,9 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     const measure = () => {
       frame = 0
       const next = {
-        width: scroller.clientWidth,
+        // The desk's own width: something beside it in the scroller (the comments margin panel)
+        // narrows the room for the pages. Without a neighbour this equals the scroller's width.
+        width: Math.min(scroller.clientWidth, hostRef.current?.clientWidth || scroller.clientWidth),
         height: scroller.clientHeight,
         top: scroller.scrollTop,
         canvasTop: canvasTopIn(scroller, sizerRef.current),

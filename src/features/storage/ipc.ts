@@ -8,6 +8,7 @@ export const COMMANDS = {
   restoreProjectRoot: 'storage_restore_project_root',
   clearProjectRoot: 'storage_clear_project_root',
   writeFileAtomic: 'storage_write_file_atomic',
+  writeFilesAtomic: 'storage_write_files_atomic',
   readTextFile: 'storage_read_text_file',
   pathExists: 'storage_path_exists',
   ensureDir: 'storage_ensure_dir',
@@ -133,6 +134,30 @@ export async function writeFileAtomic(path: string, contents: string, fileLabel 
     await invoke(COMMANDS.writeFileAtomic, { path, contents })
   } catch (e) {
     throw toProjectError(e, fileLabel)
+  }
+}
+
+/** One file of a batch write. */
+export interface BatchFile {
+  path: string
+  contents: string
+  /** Name used in error messages. */
+  label: string
+}
+
+/**
+ * Write several files as one save (Rust `storage_write_files_atomic`): every file is staged (temp file
+ * written and fsynced) before any is renamed over its target, so a failure while staging changes
+ * nothing. The renames then run back to back in the given order: put the manuscript last.
+ */
+export async function writeFilesAtomic(files: readonly BatchFile[]): Promise<void> {
+  if (files.length === 0) return
+  try {
+    await invoke(COMMANDS.writeFilesAtomic, { files: files.map(({ path, contents }) => ({ path, contents })) })
+  } catch (e) {
+    // Rust names the file in its message; the label of the first one is the friendliest fallback.
+    const named = files.find((f) => typeof (e as { message?: unknown })?.message === 'string' && (e as { message: string }).message.includes(f.path))
+    throw toProjectError(e, (named ?? files[files.length - 1]).label)
   }
 }
 

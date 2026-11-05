@@ -446,7 +446,7 @@ describe('crash recovery of book settings', () => {
     expect(backend.files.has(RECOVERY)).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
     const snap = parseRecovery(backend.files.get(RECOVERY)!)!
-    expect(snap.version).toBe(2)
+    expect(snap.version).toBe(3)
     expect(snap.book?.trimSize).toBe('uk-royal')
     expect(onDisk().trimSize).toBe('us-5.5x8.5') // never over book.json
   })

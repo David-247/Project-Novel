@@ -68,6 +68,8 @@ describe('tooltip coverage (every control in the app has a registered, wired too
         'settings.open',
         'insert.menu',
         'footnote.options',
+        'comment.new',
+        'comment.panel',
         'file.new_project',
         'file.open_project',
         // The in-app menu bar's titles (its items are covered in App.menus.test.tsx).
