@@ -200,9 +200,9 @@ test('the ribbon: Review > Re-write opens it; in the view its buttons follow the
   // Manuscript-wide controls are off, registry buttons and slice controls alike.
   for (const id of ['comment.new', 'review.track', 'ribbon.cmd.review.change.next', 'find.open']) await expect(ctl(ribbon, id), id).toBeDisabled()
   // Home > Bold with the pointer bolds the revision's selection, not the hidden manuscript.
+  // (The revision has the focus at the start of the passage; a press on a tab does not take it.)
   await ctl(ribbon, 'ribbon.tab.home').click()
-  await revision(page).click()
-  await page.keyboard.press('ControlOrMeta+Home')
+  await expect(revision(page)).toBeFocused()
   for (let i = 0; i < 8; i++) await page.keyboard.press('Shift+ArrowRight')
   await ctl(ribbon, 'toolbar.bold').click()
   await expect(revision(page).locator('strong')).toHaveCount(1)
