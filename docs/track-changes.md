@@ -171,9 +171,13 @@ change) or `null` when there is nothing to do.
   the text is split at the range's ends and the rest stays pending with the same id, author and date.
   Plain text between two pieces of one change does not count as touching it. A **paragraph mark** (the
   boundary of a split or join: `trackedInsert` / `trackedDelete` on a textblock) is resolved only when
-  the range includes it, i.e. starts at or before the block's first position (`from <= pos + 1`) and
-  reaches it: a letter selected in the middle of an inserted paragraph rejects that letter, not the
-  break before the paragraph. A footnote reference (an atom), a break (a leaf block) and a paragraph
+  the range includes the boundary itself, as in Word, where the mark ends the previous paragraph: the
+  range starts at or before the block's position and goes past it (`from <= pos && to > pos`). A
+  selection starting at the block's first letter, or covering just that whole paragraph, does not
+  include it (a whole-paragraph selection includes the next block's mark instead, when it reaches into
+  it); a letter selected in an inserted paragraph rejects that letter, not the break before it. The
+  first block of the document has no paragraph before it: its mark is resolved only by a caret, Next
+  Change, Select All (an AllSelection from 0) or Accept / Reject All. A footnote reference (an atom), a break (a leaf block) and a paragraph
   style change are resolved **whole** whenever the range touches them. An empty range (a caret)
   resolves, whole, every change the caret is on: the marks beside it, an adjacent break and the blocks
   holding it (not a change whose pieces merely lie on both sides of plain text).

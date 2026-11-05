@@ -198,9 +198,10 @@ function resolve(state: EditorState, filter: Filter, mode: Mode, clip?: { from: 
     const del = node.attrs[TRACKED_DELETE_ATTR] as ChangeStamp | null
     const style = node.attrs[TRACKED_STYLE_ATTR] as StyleChangeStamp | null
     // A paragraph mark (the boundary before a textblock: a split or join) only when the range
-    // includes it, i.e. reaches from the previous block (or this one's start) into this block, as
-    // in Word. A break (a leaf block) and a style change: whenever the range touches the block.
-    const markInRange = !range || node.isLeaf || (range.from <= pos + 1 && range.to >= pos + 1)
+    // includes the boundary itself, as in Word, where the mark ends the previous paragraph: the range
+    // starts at or before `pos` and goes past it. A selection starting at the block's first letter
+    // does not include it. A break (a leaf block) and a style change: whenever the range touches it.
+    const markInRange = !range || node.isLeaf || (range.from <= pos && range.to > pos)
     const hitIns = !!ins && markInRange && filter(ins.id)
     const hitDel = !!del && markInRange && filter(del.id)
     const hitStyle = !!style && filter(style.id)

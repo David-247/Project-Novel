@@ -236,8 +236,16 @@ describe('semantics', () => {
       const a = apply(split, acceptChangesInRange(split, 2, 6))
       expect(texts(a.doc)).toEqual(['ab', 'cdef'])
       expect(ids(a.doc)).toEqual([])
-      // From the start of the paragraph: included too.
-      expect(texts(apply(split, rejectChangesInRange(split, 5, 7)).doc)).toEqual(['abcdef'])
+      // From the paragraph's first letter: the mark (the end of "ab") is not included.
+      expect(rejectChangesInRange(split, 5, 7)).toBeNull()
+      expect(rejectChangesInRange(split, 5, 6)).toBeNull()
+      expect(acceptChangesInRange(split, 5, 6)).toBeNull()
+      // Ending exactly at the paragraph's first position, from "ab": included.
+      expect(texts(apply(split, rejectChangesInRange(split, 2, 5)).doc)).toEqual(['abcdef'])
+      // Ending at the boundary itself (the end of "ab"): not past it, not included.
+      expect(rejectChangesInRange(split, 2, 3)).toBeNull()
+      // The whole of the new paragraph alone: its own mark (before it) is not included.
+      expect(rejectChangesInRange(split, 5, 9)).toBeNull()
 
       const join = state([p([t('ab')]), p([t('cdef')], { trackedDelete: stamp('j') })])
       expect(acceptChangesInRange(join, 7, 8)).toBeNull()
@@ -246,6 +254,19 @@ describe('semantics', () => {
       const r = apply(join, rejectChangesInRange(join, 1, 6))
       expect(texts(r.doc)).toEqual(['ab', 'cdef'])
       expect(ids(r.doc)).toEqual([])
+
+      // A first-letter selection of a joined paragraph: the join stays.
+      expect(acceptChangesInRange(join, 5, 6)).toBeNull()
+
+      // Select All (AllSelection 0..size) resolves every change, the first block's mark included.
+      const first = state([p([t('ab')], { trackedInsert: stamp('f0') }), p([t('cd', [ins('c')])], { trackedDelete: stamp('j2') })])
+      const all = apply(first, acceptChangesInRange(first, 0, first.doc.content.size))
+      expect(ids(all.doc)).toEqual([])
+      expect(texts(all.doc)).toEqual(['abcd'])
+      // A text selection of everything (1..size-1) cannot reach the first block's mark (no paragraph
+      // before it): that mark goes by caret, Next Change or Accept / Reject All.
+      const text = apply(first, acceptChangesInRange(first, 1, first.doc.content.size - 1))
+      expect(ids(text.doc)).toEqual(['f0'])
 
       // An inserted paragraph: one selected letter rejects that letter only; the break and the rest stay.
       const inserted = state([p([t('ab')]), p([t('new', [ins('n')])], { trackedInsert: stamp('n') })])
