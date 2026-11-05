@@ -197,8 +197,12 @@ function resolve(state: EditorState, filter: Filter, mode: Mode, clip?: { from: 
     const ins = node.attrs[TRACKED_INSERT_ATTR] as ChangeStamp | null
     const del = node.attrs[TRACKED_DELETE_ATTR] as ChangeStamp | null
     const style = node.attrs[TRACKED_STYLE_ATTR] as StyleChangeStamp | null
-    const hitIns = !!ins && filter(ins.id)
-    const hitDel = !!del && filter(del.id)
+    // A paragraph mark (the boundary before a textblock: a split or join) only when the range
+    // includes it, i.e. reaches from the previous block (or this one's start) into this block, as
+    // in Word. A break (a leaf block) and a style change: whenever the range touches the block.
+    const markInRange = !range || node.isLeaf || (range.from <= pos + 1 && range.to >= pos + 1)
+    const hitIns = !!ins && markInRange && filter(ins.id)
+    const hitDel = !!del && markInRange && filter(del.id)
     const hitStyle = !!style && filter(style.id)
     if (!hitIns && !hitDel && !hitStyle) return !node.isTextblock
     let type = node.type
@@ -244,7 +248,16 @@ const one = (id: string): Filter => (x) => x === id
 const all: Filter = (x) => typeof x === 'string'
 /** Changes containing a collapsed caret at `pos` (resolved whole). */
 function atCaret(state: EditorState, pos: number): Filter {
-  const ids = new Set(listChanges(state.doc).filter((c) => c.from <= pos && c.to >= pos).map((c) => c.id))
+  // What the caret is actually on: the marks of the inline nodes beside it, an adjacent break, the
+  // blocks holding it (never a change whose pieces merely lie on both sides, with plain text between).
+  const doc = state.doc
+  const $pos = doc.resolve(Math.max(0, Math.min(doc.content.size, pos)))
+  const ids = new Set<string>()
+  for (const n of [$pos.nodeAfter, $pos.nodeBefore]) {
+    if (n?.isInline) changeIdsOf(n.marks).forEach((id) => ids.add(id))
+    else if (n?.isBlock && n.isLeaf) blockIdsOf(n).forEach((id) => ids.add(id))
+  }
+  for (let d = $pos.depth; d > 0; d--) blockIdsOf($pos.node(d)).forEach((id) => ids.add(id))
   return (x) => typeof x === 'string' && ids.has(x)
 }
 /**

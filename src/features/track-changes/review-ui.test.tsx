@@ -225,18 +225,57 @@ describe('semantics', () => {
       expect(rejectChangesInRange(split, 5, 9)).toBeNull()
     })
 
-    it('block-level changes and footnote atoms the selection touches are resolved whole', () => {
-      const s = state([p([t('ab')]), p([t('cdef')], { trackedInsert: stamp('s') })])
-      expect(texts(apply(s, rejectChangesInRange(s, 6, 7)).doc)).toEqual(['abcdef'])
+    it('a paragraph mark (split / join) is resolved only when the selection includes it', () => {
+      // "ab" 1..3, then the boundary at 4; "cdef" 5..9.
+      const split = state([p([t('ab')]), p([t('cdef')], { trackedInsert: stamp('s') })])
+      // A letter in the middle of the new paragraph: the split stays.
+      expect(rejectChangesInRange(split, 6, 7)).toBeNull()
+      expect(acceptChangesInRange(split, 6, 7)).toBeNull()
+      // From the end of "ab" into "cd": the mark is included.
+      expect(texts(apply(split, rejectChangesInRange(split, 2, 6)).doc)).toEqual(['abcdef'])
+      const a = apply(split, acceptChangesInRange(split, 2, 6))
+      expect(texts(a.doc)).toEqual(['ab', 'cdef'])
+      expect(ids(a.doc)).toEqual([])
+      // From the start of the paragraph: included too.
+      expect(texts(apply(split, rejectChangesInRange(split, 5, 7)).doc)).toEqual(['abcdef'])
+
+      const join = state([p([t('ab')]), p([t('cdef')], { trackedDelete: stamp('j') })])
+      expect(acceptChangesInRange(join, 7, 8)).toBeNull()
+      expect(rejectChangesInRange(join, 7, 8)).toBeNull()
+      expect(texts(apply(join, acceptChangesInRange(join, 1, 6)).doc)).toEqual(['abcdef'])
+      const r = apply(join, rejectChangesInRange(join, 1, 6))
+      expect(texts(r.doc)).toEqual(['ab', 'cdef'])
+      expect(ids(r.doc)).toEqual([])
+
+      // An inserted paragraph: one selected letter rejects that letter only; the break and the rest stay.
+      const inserted = state([p([t('ab')]), p([t('new', [ins('n')])], { trackedInsert: stamp('n') })])
+      const one = apply(inserted, rejectChangesInRange(inserted, 6, 7))
+      expect(texts(one.doc)).toEqual(['ab', 'nw'])
+      expect(ids(one.doc)).toEqual(['n'])
+    })
+
+    it('style changes, breaks and footnote atoms the selection touches are resolved whole', () => {
+      const styled = state([
+        { type: 'heading', attrs: { level: 1, trackedStyleChange: { ...stamp('st'), beforeStyleId: null, beforeType: 'paragraph', beforeAttrs: { styleId: null } } }, content: [t('Title')] },
+      ])
+      expect(apply(styled, rejectChangesInRange(styled, 2, 3)).doc.firstChild!.type.name).toBe('paragraph')
+      const brk = state([p([t('ab')]), { type: 'pageBreak', attrs: { trackedInsert: stamp('pb') } }, p([t('cd')])])
+      // From "b" over the break into "c".
+      expect(texts(apply(brk, rejectChangesInRange(brk, 2, 7)).doc)).toEqual(['ab', 'cd'])
       const f = state([p([t('a'), fn('Note text', [ins('fi')]), t('b')])])
       // The selection covers "a" and the start of the reference only.
       const r = apply(f, rejectChangesInRange(f, 1, 3))
       expect(footnotes(r.doc)).toEqual([])
     })
 
-    it('a collapsed caret still resolves the whole change', () => {
+    it('a collapsed caret still resolves the whole change, but not from the plain gap between its pieces', () => {
       const s = insDoc()
       expect(runs(apply(s, acceptChangesInRange(s, 5, 5)).doc)).toBe('abinsertedcd')
+      const split = state([p([t('one', [ins('z')]), t(' plain '), t('two', [ins('z')])])])
+      expect(rejectChangesInRange(split, 7, 7)).toBeNull()
+      expect(texts(apply(split, rejectChangesInRange(split, 2, 2)).doc)).toEqual([' plain '])
+      const para = state([p([t('ab')]), p([t('cdef')], { trackedInsert: stamp('s') })])
+      expect(texts(apply(para, rejectChangesInRange(para, 7, 7)).doc)).toEqual(['abcdef'])
     })
   })
 

@@ -169,9 +169,14 @@ change) or `null` when there is nothing to do.
 - `acceptChangesInRange(state, from, to)`, `rejectChangesInRange(state, from, to)`: as Word does,
   **only the selected part** of each inline change (insertion, deletion, format change) is resolved:
   the text is split at the range's ends and the rest stays pending with the same id, author and date.
-  Plain text between two pieces of one change does not count as touching it. A footnote reference (an
-  atom) and every block-level change (a split or join boundary, a break, a style change) that the range
-  touches are resolved **whole**. An empty range resolves every change containing it, whole.
+  Plain text between two pieces of one change does not count as touching it. A **paragraph mark** (the
+  boundary of a split or join: `trackedInsert` / `trackedDelete` on a textblock) is resolved only when
+  the range includes it, i.e. starts at or before the block's first position (`from <= pos + 1`) and
+  reaches it: a letter selected in the middle of an inserted paragraph rejects that letter, not the
+  break before the paragraph. A footnote reference (an atom), a break (a leaf block) and a paragraph
+  style change are resolved **whole** whenever the range touches them. An empty range (a caret)
+  resolves, whole, every change the caret is on: the marks beside it, an adjacent break and the blocks
+  holding it (not a change whose pieces merely lie on both sides of plain text).
 - `acceptAllByAuthor(state, author)`, `rejectAllByAuthor(state, author)`: every change by that author.
 - `listChanges(doc)` → `{ id, kinds, author, date, from, to }[]` in document order (it skips blocks
   without changes, cached per node); `countChanges(state)`; `listAuthors(changes)`.
