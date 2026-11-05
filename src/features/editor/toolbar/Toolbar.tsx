@@ -11,7 +11,7 @@ import { markChain } from './mark-chain'
 import * as I from './icons'
 import { FIRST_LINE_INDENTS, FONT_SIZES, LINE_SPACINGS, PARAGRAPH_SPACINGS, withCurrent } from './presets'
 import type { Alignment } from './toolbar-state'
-import { useMountedEditor } from '../use-mounted-editor'
+import { useActiveEditor } from '../use-mounted-editor'
 import { useToolbarState } from './use-toolbar-state'
 import { StylesGroup } from '../styles/StylesGroup'
 
@@ -63,7 +63,7 @@ const ALIGNMENTS: ReadonlyArray<{ key: ToolbarControlKey; value: Alignment; icon
 
 /** The formatting state and the control builders shared by the toolbar's groups. */
 function useFormatControls() {
-  const editor = useMountedEditor()
+  const editor = useActiveEditor()
   const s = useToolbarState(editor)
   const disabled = !editor || !s.ready
 
@@ -238,7 +238,7 @@ export function StylesControls({ bare = false }: { bare?: boolean }) {
  * Active states come from `useToolbarState`, which reads only the selection (see `readToolbarState`).
  */
 export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFonts, className }: ToolbarProps) {
-  const editor = useMountedEditor()
+  const editor = useActiveEditor()
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     // Only for the toolbar's own items: controls placed in the slots (e.g. a find field)

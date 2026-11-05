@@ -4,7 +4,7 @@ import { Select } from '@/shared/ui'
 import { fontFamilyCss, loadSystemFonts } from '../fonts'
 import { TOOLBAR_CONTROLS } from './controls'
 import { markChain } from './mark-chain'
-import { useMountedEditor } from '../use-mounted-editor'
+import { useActiveEditor } from '../use-mounted-editor'
 import { useToolbarState } from './use-toolbar-state'
 
 export interface FontFamilyPickerProps
@@ -46,7 +46,7 @@ function useSystemFonts(loadFonts: () => Promise<string[]>): { fonts: string[]; 
  */
 export function FontFamilyPicker({ loadFonts = loadSystemFonts, disabled, wrapperClassName = 'w-44', ...rest }: FontFamilyPickerProps) {
   const { fonts, failed } = useSystemFonts(loadFonts)
-  const editor = useMountedEditor()
+  const editor = useActiveEditor()
 
   const current = useToolbarState(editor).fontFamily
 

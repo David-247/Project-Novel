@@ -1,8 +1,9 @@
 import type { ReactElement, ReactNode } from 'react'
 import { TrimSizePicker } from '@/features/book-settings'
-import { CommentsPanelButton, NewCommentButton } from '@/features/comments'
+import { COMMENT_CONTROLS, CommentsPanelButton, NewCommentButton } from '@/features/comments'
 import {
   AlignmentControls,
+  FIND_CONTROLS,
   FindButton,
   FontControls,
   HistoryButtons,
@@ -15,8 +16,10 @@ import {
 } from '@/features/editor'
 import { FootnoteOptionsButton } from '@/features/footnotes'
 import { HeaderFooterButton } from '@/features/header-footer'
-import { SplitCommandButton } from '@/features/ribbon'
+import { CommandButton, SplitCommandButton } from '@/features/ribbon'
+import { REWRITE_CONTROLS as RW } from '@/features/rewrite'
 import { BY_AUTHOR_SUBMENU, MarkupViewMenu, TRACK_CHANGES_CONTROLS as TC, TrackChangesButton } from '@/features/track-changes'
+import { getCommand, isCommandEnabled, useCommandStateVersion, useCommands } from '@/shared/commands'
 import { registerRibbonGroups, type RibbonGroupSpec, type RibbonMenuEntry } from '@/shared/ribbon'
 import { SurfacePicker } from '@/shared/theme'
 
@@ -146,6 +149,24 @@ const icons = {
 
 const item = (node: ReactElement) => <ToolbarItem>{node}</ToolbarItem>
 
+/**
+ * A slice's own control for a registry command (Find, New Comment, Track Changes), disabled while the
+ * command is: the ribbon then follows the registry's gate (the re-write view turns these off) like the
+ * menus do. Only the enabled state is taken from the command; the control still runs its own action.
+ */
+function GatedItem({ commandId, children }: { commandId: string; children: ReactElement }) {
+  useCommandStateVersion()
+  const command = getCommand(commandId)
+  return <ToolbarItem disabled={!!command && !isCommandEnabled(command)}>{children}</ToolbarItem>
+}
+const gated = (commandId: string, node: ReactElement) => <GatedItem commandId={commandId}>{node}</GatedItem>
+
+/** A registry command's ribbon button with an icon (the command has `display: 'menu'`, so it shows once). */
+function IconCommandButton({ commandId, icon }: { commandId: string; icon: () => ReactElement }) {
+  const command = useCommands().find((c) => c.id === commandId)
+  return command ? <CommandButton command={command} icon={icon} /> : null
+}
+
 export const RIBBON_GROUPS: RibbonGroupSpec[] = [
   // ---- Home ----
   {
@@ -213,7 +234,7 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     icon: icons.find,
     // Two small buttons: a dropdown would not be narrower.
     collapsible: false,
-    Content: () => item(<FindButton />),
+    Content: () => gated(FIND_CONTROLS.open.id, <FindButton />),
     menu: [cmd('find.open')],
   },
   // ---- Insert ----
@@ -258,7 +279,7 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     icon: icons.tracking,
     Content: () => (
       <>
-        {item(<TrackChangesButton />)}
+        {gated(TC.track.id, <TrackChangesButton />)}
         {item(<MarkupViewMenu />)}
       </>
     ),
@@ -307,9 +328,18 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
       sub('review', BY_AUTHOR_SUBMENU.reject),
     ],
   },
-  { id: 'review.comments', tab: 'review', label: 'Comments', order: 30, priority: 80, icon: icons.comment, Content: () => item(<NewCommentButton />), menu: [cmd('comment.new')] },
-  // Re-write (T8) places its commands here.
-  { id: 'review.rewrite', tab: 'review', label: 'Re-write', order: 40, priority: 70, icon: icons.rewrite },
+  { id: 'review.comments', tab: 'review', label: 'Comments', order: 30, priority: 80, icon: icons.comment, Content: () => gated(COMMENT_CONTROLS.new.id, <NewCommentButton />), menu: [cmd('comment.new')] },
+  // Re-write Passage… (icon) is the group's own button; Re-writes…, Previous / Next Re-write are placed by
+  // their commands (after it). The dropdown lists all four (their `ribbon` placements, in order).
+  {
+    id: 'review.rewrite',
+    tab: 'review',
+    label: 'Re-write',
+    order: 40,
+    priority: 70,
+    icon: icons.rewrite,
+    Content: () => <IconCommandButton commandId={RW.open.id} icon={icons.rewrite} />,
+  },
   // ---- View ----
   // Page-turn / continuous scroll (T5) place their commands here.
   { id: 'view.views', tab: 'view', label: 'Views', order: 10, priority: 90, icon: icons.views },
