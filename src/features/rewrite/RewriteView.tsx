@@ -300,7 +300,8 @@ function Comparison({ record }: { record: RewriteRecord }) {
   }, [version.id, compare])
 
   // ---- The original page: the snapshot, or the passage as it is now ("original changed") ---------
-  const current = showCurrent && record.originalChanged
+  const problem = useStore((s) => s.rewrite.problems[record.anchor])
+  const current = showCurrent && record.originalChanged && !problem
   const { original, anchor } = record
   useLayoutEffect(() => {
     const e = eds.current
@@ -397,7 +398,7 @@ function Comparison({ record }: { record: RewriteRecord }) {
   return (
     <section ref={rootRef} className="nv-rw" aria-label="Re-write" data-testid="rewrite-view" onKeyDown={onKeyDown}>
       <RewriteBar record={record} activeId={version.id} passageLabel={passageLabel} narrow={narrow} revisedName={revisedName} />
-      {record.originalChanged ? <ChangedBanner current={!!current} /> : null}
+      {problem ? <MissingBanner problem={problem} /> : record.originalChanged ? <ChangedBanner current={!!current} /> : null}
       <div ref={scrollerRef} className="nv-rw-scroller">
         <div
           ref={textRef}
@@ -586,6 +587,17 @@ function RenameField({ name, onDone }: { name: string; onDone: (name: string | n
         }}
       />
     </Tooltip>
+  )
+}
+
+/** The passage is gone from the manuscript (or in pieces): nothing to compare with or replace. */
+function MissingBanner({ problem }: { problem: 'missing' | 'split' }) {
+  return (
+    <div role="status" className="border-b border-border bg-surface-raised px-3 py-1.5 text-ui-sm text-text" data-testid="rewrite-missing">
+      {problem === 'missing'
+        ? 'The passage for this re-write was removed from the manuscript. Your versions are kept: copy text out of them. The original page shows the passage as it was.'
+        : 'The passage for this re-write is no longer in one piece in the manuscript. Your versions are kept: copy text out of them. The original page shows the passage as it was.'}
+    </div>
   )
 }
 

@@ -401,6 +401,9 @@ A re-write:
   and set `originalChanged`. Comments can be added to and removed from the passage. The
   anchor is not part of the undo history and never a tracked change; a block of an open re-write that loses it
   (rejecting a style change made before the re-write) gets it back.
+- **Removed by undo.** The anchor is not in the undo history. If an undo removes the passage's blocks, the re-write
+  stays (with `originalChanged`) and the app says the passage is gone; a redo or undo that puts equal blocks back at
+  the same place anchors them again. Otherwise the versions stay readable in the re-write view.
 - **One run.** Pasted, dropped and drag-copied blocks never carry `rewriteId`. If the blocks carrying an anchor are
   not one contiguous run (a file edited by hand), the passage counts as damaged: it is not shown or replaced.
 - **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the

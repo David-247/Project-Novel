@@ -49,8 +49,8 @@ export type RewriteNotice =
   | { kind: 'locked'; id: string; seq: number }
   | { kind: 'undo'; id: string; seq: number }
   | { kind: 'span'; seq: number }
-  | { kind: 'missing'; seq: number }
-  | { kind: 'split'; seq: number }
+  | { kind: 'missing'; id?: string; seq: number }
+  | { kind: 'split'; id?: string; seq: number }
 
 export interface RewriteSlice {
   rewrite: {
@@ -72,6 +72,8 @@ export interface RewriteSlice {
     /** The open re-write whose locked passage holds the manuscript's caret, or null. */
     caretIn: string | null
     notice: RewriteNotice | null
+    /** Open re-writes whose passage is not in the manuscript as one run now (anchor id -> problem). */
+    problems: Readonly<Record<string, 'missing' | 'split'>>
     /** Review ▸ Re-writes list dialog. */
     listOpen: boolean
   }
@@ -89,6 +91,7 @@ export interface RewriteSlice {
     setShowCurrent: (on: boolean) => void
     setCaretIn: (id: string | null) => void
     setNotice: (notice: RewriteNotice | null) => void
+    setProblems: (problems: Readonly<Record<string, 'missing' | 'split'>>) => void
     setListOpen: (open: boolean) => void
   }
 }
@@ -111,6 +114,7 @@ export const createRewriteSlice: SliceCreator<RewriteSlice> = (set) => {
       showCurrent: false,
       caretIn: null,
       notice: null,
+      problems: {},
       listOpen: false,
     },
     rewriteActions: {
@@ -125,6 +129,7 @@ export const createRewriteSlice: SliceCreator<RewriteSlice> = (set) => {
       setShowCurrent: (showCurrent) => patch({ showCurrent }),
       setCaretIn: (caretIn) => patch({ caretIn }),
       setNotice: (notice) => patch({ notice }),
+      setProblems: (problems) => patch({ problems }),
       setListOpen: (listOpen) => patch({ listOpen }),
     },
   }

@@ -13,6 +13,7 @@ import { alignBlocks } from './align'
 import { passageProblem, passageRange, stripAnchors } from './anchor'
 import { closeRewrite, rewritePassage, wireRewriteAnchors } from './commands'
 import { rewriteCommandGate } from './gate'
+import { RewriteHost } from './RewriteHost'
 import { parseRewritesFile, serializeRewrite, withStatus } from './model'
 import { __resetRewritesFileForTests } from './persistence'
 
@@ -123,6 +124,47 @@ describe('undo and the locked passage', () => {
     // And redo.
     act(() => void redo(ed.state, ed.view.dispatch))
     expect(ed.state.doc.child(1).attrs.textAlign).toBe('center')
+  })
+
+  it('an undo that removes the whole passage says so; the redo that puts it back re-anchors it', () => {
+    const ed = mount()
+    // An older event: two paragraphs inserted after Gamma.
+    const end = ed.state.doc.content.size
+    act(() => ed.view.dispatch(ed.state.tr.insert(end, [ed.schema.nodes.paragraph.create(null, ed.schema.text('Delta line.')), ed.schema.nodes.paragraph.create(null, ed.schema.text('Epsilon line.'))])))
+    const id = rewrite(ed, 5, 5)
+    expect(rw().problems).toEqual({})
+    // Undo the insertion: the passage (Epsilon) is gone.
+    act(() => void undo(ed.state, ed.view.dispatch))
+    expect(ed.state.doc.childCount).toBe(4)
+    expect(passageProblem(ed.state.doc, id)).toBe('missing')
+    expect(rw().notice).toMatchObject({ kind: 'missing', id })
+    expect(rw().problems).toEqual({ [id]: 'missing' })
+    expect(rw().rewrites[0].originalChanged).toBe(true)
+    // Redo: the blocks come back, the anchor with them (only on the passage's block).
+    act(() => void redo(ed.state, ed.view.dispatch))
+    expect(anchorOf(ed, 4)).toBeNull()
+    expect(anchorOf(ed, 5)).toBe(id)
+    expect(passageRange(ed.state.doc, id)).not.toBeNull()
+    expect(rw().problems).toEqual({})
+    // The passage is locked again.
+    const before = ed.state.doc
+    select(ed, blockPos(ed, 5) + 2)
+    act(() => ed.view.dispatch(ed.state.tr.insertText('X')))
+    expect(ed.state.doc.eq(before)).toBe(true)
+  })
+
+  it('the undo notice goes when the caret moves to or from a passage', () => {
+    const ed = mount()
+    const id = rewrite(ed, 1, 1)
+    const tr = ed.state.tr.insertText('Omega', blockPos(ed, 1) + 1, blockPos(ed, 1) + 6).setMeta(BULK_EDIT_META, true)
+    act(() => ed.view.dispatch(tr))
+    act(() => void undo(ed.state, ed.view.dispatch))
+    expect(rw().notice).toMatchObject({ kind: 'undo', id })
+    render(<RewriteHost>{null}</RewriteHost>)
+    // Into the passage, then out of it: the notice goes.
+    act(() => select(ed, blockPos(ed, 1) + 2))
+    act(() => select(ed, blockPos(ed, 3) + 2))
+    expect(rw().notice).toBeNull()
   })
 
   it('typing from before the re-write is not merged with later edits (the history group is closed)', () => {

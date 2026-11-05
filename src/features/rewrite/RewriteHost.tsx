@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { getChapters, chapterIndexAt, getEditor, blockPlainText } from '@/features/editor'
 import { useStore, type RewriteRecord } from '@/shared/store'
 import { Button, cn, Dialog, Tooltip } from '@/shared/ui'
-import { passageRange } from './anchor'
+import { passageProblem, passageRange } from './anchor'
 import { dismissNotice, focusRevision, openList, openRewrite, setViewHooks } from './commands'
 import { REWRITE_CONTROLS as C } from './controls'
 import { RewriteView } from './RewriteView'
@@ -62,17 +62,21 @@ export function RewriteHost({ children }: RewriteHostProps) {
   )
 }
 
+/** The undo notice goes away by itself after this long. */
+const UNDO_NOTICE_MS = 6000
+
 /**
  * The manuscript's re-write notice, floating over the top of the pages: shown while the caret is in a
  * passage that is being re-written (with the way back to its re-write), stronger after an edit there
- * was refused, and when a selection spans more than one chapter. `inView`: over the comparison view,
- * only what can happen while it is open (an undo that changed the passage).
+ * was refused, when a selection spans more than one chapter, and when an edit removed a passage.
+ * `inView`: over the comparison view, only what can happen while it is open (an undo that changed or
+ * removed the passage).
  */
 function RewriteNotice({ inView = false }: { inView?: boolean }) {
   const notice = useStore((s) => s.rewrite.notice)
   const caretIn = useStore((s) => s.rewrite.caretIn)
   const rewrites = useStore((s) => s.rewrite.rewrites)
-  const anchorId = notice?.kind === 'locked' || notice?.kind === 'undo' ? notice.id : caretIn
+  const anchorId = notice && 'id' in notice && notice.id ? notice.id : caretIn
   const record = anchorId ? rewrites.find((r) => r.anchor === anchorId && r.status === 'open') : undefined
   // A refused edit's notice stays until the caret moves to or from a passage (or Dismiss): an edit
   // refused at a passage's edge (Backspace joining into it) leaves the caret outside, and still shows.
@@ -80,14 +84,20 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
   useEffect(() => {
     if (lastCaret.current === caretIn) return
     lastCaret.current = caretIn
-    if (notice?.kind === 'locked') dismissNotice()
+    if (notice?.kind === 'locked' || notice?.kind === 'undo') dismissNotice()
   }, [caretIn, notice])
+  // The undo notice only informs: it goes away by itself.
+  useEffect(() => {
+    if (notice?.kind !== 'undo') return
+    const t = setTimeout(dismissNotice, UNDO_NOTICE_MS)
+    return () => clearTimeout(t)
+  }, [notice])
   let text: string | null = null
   if (notice?.kind === 'undo') text = 'Undo changed text in a passage that is in re-write.'
+  else if (notice?.kind === 'missing') text = `The passage for this re-write was removed. Its versions are kept${notice.id ? '; reopen it to copy text out' : ''}.`
+  else if (notice?.kind === 'split') text = `The passage for this re-write is no longer in one piece. Its versions are kept${notice.id ? '; reopen it to copy text out' : ''}.`
   else if (inView) text = null
   else if (notice?.kind === 'span') text = 'A re-write covers one chapter at most. Select paragraphs within one chapter and try again.'
-  else if (notice?.kind === 'missing') text = 'The passage of this re-write is no longer in the manuscript.'
-  else if (notice?.kind === 'split') text = 'The passage of this re-write is no longer in one piece in the manuscript.'
   else if (notice?.kind === 'locked' && record) text = 'This passage is being re-written, so it cannot be changed here. Edit it in its re-write.'
   else if (record) text = 'This passage is being re-written. It is locked until you choose a version.'
   if (!text) return null
@@ -135,7 +145,11 @@ function describe(r: RewriteRecord): { where: string; preview: string } {
   const preview = text(first).trim().slice(0, 80) || 'Empty paragraph'
   if (!ed) return { where: '', preview }
   const range = passageRange(ed.state.doc, r.anchor)
-  if (!range) return { where: 'Passage no longer in the manuscript', preview }
+  if (!range)
+    return {
+      where: passageProblem(ed.state.doc, r.anchor) === 'split' ? 'Passage no longer in one piece in the manuscript' : 'Passage no longer in the manuscript',
+      preview,
+    }
   const chapters = getChapters(ed.state.doc)
   const i = chapterIndexAt(chapters, range.from)
   const chapter = i >= 0 ? chapters[i] : null

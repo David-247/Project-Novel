@@ -41,9 +41,23 @@ export interface LockedRange {
   to: number
 }
 
+/** An open re-write whose passage an allowed edit (an undo) removed: where it was, and its blocks. */
+interface LostPassage {
+  /** Where the passage was, mapped through every later edit. */
+  at: number
+  /** Its blocks as they were (an undo of the removal, a redo of the insertion, puts equal blocks back). */
+  blocks: readonly PMNode[]
+}
+
+/** What an applied transaction did to open passages (reported by the plugin view, after every filter). */
+type AnchorEvent = { kind: 'changed' | 'undo' | 'missing' | 'split'; id: string }
+
 interface AnchorState {
   ranges: readonly LockedRange[]
   decorations: DecorationSet
+  lost: ReadonlyMap<string, LostPassage>
+  /** This dispatch's events (appended transactions add to their root's). */
+  events: readonly AnchorEvent[]
 }
 
 export const rewriteAnchorKey = new PluginKey<AnchorState>('nvRewriteAnchor')
@@ -163,9 +177,10 @@ function stepRange(step: Step): [number, number] | null {
   return null
 }
 
-/** The first locked range a transaction's steps touch (inside it, not just at its outer edge), or null. */
-export function touchedRange(tr: Transaction, ranges: readonly LockedRange[]): LockedRange | null {
-  if (!ranges.length) return null
+/** The locked ranges a transaction's steps touch (inside them, not just at their outer edge). */
+export function touchedRanges(tr: Transaction, ranges: readonly LockedRange[], first = false): LockedRange[] {
+  const out: LockedRange[] = []
+  if (!ranges.length) return out
   let current = ranges.map((r) => [r.from, r.to] as [number, number])
   for (const step of tr.steps) {
     const span = stepRange(step)
@@ -173,14 +188,39 @@ export function touchedRange(tr: Transaction, ranges: readonly LockedRange[]): L
       const [a, b] = span
       for (let i = 0; i < current.length; i++) {
         const [f, t] = current[i]
-        if (t <= f) continue
-        if (a === b ? a > f && a < t : a < t && b > f) return ranges[i]
+        if (t <= f || out.includes(ranges[i])) continue
+        if (a === b ? a > f && a < t : a < t && b > f) {
+          out.push(ranges[i])
+          if (first) return out
+        }
       }
     }
     const map = step.getMap()
     current = current.map(([f, t]) => [map.map(f, 1), map.map(t, -1)])
   }
-  return null
+  return out
+}
+
+/** The first locked range a transaction's steps touch, or null. */
+export function touchedRange(tr: Transaction, ranges: readonly LockedRange[]): LockedRange | null {
+  return touchedRanges(tr, ranges, true)[0] ?? null
+}
+
+/** Top-level blocks of `doc` in [from, to). */
+function blocksIn(doc: PMNode, from: number, to: number): PMNode[] {
+  const out: PMNode[] = []
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (pos >= from) out.push(node)
+    return false
+  })
+  return out
+}
+
+/** Same block, anchor aside (type, content, marks; attributes other than the anchor). */
+function sameBlockIgnoringAnchor(a: PMNode, b: PMNode): boolean {
+  if (a.type.name !== b.type.name || !a.content.eq(b.content) || !a.sameMarkup(a.type.create({ ...a.attrs }, null, b.marks))) return false
+  for (const k of Object.keys(a.attrs)) if (k !== REWRITE_BLOCK_ATTR && a.attrs[k] !== b.attrs[k]) return false
+  return true
 }
 
 let seq = 0
@@ -189,7 +229,7 @@ function refused(id: string) {
   useStore.getState().rewriteActions.setNotice({ kind: 'locked', id, seq: ++seq })
 }
 
-/** Called (once per transaction) with the anchors whose passage a programmatic edit changed. */
+/** Called (once per dispatch, after every filter) with the anchors whose passage a programmatic edit changed. */
 let onOriginalChanged: ((anchor: string) => void) | null = null
 export function setOriginalChangedHandler(fn: ((anchor: string) => void) | null): void {
   onOriginalChanged = fn
@@ -209,9 +249,28 @@ function programmatic(tr: Transaction): boolean {
   return tr.getMeta(BULK_EDIT_META) === true || tr.getMeta(TRACK_SKIP_META) === true || !!tr.getMeta('history$')
 }
 
-/** Undo / redo changed text in a passage in re-write: a short, non-blocking notice. */
-function undidInPassage(id: string) {
-  useStore.getState().rewriteActions.setNotice({ kind: 'undo', id, seq: ++seq })
+/** Report one dispatch's events: "original changed", and the notice (a lost passage outranks an undo). */
+function report(events: readonly AnchorEvent[]) {
+  const ids = [...new Set(events.map((e) => e.id))]
+  for (const id of ids) onOriginalChanged?.(id)
+  const pick = (k: AnchorEvent['kind']) => events.find((e) => e.kind === k)
+  const lost = pick('missing') ?? pick('split')
+  const undo = pick('undo')
+  const actions = useStore.getState().rewriteActions
+  if (lost) actions.setNotice({ kind: lost.kind as 'missing' | 'split', id: lost.id, seq: ++seq })
+  else if (undo) actions.setNotice({ kind: 'undo', id: undo.id, seq: ++seq })
+}
+
+/** Open anchors whose passage is missing or split now (the view and the list show it). */
+function problems(ranges: readonly LockedRange[]): Record<string, 'missing' | 'split'> {
+  const count = new Map<string, number>()
+  for (const r of ranges) count.set(r.id, (count.get(r.id) ?? 0) + 1)
+  const out: Record<string, 'missing' | 'split'> = {}
+  for (const id of openAnchors()) {
+    const n = count.get(id) ?? 0
+    if (n !== 1) out[id] = n === 0 ? 'missing' : 'split'
+  }
+  return out
 }
 
 function selectionLocked(state: EditorState): LockedRange | null {
@@ -232,16 +291,54 @@ function createAnchorPlugin(): Plugin<AnchorState> {
     state: {
       init: (_, state) => {
         const ranges = computeRanges(state.doc, openAnchors())
-        return { ranges, decorations: buildDecorations(state.doc, ranges) }
+        return { ranges, decorations: buildDecorations(state.doc, ranges), lost: new Map(), events: [] }
       },
-      apply(tr, value, _old, state) {
-        if (!tr.docChanged && !tr.getMeta(REFRESH_META)) return value
+      // Runs only for applied transactions (after every filter): the events reported by the view.
+      apply(tr, value, oldState, state) {
+        const appended = tr.getMeta('appendedTransaction') !== undefined
+        const carried = appended ? value.events : []
+        if (!tr.docChanged && !tr.getMeta(REFRESH_META)) return value.events.length && !appended ? { ...value, events: [] } : value
         // O(top-level blocks) per edit, attribute reads only: microseconds on a 100k-word manuscript.
         const ranges = computeRanges(state.doc, openAnchors())
-        if (sameRanges(ranges, value.ranges)) {
-          return tr.docChanged ? { ranges: value.ranges, decorations: value.decorations.map(tr.mapping, tr.doc) } : value
+        const events: AnchorEvent[] = [...carried]
+        let lost = value.lost
+        if (tr.docChanged) {
+          if (lost.size) {
+            const next = new Map<string, LostPassage>()
+            lost.forEach((l, id) => next.set(id, { ...l, at: tr.mapping.map(l.at, -1) }))
+            lost = next
+          }
+          if (!tr.getMeta(REWRITE_ALLOW_META) && programmatic(tr)) {
+            const kind = tr.getMeta('history$') ? 'undo' : 'changed'
+            for (const r of touchedRanges(tr, value.ranges)) events.push({ kind, id: r.id })
+          }
+          // Passages this edit removed (or split): remembered, so a redo / undo that puts the blocks back re-anchors them.
+          const now = new Set(ranges.map((r) => r.id))
+          const runs = new Map<string, number>()
+          for (const r of ranges) runs.set(r.id, (runs.get(r.id) ?? 0) + 1)
+          const before = new Map<string, number>()
+          for (const r of value.ranges) before.set(r.id, (before.get(r.id) ?? 0) + 1)
+          for (const r of value.ranges) {
+            if (!now.has(r.id) && !lost.has(r.id)) {
+              if (lost === value.lost) lost = new Map(lost)
+              ;(lost as Map<string, LostPassage>).set(r.id, { at: tr.mapping.map(r.from, -1), blocks: blocksIn(oldState.doc, r.from, r.to) })
+              events.push({ kind: 'missing', id: r.id })
+            }
+          }
+          for (const [id, n] of runs) if (n > 1 && (before.get(id) ?? 0) <= 1) events.push({ kind: 'split', id })
+          for (const id of now) {
+            if (lost.has(id)) {
+              if (lost === value.lost) lost = new Map(lost)
+              ;(lost as Map<string, LostPassage>).delete(id)
+            }
+          }
         }
-        return { ranges, decorations: buildDecorations(state.doc, ranges) }
+        const decorations = sameRanges(ranges, value.ranges)
+          ? tr.docChanged
+            ? value.decorations.map(tr.mapping, tr.doc)
+            : value.decorations
+          : buildDecorations(state.doc, ranges)
+        return { ranges: sameRanges(ranges, value.ranges) ? value.ranges : ranges, decorations, lost, events }
       },
     },
     filterTransaction(tr, state) {
@@ -250,27 +347,37 @@ function createAnchorPlugin(): Plugin<AnchorState> {
       if (!ranges?.length) return true
       const hit = touchedRange(tr, ranges)
       if (!hit) return true
-      if (programmatic(tr)) {
-        const anchor = hit.id
-        const undo = !!tr.getMeta('history$')
-        queueMicrotask(() => {
-          onOriginalChanged?.(anchor)
-          if (undo) undidInPassage(anchor)
-        })
-        return true
-      }
+      // Allowed edits are reported after every filter ran (plugin state events, the view).
+      if (programmatic(tr)) return true
       refused(hit.id)
       return false
     },
     // An open re-write's block that lost its anchor (a programmatic edit restored attributes from
     // before it existed: rejecting a tracked style change) gets it back, outside the undo history.
+    // A lost passage whose blocks an undo / redo put back where it was is anchored again.
     appendTransaction(trs, oldState, newState) {
       if (!trs.some((t) => t.docChanged) || trs.some((t) => t.getMeta(REWRITE_ALLOW_META))) return null
+      const out = newState.tr
+      const lost = rewriteAnchorKey.getState(newState)?.lost
+      if (lost?.size && trs.some((t) => t.getMeta('history$'))) {
+        lost.forEach((l, id) => {
+          const $at = newState.doc.resolve(Math.min(l.at, newState.doc.content.size))
+          if ($at.depth !== 0) return
+          let index = $at.index(0)
+          let pos = l.at
+          for (const want of l.blocks) {
+            const have = index < newState.doc.childCount ? newState.doc.child(index) : null
+            if (!have || !sameBlockIgnoringAnchor(have, want)) return
+            index++
+            pos += have.nodeSize
+          }
+          setAnchor(out, l.at, pos, id)
+        })
+      }
       const old = rewriteAnchorKey.getState(oldState)?.ranges
-      if (!old?.length) return null
+      if (!old?.length) return out.docChanged ? out.setMeta(REWRITE_ALLOW_META, true).setMeta(TRACK_SKIP_META, true).setMeta('addToHistory', false) : null
       const mapping = new Mapping()
       for (const t of trs) mapping.appendMapping(t.mapping)
-      const out = newState.tr
       for (const r of old) {
         const from = mapping.map(r.from, 1)
         const to = mapping.map(r.to, -1)
@@ -325,6 +432,12 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         signature = next
         view.dispatch(view.state.tr.setMeta(REFRESH_META, {}).setMeta('addToHistory', false))
       })
+      const syncProblems = (state: EditorState) => {
+        const p = problems(rewriteAnchorKey.getState(state)?.ranges ?? [])
+        const cur = useStore.getState().rewrite.problems
+        if (JSON.stringify(p) !== JSON.stringify(cur)) useStore.getState().rewriteActions.setProblems(p)
+      }
+      syncProblems(view.state)
       const syncCaret = (state: EditorState) => {
         const id = selectionLocked(state)?.id ?? null
         if (useStore.getState().rewrite.caretIn !== id) useStore.getState().rewriteActions.setCaretIn(id)
@@ -334,6 +447,8 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         update(v, prevState) {
           const before = rewriteAnchorKey.getState(prevState)
           const now = rewriteAnchorKey.getState(v.state)
+          if (now?.events !== before?.events && now?.events.length) report(now.events)
+          if (before?.ranges !== now?.ranges) syncProblems(v.state)
           if (!v.state.selection.eq(prevState.selection) || before?.ranges !== now?.ranges) syncCaret(v.state)
         },
         destroy() {
