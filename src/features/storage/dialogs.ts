@@ -51,3 +51,22 @@ export async function askUnsavedChanges(projectTitle: string | null, action: str
   if (result === 'No' || result === "Don't Save") return 'discard'
   return 'cancel'
 }
+
+/**
+ * A go-ahead / Cancel question with the native message dialog (Accept All Changes on a long
+ * manuscript): true when `confirmLabel` was chosen. Falls back to the webview's confirm when the
+ * dialog itself fails.
+ */
+export async function askConfirm(title: string, text: string, confirmLabel: string): Promise<boolean> {
+  try {
+    const result = await message(text, { title, kind: 'warning', buttons: { ok: confirmLabel, cancel: 'Cancel' } })
+    return result === confirmLabel || result === 'Ok'
+  } catch (e) {
+    console.error(title, e)
+    try {
+      return window.confirm(`${title}\n\n${text}`)
+    } catch {
+      return false
+    }
+  }
+}

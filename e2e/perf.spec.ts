@@ -524,3 +524,56 @@ test('100k-word manuscript with 2,000 tracked changes: typing with tracking on, 
   budget(testInfo, 'markup view switch reflow complete ms', worst, 1000)
   budget(testInfo, 'Replace All ms (tracking on)', replaceAllMs, 2000)
 })
+
+/**
+ * Track changes review: Accept All (and Reject All) of the 2,000 changes on the 100k-word manuscript,
+ * from the Review menu through the confirmation, until the book is repaginated: the new page model
+ * published and the pages in view drawn (the Replace All class, < 2 s).
+ */
+test('100k-word manuscript with 2,000 tracked changes: Accept All and Reject All, including repagination', async ({ page }, testInfo) => {
+  test.setTimeout(240_000)
+  const { doc, words, changes } = buildTrackedManuscript()
+  await openEpic(page, '/projects/Review', doc)
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBe(changes)
+  await editor(page).click()
+
+  const resolveAll = async (id: 'review.acceptAll' | 'review.rejectAll', confirm: string) => {
+    const menuBar = page.getByRole('menubar', { name: 'Menu bar' })
+    await menuBar.locator('[data-control-id="menu.review"]').click()
+    await page.locator(`[role="menu"] [data-control-id="${id}"]`).click()
+    await expect(page.getByTestId('native-dialog')).toContainText('2,000 changes')
+    return page.evaluate(async (label) => {
+      const before = window.__nvE2E.layout().layoutVersion
+      const btn = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="native-dialog"] button')].find((b) => b.textContent === label)!
+      const t0 = performance.now()
+      btn.click()
+      await new Promise<void>((resolve) => {
+        const check = () =>
+          window.__nvE2E.countChanges() === 0 && window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > before
+            ? resolve()
+            : requestAnimationFrame(check)
+        requestAnimationFrame(check)
+      })
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+      return { ms: performance.now() - t0, pages: window.__nvE2E.layout().pageCount }
+    }, confirm)
+  }
+
+  const accept = await resolveAll('review.acceptAll', 'Accept All')
+  await waitForLayout(page)
+  // One undo step brings every change back.
+  await editor(page).click()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.countChanges())).toBe(changes)
+  await waitForLayout(page)
+  const reject = await resolveAll('review.rejectAll', 'Reject All')
+
+  await report(testInfo, 'perf-track-changes-review', {
+    manuscript: { words, blocks: doc.content.length, changes },
+    acceptAll: { ms: +accept.ms.toFixed(1), pages: accept.pages },
+    rejectAll: { ms: +reject.ms.toFixed(1), pages: reject.pages },
+    budgets: { acceptAllMs: 2000, rejectAllMs: 2000 },
+  })
+  budget(testInfo, 'Accept All of 2,000 changes ms (incl. repagination)', accept.ms, 2000)
+  budget(testInfo, 'Reject All of 2,000 changes ms (incl. repagination)', reject.ms, 2000)
+})

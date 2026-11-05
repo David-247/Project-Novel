@@ -11,7 +11,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { filterPastedComments } from '@/features/comments'
 import { useStore } from '@/shared/store'
-import { Button, cn, fieldBase, Tooltip } from '@/shared/ui'
+import { ANCHORED_GUTTER, Button, cn, fieldBase, placeAnchored, Tooltip } from '@/shared/ui'
 import { COMPOSITION_FLUSH_MS, flushComposedText, isTracking, skipDeleted } from '@/features/track-changes'
 import { COMPOSING_META } from '@/shared/track-changes'
 import { useMountedEditor } from '../use-mounted-editor'
@@ -24,9 +24,8 @@ const FROM_OUTSIDE = 'nvFootnoteFromOutside'
 let active: EditorView | null = null
 /** Internal (tests): the nested view of the open footnote editor. */
 export const activeFootnoteView = () => active
-/** Gap between the reference line and the editor (px). */
-const GAP = 8
-const GUTTER = 8
+/** Window inset of the editor before it is placed (px). */
+const GUTTER = ANCHORED_GUTTER
 
 /**
  * The footnote editor: an anchored popover under the reference holding a nested ProseMirror view
@@ -88,15 +87,7 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
     const root = rootRef.current
     const ref = outer.isDestroyed ? null : (outer.view.nodeDOM(posRef.current) as HTMLElement | null)
     if (!root || !ref?.getBoundingClientRect) return
-    const r = ref.getBoundingClientRect()
-    const w = root.offsetWidth
-    const h = root.offsetHeight
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const left = Math.round(Math.min(Math.max(GUTTER, r.left - 24), Math.max(GUTTER, vw - w - GUTTER)))
-    let top = r.bottom + GAP
-    if (top + h > vh - GUTTER && r.top - GAP - h >= GUTTER) top = r.top - GAP - h
-    top = Math.round(top)
+    const { left, top } = placeAnchored(ref.getBoundingClientRect(), { width: root.offsetWidth, height: root.offsetHeight })
     setPlace((p) => (p && p.left === left && p.top === top ? p : { left, top }))
   }, [outer])
 
