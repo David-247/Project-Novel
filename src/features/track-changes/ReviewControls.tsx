@@ -39,7 +39,9 @@ export function TrackChangesButton({ ref, ...forwarded }: ReviewControlProps) {
         className="gap-1.5"
       >
         <TrackIcon />
-        <span className="hidden xl:inline">{meta.label}</span>
+        {/* Always labelled: the ribbon scales its groups itself (a viewport breakpoint here would make the
+            group change width under the ribbon's measurements, so narrowing could give room back). */}
+        <span>{meta.label}</span>
       </ToggleButton>
     </Tooltip>
   )

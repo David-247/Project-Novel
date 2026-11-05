@@ -8,6 +8,7 @@ import { createLayoutSlice } from './layout-slice'
 import { createPreferencesSlice } from './preferences-slice'
 import { createCommentsSlice } from './comments-slice'
 import { createTrackChangesSlice } from './track-changes-slice'
+import { createRewriteSlice } from './rewrite-slice'
 import type { RootState } from './types'
 
 /**
@@ -27,6 +28,7 @@ export const useStore = create<RootState>()((...a) => ({
   ...createPreferencesSlice(...a),
   ...createCommentsSlice(...a),
   ...createTrackChangesSlice(...a),
+  ...createRewriteSlice(...a),
 }))
 
 export { useColorSchemeSync } from './use-color-scheme-sync'
@@ -49,4 +51,5 @@ export type { ParsedPreferences } from './preferences-file'
 export { setSystemAuthorName } from './preferences-slice'
 export type { CommentsSlice, CommentThread, CommentMessage } from './comments-slice'
 export type { TrackChangesSlice } from './track-changes-slice'
+export type { RewriteSlice, RewriteRecord, RewriteVersion, RewriteStatus, RewriteNotice } from './rewrite-slice'
 export type { RootState, SliceCreator } from './types'

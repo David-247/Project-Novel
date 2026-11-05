@@ -15,6 +15,30 @@ declare module '@tiptap/core' {
   }
 }
 
+/** The reference mark; `open`: a click or tap opens the note in the footnote editor. */
+function footnoteView(open: boolean) {
+  return ({ getPos }: { getPos: (() => number | undefined) | boolean }) => {
+    const dom = document.createElement('sup')
+    dom.className = 'nv-fn-ref'
+    dom.setAttribute('data-footnote-ref', '')
+    dom.setAttribute('role', 'doc-noteref')
+    dom.contentEditable = 'false'
+    // A click or tap (on the 32 px target around the mark) opens the note.
+    if (open)
+      dom.addEventListener('click', (e) => {
+        const pos = typeof getPos === 'function' ? getPos() : undefined
+        if (typeof pos !== 'number') return
+        e.preventDefault()
+        openFootnoteEditor(pos)
+      })
+    return {
+      dom,
+      update: (node: { type: { name: string } }) => node.type.name === FOOTNOTE_NODE,
+      ignoreMutation: () => true,
+    }
+  }
+}
+
 /**
  * Footnote: an inline atom at the reference point. Its content (text with marks) is the note text,
  * so the note travels with its reference through copy/paste, undo, save and recovery, and find &
@@ -38,36 +62,22 @@ export const FootnoteNode = Node.create({
   renderHTML: () => ['sup', { 'data-footnote': '', class: 'nv-fn-ref' }, 0],
   // Plain-text copies keep the body text only (the note would run into the sentence).
   renderText: () => '',
-  addNodeView() {
-    return ({ getPos }) => {
-      const dom = document.createElement('sup')
-      dom.className = 'nv-fn-ref'
-      dom.setAttribute('data-footnote-ref', '')
-      dom.setAttribute('role', 'doc-noteref')
-      dom.contentEditable = 'false'
-      // A click or tap (on the 32 px target around the mark) opens the note.
-      dom.addEventListener('click', (e) => {
-        const pos = typeof getPos === 'function' ? getPos() : undefined
-        if (typeof pos !== 'number') return
-        e.preventDefault()
-        openFootnoteEditor(pos)
-      })
-      return {
-        dom,
-        update: (node) => node.type.name === FOOTNOTE_NODE,
-        ignoreMutation: () => true,
-      }
-    }
-  },
+  addNodeView: () => footnoteView(true),
 })
 
 /**
  * Footnotes: the node, Insert Footnote (Mod-Alt-f), Enter on a selected reference to edit its note,
  * and the numbering plugin.
  */
-export const Footnotes = Extension.create({
+/** For a detached view (another editor with the same schema): the mark only, the note does not open. */
+const DetachedFootnoteNode = FootnoteNode.extend({ addNodeView: () => footnoteView(false) })
+
+export const Footnotes = Extension.create<{ detached: boolean }>({
   name: 'footnotes',
-  addExtensions: () => [FootnoteNode],
+  addOptions: () => ({ detached: false }),
+  addExtensions() {
+    return [this.options.detached ? DetachedFootnoteNode : FootnoteNode]
+  },
 
   addCommands() {
     return {
@@ -99,6 +109,7 @@ export const Footnotes = Extension.create({
   },
 
   addKeyboardShortcuts() {
+    if (this.options.detached) return {} as Record<string, () => boolean>
     return {
       'Mod-Alt-f': () => this.editor.commands.insertFootnote(),
       Enter: () => {
@@ -109,6 +120,7 @@ export const Footnotes = Extension.create({
   },
 
   addProseMirrorPlugins() {
-    return [footnoteNumberingPlugin()]
+    // Detached views number their own references but do not notify the footnotes area listeners.
+    return [footnoteNumberingPlugin({ notify: !this.options.detached })]
   },
 })

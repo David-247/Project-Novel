@@ -14,7 +14,7 @@
 export { NovelEditor } from './NovelEditor'
 export type { NovelEditorProps } from './NovelEditor'
 // The mounted editor (re-renders when it mounts/unmounts, not per transaction), for hosts such as pagination.
-export { useMountedEditor } from './use-mounted-editor'
+export { useMountedEditor, useActiveEditor } from './use-mounted-editor'
 export {
   FontFamilyPicker,
   Toolbar,
@@ -37,9 +37,13 @@ export {
   getDocVersion,
   onDocChange,
   getEditor,
+  getActiveEditor,
+  setActiveEditorSource,
+  activeEditorChanged,
 } from './controller'
 export type { DocChangeListener } from './controller'
 export { createEditorExtensions } from './extensions'
+export type { EditorExtensionOptions } from './extensions'
 export { SYSTEM_FONT_STACK, listSystemFonts, fontFamilyCss, primaryFontFamily } from './fonts'
 // Find & replace + history (task 4)
 export { FindReplacePanel } from './find/FindReplacePanel'

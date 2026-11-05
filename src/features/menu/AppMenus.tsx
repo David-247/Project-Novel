@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { getEditor } from '@/features/editor'
+import { getActiveEditor } from '@/features/editor'
 import { installCommandShortcuts, menuBarKind } from '@/shared/commands'
 import { registerMenuCommands } from './commands'
 import { MenuBar } from './MenuBar'
@@ -13,7 +13,7 @@ import { startNativeMenu } from './native'
 export function useAppMenus(): void {
   useEffect(() => {
     const offCommands = registerMenuCommands()
-    const offKeys = installCommandShortcuts({ manuscript: () => getEditor()?.view.dom })
+    const offKeys = installCommandShortcuts({ manuscript: () => getActiveEditor()?.view.dom })
     const offNative = startNativeMenu()
     return () => {
       offNative()

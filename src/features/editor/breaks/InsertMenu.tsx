@@ -3,7 +3,7 @@ import { NodeSelection } from '@tiptap/pm/state'
 import { useRef, useState } from 'react'
 import type { Ref } from 'react'
 import { Button, cn, focusRing, formatShortcut, detectPlatform, Tooltip } from '@/shared/ui'
-import { getEditor } from '../controller'
+import { getActiveEditor } from '../controller'
 import { getFootnoteEditing } from '../footnote/editing'
 import { setChaptersStartOn, type ChaptersStartOn } from './chapter-start'
 import { CHAPTER_START_CONTROLS, INSERT_ITEMS, INSERT_MENU_CONTROL, ORNAMENT_CONTROLS } from './controls'
@@ -53,7 +53,7 @@ export function InsertMenu({ ref, label = INSERT_MENU_CONTROL.label, ...forwarde
   const chooseOrnament = (value: string) => {
     setNewSceneBreakOrnament(value)
     setOrnament(value)
-    const ed = getEditor()
+    const ed = getActiveEditor()
     if (ed && ed.state.selection instanceof NodeSelection && ed.state.selection.node.type.name === 'sceneBreak') {
       ed.chain().focus().setSceneBreakOrnament(value).run()
     }
@@ -82,7 +82,7 @@ export function InsertMenu({ ref, label = INSERT_MENU_CONTROL.label, ...forwarde
             inserted.current = false
             e.preventDefault()
             // An inserted footnote has its own editor, which holds the focus.
-            if (!getFootnoteEditing()) getEditor()?.commands.focus()
+            if (!getFootnoteEditing()) getActiveEditor()?.commands.focus()
           }}
           className="z-40 min-w-64 max-w-[calc(100vw-1rem)] rounded-control border border-border bg-surface-raised p-1 text-text shadow-raised"
         >
@@ -92,7 +92,7 @@ export function InsertMenu({ ref, label = INSERT_MENU_CONTROL.label, ...forwarde
                 data-control-id={item.id}
                 className={cn(itemClass, 'pl-2.5')}
                 onSelect={() => {
-                  const ed = getEditor()
+                  const ed = getActiveEditor()
                   inserted.current = Boolean(ed)
                   if (ed) item.run(ed)
                 }}

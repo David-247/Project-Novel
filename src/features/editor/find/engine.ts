@@ -18,6 +18,7 @@ import {
   noteAround,
   setFindDecorations,
 } from './plugin'
+import { BULK_EDIT_META } from '@/shared/rewrite'
 import { deletedRange, findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
 import type { FindOptions, MatchRange } from './search'
 
@@ -285,6 +286,8 @@ export function replaceAll(): number {
   const count = replaceable.filter(Boolean).length
   if (count === 0) return 0
   const tr = replaceAllRanges(ed.state.tr, ed.schema, matches, findState().replacement, replaceable)
+  // A bulk edit: it may change a passage locked by a re-write (which is then marked "original changed").
+  tr.setMeta(BULK_EDIT_META, true)
   closeHistory(clearFindDecorations(tr))
   ed.view.dispatch(tr)
   scanNow({ closeUndoGroup: true })

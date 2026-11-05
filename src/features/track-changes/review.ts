@@ -1,4 +1,5 @@
 import type { Mark, Node as PMNode } from '@tiptap/pm/model'
+import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { canJoin } from '@tiptap/pm/transform'
 import {
@@ -216,6 +217,8 @@ function resolve(state: EditorState, filter: Filter, mode: Mode, clip?: { from: 
       if (mode === 'reject' && beforeType) {
         type = beforeType
         attrs = { ...style.beforeAttrs, [TRACKED_INSERT_ATTR]: attrs[TRACKED_INSERT_ATTR], [TRACKED_DELETE_ATTR]: attrs[TRACKED_DELETE_ATTR], [TRACKED_STYLE_ATTR]: null }
+        // The re-write anchor is not formatting: it stays as it is now (the attributes from before may predate it).
+        if (REWRITE_BLOCK_ATTR in node.attrs) attrs[REWRITE_BLOCK_ATTR] = node.attrs[REWRITE_BLOCK_ATTR]
       }
     }
     const join = (hitIns && mode === 'reject') || (hitDel && mode === 'accept')

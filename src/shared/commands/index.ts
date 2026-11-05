@@ -22,6 +22,8 @@ export {
   useCommandStateVersion,
   runCommand,
   isCommandEnabled,
+  commandGuard,
+  setCommandGate,
   shortcutKey,
   commandProblem,
   COMMAND_STATE_DEBOUNCE_MS,

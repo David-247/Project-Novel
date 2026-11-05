@@ -191,7 +191,9 @@ and fails if any visible block is painted anywhere but its final place. Scrollin
 (ProseMirror `scrollIntoView`, e.g. Mod-End) and the find panel's reveal of the current match
 finish the pending frames first (`handleScrollToSelection`, the editor's `setFindRevealHook`).
 Large document changes (Replace All of a common word, a restyle) take the same path: dirty blocks
-in view first, the rest progressively.
+in view first, the rest progressively. A transaction with more than 200 position-changing steps is
+not mapped: its decorations are dropped and redrawn. Steps that move nothing (AttrStep, e.g. the
+re-write anchor set on every block of a chapter) do not count and are left out of the mapping.
 Anything that needs them all (hit tests for the arrow keys and presses on the desk, PageUp/Down)
 finishes the pending frames first. `getPaginationDebug().modelSettled` is "reflow complete";
 `settled` is "every block drawn". The perf test asserts the first < 1 s and reports (and caps at 3 s)

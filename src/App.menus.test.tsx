@@ -121,7 +121,25 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
       'Reject All Changes',
       'Reject All by Author ▸',
       '—',
-      'New Comment', '—', 'Next Comment', 'Previous Comment', '—', 'Show Resolved Comments'])
+      'New Comment',
+      '—',
+      'Next Comment',
+      'Previous Comment',
+      '—',
+      'Show Resolved Comments',
+      '—',
+      'Re-write Passage…',
+      'Re-writes…',
+      'Next Re-write',
+      'Previous Re-write',
+      '—',
+      'Show Differences',
+      'Flip Pages',
+      'Go to Left Page',
+      'Go to Right Page',
+      'New Version',
+      'Close Re-write',
+    ])
     expect(names(model[6].children)).toEqual(['Keyboard Shortcuts', 'Project Folder Format', '—', 'About Novel'])
   })
 

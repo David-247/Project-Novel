@@ -1,5 +1,5 @@
 import { detectPlatform, matchesShortcut, type Platform } from '@/shared/ui'
-import { getCommand, getCommands, isCommandEnabled, type Command } from './registry'
+import { commandGuard, getCommand, getCommands, isCommandEnabled, type Command } from './registry'
 
 /**
  * The keyboard side of the registry: one window listener runs the command whose shortcut was pressed.
@@ -40,14 +40,7 @@ function remember(cmd: Command) {
   lastPress = { id: cmd.id, at: performance.now() }
 }
 
-/** The command's guard: its own, else 'manuscript' for text commands (Insert, Format, Edit history / clipboard). */
-function guardOf(cmd: Command): 'manuscript' | 'modal' | 'none' {
-  if (cmd.guard) return cmd.guard
-  const m = cmd.menu
-  if (!m) return 'none'
-  const text = m.id === 'insert' || m.id === 'format' || (m.id === 'edit' && (m.group === 'history' || m.group === 'clipboard'))
-  return text ? 'manuscript' : 'none'
-}
+const guardOf = commandGuard
 
 const isHistoryCommand = (cmd: Command) => cmd.menu?.id === 'edit' && cmd.menu.group === 'history'
 

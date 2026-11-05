@@ -5,7 +5,7 @@ import { useStore } from '@/shared/store'
 import { ariaKeyshortcuts, IconButton, Tooltip } from '@/shared/ui'
 import { HISTORY_CONTROLS } from './controls'
 import { RedoIcon, UndoIcon } from '../find/icons'
-import { useMountedEditor } from '../use-mounted-editor'
+import { useActiveEditor } from '../use-mounted-editor'
 
 function snapshot(editor: Editor | null): string {
   if (!editor || editor.isDestroyed) return '00'
@@ -30,7 +30,7 @@ export interface HistoryButtonsProps {
 const identity = (button: ReactElement) => button
 
 export function HistoryButtons({ wrap = identity }: HistoryButtonsProps = {}) {
-  const editor = useMountedEditor()
+  const editor = useActiveEditor()
   const subscribe = useCallback(
     (cb: () => void) => {
       editor?.on('transaction', cb)

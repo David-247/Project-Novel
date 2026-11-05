@@ -124,6 +124,12 @@ const REACH: Record<RibbonTab, Record<string, [string, string][]>> = {
       ['review.reject.options', 'menu.review.reject-all-by-author'],
     ],
     'review.comments': [['comment.new', 'comment.new'], ['ribbon.cmd.comment.prev', 'comment.prev'], ['ribbon.cmd.comment.next', 'comment.next']],
+    'review.rewrite': [
+      ['ribbon.cmd.rewrite.open', 'rewrite.open'],
+      ['ribbon.cmd.rewrite.list', 'rewrite.list'],
+      ['ribbon.cmd.rewrite.prev', 'rewrite.prev'],
+      ['ribbon.cmd.rewrite.next', 'rewrite.next'],
+    ],
   },
   view: {
     'view.views': [['ribbon.cmd.view.singlePage', 'view.singlePage'], ['ribbon.cmd.pagination.spreadView', 'pagination.spreadView']],
@@ -349,7 +355,7 @@ test('ribbon text and icons meet WCAG AA on the four papers in OS light and dark
       add(`${scheme}/${surface}/paragraph menu`, await contrast(page, MENU, `${MENU} svg`))
       await page.keyboard.press('Escape')
       await resize(page, 360)
-      await page.locator('[data-control-id="ribbon.more"]').click()
+      await panel(page, 'home').locator('[data-control-id="ribbon.more"]').click() // each tab's panel has its own More
       await expect(page.getByRole('menu')).toBeVisible()
       add(`${scheme}/${surface}/More`, await contrast(page, MENU, `${MENU} svg`))
       await page.keyboard.press('Escape')

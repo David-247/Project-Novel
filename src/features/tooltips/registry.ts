@@ -14,6 +14,7 @@
 import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import { COMMENT_CONTROLS } from '@/features/comments'
+import { REWRITE_CONTROLS } from '@/features/rewrite'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
@@ -295,6 +296,14 @@ const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
   ...Object.fromEntries(MARKUP_VIEW_OPTIONS.map((o): [string, TooltipCopy] => [o.id, { title: o.label, description: o.description }])),
 }
 
+/** Re-write: the comparison view, the manuscript's notice and the Re-writes list (rewrite slice). */
+const REWRITE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(REWRITE_CONTROLS).map((c): [string, TooltipCopy] => [
+    c.id,
+    { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+  ]),
+)
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -314,7 +323,7 @@ const MENU_TOOLTIPS: Record<string, TooltipCopy> = {
   'menu.view': { title: 'View', description: 'How the pages look on screen: spread, zoom, paper and full screen.' },
   'menu.insert': { title: 'Insert', description: 'Add chapter, page and scene breaks, and footnotes.' },
   'menu.format': { title: 'Format', description: 'Text and paragraph formatting, styles, headers and footnote options.' },
-  'menu.review': { title: 'Review', description: 'Revision tools for the manuscript.' },
+  'menu.review': { title: 'Review', description: 'Revision tools for the manuscript: comments, tracked changes and re-writes.' },
   'menu.help': { title: 'Help', description: 'Keyboard shortcuts, the project folder format and the version.' },
   [MENU_DIALOG_CONTROLS.shortcutsSearch.id]: {
     title: MENU_DIALOG_CONTROLS.shortcutsSearch.label,
@@ -359,6 +368,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...REVIEW_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...COMMENT_TOOLTIPS,
+  ...REWRITE_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,
 })
