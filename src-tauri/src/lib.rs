@@ -1,4 +1,5 @@
 mod fonts;
+mod preferences;
 mod storage;
 
 use tauri::{Emitter, Manager};
@@ -29,6 +30,9 @@ pub fn run() {
             storage::storage_exit_app,
             storage::storage_probe_recent_recovery,
             storage::storage_list_dir,
+            preferences::preferences_read,
+            preferences::preferences_write,
+            preferences::preferences_default_author,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Novel")

@@ -409,3 +409,47 @@ Only Rust writes this file (`storage_remember_recent` records the open project's
 the display name and timestamp), because an entry here is what lets Open Recent reopen a folder without a dialog.
 Most recent first, de-duplicated by folder, at most 10 entries. Folders that no longer contain a `project.json` are
 shown as "(missing)" and disabled in File > Open Recent. A damaged file is treated as an empty list.
+
+## App preferences (outside the project)
+
+Not part of a project, and never written into a project folder. Per-user settings live in the same app config
+directory as the recent-projects list, as `preferences.json` (written atomically by `preferences_write` in
+`src-tauri/src/preferences.rs`, like every file Novel writes). They apply to every project on this computer and are edited
+in **Settings** (the gear in the toolbar, or Ctrl+, on Windows and Cmd+, on macOS).
+
+```json
+{
+  "version": 1,
+  "authorName": "Ada Lovelace",
+  "authorColor": null,
+  "pageNavigation": "book",
+  "defaultPaper": "auto",
+  "defaultTrimSize": "us-5.5x8.5",
+  "reduceMotion": "system",
+  "authorPrompted": false
+}
+```
+
+| Key | Values | Meaning |
+|---|---|---|
+| `authorName` | text, at most 120 characters | Attributes tracked changes and comments. Absent: the OS user's full name (else the account name) is used. `""` means no name is known; the app then asks once, on the first tracked change or comment. |
+| `authorColor` | `"#rrggbb"` or `null` | Colour of the author's changes and comments. `null`: automatic. |
+| `pageNavigation` | `"book"` or `"scroll"` | How the writing view moves between pages. Default `"book"`. |
+| `defaultPaper` | `"auto"`, `"book"`, `"white"`, `"dark"` | Paper surface a **new** project starts with (its `book.json` `surface`). Existing projects keep theirs. |
+| `defaultTrimSize` | a trim size id from the catalog | Trim size a **new** project starts with, with that size's default margins. Existing projects keep theirs. |
+| `reduceMotion` | `"system"`, `"on"`, `"off"` | Reduce animation (`"system"` follows the OS setting). |
+| `authorPrompted` | `true`/`false` | The one-time "who is writing?" question has been asked (answered or dismissed); it is never asked again. |
+
+Rules:
+
+- **No credentials.** This file holds no API keys, tokens or other secrets. AI provider keys and OAuth tokens are
+  stored only in the OS keychain.
+- **Versioned.** `version` is 1. An older or unversioned file is migrated when read; a newer file is read for the keys
+  this Novel knows.
+- **Unknown keys are kept.** Keys this Novel does not know (written by a newer Novel) are preserved when preferences
+  are saved.
+- **Never fails to start.** A missing, unreadable or damaged file, or a wrongly typed value, falls back to the default
+  (per key for a single bad value, wholly for a file that is not a JSON object). Reading never writes; the next change
+  made in Settings rewrites the file in the current format, which repairs it.
+- **Saved as you change.** Changes apply immediately (no OK button) and are written about 300 ms after the last one.
+- Not in a project: Save As, backups and recovery never include it.

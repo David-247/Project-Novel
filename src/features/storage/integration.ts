@@ -15,6 +15,7 @@ import {
   openProject,
   saveProject,
 } from './project'
+import { flushPreferences } from '@/features/settings'
 import { getDocumentProvider } from '@/shared/document'
 import { detectPlatform, matchesShortcut, type Platform } from '@/shared/ui'
 
@@ -32,6 +33,8 @@ export function prepareToExit(action: 'closing' | 'quitting'): Promise<boolean> 
     try {
       if (!(await confirmUnsavedChanges(action))) return false
       await stopAutosave()
+      // A preference changed in the last 300 ms must not be lost to the exit (never rejects).
+      await flushPreferences()
       if (!hasPendingRecovery() && !getDocumentProvider()?.isDirty() && !isBookDirty()) await clearRecoveryData()
       return true
     } finally {

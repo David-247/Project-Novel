@@ -12,3 +12,14 @@ body,
 body {
   margin: 0;
 }
+
+/* Settings > Motion: 'Reduce motion' (or the OS setting, when set to follow it) stops CSS animation
+   and transitions app-wide. The attribute is set by src/features/settings (useReduceMotionAttribute). */
+:root[data-reduce-motion='on'] *,
+:root[data-reduce-motion='on'] *::before,
+:root[data-reduce-motion='on'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}

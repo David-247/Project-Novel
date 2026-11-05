@@ -27,6 +27,7 @@ import {
 } from '@/features/storage'
 import { PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
 import { FootnoteOptionsButton, useFootnotePagination } from '@/features/footnotes'
+import { SettingsButton, SettingsDialog, useSettingsIntegration } from '@/features/settings'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
@@ -52,6 +53,8 @@ export function App() {
   useReloadGuard(!import.meta.env.DEV)
   useEffect(() => registerDocumentProvider(editorDocumentProvider), [])
   useStorageIntegration()
+  // App preferences: load/save preferences.json, Mod-, opens Settings, the Motion preference.
+  useSettingsIntegration()
   // Footnotes at the bottom of their page (bottom reservations + the footnote area page slot).
   useFootnotePagination()
   return (
@@ -98,6 +101,12 @@ export function App() {
                       <HeaderFooterButton />
                     </ToolbarItem>
                   </ToolbarGroup>
+                  <ToolbarSeparator />
+                  <ToolbarGroup label="App">
+                    <ToolbarItem>
+                      <SettingsButton />
+                    </ToolbarItem>
+                  </ToolbarGroup>
                 </>
               }
             />
@@ -129,6 +138,8 @@ export function App() {
       />
       {/* Running heads / page numbers in the page margins, and their dialogs (portal). */}
       <HeaderFooter />
+      {/* Settings dialog and the one-time author question (portal). */}
+      <SettingsDialog />
       {/* Crash-recovery prompts (portal). */}
       <RecoveryDialog />
     </TooltipProvider>
