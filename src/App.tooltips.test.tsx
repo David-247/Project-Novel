@@ -225,9 +225,9 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     await renderFullApp(
       <>
         <button type="button">Mystery action</button>
-        {/* A proxy (hidden from AT, not a tab stop) is skipped; aria-hidden alone is not enough. */}
+        {/* An explicit proxy is skipped; hidden and out of the tab order alone is not enough. */}
+        <input type="color" aria-hidden="true" tabIndex={-1} data-tooltip-proxy="" />
         <input type="color" aria-hidden="true" tabIndex={-1} />
-        <input type="color" aria-hidden="true" />
         <button type="button" data-control-id="nowhere.registered">
           Unregistered
         </button>

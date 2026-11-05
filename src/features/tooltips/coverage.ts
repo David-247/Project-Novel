@@ -1,6 +1,12 @@
 import type { TooltipCopy } from '@/shared/ui'
 import { getTooltipCopy, TOOLTIP_REGISTRY } from './registry'
 
+/**
+ * Opt-out for a control's hidden helper element (aria-hidden, tabindex -1) that another control
+ * drives, e.g. the colour input behind Settings > Author colour. Use on nothing a user can reach.
+ */
+export const TOOLTIP_PROXY_ATTR = 'data-tooltip-proxy'
+
 /** Everything a user can operate: native controls plus ARIA widget roles. */
 export const CONTROL_SELECTOR = [
   'button',
@@ -53,7 +59,7 @@ function describedByText(el: Element): string {
 /**
  * Lists every interactive control under `root` that would show no tooltip. The manuscript itself
  * (the contenteditable writing surface) is the document, not a control, and is skipped, as is an
- * element that is both aria-hidden and tabindex -1 (a proxy driven by a real control).
+ * element marked `data-tooltip-proxy` (hidden, out of the tab order, driven by a real control).
  */
 export function auditTooltipCoverage(
   root: ParentNode,
@@ -62,9 +68,9 @@ export function auditTooltipCoverage(
   const problems: CoverageProblem[] = []
   for (const el of Array.from(root.querySelectorAll(CONTROL_SELECTOR))) {
     if (el.getAttribute('contenteditable') === 'true') continue
-    // A proxy no one operates directly (out of the tab order and hidden from assistive tech), e.g.
-    // the colour input that the Author colour button opens: the button carries the tooltip.
-    if (el.getAttribute('aria-hidden') === 'true' && el.getAttribute('tabindex') === '-1') continue
+    // An explicit proxy no one operates directly (the colour input the Author colour button opens):
+    // the control that drives it carries the tooltip.
+    if (el.hasAttribute(TOOLTIP_PROXY_ATTR)) continue
     const controlId = el.getAttribute('data-control-id')
     const label = describe(el)
     if (!controlId) {

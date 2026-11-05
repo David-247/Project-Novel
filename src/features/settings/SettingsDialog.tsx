@@ -157,7 +157,9 @@ function SettingsForm() {
                 <Button
                   id={`${formId}-authorColor`}
                   data-control-id={C.authorColor.id}
-                  aria-describedby={`${formId}-authorColor-hint`}
+                  // The current value is read with the name ("#aa3366" or "Chosen for you"), then the hint.
+                  aria-describedby={`${formId}-authorColor-value ${formId}-authorColor-hint`}
+                  aria-haspopup="dialog"
                   className="w-14 p-1"
                   onClick={() => openColorPicker(colorInput.current)}
                 >
@@ -177,6 +179,7 @@ function SettingsForm() {
                 type="color"
                 tabIndex={-1}
                 aria-hidden="true"
+                data-tooltip-proxy=""
                 data-testid="settings-author-color-picker"
                 className="sr-only"
                 value={prefs.authorColor ?? PICKER_FALLBACK}
@@ -191,7 +194,9 @@ function SettingsForm() {
                   {C.authorColorAuto.label}
                 </Button>
               </Tooltip>
-              <span className="text-ui-xs text-text-muted">{prefs.authorColor ?? 'Chosen for you'}</span>
+              <span id={`${formId}-authorColor-value`} className="text-ui-xs text-text-muted">
+                {prefs.authorColor ?? 'Chosen for you'}
+              </span>
             </div>
             <p id={`${formId}-authorColor-hint`} className="m-0 text-ui-xs text-text-muted">
               Colours your changes and comments. Automatic picks one for you.
