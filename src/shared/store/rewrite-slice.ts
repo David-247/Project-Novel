@@ -21,6 +21,17 @@ export interface RewriteVersion {
 
 export type RewriteStatus = 'open' | 'resolved'
 
+/** Where a resolved re-write's passage was (rewrites.json `location`). */
+export interface RewriteLocation {
+  /** Top-level block index of the passage's first block. */
+  block: number
+  /** Chapter index there (-1 before the first chapter). */
+  chapter: number
+  /** The start of the paragraph before and after the passage (plain text, up to 60 characters; '' at an edge). */
+  before: string
+  after: string
+}
+
 export interface RewriteRecord {
   id: string
   /** ISO 8601. */
@@ -48,6 +59,13 @@ export interface RewriteRecord {
   choice?: string
   /** ISO 8601 time of the choice. Absent while open. */
   resolvedAt?: string
+  /**
+   * Keep This Version: a frozen copy of the passage that was kept (the version as it was then), so the
+   * record stays true to the manuscript when the version is edited later. Absent while open.
+   */
+  kept?: DocNodeJSON
+  /** Where the passage was when it resolved: Reopen looks there first. Absent while open. */
+  location?: RewriteLocation
   extra?: Record<string, unknown>
 }
 
@@ -59,7 +77,9 @@ export type RewriteNotice =
   | { kind: 'missing'; id?: string; seq: number }
   | { kind: 'split'; id?: string; seq: number }
   /** Reopen: the kept text of a resolved re-write was not found in the manuscript. */
-  | { kind: 'notFound'; seq: number }
+  | { kind: 'notFound'; ambiguous?: boolean; seq: number }
+  /** Discard Re-write: undo brings it back. */
+  | { kind: 'discarded'; seq: number }
 
 export interface RewriteSlice {
   rewrite: {

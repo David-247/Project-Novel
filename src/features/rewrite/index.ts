@@ -20,7 +20,7 @@
 // - While the view is open it registers the editor slice's active editor source (text commands act on
 //   the revision while it has the focus) and the registry's command gate (manuscript-wide commands off).
 //
-// The choice (T9; choice.ts): Keep Original (Mod-Alt-Shift-o), Keep This Version (Mod-Alt-Shift-v),
+// The choice (T9; choice.ts): Keep Original, Keep This Version (no default shortcut),
 // Discard Re-write, and Reopen from the Re-writes list. Each is one manuscript transaction with a
 // RewriteStateStep (step.ts), so one undo reverts it (the re-write open again with every version) and
 // redo applies it again; the store / rewrites.json follow the step. Keep This Version is a word-level
@@ -47,6 +47,7 @@ export {
 } from './commands'
 export { registerRewriteCommands, rewriteCommands } from './menu-commands'
 export { keepOriginal, keepVersion, keepVersionNow, discardRewrite, reopenRewrite, locatePassage, setRewriteConfirm } from './choice'
+export type { LocateResult } from './choice'
 export type { RewriteConfirm, RewriteConfirmRequest } from './choice'
 export { replacePassage } from './apply'
 export { RewriteStateStep } from './step'

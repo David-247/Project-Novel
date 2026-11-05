@@ -15,8 +15,6 @@ export const SHOW_DIFF_SHORTCUT = 'Mod-Shift-d'
 export const FLIP_SHORTCUT = 'Mod-Alt-k'
 export const FOCUS_LEFT_SHORTCUT = 'Mod-Alt-ArrowLeft'
 export const FOCUS_RIGHT_SHORTCUT = 'Mod-Alt-ArrowRight'
-export const KEEP_ORIGINAL_SHORTCUT = 'Mod-Alt-Shift-o'
-export const KEEP_VERSION_SHORTCUT = 'Mod-Alt-Shift-v'
 
 export const REWRITE_CONTROLS = {
   open: {
@@ -61,13 +59,11 @@ export const REWRITE_CONTROLS = {
     id: 'rewrite.keepOriginal',
     label: 'Keep Original',
     description: 'Leave the passage as it is and close the re-write. Your versions are kept; Undo reopens it.',
-    shortcut: KEEP_ORIGINAL_SHORTCUT,
   },
   keepVersion: {
     id: 'rewrite.keepVersion',
     label: 'Keep This Version',
     description: 'Put the version you are looking at in the manuscript in place of the passage. Undo reverts it.',
-    shortcut: KEEP_VERSION_SHORTCUT,
   },
   discard: {
     id: 'rewrite.discard',

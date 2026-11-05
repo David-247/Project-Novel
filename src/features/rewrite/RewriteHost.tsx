@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { getChapters, chapterIndexAt, getEditor, blockPlainText } from '@/features/editor'
 import { useStore, type RewriteRecord } from '@/shared/store'
-import { Button, cn, Dialog, Tooltip } from '@/shared/ui'
+import { Button, cn, Dialog, formatShortcut, Tooltip } from '@/shared/ui'
 import { passageProblem, passageRange } from './anchor'
 import { reopenRewrite } from './choice'
 import { dismissNotice, focusRevision, openList, openRewrite, setViewHooks } from './commands'
@@ -91,7 +91,7 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
   }, [caretIn, notice])
   // The undo notice only informs: it goes away by itself.
   useEffect(() => {
-    if (notice?.kind !== 'undo') return
+    if (notice?.kind !== 'undo' && notice?.kind !== 'discarded') return
     const t = setTimeout(dismissNotice, UNDO_NOTICE_MS)
     return () => clearTimeout(t)
   }, [notice])
@@ -100,13 +100,17 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
   else if (notice?.kind === 'missing') text = `The passage for this re-write was removed. Its versions are kept${notice.id ? '; reopen it to copy text out' : ''}.`
   else if (notice?.kind === 'split') text = `The passage for this re-write is no longer in one piece. Its versions are kept${notice.id ? '; reopen it to copy text out' : ''}.`
   else if (inView) text = null
-  else if (notice?.kind === 'notFound') text = 'The text this re-write left in the manuscript was not found, so it cannot be reopened. Its versions are kept.'
+  else if (notice?.kind === 'notFound')
+    text = notice.ambiguous
+      ? 'The text this re-write left fits more than one place in the manuscript, so it was not reopened (Novel does not guess). Its versions are kept.'
+      : 'The text this re-write left was not found near where it was, so it cannot be reopened. Its versions are kept.'
+  else if (notice?.kind === 'discarded') text = `Re-write discarded. Undo (${formatShortcut('Mod-z')}) brings it back.`
   else if (notice?.kind === 'span') text = 'A re-write covers one chapter at most. Select paragraphs within one chapter and try again.'
   else if (notice?.kind === 'locked' && record) text = 'This passage is being re-written, so it cannot be changed here. Edit it in its re-write.'
   else if (record) text = 'This passage is being re-written. It is locked until you choose a version.'
   if (!text) return null
   // Refusals and errors are alerts; the undo notice only informs (nothing was refused).
-  const alert = notice !== null && notice.kind !== 'undo'
+  const alert = notice !== null && notice.kind !== 'undo' && notice.kind !== 'discarded'
   const dismissable = notice !== null
   const offerOpen = record && !inView
   return (
@@ -145,7 +149,7 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
 function choiceText(r: RewriteRecord): string {
   if (r.choice === CHOICE_ORIGINAL) return 'Kept the original'
   const v = r.choice ? r.versions.find((x) => x.id === r.choice) : undefined
-  return v ? `Kept ${v.name}` : 'Resolved'
+  return v ? `Kept ${v.name}` : r.kept ? 'Kept a version' : 'Resolved'
 }
 
 /** "Chapter 2, The Storm: 'It was a dark…'" for the list. */

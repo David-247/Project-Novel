@@ -271,13 +271,117 @@ describe('Keep Original, Discard, Reopen', () => {
     expect(rw().notice?.kind).toBe('notFound')
   })
 
-  it('locatePassage: an exact run first, never blocks of another open re-write', () => {
+  it('locatePassage: without a hint, two equal matches are ambiguous; never blocks of another open re-write', () => {
     const ed = mount([para('Same.'), para('Same.'), para('Other.')])
     const kept = ed.schema.nodeFromJSON({ type: 'doc', content: [para('Same.')] })
-    expect(locatePassage(ed.state.doc, kept)).toEqual({ from: 0, to: blockPos(ed, 1) })
+    expect(locatePassage(ed.state.doc, kept)).toEqual({ ambiguous: true })
     const [id] = rewrite(ed, 0, 0)
     const open = new Set([getRewrite(id)!.anchor])
     expect(locatePassage(ed.state.doc, kept, open)).toEqual({ from: blockPos(ed, 1), to: blockPos(ed, 2) })
+  })
+
+  it('Reopen does not pick a duplicate short paragraph earlier in the book (the saved location wins)', () => {
+    const ed = mount([title('One'), para('He nodded.'), para('The road went on.'), title('Two'), para('Rain.'), para('He nodded.'), para('They left.')])
+    const [id] = rewrite(ed, 5, 5)
+    act(() => void keepOriginal(id))
+    expect(getRewrite(id)!.location).toEqual({ block: 5, chapter: 1, before: 'Rain.', after: 'They left.' })
+    // Text typed before both copies moves them; the hint is the neighbours, not the index alone.
+    act(() => ed.view.dispatch(ed.state.tr.insert(blockPos(ed, 1), ed.schema.nodeFromJSON(para('A new opening line.')))))
+    act(() => void reopenRewrite(id))
+    expect(getRewrite(id)!.status).toBe('open')
+    expect(anchors(ed)[6]).toBe(getRewrite(id)!.anchor)
+    expect(anchors(ed)[2]).toBeNull()
+  })
+
+  it('Reopen refuses with a notice when the text fits several places equally', () => {
+    const ed = mount([para('A.'), para('He nodded.'), para('B.'), para('A.'), para('He nodded.'), para('B.')])
+    const [id] = rewrite(ed, 4, 4)
+    act(() => void keepOriginal(id))
+    expect(reopenRewrite(id)).toBe(false)
+    expect(rw().notice).toMatchObject({ kind: 'notFound', ambiguous: true })
+    expect(getRewrite(id)!.status).toBe('resolved')
+    expect(anchors(ed).every((a) => a === null)).toBe(true)
+  })
+
+  it('Reopen refuses when the only match is far from where the passage was', () => {
+    const ed = mount([title('One'), para('Far away.'), para('x1.'), para('x2.'), para('x3.'), para('x4.'), para('x5.'), title('Two'), para('Near.'), para('Kept here.'), para('After.')])
+    const [id] = rewrite(ed, 9, 9)
+    act(() => void keepOriginal(id))
+    // The passage and both its neighbours are rewritten by hand; an equal paragraph exists far away only.
+    act(() => ed.view.dispatch(ed.state.tr.delete(blockPos(ed, 8), blockPos(ed, 11))))
+    act(() => ed.view.dispatch(ed.state.tr.insertText(' Kept here.', blockPos(ed, 1) + 1 + 'Far away.'.length)))
+    act(() => ed.view.dispatch(ed.state.tr.insert(blockPos(ed, 2), ed.schema.nodeFromJSON(para('Kept here.')))))
+    expect(reopenRewrite(id)).toBe(false)
+    expect(rw().notice).toMatchObject({ kind: 'notFound' })
+  })
+})
+
+describe('review fixes', () => {
+  it('redo after the kept version was edited re-applies what was kept; the record keeps a frozen copy', () => {
+    const ed = mount()
+    const [id, vid] = rewrite(ed, 1, 1, [para('The rain came at night.')])
+    act(() => void keepVersionNow(vid, id))
+    const kept = getRewrite(id)!.kept
+    expect(kept!.content![0].content![0].text).toBe('The rain came at night.')
+    run(ed, undo)
+    // The version is edited while the re-write is open again.
+    const edited = { type: 'doc', content: [para('Something else entirely.')] } as DocNodeJSON
+    act(() => useStore.getState().rewriteActions.changed(rw().rewrites.map((x) => (x.id === id ? { ...x, versions: [{ ...x.versions[0], doc: edited }] } : x))))
+    run(ed, redo)
+    expect(texts(ed)[1]).toBe('The rain came at night.')
+    expect(getRewrite(id)).toMatchObject({ status: 'resolved', choice: vid, kept })
+    // rewrites.json keeps the frozen copy (and a choice whose version changed stays meaningful).
+    expect(parseRewritesFile({ version: 1, rewrites: [serializeRewrite(getRewrite(id)!)] }).rewrites[0].kept).toEqual(kept)
+  })
+
+  it('a list: a one-word edit in one item is word-level, a comment in another item survives (tracked too)', () => {
+    const item = (...c: (string | JSONContent)[]): JSONContent => ({ type: 'listItem', content: [para(...c)] })
+    const list = (...items: JSONContent[]): JSONContent => ({ type: 'bulletList', content: items })
+    const ed = mount([title('One'), list(item(text('First '), text('item', [{ type: 'comment', attrs: { id: 'c9' } }]), text(' here.')), item('Second item here.'))])
+    const [id, vid] = rewrite(ed, 1, 1, [list(item('First item here.'), item('Second point here.'))])
+    act(() => setTracking(true))
+    act(() => void keepVersionNow(vid, id))
+    expect(ed.state.doc.child(1).type.name).toBe('bulletList')
+    let comment = ''
+    ed.state.doc.descendants((n) => void (n.isText && n.marks.some((m) => m.type.name === 'comment') && (comment += n.text)))
+    expect(comment).toBe('item')
+    const ins: string[] = []
+    const del: string[] = []
+    ed.state.doc.descendants((n) => {
+      if (n.isText && n.marks.some((m) => m.type.name === 'insertion')) ins.push(n.text!)
+      if (n.isText && n.marks.some((m) => m.type.name === 'deletion')) del.push(n.text!)
+    })
+    expect(del).toEqual(['item'])
+    expect(ins).toEqual(['point'])
+  })
+
+  it('asks when a version demotes one chapter title and promotes another (same count)', async () => {
+    const ed = mount()
+    const [id, vid] = rewrite(ed, 0, 1, [para('One'), title('The rain came at dusk, soft at first.')])
+    const asked: string[] = []
+    setRewriteConfirm(async (req) => {
+      asked.push(req.title)
+      return false
+    })
+    await act(async () => void (await keepVersion(vid, id)))
+    expect(asked).toEqual(['Change the chapters?'])
+    // A renamed title is not a removal: no question.
+    const [id2, vid2] = rewrite(ed, 4, 4, [title('Two, renamed')])
+    asked.length = 0
+    await act(async () => void (await keepVersion(vid2, id2)))
+    expect(asked).toEqual([])
+    expect(texts(ed)[4]).toBe('Two, renamed')
+  })
+
+  it('Discard says so; undo puts the re-write back at its place in the list', () => {
+    const ed = mount()
+    const [a] = rewrite(ed, 1, 1)
+    const [b] = rewrite(ed, 3, 3)
+    act(() => void discardRewrite(a))
+    expect(rw().notice?.kind).toBe('discarded')
+    expect(rw().rewrites.map((r) => r.id)).toEqual([b])
+    run(ed, undo)
+    expect(rw().rewrites.map((r) => r.id)).toEqual([a, b])
   })
 })
 
@@ -296,14 +400,17 @@ describe('stale anchors', () => {
 })
 
 describe('rewrites.json', () => {
-  it('keeps the choice and its time; a choice of a version that is gone is dropped; open re-writes have none', () => {
+  it('keeps the choice, its time, the kept copy and the location; a dangling choice is dropped; open re-writes have none', () => {
     const ed = mount()
     const [id, vid] = rewrite(ed, 1, 1, [para('X.')])
     act(() => void keepVersionNow(vid, id))
     const raw = serializeRewrite(getRewrite(id)!)
     expect(raw).toMatchObject({ status: 'resolved', choice: vid })
     expect(parseRewritesFile({ version: 1, rewrites: [raw] }).rewrites[0]).toEqual(getRewrite(id))
-    expect(parseRewritesFile({ version: 1, rewrites: [{ ...raw, choice: 'v-gone' }] }).rewrites[0].choice).toBeUndefined()
+    // A choice of a version that is gone: kept when the frozen copy is there, dropped otherwise.
+    expect(parseRewritesFile({ version: 1, rewrites: [{ ...raw, choice: 'v-gone' }] }).rewrites[0].choice).toBe('v-gone')
+    expect(parseRewritesFile({ version: 1, rewrites: [{ ...raw, choice: 'v-gone', kept: undefined }] }).rewrites[0].choice).toBeUndefined()
+    expect(raw.location).toEqual({ block: 1, chapter: 0, before: 'One', after: 'She closed the window and listened.' })
     expect(parseRewritesFile({ version: 1, rewrites: [{ ...raw, status: 'open' }] }).rewrites[0].choice).toBeUndefined()
   })
 

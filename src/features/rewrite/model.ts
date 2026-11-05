@@ -1,5 +1,5 @@
 import type { DocNodeJSON } from '@/shared/document'
-import type { RewriteRecord, RewriteVersion } from '@/shared/store'
+import type { RewriteLocation, RewriteRecord, RewriteVersion } from '@/shared/store'
 import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 
 export type { RewriteRecord, RewriteVersion }
@@ -23,7 +23,7 @@ const isDate = (v: unknown): v is string => typeof v === 'string' && !Number.isN
 const isPassageDoc = (v: unknown): v is DocNodeJSON =>
   isObject(v) && v.type === 'doc' && Array.isArray(v.content) && v.content.length > 0 && v.content.every((n) => isObject(n) && typeof n.type === 'string')
 
-const RECORD_KEYS = ['id', 'createdAt', 'anchor', 'original', 'versions', 'currentVersionId', 'status', 'originalChanged', 'choice', 'resolvedAt'] as const
+const RECORD_KEYS = ['id', 'createdAt', 'anchor', 'original', 'versions', 'currentVersionId', 'status', 'originalChanged', 'choice', 'resolvedAt', 'kept', 'location'] as const
 
 /** Keep Original's choice value (otherwise a choice is the kept version's id). */
 export const CHOICE_ORIGINAL = 'original'
@@ -66,11 +66,21 @@ export function parseRewrite(raw: unknown): RewriteRecord | null {
     status: raw.status === 'open' ? 'open' : 'resolved',
     ...(raw.status !== 'open' && raw.status !== 'resolved' ? { unknownStatus: raw.status } : {}),
     ...(raw.originalChanged === true ? { originalChanged: true } : {}),
-    // The choice of a resolved re-write: Keep Original, or a version that still exists.
-    ...(raw.status !== 'open' && (raw.choice === CHOICE_ORIGINAL || (typeof raw.choice === 'string' && ids.has(raw.choice))) ? { choice: raw.choice as string } : {}),
+    // The choice of a resolved re-write: Keep Original, or a version (that still exists, or whose kept copy is here).
+    ...(raw.status !== 'open' && (raw.choice === CHOICE_ORIGINAL || (isRewriteId(raw.choice) && (ids.has(raw.choice) || isPassageDoc(raw.kept)))) ? { choice: raw.choice as string } : {}),
     ...(raw.status !== 'open' && isDate(raw.resolvedAt) ? { resolvedAt: raw.resolvedAt } : {}),
+    ...(raw.status !== 'open' && isPassageDoc(raw.kept) ? { kept: raw.kept } : {}),
+    ...(raw.status !== 'open' && parseLocation(raw.location) ? { location: parseLocation(raw.location)! } : {}),
     ...(extra ? { extra } : {}),
   }
+}
+
+/** A resolved re-write's `location` (Reopen's hint), or null when it is not usable. */
+function parseLocation(v: unknown): RewriteLocation | null {
+  if (!isObject(v)) return null
+  const { block, chapter, before, after } = v
+  if (!Number.isInteger(block) || (block as number) < 0 || !Number.isInteger(chapter) || typeof before !== 'string' || typeof after !== 'string') return null
+  return { block: block as number, chapter: chapter as number, before: before.slice(0, 60), after: after.slice(0, 60) }
 }
 
 export interface RewritesFileData {
@@ -121,6 +131,8 @@ export function serializeRewrite(r: RewriteRecord): Record<string, unknown> {
     ...(r.originalChanged ? { originalChanged: true } : {}),
     ...(r.choice ? { choice: r.choice } : {}),
     ...(r.resolvedAt ? { resolvedAt: r.resolvedAt } : {}),
+    ...(r.kept ? { kept: r.kept } : {}),
+    ...(r.location ? { location: r.location } : {}),
   }
 }
 

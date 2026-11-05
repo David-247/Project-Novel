@@ -9,7 +9,8 @@ import { alignBlocks } from './align'
  * Keep This Version: the manuscript passage becomes the version through the smallest edit the
  * comparison view's diff finds (docs/design.md, "Re-write"), not one delete-and-insert:
  * - blocks are paired as on the comparison pages (alignBlocks); an unpaired original block is
- *   deleted, an unpaired version block inserted, a paired list or break that differs replaced whole;
+ *   deleted, an unpaired version block inserted; a paired list is diffed item by item the same way
+ *   (a one-word edit in an item stays one word); a break that differs is replaced;
  * - a paired paragraph gets jsdiff's word diff (`diffWordsWithSpace`, as the pages' highlights):
  *   only the words that differ are replaced, so the unchanged text keeps its marks (comments stay
  *   anchored where they were); formatting that differs on unchanged words becomes mark steps, a
@@ -177,10 +178,28 @@ function inlineOps(a: PMNode, b: PMNode, start: number, ops: Op[]): void {
 
 /** Add to `tr` the steps turning the passage `left` (at `base` in tr.doc) into `right`. Returns the number of ops. */
 export function replacePassage(tr: Transaction, base: number, left: PMNode, right: PMNode): number {
+  const ops: Op[] = []
+  childOps(tr, left, right, base, ops)
+  // Descending: every position is valid in the start document. At one position, the op over a range
+  // runs before an insertion there (the insertion goes before that range); several insertions at one
+  // position run last first, so they end up in order.
+  const order = ops.map((op, i) => ({ op, i }))
+  order.sort((x, y) => y.op.from - x.op.from || y.op.to - x.op.to || y.i - x.i)
+  for (const { op } of order) op.run(tr)
+  return ops.length
+}
+
+/** Containers whose children are paired and diffed like the passage's blocks (a one-word edit in a list item stays one word). */
+const NESTED = new Set(['bulletList', 'orderedList', 'listItem'])
+
+/**
+ * Ops turning the children of `left` (content starting at document position `base`) into those of
+ * `right`: paired, then word-diffed (textblocks), recursed into (lists and their items), or replaced.
+ */
+function childOps(tr: Transaction, left: PMNode, right: PMNode, base: number, ops: Op[]): void {
   const rows = alignBlocks(left, right)
   const starts: number[] = []
   left.forEach((_n, offset) => starts.push(offset))
-  const ops: Op[] = []
   let after = 0 // end of the last original block seen: where an added block goes
   for (const row of rows) {
     if (row.left !== null) {
@@ -203,6 +222,9 @@ export function replacePassage(tr: Transaction, base: number, left: PMNode, righ
           // Before the block's inner ops in the sort below (same `from`, wider range last).
           ops.push({ from, to: to + 1, run: (tr) => void tr.setNodeMarkup(from, type, attrs, a.marks) })
         }
+      } else if (a.type.name === b.type.name && NESTED.has(a.type.name) && sameJSON(styleAttrs(a), styleAttrs(b))) {
+        // A list (or list item): its items paired and diffed in turn.
+        childOps(tr, a, b, from + 1, ops)
       } else {
         const node = clean(Fragment.from(b))
         ops.push({ from, to, run: (tr) => void tr.replaceWith(from, to, node) })
@@ -213,11 +235,25 @@ export function replacePassage(tr: Transaction, base: number, left: PMNode, righ
       ops.push({ from: at, to: at, run: (tr) => void tr.insert(at, node) })
     }
   }
-  // Descending: every position is valid in the start document. At one position, the op over a range
-  // runs before an insertion there (the insertion goes before that range); several insertions at one
-  // position run last first, so they end up in order.
-  const order = ops.map((op, i) => ({ op, i }))
-  order.sort((x, y) => y.op.from - x.op.from || y.op.to - x.op.to || y.i - x.i)
-  for (const { op } of order) op.run(tr)
-  return ops.length
+}
+
+/**
+ * Chapter openings (chapter titles, or the chapter-number block before one) the version removes or
+ * adds, by position: the passage's blocks are paired as on the pages, and an opening block counts as
+ * kept only when its counterpart opens a chapter too (renaming a title keeps it; demoting one title
+ * and promoting another is one removed and one added). `opens(doc)`: indices of the opening blocks.
+ */
+export function chapterChanges(left: PMNode, right: PMNode, opens: (doc: PMNode) => ReadonlySet<number>): { removed: number[]; added: number[] } {
+  const a = opens(left)
+  const b = opens(right)
+  const removed: number[] = []
+  const added: number[] = []
+  if (!a.size && !b.size) return { removed, added }
+  for (const row of alignBlocks(left, right)) {
+    const l = row.left !== null && a.has(row.left)
+    const r = row.right !== null && b.has(row.right)
+    if (l && !r) removed.push(row.left!)
+    if (r && !l) added.push(row.right!)
+  }
+  return { removed, added }
 }

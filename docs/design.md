@@ -631,17 +631,28 @@ The signature feature: a passage rewritten beside its original, compared like tw
 - **The choice (T9)**: a large labelled button under each page: **Keep Original** (secondary) under the original,
   **Keep This Version** (primary, accent; its accessible name includes the version's name) under the revision,
   sticky at the bottom of the scroller while a page runs past it, so the decision is always one click away and sits
-  under the text it keeps. Keys: Mod-Alt-Shift-o / Mod-Alt-Shift-v (by key code, as the other in-view keys); the
-  header has a quiet Discard. Both are disabled while the passage is missing or split. Keep This Version replaces
-  the passage with the smallest word-level edit (the pages' own alignment and jsdiff word diff, `apply.ts`), so
-  unchanged words keep their comments and formatting, a footnote's edited note is diffed inside the note, and with
-  Track Changes on the result is ordinary word-level insertions / deletions for Accept / Reject. A version that adds
-  or removes a chapter title asks first (the app's message dialog). After a choice the view closes and the caret is
+  under the text it keeps. **No default shortcut** (review ruling): a chord that commits the manuscript is too easy
+  to fire by accident (AltGr is Ctrl+Alt on Windows: AltGr+Shift+O types Ó in Polish; Cmd+Opt+Shift+V is Paste and
+  Match Style on macOS); the buttons are in the Tab order and the commands in the Review menu and the ribbon. The
+  view's own keys skip any event with the AltGraph modifier, and match letters by character off macOS (by key code
+  on macOS, where Option changes the character), as the registry does. The header has a quiet Discard, which asks
+  nothing and says "Re-write discarded. Undo (Ctrl+Z) brings it back." (undo puts it back in its place in the
+  list). Both Keep buttons are disabled while the passage is missing or split. Keep This Version replaces the
+  passage with the smallest word-level edit (the pages' own alignment and jsdiff word diff, `apply.ts`), so
+  unchanged words keep their comments and formatting, a footnote's edited note is diffed inside the note, lists are
+  paired item by item and diffed the same way, and with Track Changes on the result is ordinary word-level
+  insertions / deletions for Accept / Reject (if recording fails, the recorder's own status-bar warning shows and
+  the edit is applied untracked). The kept passage is frozen into the record (`kept`), so a redo after the version
+  was edited still matches the record. A version that removes or adds a chapter opening asks first (the app's
+  message dialog); openings are compared by position on the paired blocks, so a renamed title does not ask and a
+  version that demotes one title and promotes another does. After a choice the view closes and the caret is
   at the start of the passage, scrolled to its page or spread; the pages reflow from there. **Undo**: the choice is
   one manuscript transaction with a `RewriteStateStep` (like the comments' thread step), so one Mod-z puts the text
   back and the re-write open again with every version; redo applies it again. Review ▸ Re-writes… lists re-writes in
   progress, then the resolved ones with their choice ("Kept Version 2", "Kept the original") and a Reopen button:
-  the passage as it is now becomes the original, beside the saved versions.
+  the passage as it is now becomes the original, beside the saved versions. Reopen looks where the passage was
+  (the saved location and its neighbouring paragraphs) and never guesses: a short paragraph such as "He nodded."
+  elsewhere in the book is not taken; several equal matches, or none nearby, give a notice instead.
 - **While the view is open the ribbon follows the command gate**, like the menus: registry buttons read
   `isCommandEnabled` (gate included); the slices' own controls for gated commands (Find, New Comment, Track
   Changes) are disabled with their command (`GatedItem` in src/ribbon-groups.tsx); the formatting controls, Undo /

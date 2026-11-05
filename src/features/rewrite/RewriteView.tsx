@@ -25,7 +25,7 @@ import {
   toggleShowCurrent,
   toggleShowDiff,
 } from './commands'
-import { canChoose, discardRewrite, keepOriginal, keepVersion } from './choice'
+import { discardRewrite, keepOriginal, keepVersion } from './choice'
 import { REWRITE_CONTROLS as C } from './controls'
 import { rewriteCommandGate } from './gate'
 import './rewrite.css'
@@ -355,20 +355,18 @@ function Comparison({ record }: { record: RewriteRecord }) {
       return
     }
     if (e.defaultPrevented) return
-    if (mod && e.altKey && e.shiftKey && (e.code === 'KeyO' || e.code === 'KeyV')) {
-      e.preventDefault()
-      if (!canChoose()) return
-      if (e.code === 'KeyO') keepOriginal()
-      else void keepVersion()
-      return
-    }
+    // AltGr is Ctrl+Alt on Windows (and some layouts type characters with it): never a shortcut.
+    if (e.getModifierState?.('AltGraph')) return
+    // A letter: by key code on macOS (Option changes the character), by the character elsewhere, as the
+    // registry matches (a Ctrl+Alt press that types another character is that character, not the shortcut).
+    const letter = (code: string, key: string) => (mac ? e.code === code : e.key.toLowerCase() === key)
     if (mod && e.altKey && !e.shiftKey) {
-      if (e.code === 'KeyK') toggleFlip()
+      if (letter('KeyK', 'k')) toggleFlip()
       else if (e.key === 'ArrowLeft') focusSide('left')
       else if (e.key === 'ArrowRight') focusSide('right')
       else return
       e.preventDefault()
-    } else if (mod && e.shiftKey && !e.altKey && e.code === 'KeyD') {
+    } else if (mod && e.shiftKey && !e.altKey && letter('KeyD', 'd')) {
       e.preventDefault()
       toggleShowDiff()
     }
@@ -595,7 +593,6 @@ function ChoiceButton({ side, disabled, versionName }: { side: 'original' | 'rev
           variant={side === 'revised' ? 'primary' : 'secondary'}
           size="lg"
           disabled={disabled}
-          aria-keyshortcuts={ariaKeyshortcuts(c.shortcut)}
           aria-label={side === 'revised' && versionName ? `${c.label}: ${versionName}` : undefined}
           className="min-w-48 px-6 font-semibold shadow-raised"
           onClick={() => (side === 'original' ? keepOriginal() : void keepVersion())}

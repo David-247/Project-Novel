@@ -138,11 +138,13 @@ test('acceptance path: toggle versions, keep one; one undo restores the original
   expect((await rw(page)).rewrites[0].status).toBe('resolved')
 })
 
-test('Keep Original (shortcut) records the choice; the Re-writes list shows it; Reopen compares the text now with the saved versions', async ({ page }) => {
+test('Keep Original (keyboard) records the choice; the Re-writes list shows it; Reopen compares the text now with the saved versions', async ({ page }) => {
   await project(page, 'Original')
   await openOn(page, 2, 3)
   await page.keyboard.type('Quietly, ')
-  await page.keyboard.press('ControlOrMeta+Alt+Shift+o')
+  // By keyboard: the button is reachable (no default shortcut).
+  await ctl(page, 'rewrite.keepOriginal').focus()
+  await page.keyboard.press('Enter')
   await expect(view(page)).toHaveCount(0)
   expect((await blocks(page)).slice(2, 4)).toEqual([DOC.content[2].content![0].text, DOC.content[3].content![0].text])
   expect((await rw(page)).rewrites[0]).toMatchObject({ status: 'resolved', choice: 'original' })
@@ -165,7 +167,8 @@ test('Keep Original (shortcut) records the choice; the Re-writes list shows it; 
   // Locked again (the manuscript is hidden from the accessibility tree behind the view).
   await expect(page.locator('.nv-rw-locked')).toHaveCount(2)
   // Change of mind: keep the version now (keyboard).
-  await page.keyboard.press('ControlOrMeta+Alt+Shift+v')
+  await ctl(page, 'rewrite.keepVersion').focus()
+  await page.keyboard.press('Enter')
   await expect(view(page)).toHaveCount(0)
   expect((await blocks(page))[2]).toBe('Quietly, She closed the window and listened to the house settle around her.')
   // The Ever. typed after Keep Original is replaced by the version's text (the version was made before it).
@@ -282,7 +285,7 @@ test('the choice and the history survive save, reopen and crash recovery', async
 
   // A second re-write kept as original, unsaved, backed up by autosave, then a crash.
   await openOn(page, 3, 3)
-  await page.keyboard.press('ControlOrMeta+Alt+Shift+o')
+  await ctl(page, 'rewrite.keepOriginal').click()
   await expect(view(page)).toHaveCount(0)
   await expect(saveStatus(page)).toContainText('Unsaved changes')
   await page.clock.runFor(31_000)
@@ -312,4 +315,47 @@ test('the choice and the history survive save, reopen and crash recovery', async
   const list = third.getByRole('dialog', { name: 'Re-writes' })
   await expect(list.getByTestId('rewrite-list-resolved').locator('li')).toHaveCount(2)
   await expect(list.getByTestId('rewrite-list-resolved')).toContainText('Kept Version 1')
+})
+
+test('AltGr chords type characters in the view: they never keep, discard or flip', async ({ page }) => {
+  await project(page, 'AltGr')
+  await openOn(page, 1, 1)
+  // AltGr+Shift+O (Polish Ó) and AltGr+K: Ctrl+Alt on Windows, with the AltGraph modifier state.
+  const altGr = (key: string, code: string, shift: boolean) =>
+    revision(page).evaluate(
+      (el, [k, c, s]) => {
+        const init = { key: k as string, code: c as string, ctrlKey: true, altKey: true, shiftKey: s as boolean, bubbles: true, cancelable: true, modifierAltGraph: true }
+        el.dispatchEvent(new KeyboardEvent('keydown', init as KeyboardEventInit))
+      },
+      [key, code, shift] as const,
+    )
+  await page.keyboard.press('ControlOrMeta+Home')
+  await altGr('\u00d3', 'KeyO', true)
+  await page.keyboard.insertText('\u00d3')
+  await altGr('\u00d5', 'KeyV', true)
+  await altGr('\u0138', 'KeyK', false)
+  await expect(revision(page)).toContainText('\u00d3The rain came')
+  await expect(view(page)).toBeVisible()
+  const r = await rw(page)
+  expect(r.rewrites[0].status).toBe('open')
+  await expect(view(page).locator('.nv-rw-spread')).not.toHaveAttribute('data-flipped')
+  // The real Flip shortcut still works.
+  await page.keyboard.press('ControlOrMeta+Alt+k')
+  await expect(view(page).locator('.nv-rw-spread')).toHaveAttribute('data-flipped', 'true')
+})
+
+test('Discard: a notice offers undo, which brings the re-write back', async ({ page }) => {
+  await project(page, 'Discard')
+  await openOn(page, 1, 1)
+  await page.keyboard.type('Gone ')
+  await ctl(page, 'rewrite.discard').click()
+  await expect(view(page)).toHaveCount(0)
+  await expect(page.getByTestId('rewrite-notice')).toContainText('Re-write discarded. Undo')
+  expect((await rw(page)).rewrites).toHaveLength(0)
+  await expect(locked(page)).toHaveCount(0)
+  await editor(page).click()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(async () => (await rw(page)).rewrites.length).toBe(1)
+  expect(JSON.stringify((await rw(page)).rewrites[0].versions[0].doc)).toContain('Gone The rain')
+  await expect(locked(page)).toHaveCount(1)
 })

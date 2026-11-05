@@ -374,6 +374,8 @@ A re-write:
 | `originalChanged`  | boolean | Optional, `true` once a bulk edit (Replace All, accepting or rejecting a tracked change, undo) changed the passage after the snapshot. |
 | `choice`           | string  | Optional, resolved re-writes only (Phase 3, T9): `"original"` (Keep Original) or the `id` of the version kept (Keep This Version). Read only when `status` is not `"open"` and it names `"original"` or an existing version; otherwise dropped. |
 | `resolvedAt`       | string  | Optional, resolved re-writes only: ISO 8601 time of the choice. |
+| `kept`             | object  | Optional, Keep This Version only: a frozen copy of the passage kept (a passage doc like `original`), so the record stays true to the manuscript when the version is edited later. A `choice` whose version no longer exists is kept when `kept` is there. |
+| `location`         | object  | Optional, resolved re-writes only: where the passage was, Reopen's hint. `{ block, chapter, before, after }`: the top-level index of its first block, the chapter index there (`-1` before the first chapter), and the first 60 characters (plain text) of the paragraph before and after it (`""` at an edge). |
 
 ```json
 {
@@ -415,8 +417,11 @@ A re-write:
   from manuscript.json: a resolved re-write leaves no anchor (an undo or redo that would put a stale one back has it
   removed). The choice is part of the manuscript's undo history: one undo restores the text, the anchor and
   `status` `"open"` (with every version) at once, and redo applies the choice again; the file follows. Reopening a
-  resolved re-write (Review ▸ Re-writes…) finds its text in the manuscript (the kept text, word for word, else the
-  most similar run of paragraphs), anchors it again, takes it as the new `original` and sets `status` back to
+  resolved re-write (Review ▸ Re-writes…) looks for its text in the manuscript (`kept`, else the chosen version or the
+  original; word for word, else the most similar runs of paragraphs). With `location`, a match must have the same
+  neighbouring paragraphs, or else start within a few blocks of `block` in the same `chapter`; without it (an older
+  file) the match must be the only one. Several equal matches, or none close: nothing is reopened and the app says
+  so (it never guesses). Found, it is anchored again, becomes the new `original`, and `status` goes back to
   `"open"`, also in one undo step. Projects without these keys open unchanged.
 - **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the
   version being typed is written into the side file at every save and every recovery snapshot.

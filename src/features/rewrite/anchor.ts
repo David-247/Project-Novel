@@ -394,6 +394,9 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         const resolved = new Set(own.filter((s) => !s.opens).map((s) => s.anchor))
         // O(top-level blocks) per edit, attribute reads only: microseconds on a 100k-word manuscript.
         const open = openAnchors(overrides)
+        // Nothing open, nothing locked or remembered (typing with no re-write open): nothing to do.
+        if (!open.size && !value.ranges.length && !value.lost.size && !own.length && !carried.length && !stateSteps.length)
+          return value.events.length || value.stateSteps.length || overrides !== value.overrides ? { ...value, events: [], stateSteps: [], overrides } : value
         const ranges = computeRanges(state.doc, open)
         const events: AnchorEvent[] = [...carried]
         let lost = value.lost

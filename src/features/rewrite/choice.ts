@@ -2,14 +2,14 @@ import type { Node as PMNode } from '@tiptap/pm/model'
 import { TextSelection, type Transaction } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
 import type { Editor } from '@tiptap/core'
-import { blockPlainText, getChapters, getEditor } from '@/features/editor'
-import { currentTrackAuthor, isTracking, trackTransaction, TRACK_SKIP_META } from '@/features/track-changes'
+import { blockPlainText, chapterIndexAt, getChapters, getEditor } from '@/features/editor'
+import { currentTrackAuthor, isTracking, trackTransaction, TRACK_FAILED_META, TRACK_FAILED_NOTICE, TRACK_SKIP_META } from '@/features/track-changes'
 import type { DocNodeJSON } from '@/shared/document'
 import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
-import { useStore, type RewriteRecord } from '@/shared/store'
+import { useStore, type RewriteLocation, type RewriteRecord } from '@/shared/store'
 import { similarity } from './align'
 import { ANCHOR_TYPES, openAnchorsIn, passageProblem, passageRange, REWRITE_ALLOW_META } from './anchor'
-import { replacePassage } from './apply'
+import { chapterChanges, replacePassage } from './apply'
 import { closeRewrite, compact, currentPassageDoc, flushLiveVersions, getRewrite, nextSeq, openRewrite, versionDoc } from './commands'
 import { CHOICE_ORIGINAL, passageDoc } from './model'
 import { RewriteStateStep, type RewriteStepState } from './step'
@@ -53,6 +53,18 @@ export function setRewriteConfirm(fn: RewriteConfirm | null): void {
 
 const OPEN: RewriteStepState = { status: 'open', choice: null }
 
+/** The resolution fields of `r` now (a step's `before`). */
+function stateOf(r: RewriteRecord, withOriginal = false): RewriteStepState {
+  return {
+    status: r.status,
+    choice: r.choice ?? null,
+    ...(r.resolvedAt ? { resolvedAt: r.resolvedAt } : {}),
+    ...(r.kept ? { kept: r.kept } : {}),
+    ...(r.location ? { location: r.location } : {}),
+    ...(withOriginal ? { original: r.original } : {}),
+  }
+}
+
 /** Steps clearing the anchor `anchor` from every block that carries it. */
 function clearAnchor(tr: Transaction, anchor: string): void {
   tr.doc.forEach((node, offset) => {
@@ -91,7 +103,28 @@ function target(id?: string): { ed: Editor; record: RewriteRecord; range: { from
   return { ed, record, range }
 }
 
-const chapterTitles = (doc: PMNode) => getChapters(doc, undefined, 'simple')
+/** Indices of a passage's blocks that open a chapter (its title, or the chapter number before one). */
+function chapterOpenings(doc: PMNode): ReadonlySet<number> {
+  const starts = new Map<number, number>()
+  doc.forEach((_n, offset, i) => starts.set(offset, i))
+  const out = new Set<number>()
+  for (const c of getChapters(doc, undefined, 'simple')) {
+    const i = starts.get(c.from)
+    if (i !== undefined) out.add(i)
+  }
+  return out
+}
+
+const plain = (n: PMNode) => norm(blockPlainText(n, { markupView: 'simple' }))
+const quoted = (titles: string[]) => titles.map((t) => `“${t}”`).join(', ')
+
+/** Where the passage [from, to) of `doc` is: block index, chapter, and the starts of its neighbours. */
+function locationOf(doc: PMNode, from: number, to: number): RewriteLocation {
+  const block = doc.resolve(from).index(0)
+  const last = doc.resolve(Math.min(to, doc.content.size)).index(0)
+  const text = (i: number) => (i >= 0 && i < doc.childCount ? plain(doc.child(i)).slice(0, 60) : '')
+  return { block, chapter: chapterIndexAt(getChapters(doc), from), before: text(block - 1), after: text(last) }
+}
 
 function toNode(ed: Editor, json: DocNodeJSON): PMNode | null {
   try {
@@ -124,23 +157,19 @@ export async function keepVersion(versionId?: string, id?: string): Promise<bool
   const json = versionDoc(t.record, vid)
   const right = json ? toNode(t.ed, json) : null
   if (!left || !right) return false
-  const before = chapterTitles(left)
-  const after = chapterTitles(right)
-  if (before.length !== after.length) {
-    const removed = before.find((c) => !after.some((a) => a.title === c.title)) ?? before[0]
-    const ok = await confirmFn(
-      after.length < before.length
-        ? {
-            title: 'Remove a chapter title?',
-            message: `This version leaves out the chapter title${removed?.title ? ` “${removed.title}”` : ''}. Its chapter will run on from the one before it. Keep this version anyway?`,
-            confirmLabel: 'Keep This Version',
-          }
-        : {
-            title: 'Add a chapter title?',
-            message: 'This version adds a chapter title, so the chapter will be split in two. Keep this version anyway?',
-            confirmLabel: 'Keep This Version',
-          },
-    )
+  // Which chapter openings the version removes or adds, by position (a demoted title and a promoted one both count).
+  const { removed, added } = chapterChanges(left, right, chapterOpenings)
+  if (removed.length || added.length) {
+    const gone = removed.map((i) => plain(left.child(i))).filter(Boolean)
+    const fresh = added.map((i) => plain(right.child(i))).filter(Boolean)
+    const parts: string[] = []
+    if (removed.length) parts.push(`leaves out the chapter title${gone.length > 1 ? 's' : ''}${gone.length ? ` ${quoted(gone)}` : ''} (its chapter runs on from the one before it)`)
+    if (added.length) parts.push(`makes ${fresh.length ? quoted(fresh) : 'a paragraph'} a chapter title (the chapter is split there)`)
+    const ok = await confirmFn({
+      title: removed.length && added.length ? 'Change the chapters?' : removed.length ? 'Remove a chapter title?' : 'Add a chapter title?',
+      message: `This version ${parts.join(' and ')}. Keep this version anyway?`,
+      confirmLabel: 'Keep This Version',
+    })
     if (!ok) return false
   }
   return keepVersionNow(vid, t.record.id)
@@ -159,11 +188,28 @@ export function keepVersionNow(versionId: string, id?: string): boolean {
   let tr = state.tr
   replacePassage(tr, range.from, left, right)
   // Track Changes: recorded here (the recorder would also take the anchor steps below for style changes).
-  if (tr.docChanged && isTracking()) tr = trackTransaction(state, tr, currentTrackAuthor())
-  else tr.setMeta(TRACK_SKIP_META, true)
-  const caret = tr.mapping.map(range.from, -1) + 1
+  if (tr.docChanged && isTracking()) {
+    tr = trackTransaction(state, tr, currentTrackAuthor())
+    // Could not be recorded: applied untracked with the recorder's own warning (and never tracked by the hook).
+    if (tr.getMeta(TRACK_FAILED_META)) {
+      useStore.getState().trackChangesActions.setNotice(TRACK_FAILED_NOTICE)
+      tr.setMeta(TRACK_SKIP_META, true)
+    }
+  } else tr.setMeta(TRACK_SKIP_META, true)
+  const start = tr.mapping.map(range.from, -1)
+  const location = locationOf(tr.doc, start, tr.mapping.map(range.to, 1))
   clearAnchor(tr, record.anchor)
-  tr.step(new RewriteStateStep(record.id, record.anchor, OPEN, { status: 'resolved', choice: versionId, resolvedAt: new Date().toISOString() }))
+  // The kept passage is frozen into the record: later edits of the version never change what was kept.
+  tr.step(
+    new RewriteStateStep(record.id, record.anchor, OPEN, {
+      status: 'resolved',
+      choice: versionId,
+      resolvedAt: new Date().toISOString(),
+      kept: json!,
+      location,
+    }),
+  )
+  const caret = start + 1
   dispatchAlone(ed, tr, caret)
   backToManuscript(ed)
   return true
@@ -176,7 +222,8 @@ export function keepOriginal(id?: string): boolean {
   const { ed, record, range } = t
   const tr = ed.state.tr.setMeta(TRACK_SKIP_META, true)
   clearAnchor(tr, record.anchor)
-  tr.step(new RewriteStateStep(record.id, record.anchor, OPEN, { status: 'resolved', choice: CHOICE_ORIGINAL, resolvedAt: new Date().toISOString() }))
+  const location = locationOf(tr.doc, range.from, range.to)
+  tr.step(new RewriteStateStep(record.id, record.anchor, OPEN, { status: 'resolved', choice: CHOICE_ORIGINAL, resolvedAt: new Date().toISOString(), location }))
   dispatchAlone(ed, tr, range.from + 1)
   backToManuscript(ed)
   return true
@@ -194,27 +241,39 @@ export function discardRewrite(id?: string): boolean {
   if (!record || !ed || ed.isDestroyed) return false
   const tr = ed.state.tr.setMeta(TRACK_SKIP_META, true)
   clearAnchor(tr, record.anchor)
-  const before: RewriteStepState = { status: record.status, choice: record.choice ?? null, ...(record.resolvedAt ? { resolvedAt: record.resolvedAt } : {}) }
-  tr.step(new RewriteStateStep(record.id, record.anchor, before, null, record))
+  const index = store().rewrite.rewrites.findIndex((r) => r.id === record.id)
+  tr.step(new RewriteStateStep(record.id, record.anchor, stateOf(record), null, record, index))
   const range = passageRange(ed.state.doc, record.anchor)
   const wasOpen = store().rewrite.openId === record.id
   dispatchAlone(ed, tr, range ? range.from + 1 : null)
   if (wasOpen) backToManuscript(ed)
+  // Not asked first (undo brings it back): said so.
+  actions().setNotice({ kind: 'discarded', seq: nextSeq() })
   return true
 }
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
 
+/** Reopen's search: the passage found, `ambiguous` (several places fit and none stands out), or null (nowhere close). */
+export type LocateResult = { from: number; to: number } | { ambiguous: true } | null
+
+/** How many blocks from the remembered place a candidate without matching neighbours may start. */
+const NEAR_BLOCKS = 3
+
 /**
- * Where the text a resolved re-write left in the manuscript is now: the run of top-level blocks with
- * the kept text (the version kept, or the original), word for word; else the most similar run (the
- * text was edited since). Never a block of another open re-write. Null when nothing is close.
+ * Where the text a resolved re-write left in the manuscript is now (Reopen). Candidates: the runs of
+ * top-level blocks with the kept text word for word, else the runs most like it (edited since);
+ * never blocks of another open re-write. With the `hint` saved when it resolved (rewrites.json
+ * `location`), a candidate must have the same neighbouring paragraphs, or else start within a few
+ * blocks of the remembered place in the same chapter; without one (an older file), the match must
+ * be the only one. Several candidates that fit equally: `ambiguous` (Novel does not guess). Null
+ * when nothing is close.
  */
-export function locatePassage(doc: PMNode, kept: PMNode, open: ReadonlySet<string> = new Set()): { from: number; to: number } | null {
+export function locatePassage(doc: PMNode, kept: PMNode, open: ReadonlySet<string> = new Set(), hint?: RewriteLocation): LocateResult {
   const n = kept.childCount
   if (n === 0 || n > doc.childCount) return null
   const want: string[] = []
-  kept.forEach((b) => want.push(norm(blockPlainText(b, { markupView: 'simple' }))))
+  kept.forEach((b) => want.push(plain(b)))
   const blocks: PMNode[] = []
   const starts: number[] = []
   doc.forEach((b, offset) => {
@@ -231,48 +290,72 @@ export function locatePassage(doc: PMNode, kept: PMNode, open: ReadonlySet<strin
   const text = new Map<number, string>()
   const textAt = (i: number) => {
     let t = text.get(i)
-    if (t === undefined) text.set(i, (t = norm(blockPlainText(blocks[i], { markupView: 'simple' }))))
+    if (t === undefined) text.set(i, (t = plain(blocks[i])))
     return t
   }
   const range = (i: number) => ({ from: starts[i], to: starts[i + n - 1] + blocks[i + n - 1].nodeSize })
+
+  let candidates: { i: number; score: number }[] = []
   for (let i = 0; i + n <= blocks.length; i++) {
     if (textAt(i) !== want[0]) continue
     let k = 1
     while (k < n && textAt(i + k) === want[k]) k++
-    if (k === n && free(i)) return range(i)
+    if (k === n && free(i)) candidates.push({ i, score: 1 })
   }
-  // Edited since: the run whose blocks are most alike (the first block alike enough to start one).
-  let best = -1
-  let score = 0.6
-  for (let i = 0; i + n <= blocks.length; i++) {
-    if (similarity(blocks[i], kept.child(0)) < 0.5) continue
-    let sum = 0
-    for (let k = 0; k < n; k++) sum += similarity(blocks[i + k], kept.child(k))
-    if (sum / n > score && free(i)) {
-      score = sum / n
-      best = i
+  if (!candidates.length) {
+    // Edited since: runs whose blocks are alike (the first block alike enough to start one).
+    for (let i = 0; i + n <= blocks.length; i++) {
+      if (similarity(blocks[i], kept.child(0)) < 0.5) continue
+      let sum = 0
+      for (let k = 0; k < n; k++) sum += similarity(blocks[i + k], kept.child(k))
+      if (sum / n >= 0.6 && free(i)) candidates.push({ i, score: sum / n })
     }
   }
-  return best >= 0 ? range(best) : null
+  if (!candidates.length) return null
+
+  const one = (list: { i: number; score: number }[]): LocateResult => {
+    if (list.length === 1) return range(list[0].i)
+    // The clearly best of several edited runs; equal ones are ambiguous.
+    const sorted = [...list].sort((a, b) => b.score - a.score)
+    if (sorted[0].score < 1 && sorted[0].score - sorted[1].score >= 0.1) return range(sorted[0].i)
+    return { ambiguous: true }
+  }
+  if (!hint) return one(candidates)
+
+  const chapters = getChapters(doc)
+  const context = (i: number) => (i > 0 ? textAt(i - 1).slice(0, 60) : '') === hint.before && (i + n < blocks.length ? textAt(i + n).slice(0, 60) : '') === hint.after
+  const inContext = candidates.filter((c) => context(c.i))
+  if (inContext.length) return one(inContext)
+  // Its neighbours were edited too: only near the remembered place, in the same chapter.
+  candidates = candidates.filter((c) => Math.abs(c.i - hint.block) <= Math.max(NEAR_BLOCKS, n) && chapterIndexAt(chapters, starts[c.i]) === hint.chapter)
+  if (!candidates.length) return null
+  return one(candidates)
+}
+
+/** The passage a resolved re-write left in the manuscript: the frozen kept copy, else the version chosen, else the original. */
+function keptText(record: RewriteRecord): DocNodeJSON {
+  if (record.kept) return record.kept
+  if (record.choice && record.choice !== CHOICE_ORIGINAL) return versionDoc(record, record.choice) ?? record.original
+  return record.original
 }
 
 /**
  * Reopen a resolved re-write (Re-writes list): its passage is found in the manuscript (locatePassage)
  * and becomes the new original, compared with the saved versions; the passage is locked again. One
- * undo event, like the choice it reopens. A notice when the text is not found.
+ * undo event, like the choice it reopens. A notice, and nothing locked, when the text is not found or
+ * fits more than one place.
  */
 export function reopenRewrite(id: string): boolean {
   const record = getRewrite(id)
   const ed = getEditor()
   if (!record || record.status === 'open' || !ed || ed.isDestroyed) return false
   if (store().rewrite.openId) closeRewrite({ restore: false })
-  const keptJSON = record.choice && record.choice !== CHOICE_ORIGINAL ? (versionDoc(record, record.choice) ?? record.original) : record.original
-  const kept = toNode(ed, keptJSON)
-  const found = kept ? locatePassage(ed.state.doc, kept, openAnchorsIn(ed.state)) : null
-  if (!found) {
+  const kept = toNode(ed, keptText(record))
+  const found = kept ? locatePassage(ed.state.doc, kept, openAnchorsIn(ed.state), record.location) : null
+  if (!found || 'ambiguous' in found) {
     // The list closes, so the notice can be read.
     actions().setListOpen(false)
-    actions().setNotice({ kind: 'notFound', seq: nextSeq() })
+    actions().setNotice({ kind: 'notFound', ...(found ? { ambiguous: true } : {}), seq: nextSeq() })
     return false
   }
   const blocks: DocNodeJSON[] = []
@@ -283,8 +366,7 @@ export function reopenRewrite(id: string): boolean {
     if ((ANCHOR_TYPES as readonly string[]).includes(node.type.name)) tr.setNodeAttribute(pos, REWRITE_BLOCK_ATTR, record.anchor)
     return false
   })
-  const before: RewriteStepState = { status: record.status, choice: record.choice ?? null, original: record.original, ...(record.resolvedAt ? { resolvedAt: record.resolvedAt } : {}) }
-  tr.step(new RewriteStateStep(record.id, record.anchor, before, { status: 'open', choice: null, original: passageDoc(blocks) }))
+  tr.step(new RewriteStateStep(record.id, record.anchor, stateOf(record, true), { status: 'open', choice: null, original: passageDoc(blocks) }))
   // The manuscript gives up the focus first (as Re-write Passage… does: a long selection is not re-placed).
   if (ed.view.hasFocus()) {
     ;(ed.view.dom as HTMLElement).blur()
@@ -292,7 +374,8 @@ export function reopenRewrite(id: string): boolean {
   }
   dispatchAlone(ed, tr, null)
   if (getRewrite(id)?.status !== 'open') return false
-  return openRewrite(id, record.choice && record.choice !== CHOICE_ORIGINAL ? record.choice : undefined)
+  const shown = record.choice && record.choice !== CHOICE_ORIGINAL && record.versions.some((v) => v.id === record.choice) ? record.choice : undefined
+  return openRewrite(id, shown)
 }
 
 /** Keep commands: the open re-write can be resolved (its passage is in the manuscript in one piece). */

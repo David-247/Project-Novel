@@ -57,13 +57,12 @@ export function rewriteCommands(): Command[] {
     { id: C.focusLeft.id, label: C.focusLeft.label, description: C.focusLeft.description, shortcut: C.focusLeft.shortcut, menu: review(52), guard: 'none', isEnabled: inView, run: () => focusSide('left') },
     { id: C.focusRight.id, label: C.focusRight.label, description: C.focusRight.description, shortcut: C.focusRight.shortcut, menu: review(53), guard: 'none', isEnabled: inView, run: () => focusSide('right') },
     { id: C.newVersion.id, label: C.newVersion.label, description: C.newVersion.description, menu: review(54), guard: 'modal', isEnabled: inView, run: () => void newVersion() },
-    // The choice: large buttons under each page of the view, the ribbon's Re-write group, the Review menu.
-    // The view handles the shortcuts by key code (macOS: Option changes the letter); the registry's are for the sheet and menus.
+    // The choice: large buttons under each page of the view, the ribbon's Re-write group, the Review menu. No
+    // default shortcut: a one-key-chord commit is too easy to fire by accident (AltGr is Ctrl+Alt on Windows).
     {
       id: C.keepOriginal.id,
       label: C.keepOriginal.label,
       description: C.keepOriginal.description,
-      shortcut: C.keepOriginal.shortcut,
       menu: review(55),
       ribbon: ribbon(50),
       guard: 'modal',
@@ -74,7 +73,6 @@ export function rewriteCommands(): Command[] {
       id: C.keepVersion.id,
       label: C.keepVersion.label,
       description: C.keepVersion.description,
-      shortcut: C.keepVersion.shortcut,
       menu: review(56),
       ribbon: ribbon(60),
       guard: 'modal',
