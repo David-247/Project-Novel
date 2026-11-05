@@ -12,9 +12,10 @@
 // rejectAll, acceptChangesInRange, rejectChangesInRange.
 // Pagination: setMarkupViewRepaginate(invalidatePaginationAt) in the composition root.
 // UI: TrackChangesButton (`review.track`) and MarkupViewMenu (`review.markup`), wrap in ToolbarItem.
-export { TrackChanges, trackChangesKey, setMarkupViewRepaginate, applyMarkupViewAttribute, changedBlockPositions } from './extension'
+export { TrackChanges, trackChangesKey, setMarkupViewRepaginate, applyMarkupViewAttribute, changedBlockPositions, skipDeleted, TRACK_FAILED_NOTICE } from './extension'
 export type { TrackChangesOptions } from './extension'
-export { trackTransaction, cleanSlice, newChangeId, TRACK_SKIP_META, TRACKED_META } from './record'
+export { trackTransaction, cleanSlice, newChangeId, markComposed, TRACK_SKIP_META, TRACKED_META, TRACK_FAILED_META, DEFERRED_INSERT_META } from './record'
+export type { TrackOptions } from './record'
 export type { Author, ChangeStamp, StyleChangeStamp } from './record'
 export {
   acceptChange,
@@ -31,6 +32,6 @@ export { copiedSlice } from './copy'
 export { isTracking, setTracking, toggleTrackChanges, getMarkupView, setMarkupView } from './commands'
 export { TRACK_CHANGES_CONTROLS, MARKUP_VIEW_OPTIONS, markupViewLabel } from './controls'
 export type { MarkupViewOption } from './controls'
-export { TrackChangesButton, MarkupViewMenu } from './ReviewControls'
+export { TrackChangesButton, MarkupViewMenu, TrackChangesNotice } from './ReviewControls'
 export type { ReviewControlProps } from './ReviewControls'
 export { TRACKED_BLOCK_TYPES } from './schema'

@@ -462,10 +462,49 @@ test('100k-word manuscript with 2,000 tracked changes: typing with tracking on, 
   expect(toNone.pagesAfter).not.toBe(toNone.pagesBefore)
   const worst = Math.max(toNone.ms, toOriginal.ms, toAll.ms)
 
+  // Typing in No Markup and Simple Markup (the break decorations follow the view on every keystroke).
+  const typingIn = async (view: 'none' | 'simple') => {
+    await page.evaluate((v) => window.__nvE2E.setMarkupView(v), view)
+    await waitForLayout(page)
+    return measureTyping(page)
+  }
+  const typingNone = await typingIn('none')
+  const typingSimple = await typingIn('simple')
+  await page.evaluate(() => window.__nvE2E.setMarkupView('all'))
+  await waitForLayout(page)
+
+  // Replace All with tracking on: every replaced "the" stays as a deletion, "a" goes in after it.
+  const the = Math.ceil(words / THE_EVERY)
+  await findThe(page, the)
+  await findPanel(page).getByRole('textbox', { name: 'Replace with' }).fill('a')
+  const changesBefore = await page.evaluate(() => window.__nvE2E.countChanges())
+  const replaceAllRun = await page.evaluate(async () => {
+    const btn = document.querySelector<HTMLButtonElement>('[data-control-id="find.replaceAll"]')!
+    const status = document.querySelector('[data-testid="find-status"]')!
+    const t0 = performance.now()
+    btn.click()
+    const clickMs = performance.now() - t0
+    await new Promise<void>((resolve) => {
+      const check = () => (status.textContent?.startsWith('Replaced') ? resolve() : requestAnimationFrame(check))
+      check()
+    })
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    return { ms: performance.now() - t0, clickMs, pass: window.__nvE2E.paginationLines().lastPass }
+  })
+  console.info(`[perf] tracked Replace All: ${JSON.stringify(replaceAllRun)}`)
+  const replaceAllMs = replaceAllRun.ms
+  const replacedText = await page.getByTestId('find-status').textContent()
+  const replaced = Number(/Replaced (\d+)/.exec(replacedText ?? '')?.[1] ?? 0)
+  expect(replaced).toBeGreaterThan(9000)
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBeGreaterThan(changesBefore)
+
   await report(testInfo, 'perf-track-changes', {
     manuscript: { words, blocks: doc.content.length, changes },
     openMs,
     typing,
+    typingNoMarkup: typingNone,
+    typingSimpleMarkup: typingSimple,
+    replaceAll: { replaced, ms: +replaceAllMs.toFixed(1) },
     markupSwitch: {
       toNoMarkupMs: +toNone.ms.toFixed(1),
       toOriginalMs: +toOriginal.ms.toFixed(1),
@@ -475,10 +514,13 @@ test('100k-word manuscript with 2,000 tracked changes: typing with tracking on, 
       // When the engine's pass started after the switch (style recalc, first frame) and how long it took.
       passes: [toNone, toOriginal, toAll].map((s) => ({ startMs: s.passStartMs, totalMs: s.passMs })),
     },
-    budgets: { typingMedianMs: 50, markupSwitchMs: 1000 },
+    budgets: { typingMedianMs: 50, markupSwitchMs: 1000, replaceAllMs: 2000 },
   })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
   budget(testInfo, 'typing median ms (tracking on, 2,000 changes)', typing.medianMs, 50)
+  budget(testInfo, 'typing median ms (tracking on, No Markup)', typingNone.medianMs, 50)
+  budget(testInfo, 'typing median ms (tracking on, Simple Markup)', typingSimple.medianMs, 50)
   budget(testInfo, 'markup view switch reflow complete ms', worst, 1000)
+  budget(testInfo, 'Replace All ms (tracking on)', replaceAllMs, 2000)
 })

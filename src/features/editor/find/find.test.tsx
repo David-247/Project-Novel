@@ -4,7 +4,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { useStore } from '@/shared/store'
 import { FindButton, FindReplacePanel, getEditor, HISTORY_DEPTH, HistoryButtons, NovelEditor, setDocJSON } from '../index'
 import { installLayoutPolyfills } from '../jsdom-polyfills.test-util'
-import { getMatches, HIGHLIGHT_WINDOW, replaceAll, scanNow } from './engine'
+import { getMatches, HIGHLIGHT_WINDOW, replaceAll, replaceCurrent, scanNow } from './engine'
 import { CURRENT_CLASS, MATCH_CLASS } from './plugin'
 import { findMatches } from './search'
 
@@ -479,5 +479,59 @@ describe('find & replace inside footnotes (note text travels with find)', () => 
     expect(ed.state.doc.firstChild!.child(1).type.name).toBe('footnote')
     act(() => void ed.commands.undo())
     expect(ed.state.doc.firstChild!.child(1).textContent).toBe('Source: the cat book.')
+  })
+})
+
+describe('replace with Track Changes on (All Markup finds deleted text)', () => {
+  const deletedText = (ed: ReturnType<typeof mountAll>) => {
+    let out = ''
+    ed.state.doc.descendants((n) => {
+      if (n.isText && n.marks.some((m) => m.type.name === 'deletion')) out += n.text
+    })
+    return out
+  }
+
+  it('Replace goes past the replaced (now deleted) match; nothing left: returns false', () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    try {
+      const ed = mountAll({ type: 'doc', content: [para(t('a cat and a cat'))] })
+      act(() => useStore.setState((s) => ({ find: { ...s.find, open: true, query: 'cat', replacement: '' } })))
+      act(() => scanNow())
+      let r = false
+      act(() => void (r = replaceCurrent()))
+      expect(r).toBe(true)
+      act(() => void (r = replaceCurrent()))
+      expect(r).toBe(true)
+      expect(deletedText(ed)).toBe('catcat')
+      act(() => void (r = replaceCurrent()))
+      expect(r).toBe(false)
+      expect(replaceAll()).toBe(0)
+    } finally {
+      act(() => useStore.getState().bookActions.resetBook())
+    }
+  })
+
+  it('Replace All counts only what it replaced; the replacement never inherits tracking marks', () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    try {
+      const del = { type: 'deletion', attrs: { id: 'd', author: 'Zed' } }
+      const ins = { type: 'insertion', attrs: { id: 'i', author: 'Zed' } }
+      const ed = mountAll({
+        type: 'doc',
+        content: [para({ type: 'text', text: 'cat', marks: [del] }, t(' '), { type: 'text', text: 'cat', marks: [ins] }, t(' cat'))],
+      })
+      act(() => useStore.setState((s) => ({ find: { ...s.find, open: true, query: 'cat', replacement: 'dog' } })))
+      act(() => scanNow())
+      let n = 0
+      act(() => void (n = replaceAll()))
+      expect(n).toBe(2)
+      const authors: string[] = []
+      ed.state.doc.descendants((node) => {
+        if (node.isText && node.text === 'dog') authors.push(node.marks.map((m) => `${m.type.name}:${m.attrs.author}`).join())
+      })
+      expect(authors).toEqual(['insertion:Author', 'insertion:Author'])
+    } finally {
+      act(() => useStore.getState().bookActions.resetBook())
+    }
   })
 })

@@ -277,3 +277,62 @@ describe('footnote editor (nested view, unified undo)', () => {
   })
 })
 
+describe('footnote editor with Track Changes on (real inner / outer round trip)', () => {
+  type View = NonNullable<ReturnType<typeof activeFootnoteView>>
+  /** A key in the note: its handlers first, then what the browser does natively (one character). */
+  function press(inner: View, key: 'Backspace' | 'Delete') {
+    const before = inner.state.doc
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+    act(() => void inner.dom.dispatchEvent(ev))
+    if (ev.defaultPrevented || inner.state.doc !== before) return
+    const { head } = inner.state.selection
+    act(() => void inner.dispatch(key === 'Backspace' ? inner.state.tr.delete(head - 1, head) : inner.state.tr.delete(head, head + 1)))
+  }
+  const noteOf = (ed: Editor) => ed.state.doc.firstChild!.child(1)
+  const deletedText = (ed: Editor) => {
+    let s = ''
+    noteOf(ed).forEach((c) => {
+      if (c.marks.some((m) => m.type.name === 'deletion')) s += c.text ?? ''
+    })
+    return s
+  }
+  async function open(ed: Editor): Promise<View> {
+    act(() => void ed.commands.editFootnote(2))
+    await screen.findByTestId('footnote-editor')
+    return activeFootnoteView()!
+  }
+
+  it('Backspace twice keeps both characters as deletions; the note stays open and in step; typing goes on', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    act(() => void inner.dispatch(inner.state.tr.setSelection(TextSelection.atEnd(inner.state.doc))))
+    press(inner, 'Backspace')
+    press(inner, 'Backspace')
+    expect(noteOf(ed).textContent).toBe('note')
+    expect(deletedText(ed)).toBe('te')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+    // Deleting already-deleted text (natively, no key handler) changes nothing in the manuscript:
+    // the note is mirrored back instead of drifting apart.
+    act(() => void inner.dispatch(inner.state.tr.delete(3, 4)))
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+    // The next keystroke still lands (the editor did not close on a mismatch).
+    act(() => void inner.dispatch(inner.state.tr.insertText('X', inner.state.selection.from)))
+    expect(getFootnoteEditing()).not.toBeNull()
+    expect(noteOf(ed).textContent).toContain('X')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+  })
+
+  it('Delete past deleted text acts on the character after it', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    act(() => void inner.dispatch(inner.state.tr.setSelection(TextSelection.create(inner.state.doc, 0))))
+    press(inner, 'Delete')
+    act(() => void inner.dispatch(inner.state.tr.setSelection(TextSelection.create(inner.state.doc, 0))))
+    press(inner, 'Delete')
+    expect(deletedText(ed)).toBe('no')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+  })
+})
+

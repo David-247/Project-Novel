@@ -92,14 +92,23 @@ later steps are mapped over the deleted text kept so far. The selection is mappe
 **Backspace** leaves the caret before the text it marked, **Delete** and typing after it.
 **Backspace / Delete across a deletion:** when the character (or paragraph boundary) next to the caret
 is already deleted, the caret first moves over the deleted run and the key acts on the text beyond it.
-If the rewrite throws, the edit is applied untracked and the error logged (never a lost keystroke).
+If the rewrite throws, the edit is applied untracked (never a lost keystroke), the error is logged
+and the status bar shows a warning (`TrackChangesNotice`, store `trackChanges.notice`) until Track
+Changes is turned off or on again.
 
-**IME composition.** Each composition update replaces the composed text, which is your own insertion,
-so it is really replaced: the composition ends as one insertion holding the final text.
+**IME composition.** While the view is composing, the composed text is inserted **without** its
+insertion mark: wrapping the composing text node in a mark span mid-composition cancels or doubles the
+composition in Safari. The extension keeps the unmarked ranges (mapped through every transaction) and
+counts them as your own insertion, so each composition update really replaces the previous one. When
+the composition ends, the ranges get their insertion mark: in ProseMirror's last transaction of the
+composition, or (when there is none) in a transaction on `compositionend` carrying the same
+`composition` meta, so the history keeps it in the composition's undo step.
 
 **Footnote text.** The footnote editor forwards its steps into the manuscript transaction
 (`StepMap.offset`), so they go through the same dispatch hook: edits inside a note are recorded like
-body text, and the note editor shows the result.
+body text, and the note editor shows the result. Backspace / Delete in the note go past deleted text
+first (`skipDeleted`, as in the manuscript), and the note is mirrored back from the manuscript whenever
+the two differ after a forwarded edit (deleting already-deleted text changes nothing there).
 
 **Author.** `TrackChanges.configure({ getAuthor })`: `() => ({ name, color? })`, default
 `() => ({ name: 'Author' })`. The composition root wires it to the settings at integration.
@@ -154,8 +163,10 @@ change) or `null` when there is nothing to do.
 | `trackedDelete` | boundary removed | attribute cleared |
 | `trackedStyleChange` | attribute cleared | `beforeType` / `beforeAttrs` restored |
 
-Inline changes are resolved first (marks, then removed text from last to first), then blocks from last
-to first. **Removing a boundary:** a break is deleted; an empty block is deleted (unless it is its
+Inline changes are resolved first (marks, then removed text from last to first), then blocks: first
+attributes and the blocks that go away whole (breaks, empty blocks), last to first; then the joins.
+The order matters for a break inserted mid-paragraph (Mod-Enter in "abcd" gives `ab | +¶[pageBreak] |
++¶cd`): the break goes before "cd" can join "ab", so rejecting gives "abcd" back. **Removing a boundary:** a break is deleted; an empty block is deleted (unless it is its
 parent's only child); otherwise the block is joined to the textblock before it when they can join, and
 left as it is when they cannot (the first block, after a list).
 
@@ -182,15 +193,28 @@ reflows: the trim-reflow budget (< 1 s to reflow complete).
 - **Footnotes.** `collectFootnotes` leaves out notes the view hides: a deleted note takes no number and no
   space in No Markup. Note measurements are dropped on a switch (hidden text inside notes).
 
-Perf (`e2e/perf.spec.ts`, 100k words, 2,000 changes, local Windows 11): typing with tracking on, median
-21 ms Chromium / 41–45 ms WebKit; view switch, reflow complete, worst of three switches 340–370 ms
-Chromium / 710–750 ms WebKit (up to 1.45 s on WebKit under a loaded host; Windows WebKit is not a
-shipping pair).
+Outside All Markup the `data-break-before` decorations are mapped on typing, like in All Markup, and
+recomputed only when an edited block became hidden or visible.
+
+Perf (`e2e/perf.spec.ts`, 100k words, 2,000 changes, local Windows 11, a loaded host; Windows WebKit is
+not a shipping pair):
+
+| Measure (budget) | Chromium | WebKit |
+|---|---|---|
+| Typing, tracking on, All / No / Simple Markup (< 50 ms median) | 18 / 20 / 20 ms | 43 / 48 / 51 ms |
+| View switch, reflow complete, worst of three (< 1 s) | 290–370 ms | 665–750 ms (up to 1.45 s) |
+| Replace All of 10,000 "the", tracking on (< 2 s) | 0.9–1.1 s | 1.5–2.4 s |
+
+A tracked replacement is two steps (the deletion mark, then the new text inserted with its insertion
+mark), so a tracked Replace All costs about twice an untracked one.
 
 ## Other features
 
 - **Find** skips hidden text in Simple / No Markup (deleted) and Original (inserted); All Markup finds
-  everything. Replace never replaces a match that is all deleted text.
+  everything. Replace never replaces a match that is all deleted text: Replace goes on to the next match
+  still there, Replace All counts only what it replaced (and its summary shows until the document
+  changes, since All Markup still finds the deleted originals). Replacement text never inherits
+  tracking marks.
 - **Word count**: none exists yet; when it does, it should count `isInlineHidden(node, 'none')`-visible text.
 - **Storage**: the marks and attributes are ordinary manuscript.json content: save, reopen and crash
   recovery keep them. `trackChanges` is in book.json.

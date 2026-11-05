@@ -12,7 +12,9 @@ export const isTracking = (state: Pick<RootState, 'book'> = useStore.getState())
 
 /** Turn recording on or off. Existing changes stay either way. */
 export function setTracking(on: boolean): void {
-  useStore.getState().bookActions.setTrackChanges(on)
+  const s = useStore.getState()
+  s.trackChangesActions.setNotice(null)
+  s.bookActions.setTrackChanges(on)
 }
 
 /** Flip recording (Mod-Shift-e). `editor`, when given, gets the focus back. Returns the new state. */

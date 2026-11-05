@@ -161,6 +161,11 @@ function resolve(state: EditorState, filter: Filter, mode: Mode): Transaction | 
     blocks.push({ pos, attrs, type, marks: node.marks, join })
     return !node.isTextblock
   })
+  // 2a. Attributes, and the blocks that go away whole (breaks, empty blocks), last to first. Removing
+  // those first matters: a break inserted mid-paragraph sits between the two halves, which can only
+  // join once it is gone (Mod-Enter in "abcd", then reject: "abcd" again).
+  const joins: number[] = []
+  const start = tr.steps.length
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i]
     try {
@@ -168,8 +173,14 @@ function resolve(state: EditorState, filter: Filter, mode: Mode): Transaction | 
     } catch {
       tr.setNodeMarkup(b.pos, undefined, { ...tr.doc.nodeAt(b.pos)!.attrs, [TRACKED_STYLE_ATTR]: null })
     }
-    if (b.join) removeBoundary(tr, b.pos)
+    if (!b.join) continue
+    const node = tr.doc.nodeAt(b.pos)!
+    if (node.isLeaf || node.content.size === 0) removeBoundary(tr, b.pos)
+    else joins.push(b.pos)
   }
+  // 2b. Joins (positions mapped over 2a), last to first.
+  const after = tr.mapping.slice(start)
+  for (const pos of joins) removeBoundary(tr, after.map(pos, 1))
   return tr.docChanged ? tr : null
 }
 

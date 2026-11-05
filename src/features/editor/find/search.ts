@@ -1,6 +1,6 @@
 import type { Mark, Node as PMNode, Schema } from '@tiptap/pm/model'
 import type { Transaction } from '@tiptap/pm/state'
-import { DELETION_MARK, isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
+import { DELETION_MARK, isBlockHidden, isInlineHidden, TRACKING_MARKS, type MarkupView } from '@/shared/track-changes'
 
 export interface FindOptions {
   caseSensitive: boolean
@@ -144,13 +144,17 @@ export function indexAtOrAfter(matches: readonly MatchRange[], pos: number): num
   return lo < matches.length ? lo : 0
 }
 
-/** Marks of the first matched character, so a replacement keeps e.g. bold/italic/font. */
+/**
+ * Marks of the first matched character, so a replacement keeps e.g. bold/italic/font. Track changes
+ * marks are not formatting: the replacement never inherits them (the recorder marks it when tracking).
+ */
 function marksAt(doc: PMNode, from: number): readonly Mark[] {
-  return doc.nodeAt(from)?.marks ?? []
+  const marks = doc.nodeAt(from)?.marks ?? []
+  return marks.some((m) => TRACKING_MARKS.includes(m.type.name)) ? marks.filter((m) => !TRACKING_MARKS.includes(m.type.name)) : marks
 }
 
 /** Every character of the range is tracked-deleted text (found in All Markup): nothing to replace. */
-function deletedRange(doc: PMNode, range: MatchRange): boolean {
+export function deletedRange(doc: PMNode, range: MatchRange): boolean {
   const type = doc.type.schema.marks[DELETION_MARK]
   if (!type) return false
   let all = true

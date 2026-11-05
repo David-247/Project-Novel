@@ -11,6 +11,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '@/shared/store'
 import { Button, cn, fieldBase, Tooltip } from '@/shared/ui'
+import { isTracking, skipDeleted } from '@/features/track-changes'
 import { useMountedEditor } from '../use-mounted-editor'
 import { FOOTNOTE_EDITOR_CONTROLS } from './controls'
 import { closeFootnoteEditor, useFootnoteEditing } from './editing'
@@ -124,6 +125,10 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
               'Mod-u': mark('underline'),
               Escape: () => (back(), true),
               Enter: () => (back(), true),
+              // Track changes: deleted text stays in the note; Backspace / Delete go past it first (as
+              // in the manuscript), so they act on text that is still there.
+              Backspace: skipKey(-1),
+              Delete: skipKey(1),
             }),
             keymap(baseKeymap),
           ],
@@ -175,6 +180,10 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
             first = false
           }
           if (outerTr.docChanged) outerView.dispatch(outerTr)
+          // The manuscript may have kept what the note removed (Track Changes keeps deleted text, and
+          // deleting already-deleted text changes nothing there): mirror it back whenever the two differ.
+          const now = outerView.state.doc.nodeAt(posRef.current)
+          if (now?.type.name === FOOTNOTE_NODE && !now.content.eq(inner.state.doc.content)) syncInner(inner, now)
         },
       },
     )
@@ -280,6 +289,16 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
       <div ref={mountRef} />
     </div>
   )
+}
+
+/** Backspace (-1) / Delete (+1) in the note while tracking: move past deleted text, then let the key act. */
+function skipKey(dir: -1 | 1) {
+  return (state: EditorState, dispatch?: (tr: Transaction) => void) => {
+    if (!isTracking()) return false
+    const pos = skipDeleted(state, dir)
+    if (pos !== null && dispatch) dispatch(state.tr.setSelection(TextSelection.create(state.doc, pos)))
+    return false
+  }
 }
 
 function labelAt(editor: Editor, pos: number): string {

@@ -14,7 +14,7 @@ import {
   type ResolvedStyles,
 } from '@/shared/book'
 import { useStore } from '@/shared/store'
-import { currentMarkupView, isBlockHidden, MARKUP_VIEW_META } from '@/shared/track-changes'
+import { currentMarkupView, isBlockHidden, MARKUP_VIEW_META, type MarkupView } from '@/shared/track-changes'
 import { inListItem } from '../toolbar/block-format'
 import { getResolvedStyles, resolveStyles } from './resolved'
 
@@ -206,6 +206,17 @@ function sameBreaks(a: DecorationSet, b: DecorationSet): boolean {
   return x.every((d, i) => d.from === y[i].from && d.to === y[i].to && d.spec.nvBreak === y[i].spec.nvBreak)
 }
 
+/** A top-level block that changed between `a` and `b` (same shape) became hidden or visible in `view`. */
+function hiddenFlipped(a: PMNode, b: PMNode, view: MarkupView): boolean {
+  if (view === 'all') return false
+  for (let i = 0; i < a.childCount; i++) {
+    const x = a.child(i)
+    const y = b.child(i)
+    if (x !== y && isBlockHidden(x, view) !== isBlockHidden(y, view)) return true
+  }
+  return false
+}
+
 /** True when both docs have the same top-level block types and attrs (typing inside a block). */
 function sameTopLevelShape(a: PMNode, b: PMNode): boolean {
   if (a.childCount !== b.childCount) return false
@@ -236,8 +247,9 @@ function breaksPlugin(): Plugin<BreakState> {
           return sameBreaks(next, value.decorations) ? value : { ...value, decorations: next }
         }
         if (!tr.docChanged) return value
-        // Outside All Markup a text edit can hide or show a whole block: recompute (O(top-level blocks)).
-        if (sameTopLevelShape(oldState.doc, newState.doc) && currentMarkupView() === 'all') {
+        // Outside All Markup a text edit can hide or show a whole block (track changes): recompute only
+        // when one of the edited blocks did (typing stays a mapping, as in All Markup).
+        if (sameTopLevelShape(oldState.doc, newState.doc) && !hiddenFlipped(oldState.doc, newState.doc, currentMarkupView())) {
           return { ...value, decorations: value.decorations.map(tr.mapping, tr.doc) }
         }
         return { ...value, decorations: computeBreaks(newState.doc, getResolvedStyles()) }

@@ -15,7 +15,16 @@ import {
 } from '@/shared/track-changes'
 import { toggleTrackChanges } from './commands'
 import { copiedSlice } from './copy'
-import { cleanSlice, shouldTrack, trackTransaction, type Author } from './record'
+import {
+  cleanSlice,
+  DEFERRED_INSERT_META,
+  markComposed,
+  shouldTrack,
+  TRACK_FAILED_META,
+  TRACK_SKIP_META,
+  trackTransaction,
+  type Author,
+} from './record'
 import { DeletionMark, FormatChangeMark, InsertionMark, TrackedBlockAttributes } from './schema'
 import './track-changes.css'
 
@@ -27,6 +36,16 @@ export interface TrackChangesOptions {
 }
 
 export const trackChangesKey = new PluginKey<DecorationSet>('nvTrackChanges')
+
+/** Status-bar text when an edit could not be recorded (it was applied untracked, never lost). */
+export const TRACK_FAILED_NOTICE = 'Track Changes could not record your last edit. It was made without tracking.'
+
+interface TrackChangesStorage {
+  /** Composed text not marked yet (positions in the current doc): marked when the IME composition ends. */
+  pending: (readonly [number, number])[]
+  /** ProseMirror's id of that composition (transaction meta 'composition'): keeps the marking in its undo step. */
+  composition: unknown
+}
 
 // ---- Markup view on the page -------------------------------------------------------------------
 
@@ -179,7 +198,7 @@ export function skipDeleted(state: EditorState, dir: -1 | 1): number | null {
  * Backspace / Delete past deleted text, final-text copy, and the hidden-block decorations of the
  * markup views. See docs/track-changes.md.
  */
-export const TrackChanges = Extension.create<TrackChangesOptions>({
+export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesStorage>({
   name: 'trackChanges',
   // Before the core keymap (Backspace / Delete) and TextAlign (whose Mod-Shift-e moved to Mod-e).
   priority: 1200,
@@ -193,10 +212,30 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
 
   addExtensions: () => [InsertionMark, DeletionMark, FormatChangeMark, TrackedBlockAttributes],
 
+  addStorage: () => ({ pending: [], composition: undefined }),
+
   dispatchTransaction({ transaction, next }) {
-    if (!shouldTrack(transaction) || !this.options.isEnabled()) return next(transaction)
-    const state = this.editor.state
-    next(trackTransaction(state, transaction, this.options.getAuthor()))
+    const storage = this.storage
+    const view = this.editor.view
+    const composing = !!view && view.composing
+    let out = transaction
+    if (shouldTrack(transaction) && this.options.isEnabled()) {
+      out = trackTransaction(this.editor.state, transaction, this.options.getAuthor(), undefined, { composing, pending: storage.pending })
+      if (out.getMeta(TRACK_FAILED_META)) useStore.getState().trackChangesActions.setNotice(TRACK_FAILED_NOTICE)
+    }
+    if (storage.pending.length && out.docChanged)
+      storage.pending = storage.pending.map(([a, b]) => [out.mapping.map(a, -1), out.mapping.map(b, 1)] as const).filter(([a, b]) => b > a)
+    const deferred = out.getMeta(DEFERRED_INSERT_META) as (readonly [number, number])[] | undefined
+    if (deferred) {
+      storage.pending = [...storage.pending, ...deferred]
+      storage.composition = out.getMeta('composition')
+    }
+    // The composition is over: the composed text gets its insertion mark in this same transaction.
+    if (!composing && storage.pending.length && !out.getMeta(TRACK_SKIP_META) && !out.getMeta('history$') && this.options.isEnabled()) {
+      markComposed(out, storage.pending, this.options.getAuthor())
+      storage.pending = []
+    }
+    next(out)
   },
 
   addKeyboardShortcuts() {
@@ -226,6 +265,24 @@ export const TrackChanges = Extension.create<TrackChangesOptions>({
         },
         props: {
           decorations: (state) => trackChangesKey.getState(state),
+          handleDOMEvents: {
+            // ProseMirror reads the composition's last DOM change right after compositionend; when it
+            // has none, mark what was composed in a transaction of its own (merged into the same undo
+            // step: adjacent and within the history's group delay).
+            compositionend: (view) => {
+              setTimeout(() => {
+                const storage = this.storage
+                if (view.isDestroyed || view.composing || storage.pending.length === 0) return
+                const tr = view.state.tr
+                markComposed(tr, storage.pending, this.options.getAuthor())
+                storage.pending = []
+                // Same composition id: the history keeps it in the composition's undo step.
+                if (storage.composition !== undefined) tr.setMeta('composition', storage.composition)
+                if (tr.docChanged) view.dispatch(tr.setMeta(TRACK_SKIP_META, true))
+              }, 30)
+              return false
+            },
+          },
           transformCopied: (slice) => copiedSlice(slice, currentMarkupView()),
           transformPasted: (slice) => cleanSlice(slice),
         },

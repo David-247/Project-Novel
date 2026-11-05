@@ -18,7 +18,7 @@ import {
   noteAround,
   setFindDecorations,
 } from './plugin'
-import { findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
+import { deletedRange, findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
 import type { FindOptions, MatchRange } from './search'
 
 /**
@@ -246,25 +246,42 @@ export function replaceCurrent(): boolean {
   const ed = getEditor()
   if (!ed) return false
   if (!isFresh(ed)) scanNow()
-  const m = matches[current]
+  // Track changes: a match that is all deleted text (found in All Markup) cannot be replaced.
+  const at = replaceableFrom(ed.state.doc, current)
+  const m = matches[at]
   if (!m) return false
   const replacement = findState().replacement
   const tr = replaceRange(ed.state.tr, ed.schema, m, replacement)
   closeHistory(clearFindDecorations(tr))
   ed.view.dispatch(tr)
-  scanNow({ anchor: m.from + replacement.length, reveal: true, closeUndoGroup: true })
+  scanNow({ anchor: m.from + replacement.length, closeUndoGroup: true })
+  // With Track Changes on the replaced text stays (deleted): go on past it, to a match still there.
+  const next = replaceableFrom(ed.state.doc, current)
+  if (next >= 0) goTo(ed, next)
+  else if (current >= 0) goTo(ed, current)
   return true
+}
+
+/** The first match at or after `index` (wrapping) that is not all deleted text; -1 when none is. */
+function replaceableFrom(doc: PMNode, index: number): number {
+  if (index < 0 || matches.length === 0) return -1
+  for (let k = 0; k < matches.length; k++) {
+    const i = (index + k) % matches.length
+    if (!deletedRange(doc, matches[i])) return i
+  }
+  return -1
 }
 
 /**
  * Replace every match in a single transaction (one undo step restores all of them).
- * Returns the number of replacements.
+ * Returns the number of replacements (matches that are all deleted text are skipped).
  */
 export function replaceAll(): number {
   const ed = getEditor()
   if (!ed) return 0
   if (!isFresh(ed)) scanNow()
-  const count = matches.length
+  const doc = ed.state.doc
+  const count = matches.filter((m) => !deletedRange(doc, m)).length
   if (count === 0) return 0
   const tr = replaceAllRanges(ed.state.tr, ed.schema, matches, findState().replacement)
   closeHistory(clearFindDecorations(tr))

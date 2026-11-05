@@ -26,7 +26,7 @@ import {
   useStorageIntegration,
 } from '@/features/storage'
 import { invalidatePaginationAt, PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
-import { MarkupViewMenu, setMarkupViewRepaginate, TrackChangesButton } from '@/features/track-changes'
+import { MarkupViewMenu, setMarkupViewRepaginate, TrackChangesButton, TrackChangesNotice } from '@/features/track-changes'
 import { FootnoteOptionsButton, useFootnotePagination } from '@/features/footnotes'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
@@ -132,6 +132,7 @@ export function App() {
           <>
             <SaveStatusIndicator />
             <RecoveryStatus />
+            <TrackChangesNotice />
             <span className="flex-1" />
             <NoProjectActions />
             <PageIndicator />

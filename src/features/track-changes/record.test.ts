@@ -9,7 +9,8 @@ import { createEditorExtensions, blockPlainText, collectFootnotes } from '@/feat
 import { resolveFootnoteOptions } from '@/shared/book'
 import { acceptAll, rejectAll, acceptChange, listChanges } from './review'
 import { resetTrackingSession, TRACK_SKIP_META } from './record'
-import { TrackChanges } from './extension'
+import { TrackChanges, TRACK_FAILED_NOTICE } from './extension'
+import { setTracking } from './commands'
 
 /**
  * Transaction rewrite rules (docs/track-changes.md, "Recording"). A headless editor with the real
@@ -18,10 +19,17 @@ import { TrackChanges } from './extension'
 
 const editors: Editor[] = []
 let author = 'Ann'
+/** An author whose name cannot be read: makes the rewrite throw. */
+let brokenAuthor = false
+const broken = {
+  get name(): string {
+    throw new Error('boom')
+  },
+}
 
 function make(content: JSONContent[]): Editor {
   const extensions = createEditorExtensions().map((e) =>
-    e.name === 'trackChanges' ? TrackChanges.configure({ getAuthor: () => ({ name: author }) }) : e,
+    e.name === 'trackChanges' ? TrackChanges.configure({ getAuthor: () => (brokenAuthor ? broken : { name: author }) }) : e,
   )
   const ed = new Editor({ element: document.createElement('div'), extensions, content: { type: 'doc', content } })
   editors.push(ed)
@@ -253,6 +261,46 @@ describe('IME composition', () => {
     expect(ed.state.selection.head).toBe(5)
   })
 
+  /** Make the view report an IME composition in progress (as ProseMirror does between compositionstart / end). */
+  function composingFlag(ed: Editor) {
+    let on = false
+    Object.defineProperty(ed.view, 'composing', { configurable: true, get: () => on })
+    return (v: boolean) => (on = v)
+  }
+
+  it('while composing the text stays unmarked (no re-wrap); the final update marks it, one undo step', () => {
+    const ed = make([p(t('ab'))])
+    at(ed, 3)
+    const composing = composingFlag(ed)
+    composing(true)
+    ed.view.dispatch(ed.state.tr.insertText('k').setMeta('composition', 1))
+    ed.view.dispatch(ed.state.tr.insertText('か', 3, 4).setMeta('composition', 1))
+    expect(show(ed.state.doc)).toBe('abか')
+    expect(ed.view.dom.querySelector('.nv-ins')).toBeNull()
+    // The composition ends with ProseMirror reading the last DOM change.
+    composing(false)
+    ed.view.dispatch(ed.state.tr.insertText('かな', 3, 4).setMeta('composition', 1))
+    expect(show(ed.state.doc)).toBe('ab{+かな}')
+    expect(ids(ed)).toHaveLength(1)
+    undo(ed.state, ed.view.dispatch)
+    expect(show(ed.state.doc)).toBe('ab')
+  })
+
+  it('a composition that ends without a last change is marked on compositionend', async () => {
+    const ed = make([p(t('ab'))])
+    at(ed, 3)
+    const composing = composingFlag(ed)
+    composing(true)
+    ed.view.dispatch(ed.state.tr.insertText('漢字').setMeta('composition', 2))
+    expect(show(ed.state.doc)).toBe('ab漢字')
+    composing(false)
+    ed.view.dom.dispatchEvent(new CompositionEvent('compositionend', { data: '漢字', bubbles: true }))
+    await new Promise((r) => setTimeout(r, 60))
+    expect(show(ed.state.doc)).toBe('ab{+漢字}')
+    undo(ed.state, ed.view.dispatch)
+    expect(show(ed.state.doc)).toBe('ab')
+  })
+
   it('composing over untracked text deletes it and inserts after it', () => {
     const ed = make([p(t('ab'))])
     ed.view.dispatch(ed.state.tr.insertText('ア', 2, 3).setMeta('composition', 2))
@@ -347,6 +395,31 @@ describe('footnotes and breaks', () => {
     expect(show(ed.state.doc)).toBe('A^({-n}ote{+!})')
   })
 
+  describe('breaks inserted in the middle of a paragraph (split + insert)', () => {
+    const cases: [string, (ed: Editor) => void, string][] = [
+      ['page break', (ed) => ed.commands.insertPageBreak(), 'ab | +¶[pageBreak] | +¶cd'],
+      ['scene break', (ed) => ed.commands.insertSceneBreak('#'), 'ab | +¶[sceneBreak] | +¶cd'],
+      ['new chapter', (ed) => ed.commands.insertChapter(), 'ab | +¶ | +¶cd'],
+    ]
+    for (const [name, insert, tracked] of cases) {
+      it(`${name}: reject gives the paragraph back whole, accept keeps the structure`, () => {
+        const ed = make([p(t('abcd'))])
+        at(ed, 3)
+        insert(ed)
+        expect(show(ed.state.doc)).toBe(tracked)
+        const s0 = ed.state
+        apply(ed, rejectAll(ed.state))
+        expect(show(ed.state.doc)).toBe('abcd')
+        expect(ed.state.doc.childCount).toBe(1)
+        expect(ed.state.doc.firstChild!.attrs.styleId ?? null).toBeNull()
+        ed.view.updateState(s0)
+        apply(ed, acceptAll(ed.state))
+        expect(show(ed.state.doc)).toBe(tracked.replace(/\+¶/g, ''))
+        expect(listChanges(ed.state.doc)).toHaveLength(0)
+      })
+    }
+  })
+
   it('page break insert and delete are tracked block changes', () => {
     const ed = make([p(t('ab')), p(t('cd'))])
     at(ed, 3)
@@ -437,6 +510,24 @@ describe('undo', () => {
     expect(show(ed.state.doc)).toBe('abcd')
     undo(ed.state, ed.view.dispatch)
     expect(show(ed.state.doc)).toBe('abc{+d}')
+  })
+
+  it('a rewrite that fails applies the edit untracked and shows a status-bar warning', () => {
+    const ed = make([p(t('abc'))])
+    brokenAuthor = true
+    const err = console.error
+    console.error = () => {}
+    try {
+      at(ed, 4)
+      type(ed, 'd')
+    } finally {
+      console.error = err
+      brokenAuthor = false
+    }
+    expect(show(ed.state.doc)).toBe('abcd')
+    expect(useStore.getState().trackChanges.notice).toBe(TRACK_FAILED_NOTICE)
+    setTracking(false) // turning Track Changes off (or on) clears it
+    expect(useStore.getState().trackChanges.notice).toBeNull()
   })
 
   it('transactions marked to be skipped are applied as they are', () => {

@@ -65,6 +65,11 @@ interface Ctx {
   ins: Mark | null
   del: Mark | null
   fmtId: string | null
+  /** IME composition in progress: inserted text is left unmarked and reported in `deferred`. */
+  composing: boolean
+  /** Unmarked text this author is composing (doc positions of the state): counts as own insertion. */
+  pending: readonly (readonly [number, number])[]
+  deferred: { from: number; to: number; step: number }[]
 }
 
 function stamp(ctx: Ctx, id = newChangeId()): ChangeStamp {
@@ -168,7 +173,7 @@ function trackReplace(tr: Transaction, F: number, T: number, slice: Slice, ctx: 
         const covered = a === pos && b === pos + node.nodeSize
         // Inside a footnote's text (or across part of it): its content is handled on its own.
         if (!node.isText && !node.isLeaf && !covered) return true
-        if (ownInsertion(node, ctx)) removals.push([a, b])
+        if (ownInsertion(node, ctx) || ctx.pending.some(([x, y]) => x <= a && b <= y)) removals.push([a, b])
         else if (!markOf(node, DELETION_MARK)) {
           if (node.isText || node.isLeaf) markRanges.push([a, b])
           else nodeMarks.push(pos)
@@ -215,7 +220,35 @@ class StepMapping {
   }
 }
 
+/** The inline content with `mark` added wherever its parent allows it (recursing into footnotes). */
+function markInline(frag: Fragment, mark: Mark, parent: NodeType): Fragment {
+  const out: PMNode[] = []
+  frag.forEach((n) => {
+    let node = n
+    if (!n.isText && !n.isLeaf) node = n.copy(markInline(n.content, mark, n.type))
+    out.push(parent.allowsMarkType(mark.type) ? node.mark(mark.addToSet(node.marks)) : node)
+  })
+  return Fragment.fromArray(out)
+}
+
+/**
+ * Inline-only content (typing, Replace): inserted with its insertion mark already on it, one step
+ * instead of an insert plus an AddMarkStep (Replace All: 2 steps per match, not 3).
+ */
+function insertMarkedInline(tr: Transaction, at: number, slice: Slice, ctx: Ctx): boolean {
+  if (ctx.composing || slice.openStart !== 0 || slice.openEnd !== 0) return false
+  let inline = true
+  slice.content.forEach((n) => {
+    if (!n.isInline) inline = false
+  })
+  const $at = tr.doc.resolve(at)
+  if (!inline || !$at.parent.inlineContent) return false
+  const mark = insertionMarkFor(tr.doc, at, at, ctx)
+  return !tr.maybeStep(new ReplaceStep(at, at, new Slice(markInline(slice.content, mark, $at.parent.type), 0, 0))).failed
+}
+
 function insertTracked(tr: Transaction, at: number, slice: Slice, ctx: Ctx) {
+  if (insertMarkedInline(tr, at, slice, ctx)) return
   const first = tr.steps.length
   const res = tr.maybeStep(new ReplaceStep(at, at, slice))
   if (res.failed) tr.replace(at, at, slice)
@@ -225,19 +258,8 @@ function insertTracked(tr: Transaction, at: number, slice: Slice, ctx: Ctx) {
   const to = m.map(at, 1)
   if (to <= from) return
   const doc = tr.doc
-  const before = doc.resolve(from).nodeBefore
-  const after = doc.resolve(to).nodeAfter
-  let adjacent = [markOf(before, INSERTION_MARK), markOf(after, INSERTION_MARK)].find((mk) => ownSession(mk, ctx))
-  if (!adjacent && !before) {
-    // Typing at the start of a paragraph this session inserted: the same change as the paragraph.
-    const $from = doc.resolve(from)
-    const block = $from.parent.attrs[TRACKED_INSERT_ATTR] as ChangeStamp | null
-    if (block && block.author === ctx.author && sessionIds.has(block.id))
-      adjacent = ctx.schema.marks[INSERTION_MARK].create({ ...block, authorColor: block.authorColor ?? null })
-  }
-  let mark: Mark | null = null
-  const blocks: number[] = []
   let inline = false
+  const blocks: number[] = []
   doc.nodesBetween(from, to, (node, pos) => {
     if (node.isInline) {
       inline = true
@@ -246,14 +268,64 @@ function insertTracked(tr: Transaction, at: number, slice: Slice, ctx: Ctx) {
     if ((node.isTextblock || node.isLeaf) && pos >= from && pos < to && TRACKED_INSERT_ATTR in node.attrs) blocks.push(pos)
     return !node.isLeaf
   })
+  let mark: Mark | null = null
   if (inline) {
-    mark = adjacent ?? (ctx.ins ??= changeMark(ctx, INSERTION_MARK))
+    // While an IME composes, re-wrapping its text node in a mark span cancels or doubles the
+    // composition (Safari): the mark is added when the composition ends (markComposed).
+    if (ctx.composing && blocks.length === 0) return void ctx.deferred.push({ from, to, step: tr.steps.length })
+    mark = insertionMarkFor(doc, from, to, ctx)
     tr.addMark(from, to, mark)
   }
   if (blocks.length) {
     const s = stamp(ctx, (mark ?? (ctx.ins ??= changeMark(ctx, INSERTION_MARK))).attrs.id)
     for (const p of blocks) setBlockAttr(tr, p, TRACKED_INSERT_ATTR, s)
   }
+}
+
+/** The insertion mark for new text at [from, to): the author's adjacent change of this session, or a new one. */
+function insertionMarkFor(doc: PMNode, from: number, to: number, ctx: Ctx): Mark {
+  const before = doc.resolve(from).nodeBefore
+  const after = doc.resolve(to).nodeAfter
+  let adjacent = [markOf(before, INSERTION_MARK), markOf(after, INSERTION_MARK)].find((mk) => ownSession(mk, ctx))
+  if (!adjacent && !before) {
+    // Typing at the start of a paragraph this session inserted: the same change as the paragraph.
+    const block = doc.resolve(from).parent.attrs[TRACKED_INSERT_ATTR] as ChangeStamp | null
+    if (block && block.author === ctx.author && sessionIds.has(block.id))
+      adjacent = ctx.schema.marks[INSERTION_MARK].create({ ...block, authorColor: block.authorColor ?? null })
+  }
+  return adjacent ?? (ctx.ins ??= changeMark(ctx, INSERTION_MARK))
+}
+
+/** Meta on a tracked transaction: ranges (in its doc) of composed text left unmarked for now. */
+export const DEFERRED_INSERT_META = 'nvTrackDeferred'
+/** Meta on a transaction applied untracked because the rewrite failed. */
+export const TRACK_FAILED_META = 'nvTrackFailed'
+
+/**
+ * Marks composed text (ranges in `tr.doc`, from DEFERRED_INSERT_META) as inserted, in `tr`: the end
+ * of an IME composition. Text already marked (or deleted) in the range is left as it is.
+ */
+export function markComposed(tr: Transaction, ranges: readonly (readonly [number, number])[], author: Author, date = new Date().toISOString()): void {
+  const ctx = newCtx(tr.doc.type.schema, author, date)
+  const size = tr.doc.content.size
+  for (const [a, b] of ranges) {
+    const from = Math.max(0, Math.min(size, a))
+    const to = Math.max(from, Math.min(size, b))
+    if (to <= from) continue
+    const marks: [number, number][] = []
+    tr.doc.nodesBetween(from, to, (n, pos) => {
+      if (n.isInline && (n.isText || n.isLeaf) && !markOf(n, INSERTION_MARK) && !markOf(n, DELETION_MARK))
+        marks.push([Math.max(from, pos), Math.min(to, pos + n.nodeSize)])
+      return !n.isInline
+    })
+    if (marks.length === 0) continue
+    const mark = insertionMarkFor(tr.doc, from, to, ctx)
+    for (const [x, y] of mergeRanges(marks)) tr.addMark(x, y, mark)
+  }
+}
+
+function newCtx(schema: Schema, author: Author, date: string, composing = false, pending: Ctx['pending'] = []): Ctx {
+  return { schema, author: author.name, color: author.color ?? null, date, ins: null, del: null, fmtId: null, composing, pending, deferred: [] }
 }
 
 // ---- Block attributes (paragraph styles and formatting) --------------------------------------------
@@ -437,11 +509,24 @@ export function shouldTrack(tr: Transaction): boolean {
  * The selection is mapped onto the result: Backspace leaves the caret before the deleted text,
  * Delete and typing after it. If the rewrite fails, the transaction is returned unchanged.
  */
-export function trackTransaction(state: EditorState, tr: Transaction, author: Author, date = new Date().toISOString()): Transaction {
+export interface TrackOptions {
+  /** An IME composition is in progress: leave inserted text unmarked (DEFERRED_INSERT_META). */
+  composing?: boolean
+  /** Unmarked composed text of this author in `state.doc` (counts as own insertion). */
+  pending?: readonly (readonly [number, number])[]
+}
+
+export function trackTransaction(
+  state: EditorState,
+  tr: Transaction,
+  author: Author,
+  date = new Date().toISOString(),
+  options: TrackOptions = {},
+): Transaction {
   if (!shouldTrack(tr) || tr.before !== state.doc) return tr
-  const ctx: Ctx = { schema: state.schema, author: author.name, color: author.color ?? null, date, ins: null, del: null, fmtId: null }
   const out = state.tr
   try {
+    const ctx = newCtx(state.schema, author, date, options.composing === true, options.pending ?? [])
     let runs: Run[] = []
     if (descendingReplaces(tr.steps)) {
       // Fast path (one step; Replace All): every step's positions are valid in `out` as it goes.
@@ -458,10 +543,18 @@ export function trackTransaction(state: EditorState, tr: Transaction, author: Au
     }
     copyMeta(tr, out)
     mapSelection(tr, out, runs, backspaceLike(state, tr) ? -1 : 1)
+    if (ctx.deferred.length)
+      out.setMeta(
+        DEFERRED_INSERT_META,
+        ctx.deferred.map((d) => {
+          const m = out.mapping.slice(d.step)
+          return [m.map(d.from, -1), m.map(d.to, 1)] as const
+        }),
+      )
     return out
   } catch (err) {
     console.error('[track-changes] could not record this edit; applied untracked', err)
-    return tr
+    return tr.setMeta(TRACK_FAILED_META, true)
   }
 }
 

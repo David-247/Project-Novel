@@ -2,7 +2,7 @@ import * as Menu from '@radix-ui/react-dropdown-menu'
 import type { Ref } from 'react'
 import { useStore } from '@/shared/store'
 import type { MarkupView } from '@/shared/track-changes'
-import { ariaKeyshortcuts, Button, cn, focusRing, ToggleButton, Tooltip } from '@/shared/ui'
+import { ariaKeyshortcuts, Button, cn, focusRing, StatusText, ToggleButton, Tooltip } from '@/shared/ui'
 import { isTracking, setMarkupView, setTracking } from './commands'
 import { MARKUP_VIEW_OPTIONS, markupViewLabel, TRACK_CHANGES_CONTROLS } from './controls'
 
@@ -94,5 +94,19 @@ export function MarkupViewMenu({ ref, ...forwarded }: ReviewControlProps) {
         </Menu.Content>
       </Menu.Portal>
     </Menu.Root>
+  )
+}
+
+/**
+ * Status-bar warning when an edit could not be recorded (it was applied untracked). Shown until
+ * Track Changes is turned off or on again. Put it in the status bar.
+ */
+export function TrackChangesNotice() {
+  const notice = useStore((s) => s.trackChanges.notice)
+  if (!notice) return null
+  return (
+    <StatusText tone="warning" live role="status" data-testid="track-changes-notice" className="whitespace-normal">
+      {notice}
+    </StatusText>
   )
 }
