@@ -445,7 +445,7 @@ What Word does, and what we took from it:
 | Layout | Paper | The paper surface picker |
 | Layout | Book | Book Details |
 | Review | Tracking | Track Changes, Markup |
-| Review | Changes | (T7: Accept / Reject) |
+| Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
 | Review | Re-write | (T8) |
 | View | Views | Single Page, Two-Page Spread (T5: Book page-turn / Continuous scroll) |
@@ -474,6 +474,13 @@ whose own controls are no wider than its group button (one icon) never collapses
   way**: Review > Changes (Accept / Reject), Review > Re-write, View > Views (page-turn). A group with nothing to
   show is hidden, so those groups are registered already. A new group with custom controls is one entry in
   `src/ribbon-groups.tsx`.
+- **Split buttons** (Word's "Accept ▾"): `SplitCommandButton` (`@/features/ribbon`) in a group's `Content`. The
+  main half is the command's ribbon button (`ribbon.cmd.<id>`, an icon and a short label, "Accept"); the arrow is a
+  registry dropdown (`RegistryMenu`) with its own control id and tooltip entry (`review.accept.options`,
+  `review.reject.options`), listing commands and registry submenus. Both halves are 32px toolbar items. The command
+  has no `ribbon` placement (it would show twice); the group's `menu` lists it for the collapsed group and More.
+  Review > Changes: Previous / Next Change are placed by their commands (`buttons: 'before'`), the two split
+  buttons are the group's `Content`.
 - Each command id is shown once in the ribbon (inactive tabs stay mounted, hidden), so a `data-control-id` still
   names one element.
 

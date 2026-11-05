@@ -86,6 +86,10 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'comment.prev',
           'comment.next',
           'comment.showResolved',
+          'review.change.prev',
+          'review.change.next',
+          'review.accept',
+          'review.reject',
           'view.singlePage',
           'pagination.spreadView',
           'pagination.zoomOut',
@@ -95,6 +99,9 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'view.actualSize',
           'view.fullScreen',
         ].map((id) => `ribbon.cmd.${id}`),
+        // Review > Changes: the dropdown halves of the Accept / Reject split buttons.
+        'review.accept.options',
+        'review.reject.options',
         // The in-app menu bar's titles (its items are covered in App.menus.test.tsx).
         ...['file', 'edit', 'view', 'insert', 'format', 'review', 'help'].map((m) => `menu.${m}`),
       ]),

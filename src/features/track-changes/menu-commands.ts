@@ -67,9 +67,11 @@ export function reviewCommands(): Command[] {
     ...rest,
   })
   return [
+    // Ribbon: Review > Changes shows Previous / Next as buttons; Accept ▾ / Reject ▾ are split buttons in
+    // the group's own controls (src/ribbon-groups.tsx), which list the rest.
     // Navigation moves the manuscript's selection: allowed from anywhere (registry guard 'none').
-    cmd(C.prevChange, { menu: { id: 'review', group: 'changes', order: 2 }, guard: 'none', isEnabled: hasChanges, run: () => void prevChange() }),
-    cmd(C.nextChange, { menu: { id: 'review', group: 'changes', order: 3 }, guard: 'none', isEnabled: hasChanges, run: () => void nextChange() }),
+    cmd(C.prevChange, { menu: { id: 'review', group: 'changes', order: 2 }, ribbon: { group: 'review.changes', order: 10 }, guard: 'none', isEnabled: hasChanges, run: () => void prevChange() }),
+    cmd(C.nextChange, { menu: { id: 'review', group: 'changes', order: 3 }, ribbon: { group: 'review.changes', order: 20 }, guard: 'none', isEnabled: hasChanges, run: () => void nextChange() }),
     // Acts at the manuscript's caret. Always enabled while the manuscript is mounted, so the key is
     // never left to the browser (Alt+Enter would insert a line break there).
     cmd(C.showChange, { menu: { id: 'review', group: 'changes', order: 4 }, guard: 'manuscript', isEnabled: () => !!getReviewView(), run: () => void showChangeAtCaret() }),

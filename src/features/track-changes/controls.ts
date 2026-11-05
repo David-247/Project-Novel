@@ -63,6 +63,16 @@ export const TRACK_CHANGES_CONTROLS = {
     label: 'Reject All Changes',
     description: 'Undo every tracked change in the book. Asks first when there are many.',
   },
+  acceptOptions: {
+    id: 'review.accept.options',
+    label: 'Accept Options',
+    description: 'Accept and move to the next change, accept every change, or accept every change by one author.',
+  },
+  rejectOptions: {
+    id: 'review.reject.options',
+    label: 'Reject Options',
+    description: 'Reject and move to the next change, reject every change, or reject every change by one author.',
+  },
   popoverAccept: {
     id: 'review.popover.accept',
     label: 'Accept',

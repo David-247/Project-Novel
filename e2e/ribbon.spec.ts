@@ -115,6 +115,14 @@ const REACH: Record<RibbonTab, Record<string, [string, string][]>> = {
   },
   review: {
     'review.tracking': [['review.track', 'review.track'], ['review.markup', 'menu.view.markup']],
+    'review.changes': [
+      ['ribbon.cmd.review.change.prev', 'review.change.prev'],
+      ['ribbon.cmd.review.change.next', 'review.change.next'],
+      ['ribbon.cmd.review.accept', 'review.accept'],
+      ['review.accept.options', 'menu.review.accept-all-by-author'],
+      ['ribbon.cmd.review.reject', 'review.reject'],
+      ['review.reject.options', 'menu.review.reject-all-by-author'],
+    ],
     'review.comments': [['comment.new', 'comment.new'], ['ribbon.cmd.comment.prev', 'comment.prev'], ['ribbon.cmd.comment.next', 'comment.next']],
   },
   view: {

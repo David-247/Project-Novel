@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { editor, launch, nativeDialog, newProject, openRecent, pressTab, saveStatus, seedProject, waitForLayout } from './helpers'
+import { editor, launch, nativeDialog, newProject, openRecent, pressTab, reveal, ribbonTab, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Track changes review (T7): accept and reject from the change popover, the Review menu, a
@@ -243,7 +243,7 @@ test('the popover from the keyboard: Alt+Enter, Tab, Escape; tooltips and AA con
     await page.emulateMedia({ colorScheme: scheme })
     await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
     for (const surface of ['auto', 'book', 'white', 'dark'] as const) {
-      await ctl(page, `book.surface.${surface}`).click()
+      await (await reveal(page, `book.surface.${surface}`)).click()
       await editor(page).click()
       await page.evaluate(() => window.__nvE2E.selectText(9, 9))
       await page.keyboard.press('Alt+Enter')
@@ -293,4 +293,52 @@ test('the popover from the keyboard: Alt+Enter, Tab, Escape; tooltips and AA con
     }
   }
   expect(failures).toEqual([])
+})
+
+test('from the ribbon: Review > Changes has Previous, Next, Accept ▾ and Reject ▾ (split buttons with All by Author)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await launch(page)
+  await seedReview(page, '/projects/Ribbon', [
+    { type: 'paragraph', content: [text('One '), text('ann1 ', [tc('insertion', 'a1', 'Ann')]), text('two '), text('bob1 ', [tc('insertion', 'b1', 'Bob')])] },
+    { type: 'paragraph', content: [text('Three '), text('ann2 ', [tc('deletion', 'a2', 'Ann')]), text('four '), text('bob2', [tc('insertion', 'b2', 'Bob')])] },
+  ])
+  expect(await count(page)).toBe(4)
+  await ribbonTab(page, 'review')
+  const group = page.locator('[data-ribbon-group="review.changes"]')
+  // Word's order: Previous, Next, Accept ▾, Reject ▾.
+  const ids = await group.locator('[data-control-id]:visible').evaluateAll((els) => els.map((e) => e.getAttribute('data-control-id')))
+  expect(ids).toEqual([
+    'ribbon.cmd.review.change.prev',
+    'ribbon.cmd.review.change.next',
+    'ribbon.cmd.review.accept',
+    'review.accept.options',
+    'ribbon.cmd.review.reject',
+    'review.reject.options',
+  ])
+
+  // Next selects the first change; Accept keeps it, and the manuscript keeps the focus.
+  await editor(page).click()
+  await page.evaluate(() => window.__nvE2E.selectText(1, 1))
+  await ctl(group, 'ribbon.cmd.review.change.next').click()
+  await ctl(group, 'ribbon.cmd.review.accept').click()
+  await expect.poll(() => count(page)).toBe(3)
+  expect((await blocks(page))[0]).toBe('One ann1 two bob1 ')
+  await expect(editor(page)).toBeFocused()
+
+  // The Accept dropdown: Accept, and Move to Next, All, All by Author ▸ (one item per author).
+  await ctl(group, 'review.accept.options').click()
+  const menu = page.locator('[role="menu"]')
+  for (const id of ['review.accept', 'review.acceptNext', 'review.acceptAll', 'menu.review.accept-all-by-author']) await expect(ctl(menu, id)).toBeVisible()
+  await ctl(menu, 'menu.review.accept-all-by-author').click()
+  await ctl(menu, 'review.acceptAll.author.Bob').click()
+  await expect.poll(() => count(page)).toBe(1)
+
+  // Reject ▾ > Reject All Changes: Ann's deletion comes back.
+  await ctl(group, 'review.reject.options').click()
+  await ctl(menu, 'review.rejectAll').click()
+  await expect.poll(() => count(page)).toBe(0)
+  expect(await blocks(page)).toEqual(['One ann1 two bob1 ', 'Three ann2 four bob2'])
+  // No changes left: the buttons are disabled.
+  await expect(ctl(group, 'ribbon.cmd.review.accept')).toBeDisabled()
+  await expect(ctl(group, 'ribbon.cmd.review.change.next')).toBeDisabled()
 })
