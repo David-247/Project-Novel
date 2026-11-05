@@ -11,6 +11,7 @@ import { editor, launch, openRecent, saveStatus, seedProject, waitForLayout } fr
  *  - typing in the revision (keydown -> next frame painted), median < 50 ms.
  * And at chapter scale (a chapter of 250 paragraphs, 8,000 words, re-written whole): open < 300 ms;
  * Enter and Backspace (a paragraph added, then joined back: the alignment is redone) median < 50 ms.
+ * Keep This Version on the 20-paragraph passage: reflow complete < 1 s; typing after it median < 50 ms.
  * Gating: e2e/budget.ts (decision f040009b). Numbers go to perf-results/rewrite-*.json.
  */
 
@@ -199,4 +200,67 @@ test('re-write of a whole 250-paragraph chapter (8,000 words): open < 300 ms, En
   budget(testInfo, 'open re-write ms (250-paragraph chapter)', open.openMs, 300)
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
   budget(testInfo, 'Enter / Backspace median ms (250-paragraph revision)', typing.medianMs, 50)
+})
+
+test('Keep This Version on a 20-paragraph passage at 100k words: reflow complete < 1 s, typing after it median < 50 ms', async ({ page }, testInfo) => {
+  test.setTimeout(240_000)
+  const { fx, first } = await openFixture(page, '/projects/RewriteKeep')
+  await editor(page).click()
+  const open = await timeOpen(page, first)
+  expect(open.rows).toBe(PARAGRAPHS)
+  // Edits in four paragraphs of the revision (words added, so line and page breaks move from there on).
+  const rev = page.getByRole('textbox', { name: 'Revised passage' })
+  for (const n of [0, 6, 12, 19]) {
+    await rev.locator('p').nth(n).click()
+    await page.keyboard.press('End')
+    await page.keyboard.type(' And the lantern went out over the water, and nobody saw it go.')
+  }
+  await waitForLayout(page)
+
+  const keep = await page.evaluate(async () => {
+    const e = window.__nvE2E
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    const v = e.layout().layoutVersion
+    const t0 = performance.now()
+    if (!e.runCommand('rewrite.keepVersion')) throw new Error('Keep This Version is disabled')
+    const syncMs = performance.now() - t0
+    // "Reflow complete" (docs/pagination.md): the new page model published and the pages in view painted.
+    await new Promise<void>((resolve, reject) => {
+      const give = setTimeout(() => reject(new Error('no new layout after Keep This Version')), 10_000)
+      const check = () => {
+        if (e.paginationModelSettled() && e.layout().layoutVersion > v) {
+          clearTimeout(give)
+          resolve()
+        } else requestAnimationFrame(check)
+      }
+      requestAnimationFrame(check)
+    })
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    const ms = performance.now() - t0
+    await new Promise<void>((resolve) => {
+      const check = () => (e.paginationSettled() ? resolve() : requestAnimationFrame(check))
+      check()
+    })
+    return { syncMs, ms, allDrawnMs: performance.now() - t0, status: e.rewrite().rewrites.at(-1)?.status }
+  })
+  expect(keep.status).toBe('resolved')
+  await expect(page.getByTestId('rewrite-view')).toHaveCount(0)
+  await expect(editor(page)).toBeFocused()
+
+  // Typing in the manuscript right after (the caret is at the start of the kept passage).
+  await installLatencyProbe(page)
+  const typing = await measureKeys(page, [...TYPED].map((ch) => (ch === ' ' ? 'Space' : ch)))
+
+  const result = { syncMs: +keep.syncMs.toFixed(1), reflowMs: +keep.ms.toFixed(1), allDrawnMs: +keep.allDrawnMs.toFixed(1) }
+  await report(testInfo, 'rewrite-keep', {
+    manuscript: { words: fx.words, blocks: fx.doc.content.length },
+    paragraphs: PARAGRAPHS,
+    keep: result,
+    typing,
+    budgets: { reflowMs: 1000, allDrawnMs: 3000, typingMedianMs: 50 },
+  })
+  budget(testInfo, 'Keep This Version: all blocks drawn ms (20 paragraphs, 100k words)', result.allDrawnMs, 3000)
+  budget(testInfo, 'Keep This Version: reflow complete ms (20 paragraphs, 100k words)', result.reflowMs, 1000)
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  budget(testInfo, 'typing median ms after Keep This Version', typing.medianMs, 50)
 })

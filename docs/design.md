@@ -473,7 +473,7 @@ What Word does, and what we took from it:
 | Review | Tracking | Track Changes, Markup |
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
-| Review | Re-write | Re-write Passage…, Re-writes…, Previous Re-write, Next Re-write (the group's own buttons: an icon on the first, short labels Re-write / Re-writes / Previous / Next; tooltips and the dropdown keep the full names) |
+| Review | Re-write | Re-write Passage…, Re-writes…, Previous Re-write, Next Re-write (the group's own buttons: an icon on the first, short labels Re-write / Re-writes / Previous / Next; tooltips and the dropdown keep the full names); while a re-write is open, Keep Original / Keep Version; Discard Re-write in the dropdown |
 | View | Views | Single Page, Two-Page Spread; Book, Continuous Scroll (two radio pairs: page view, then navigation mode; Previous / Next Spread are the turn controls on the canvas edges and View menu items, not ribbon buttons) |
 | View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |
 | View | Show | Comments panel |
@@ -651,6 +651,36 @@ The signature feature: a passage rewritten beside its original, compared like tw
   (`rewrite.list`), Previous / Next Re-write (`rewrite.prev`, `rewrite.next`). The group's `Content` shows them
   as command buttons with short labels (Re-write, Re-writes, Previous, Next) so the group stays full at 1280px;
   the commands' `ribbon` placements are `display: 'menu'` (the collapsed group and More list the full names).
+  While a re-write is open the group adds Keep Original and Keep Version (`rewrite.keepOriginal`,
+  `rewrite.keepVersion`): contextual, so the group keeps its width the rest of the time. Discard Re-write is in the
+  group's dropdown and the Review menu.
+- **The choice (T9)**: a large labelled button under each page: **Keep Original** (secondary) under the original,
+  **Keep This Version** (primary, accent; its accessible name includes the version's name) under the revision,
+  sticky at the bottom of the scroller while a page runs past it, so the decision is always one click away and sits
+  under the text it keeps. **No default shortcut** (review ruling): a chord that commits the manuscript is too easy
+  to fire by accident (AltGr is Ctrl+Alt on Windows: AltGr+Shift+O types Ó in Polish; Cmd+Opt+Shift+V is Paste and
+  Match Style on macOS); the buttons are in the Tab order and the commands in the Review menu and the ribbon. The
+  view's own keys skip any event with the AltGraph modifier, and match letters by character off macOS (by key code
+  on macOS, where Option changes the character), as the registry does. The header has a quiet Discard, which asks
+  nothing and says "Re-write discarded. Undo (Ctrl+Z) brings it back." (undo puts it back in its place in the
+  list). Both Keep buttons are disabled while the passage is missing or split. Keep This Version replaces the
+  passage with the smallest word-level edit (the pages' own alignment and jsdiff word diff, `apply.ts`), so
+  unchanged words keep their comments and formatting, a footnote's edited note is diffed inside the note, lists are
+  paired item by item and diffed the same way, and with Track Changes on the result is ordinary word-level
+  insertions / deletions for Accept / Reject (if recording fails, the recorder's own status-bar warning shows and
+  the edit is applied untracked). The kept passage is frozen into the record (`kept`), so a redo after the version
+  was edited still matches the record. A version that removes or adds a chapter opening asks first (the app's
+  message dialog). Openings are compared by position: as many openings at the same block positions is a rename,
+  however different the words; otherwise the paired blocks decide, so a version that demotes one title and promotes
+  another asks. After a choice the view closes and the caret is
+  at the start of the passage, scrolled to its page or spread; the pages reflow from there. **Undo**: the choice is
+  one manuscript transaction with a `RewriteStateStep` (like the comments' thread step), so one Mod-z puts the text
+  back and the re-write open again with every version; redo applies it again. Review ▸ Re-writes… lists re-writes in
+  progress, then the resolved ones with their choice ("Kept Version 2", "Kept the original") and a Reopen button:
+  the passage as it is now becomes the original, beside the saved versions. Reopen takes the kept text if it is
+  the only word-for-word match in the book; otherwise it ranks the candidates by the saved location (neighbouring
+  paragraphs, the chapter by its title, the place in the chapter) and never guesses: a short paragraph such as
+  "He nodded." elsewhere in the book is not taken; a tie, or nothing matching where it was, gives a notice.
 - **While the view is open the ribbon follows the command gate**, like the menus: registry buttons read
   `isCommandEnabled` (gate included); the slices' own controls for gated commands (Find, New Comment, Track
   Changes) are disabled with their command (`GatedItem` in src/ribbon-groups.tsx); the formatting controls, Undo /

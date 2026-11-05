@@ -2,10 +2,12 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { getChapters, chapterIndexAt, getEditor, blockPlainText } from '@/features/editor'
 import { useStore, type RewriteRecord } from '@/shared/store'
-import { Button, cn, Dialog, Tooltip } from '@/shared/ui'
+import { Button, cn, Dialog, formatShortcut, Tooltip } from '@/shared/ui'
 import { passageProblem, passageRange } from './anchor'
+import { reopenRewrite } from './choice'
 import { dismissNotice, focusRevision, openList, openRewrite, setViewHooks } from './commands'
 import { REWRITE_CONTROLS as C } from './controls'
+import { CHOICE_ORIGINAL } from './model'
 import { RewriteView } from './RewriteView'
 
 export interface RewriteHostProps {
@@ -76,7 +78,8 @@ export function RewriteHost({ children }: RewriteHostProps) {
         ref={behind}
         aria-hidden={open || undefined}
         onFocusCapture={(e) => {
-          if (!open) return
+          // The store, not this render's `open`: a choice closes the view and focuses the manuscript before React re-renders.
+          if (!open || !useStore.getState().rewrite.openId) return
           ;(e.target as HTMLElement).blur?.()
           focusRevision()
         }}
@@ -114,7 +117,7 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
   }, [caretIn, notice])
   // The undo notice only informs: it goes away by itself.
   useEffect(() => {
-    if (notice?.kind !== 'undo') return
+    if (notice?.kind !== 'undo' && notice?.kind !== 'discarded') return
     const t = setTimeout(dismissNotice, UNDO_NOTICE_MS)
     return () => clearTimeout(t)
   }, [notice])
@@ -123,12 +126,17 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
   else if (notice?.kind === 'missing') text = `The passage for this re-write was removed. Its versions are kept${notice.id ? '; reopen it to copy text out' : ''}.`
   else if (notice?.kind === 'split') text = `The passage for this re-write is no longer in one piece. Its versions are kept${notice.id ? '; reopen it to copy text out' : ''}.`
   else if (inView) text = null
+  else if (notice?.kind === 'notFound')
+    text = notice.ambiguous
+      ? 'The text this re-write left fits more than one place in the manuscript, so it was not reopened (Novel does not guess). Its versions are kept.'
+      : 'The text this re-write left was not found near where it was, so it cannot be reopened. Its versions are kept.'
+  else if (notice?.kind === 'discarded') text = `Re-write discarded. Undo (${formatShortcut('Mod-z')}) brings it back.`
   else if (notice?.kind === 'span') text = 'A re-write covers one chapter at most. Select paragraphs within one chapter and try again.'
   else if (notice?.kind === 'locked' && record) text = 'This passage is being re-written, so it cannot be changed here. Edit it in its re-write.'
   else if (record) text = 'This passage is being re-written. It is locked until you choose a version.'
   if (!text) return null
   // Refusals and errors are alerts; the undo notice only informs (nothing was refused).
-  const alert = notice !== null && notice.kind !== 'undo'
+  const alert = notice !== null && notice.kind !== 'undo' && notice.kind !== 'discarded'
   const dismissable = notice !== null
   const offerOpen = record && !inView
   return (
@@ -163,13 +171,20 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
   )
 }
 
+/** How a resolved re-write was resolved, for the list: "Kept the original", "Kept Version 2". */
+function choiceText(r: RewriteRecord): string {
+  if (r.choice === CHOICE_ORIGINAL) return 'Kept the original'
+  const v = r.choice ? r.versions.find((x) => x.id === r.choice) : undefined
+  return v ? `Kept ${v.name}` : r.kept ? 'Kept a version' : 'Resolved'
+}
+
 /** "Chapter 2, The Storm: 'It was a dark…'" for the list. */
 function describe(r: RewriteRecord): { where: string; preview: string } {
   const ed = getEditor()
   const first = r.original.content?.[0]
   const text = (n: typeof first): string => (n ? (n.text ?? '') + (n.content ?? []).map((c) => text(c)).join('') : '')
   const preview = text(first).trim().slice(0, 80) || 'Empty paragraph'
-  if (!ed) return { where: '', preview }
+  if (!ed || r.status !== 'open') return { where: '', preview }
   const range = passageRange(ed.state.doc, r.anchor)
   if (!range)
     return {
@@ -183,40 +198,62 @@ function describe(r: RewriteRecord): { where: string; preview: string } {
   return { where: chapter ? `Chapter ${i + 1}${title ? `: ${title}` : ''}` : 'Before the first chapter', preview }
 }
 
-/** Review ▸ Re-writes…: every re-write in progress, in manuscript order; Open shows it. */
+/**
+ * Review ▸ Re-writes…: the re-writes in progress (Open shows one), then the resolved ones with the
+ * choice made, newest first (Reopen compares the manuscript's text now with the saved versions).
+ */
 function RewritesList() {
   const isOpen = useStore((s) => s.rewrite.listOpen)
   const rewrites = useStore((s) => s.rewrite.rewrites)
   if (!isOpen) return null
   const open = rewrites.filter((r) => r.status === 'open')
+  const resolved = rewrites.filter((r) => r.status !== 'open').sort((a, b) => ((b.resolvedAt ?? '') < (a.resolvedAt ?? '') ? -1 : 1))
+  const row = (r: RewriteRecord) => {
+    const d = describe(r)
+    const isOpenRow = r.status === 'open'
+    const c = isOpenRow ? C.listItem : C.listReopen
+    return (
+      <li key={r.id} className="flex items-center gap-3 rounded-control px-1 py-1" data-rewrite-status={isOpenRow ? 'open' : 'resolved'}>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-ui">{d.preview}</div>
+          <div className="truncate text-ui-sm text-text-muted">
+            {isOpenRow ? (d.where ? `${d.where}. ` : '') : `${choiceText(r)}. `}
+            {r.versions.length} {r.versions.length === 1 ? 'version' : 'versions'}
+            {isOpenRow && r.originalChanged ? '. The original changed since.' : ''}
+          </div>
+        </div>
+        <Tooltip controlId={c.id}>
+          <Button data-control-id={c.id} data-rewrite-id={r.id} onClick={() => (isOpenRow ? openRewrite(r.id) : reopenRewrite(r.id))}>
+            {c.label}
+          </Button>
+        </Tooltip>
+      </li>
+    )
+  }
   return (
-    <Dialog open onOpenChange={(o) => openList(o)} title="Re-writes" description="Passages you are re-writing. Each stays locked in the manuscript until you choose a version." closeControlId={C.listClose.id} wide>
+    <Dialog
+      open
+      onOpenChange={(o) => openList(o)}
+      title="Re-writes"
+      description="Passages you are re-writing stay locked in the manuscript until you choose. Resolved re-writes keep their versions, so you can reopen one and change your mind."
+      closeControlId={C.listClose.id}
+      wide
+    >
       {open.length === 0 ? (
         <p className="text-text-muted">No re-writes in progress. Select paragraphs and choose Review, Re-write Passage.</p>
       ) : (
-        <ul className="flex flex-col gap-1" data-testid="rewrite-list">
-          {open.map((r) => {
-            const d = describe(r)
-            return (
-              <li key={r.id} className="flex items-center gap-3 rounded-control px-1 py-1">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-ui">{d.preview}</div>
-                  <div className="truncate text-ui-sm text-text-muted">
-                    {d.where ? `${d.where}. ` : ''}
-                    {r.versions.length} {r.versions.length === 1 ? 'version' : 'versions'}
-                    {r.originalChanged ? '. The original changed since.' : ''}
-                  </div>
-                </div>
-                <Tooltip controlId={C.listItem.id}>
-                  <Button data-control-id={C.listItem.id} data-rewrite-id={r.id} onClick={() => openRewrite(r.id)}>
-                    {C.listItem.label}
-                  </Button>
-                </Tooltip>
-              </li>
-            )
-          })}
+        <ul className="flex flex-col gap-1" data-testid="rewrite-list" aria-label="In progress">
+          {open.map(row)}
         </ul>
       )}
+      {resolved.length ? (
+        <>
+          <h3 className="mt-3 text-ui-sm font-semibold text-text-muted">Resolved</h3>
+          <ul className="flex flex-col gap-1" data-testid="rewrite-list-resolved" aria-label="Resolved">
+            {resolved.map(row)}
+          </ul>
+        </>
+      ) : null}
     </Dialog>
   )
 }

@@ -6,6 +6,7 @@ import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { TRACK_SKIP_META } from '@/features/track-changes'
 import { BULK_EDIT_META, REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { useStore } from '@/shared/store'
+import { applyStateSteps, RewriteStateStep } from './step'
 
 /**
  * The re-write anchor in the manuscript (docs/project-format.md, "rewrites.json"):
@@ -61,18 +62,49 @@ interface AnchorState {
   lost: ReadonlyMap<string, LostPassage>
   /** This dispatch's events (appended transactions add to their root's). */
   events: readonly AnchorEvent[]
+  /**
+   * Open / not open per anchor, as the history steps (RewriteStateStep: Keep, Discard, Reopen and their
+   * undo / redo) set it, until the store says the same (it is updated after the dispatch).
+   */
+  overrides: ReadonlyMap<string, boolean>
+  /** This dispatch's RewriteStateSteps, copied into the store by the plugin view. */
+  stateSteps: readonly RewriteStateStep[]
 }
 
 export const rewriteAnchorKey = new PluginKey<AnchorState>('nvRewriteAnchor')
 
-/** Anchor ids of the re-writes that lock their passage (status 'open'). */
-function openAnchors(): ReadonlySet<string> {
+/**
+ * Anchor ids of the re-writes that lock their passage (status 'open'): the store's, with the
+ * resolution changes history steps made that the store does not show yet (`overrides`).
+ */
+function openAnchors(overrides?: ReadonlyMap<string, boolean>): ReadonlySet<string> {
   const set = new Set<string>()
   for (const r of useStore.getState().rewrite.rewrites) if (r.status === 'open') set.add(r.anchor)
+  overrides?.forEach((open, anchor) => (open ? set.add(anchor) : set.delete(anchor)))
   return set
 }
 
+/** The open anchors in `state` (its history steps included). */
+export function openAnchorsIn(state: EditorState): ReadonlySet<string> {
+  return openAnchors(rewriteAnchorKey.getState(state)?.overrides)
+}
+
 const anchorSignature = () => [...openAnchors()].sort().join(' ')
+
+const stateStepsOf = (tr: Transaction) => tr.steps.filter((s): s is RewriteStateStep => s instanceof RewriteStateStep)
+
+/** `overrides` without the entries the store now agrees with, plus the steps of `tr`. */
+function nextOverrides(overrides: ReadonlyMap<string, boolean>, steps: readonly RewriteStateStep[]): ReadonlyMap<string, boolean> {
+  if (!overrides.size && !steps.length) return overrides
+  const store = openAnchors()
+  const out = new Map<string, boolean>()
+  overrides.forEach((open, anchor) => {
+    if (store.has(anchor) !== open) out.set(anchor, open)
+  })
+  for (const s of steps) out.set(s.anchor, s.opens)
+  if (out.size === overrides.size && [...out].every(([k, v]) => overrides.get(k) === v)) return overrides
+  return out
+}
 
 /**
  * Every run of top-level blocks carrying the anchor `anchor` (normally one; a programmatic edit can
@@ -314,6 +346,21 @@ function problems(ranges: readonly LockedRange[]): Record<string, 'missing' | 's
   return out
 }
 
+let onStateStepsMirrored: (() => void) | null = null
+/** Set by commands.ts: called after the store took a step's change (rewrites.json is then unsaved). */
+export function setStateStepsMirroredHandler(fn: (() => void) | null): void {
+  onStateStepsMirrored = fn
+}
+
+/** Copy the resolution set by history steps into the store (a user change: saved with the manuscript). */
+function mirrorStateSteps(steps: readonly RewriteStateStep[]) {
+  const s = useStore.getState()
+  const next = applyStateSteps(s.rewrite.rewrites, steps)
+  if (next === s.rewrite.rewrites) return
+  s.rewriteActions.changed(next)
+  onStateStepsMirrored?.()
+}
+
 function selectionLocked(state: EditorState): LockedRange | null {
   const ranges = rewriteAnchorKey.getState(state)?.ranges ?? []
   const { from, to } = state.selection
@@ -332,18 +379,27 @@ function createAnchorPlugin(): Plugin<AnchorState> {
     state: {
       init: (_, state) => {
         const ranges = computeRanges(state.doc, openAnchors())
-        return { ranges, decorations: buildDecorations(state.doc, ranges), lost: new Map(), events: [] }
+        return { ranges, decorations: buildDecorations(state.doc, ranges), lost: new Map(), events: [], overrides: new Map(), stateSteps: [] }
       },
       // Runs only for applied transactions (after every filter): the events reported by the view.
       apply(tr, value, oldState, state) {
         const appended = tr.getMeta('appendedTransaction') !== undefined
         const carried = appended ? value.events : []
-        if (!tr.docChanged && !tr.getMeta(REFRESH_META)) return value.events.length && !appended ? { ...value, events: [] } : value
+        if (!tr.docChanged && !tr.getMeta(REFRESH_META))
+          return (value.events.length || value.stateSteps.length) && !appended ? { ...value, events: [], stateSteps: [] } : value
+        const own = stateStepsOf(tr)
+        const overrides = nextOverrides(value.overrides, own)
+        const stateSteps = own.length ? [...(appended ? value.stateSteps : []), ...own] : appended ? value.stateSteps : []
+        // Anchors a step of this transaction resolved: their passage is let go, not lost.
+        const resolved = new Set(own.filter((s) => !s.opens).map((s) => s.anchor))
         // O(top-level blocks) per edit, attribute reads only: microseconds on a 100k-word manuscript.
-        const ranges = computeRanges(state.doc, openAnchors())
+        const open = openAnchors(overrides)
+        // Nothing open, nothing locked or remembered (typing with no re-write open): nothing to do.
+        if (!open.size && !value.ranges.length && !value.lost.size && !own.length && !carried.length && !stateSteps.length)
+          return value.events.length || value.stateSteps.length || overrides !== value.overrides ? { ...value, events: [], stateSteps: [], overrides } : value
+        const ranges = computeRanges(state.doc, open)
         const events: AnchorEvent[] = [...carried]
         let lost = value.lost
-        const open = openAnchors()
         if (tr.docChanged || lost.size) {
           if (lost.size) {
             // Mapped through the edit. Dropped when the re-write is no longer open, or when another edit
@@ -361,7 +417,7 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         if (tr.docChanged) {
           if (!tr.getMeta(REWRITE_ALLOW_META) && programmatic(tr)) {
             const kind = tr.getMeta('history$') ? 'undo' : 'changed'
-            for (const r of touchedRanges(tr, value.ranges)) events.push({ kind, id: r.id })
+            for (const r of touchedRanges(tr, value.ranges)) if (!resolved.has(r.id)) events.push({ kind, id: r.id })
           }
           // Passages this edit removed (or split): remembered, so a redo / undo that puts the blocks back re-anchors them.
           const now = new Set(ranges.map((r) => r.id))
@@ -370,7 +426,7 @@ function createAnchorPlugin(): Plugin<AnchorState> {
           const before = new Map<string, number>()
           for (const r of value.ranges) before.set(r.id, (before.get(r.id) ?? 0) + 1)
           for (const r of value.ranges) {
-            if (!now.has(r.id) && !lost.has(r.id)) {
+            if (!now.has(r.id) && !lost.has(r.id) && !resolved.has(r.id)) {
               if (lost === value.lost) lost = new Map(lost)
               ;(lost as Map<string, LostPassage>).set(r.id, { at: tr.mapping.map(r.from, -1), blocks: blocksIn(oldState.doc, r.from, r.to) })
               events.push({ kind: 'missing', id: r.id })
@@ -390,7 +446,7 @@ function createAnchorPlugin(): Plugin<AnchorState> {
             ? value.decorations.map(tr.mapping, tr.doc)
             : value.decorations
           : buildDecorations(state.doc, ranges)
-        return { ranges: sameRanges(ranges, value.ranges) ? value.ranges : ranges, decorations, lost, events }
+        return { ranges: sameRanges(ranges, value.ranges) ? value.ranges : ranges, decorations, lost, events, overrides, stateSteps }
       },
     },
     filterTransaction(tr, state) {
@@ -411,6 +467,19 @@ function createAnchorPlugin(): Plugin<AnchorState> {
       if (!trs.some((t) => t.docChanged) || trs.some((t) => t.getMeta(REWRITE_ALLOW_META))) return null
       const out = newState.tr
       const lost = rewriteAnchorKey.getState(newState)?.lost
+      const openNow = openAnchorsIn(newState)
+      // Blocks an undo / redo put back with the anchor of a re-write that is not open (resolved, or
+      // gone): a stale anchor never stays in the manuscript (an undone Keep reopens its re-write in the
+      // same step, so its anchor is open here and stays).
+      if (trs.some((t) => t.getMeta('history$'))) {
+        for (const [a, b] of historyInsertions(trs)) {
+          newState.doc.nodesBetween(Math.max(0, a), Math.min(b, newState.doc.content.size), (node, pos) => {
+            const id = node.attrs[REWRITE_BLOCK_ATTR] as string | null | undefined
+            if (id && !openNow.has(id) && node.attrs[REWRITE_BLOCK_ATTR] !== undefined) out.setNodeAttribute(pos, REWRITE_BLOCK_ATTR, null)
+            return false
+          })
+        }
+      }
       if (lost?.size && trs.some((t) => t.getMeta('history$'))) {
         const inserted = historyInsertions(trs)
         lost.forEach((l, id) => {
@@ -434,6 +503,8 @@ function createAnchorPlugin(): Plugin<AnchorState> {
       const mapping = new Mapping()
       for (const t of trs) mapping.appendMapping(t.mapping)
       for (const r of old) {
+        // Resolved by a step of these transactions (an undone Reopen): let go.
+        if (!openNow.has(r.id)) continue
         const from = mapping.map(r.from, 1)
         const to = mapping.map(r.to, -1)
         if (to <= from) continue
@@ -485,7 +556,10 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         const next = anchorSignature()
         if (next === signature) return
         signature = next
-        view.dispatch(view.state.tr.setMeta(REFRESH_META, {}).setMeta('addToHistory', false))
+        // The store caught up with a history step (Keep, Discard, Reopen): the lock already follows it.
+        const st = rewriteAnchorKey.getState(view.state)
+        const fresh = computeRanges(view.state.doc, openAnchors(st?.overrides))
+        if (!st || !sameRanges(fresh, st.ranges)) view.dispatch(view.state.tr.setMeta(REFRESH_META, {}).setMeta('addToHistory', false))
         // Which open re-writes lack their passage changes with the set of open re-writes too.
         syncProblems(view.state)
       })
@@ -504,6 +578,8 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         update(v, prevState) {
           const before = rewriteAnchorKey.getState(prevState)
           const now = rewriteAnchorKey.getState(v.state)
+          // Keep / Discard / Reopen, their undo and redo: rewrites.json follows the document.
+          if (now && now.stateSteps !== before?.stateSteps && now.stateSteps.length) mirrorStateSteps(now.stateSteps)
           if (now?.events !== before?.events && now?.events.length) report(now.events)
           if (before?.ranges !== now?.ranges) syncProblems(v.state)
           if (!v.state.selection.eq(prevState.selection) || before?.ranges !== now?.ranges) syncCaret(v.state)
