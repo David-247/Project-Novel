@@ -29,6 +29,13 @@ export interface Command {
    * menu; elsewhere its items move to Help (group 'about') or the end of File (any other group).
    */
   menu?: { id: MenuId; group: string; order: number; submenu?: string }
+  /**
+   * Where the command may run from the keyboard and the native menu (default: by menu, see
+   * keyboard.ts). 'manuscript': it acts at the manuscript's caret, so not while another text field
+   * or a dialog has focus (Insert, Format, Edit history / clipboard, New Comment). 'modal': anywhere
+   * but behind a modal dialog (Track Changes, the markup views). 'none': anywhere.
+   */
+  guard?: 'manuscript' | 'modal' | 'none'
   isEnabled?: () => boolean
   /** Present on toggles and radio-like items (rendered as checkable). */
   isChecked?: () => boolean

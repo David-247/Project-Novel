@@ -30,6 +30,8 @@ export function commentCommands(): Command[] {
       description: COMMENT_CONTROLS.new.description,
       shortcut: NEW_COMMENT_SHORTCUT,
       menu: review('comments', 10),
+      // Anchors at the manuscript's caret: not from another field (a reply, a footnote) or a dialog.
+      guard: 'manuscript',
       isEnabled: getCommentsViewEditable,
       run: () => void newComment(),
     },

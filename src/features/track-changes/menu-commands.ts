@@ -17,6 +17,8 @@ export function trackChangesCommands(): Command[] {
       description: track.description,
       shortcut: track.shortcut,
       menu: { id: 'review', group: 'tracking', order: 1 },
+      // Harmless from any field (a footnote, the find field), but not behind a dialog.
+      guard: 'modal',
       isChecked: () => isTracking(),
       run: () => void toggleTrackChanges(),
     },
@@ -26,6 +28,7 @@ export function trackChangesCommands(): Command[] {
         label: o.label,
         description: o.description,
         menu: { id: 'view', group: 'markup', order: 30 + i, submenu: 'Markup' },
+        guard: 'modal',
         isChecked: () => getMarkupView() === o.value,
         run: () => setMarkupView(o.value),
       }),
@@ -33,11 +36,16 @@ export function trackChangesCommands(): Command[] {
   ]
 }
 
-/** Register the commands and keep their check marks fresh. Returns unregister. */
+/**
+ * Register the commands and keep their check marks fresh. Also drops the status-bar notice (an edit
+ * recorded untracked) when another project is opened or the project is closed: it was about that
+ * project's text, like the storage warnings the project slice clears then. Returns unregister.
+ */
 export function registerTrackChangesCommands(): () => void {
   const off = registerCommands(trackChangesCommands())
   const offStore = useStore.subscribe((s, prev) => {
     if (s.book.trackChanges !== prev.book.trackChanges || s.trackChanges.markupView !== prev.trackChanges.markupView) notifyCommandStateChanged()
+    if (s.project.path !== prev.project.path && s.trackChanges.notice) s.trackChangesActions.setNotice(null)
   })
   return () => {
     offStore()

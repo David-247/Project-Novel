@@ -390,9 +390,12 @@ control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
   Headers & Page Numbers…, Footnote Options…), Review (Track Changes | New Comment | Next Comment, Previous Comment | Show Resolved
   Comments), Help (Keyboard Shortcuts, Project Folder Format | About Novel).
 - **Keyboard** (one window listener, `installCommandShortcuts`): bubble phase, so a key the editor's keymap already
-  handled is not run again; Cut/Copy/Paste keep the webview's own handling (`nativeShortcut`); text commands (Edit
-  history and clipboard, Insert, Format, Review) do not act on the manuscript while another text field or a dialog has
-  focus. On macOS, a native menu event right after the same key press in the webview is ignored (`wasJustPressed`).
+  handled is not run again; Cut/Copy/Paste keep the webview's own handling (`nativeShortcut`). Each command has a
+  guard (`Command.guard`), applied to the key and to the native menu item alike: **manuscript** (Edit history and
+  clipboard, Insert, Format, and New Comment, which anchors at the caret): not while another text field (the find
+  field, a comment reply, the footnote popover) or a dialog has focus; **modal** (Track Changes, View > Markup): from
+  any field, the footnote popover included, but not behind a dialog; **none** (everything else, e.g. Next / Previous
+  Comment, Show Resolved Comments, Save): anywhere, so they work while typing in the comments panel. On macOS, a native menu event right after the same key press in the webview is ignored (`wasJustPressed`).
 - **In-app bar**: Alt alone or F10 moves focus to File (again: back to the text), Alt+underlined letter opens a menu
   (not on macOS, where Option types characters), arrows move between menus and items, Enter/Space choose, Escape
   closes. Closing gives focus back to where it was (normally the manuscript, through its view, so the selection is

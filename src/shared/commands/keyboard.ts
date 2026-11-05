@@ -7,9 +7,11 @@ import { getCommand, getCommands, isCommandEnabled, type Command } from './regis
  * - Bubble phase, after every app handler: a key the editor's own keymap already handled (Mod-b in
  *   the manuscript, which then calls preventDefault) is left alone, so nothing runs twice.
  * - `nativeShortcut` commands (Cut, Copy, Paste, ...) are never dispatched: the webview does them.
- * - Text commands (Edit history/clipboard, Insert, Format, Review) do not reach into the manuscript while
+ * - Text commands (Edit history/clipboard, Insert, Format, and any command with guard 'manuscript',
+ *   e.g. New Comment) do not reach into the manuscript while
  *   another text field or a modal dialog has focus (Mod-z there undoes the field, not the book), nor
- *   while an open in-app menu has focus.
+ *   while an open in-app menu has focus. Guard 'modal' (Track Changes, the markup views) only keeps
+ *   a command from acting behind a dialog; other commands (Next Comment, Save, ...) run anywhere.
  * - A disabled command leaves the key to the browser.
  *
  * macOS: the native menu's accelerator fires for the same press as the webview's keydown. A press the
@@ -38,11 +40,13 @@ function remember(cmd: Command) {
   lastPress = { id: cmd.id, at: performance.now() }
 }
 
-function isTextCommand(cmd: Command): boolean {
+/** The command's guard: its own, else 'manuscript' for text commands (Insert, Format, Edit history / clipboard). */
+function guardOf(cmd: Command): 'manuscript' | 'modal' | 'none' {
+  if (cmd.guard) return cmd.guard
   const m = cmd.menu
-  if (!m) return false
-  // Review (comments, Track Changes) acts on the manuscript too: never behind a dialog or from another field.
-  return m.id === 'insert' || m.id === 'format' || m.id === 'review' || (m.id === 'edit' && (m.group === 'history' || m.group === 'clipboard'))
+  if (!m) return 'none'
+  const text = m.id === 'insert' || m.id === 'format' || (m.id === 'edit' && (m.group === 'history' || m.group === 'clipboard'))
+  return text ? 'manuscript' : 'none'
 }
 
 const isHistoryCommand = (cmd: Command) => cmd.menu?.id === 'edit' && cmd.menu.group === 'history'
@@ -50,7 +54,8 @@ const isHistoryCommand = (cmd: Command) => cmd.menu?.id === 'edit' && cmd.menu.g
 function isEditableField(el: Element): boolean {
   if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return true
   if (el instanceof HTMLInputElement) return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color'].includes(el.type)
-  return el instanceof HTMLElement && el.isContentEditable
+  // isContentEditable, or the attribute (jsdom does not implement isContentEditable).
+  return el instanceof HTMLElement && (el.isContentEditable || !!el.closest('[contenteditable]:not([contenteditable="false"])'))
 }
 
 /** Focus is inside an open menu of the in-app menu bar. */
@@ -58,12 +63,13 @@ function inOpenMenu(target: EventTarget | null): boolean {
   return target instanceof Element && !!target.closest('[role="menu"], [data-nv-menu-content]')
 }
 
-/** Where a text command must not act: another text field, or anything inside a modal dialog. */
-function guarded(target: EventTarget | null, manuscript: HTMLElement | null | undefined): boolean {
-  if (!(target instanceof Element)) return false
+/** Where `cmd` must not act: inside a dialog (both guards), or another text field ('manuscript'). */
+function guarded(cmd: Command, target: EventTarget | null, manuscript: HTMLElement | null | undefined): boolean {
+  const guard = guardOf(cmd)
+  if (guard === 'none' || !(target instanceof Element)) return false
   if (manuscript && (target === manuscript || manuscript.contains(target))) return false
   if (target.closest('[role="dialog"], [role="alertdialog"]')) return true
-  return isEditableField(target)
+  return guard === 'manuscript' && isEditableField(target)
 }
 
 export function commandForKey(e: KeyboardEvent, platform: Platform): Command | undefined {
@@ -83,7 +89,7 @@ export function installCommandShortcuts({ manuscript, platform = detectPlatform(
     }
     if (cmd.nativeShortcut) return
     if (inOpenMenu(e.target)) return
-    if (isTextCommand(cmd) && guarded(e.target, manuscript())) return
+    if (guarded(cmd, e.target, manuscript())) return
     if (!isCommandEnabled(cmd)) return
     e.preventDefault()
     remember(cmd)
@@ -102,7 +108,7 @@ export function runFromNativeMenu(id: string, manuscript: HTMLElement | null | u
   if (wasJustPressed(id, now)) return false
   const cmd = getCommand(id)
   if (!cmd || !isCommandEnabled(cmd)) return false
-  if (isTextCommand(cmd) && !isHistoryCommand(cmd) && guarded(document.activeElement, manuscript)) return false
+  if (!isHistoryCommand(cmd) && guarded(cmd, document.activeElement, manuscript)) return false
   cmd.run()
   return true
 }
