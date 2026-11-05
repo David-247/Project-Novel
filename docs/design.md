@@ -357,3 +357,35 @@ running head is clipped (one line, `overflow: hidden`, ellipsis) and can never m
 - **Touch and keyboard**: the toolbar button is the keyboard route (no hover-only access); every field is a native
   select, text field or checkbox with a visible label and a registry tooltip.
 
+
+## Comments (Phase 3)
+
+Slice `src/features/comments/` (public interface `index.ts`). Format: docs/project-format.md, "comments.json".
+
+- **Anchor**: the inline `comment` mark (attr `id`; `excludes: ''`, so comments overlap each other and any other
+  mark, track changes included). A collapsed caret comments the word at the caret. The anchored text gets a soft
+  paper highlight (`--page-comment-bg`, comments.css, one value per paper surface); a thread with an author colour
+  gets that colour mixed into the paper, as strong as AA for the page text allows on the current paper
+  (`highlightFor`, checked in `comments/model.test.ts` for a palette on all four papers). The selected thread uses
+  `--page-comment-active-bg` and a `--page-comment-ring` underline (3:1). Resolved threads lose the highlight unless
+  Show Resolved is on. All of it is one generated style sheet: nothing changes per keystroke, and no box changes,
+  so the pagination measurement is untouched.
+- **Undo**: thread data lives in the editor's plugin state and changes only through a document step that leaves
+  the text as it is (`CommentThreadStep`), so create, reply, edit, resolve, reopen and delete are each one step of
+  the main undo history (with their marks, for create and delete). The store's `comments` slice mirrors it for the
+  panel and for comments.json.
+- **Margin panel**: to the right of the pages, on the desk (the pages fit into what is left). Cards hold the author,
+  a colour dot, a relative date, the messages, Reply, Resolve / Reopen, Go to text and Delete. Each card is level with
+  its anchor's line (painted position: page offsets and zoom included) and cards stack downward without overlap; the
+  selected card is pulled to its anchor and the ones above it stack upward (Word / Google Docs). Only the visible
+  spread's comments are shown (`layout.pages` + `visibleSpread`, never the scroll position), recomputed on every
+  published reflow, zoom and spread change. The panel takes room only while the manuscript has comments (resolved
+  ones included, so Show Resolved stays at hand).
+- **Connector, never hover alone**: the caret in an anchor, focusing a card and clicking it select the thread (card
+  ringed, anchor lit); hovering a card or its anchor text lights the other side too.
+- **Narrow windows**: when the pages at a readable size plus the panel do not fit, the comments become a toggleable
+  side drawer (a bottom sheet below 640 px) listing the threads in document order; Go to text jumps to the anchor.
+- **Commands**: New Comment (Mod-Alt-m; opens a focused composer, Mod-Enter adds, Escape cancels and returns to the
+  text), Next / Previous Comment (the anchor is centred so its spread is the one in view; both page views), Show
+  Resolved, Comments Panel toggle. Mod-z / Mod-Shift-z in the panel (outside its text fields) undo in the manuscript.
+  Toolbar: `comment.new`, `comment.panel`; every panel and card control has a registry tooltip.
