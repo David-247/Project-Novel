@@ -284,12 +284,16 @@ function insertTracked(tr: Transaction, at: number, slice: Slice, ctx: Ctx) {
 
 /** The insertion mark for new text at [from, to): the author's adjacent change of this session, or a new one. */
 function insertionMarkFor(doc: PMNode, from: number, to: number, ctx: Ctx): Mark {
-  const before = doc.resolve(from).nodeBefore
-  const after = doc.resolve(to).nodeAfter
+  const $from = doc.resolve(from)
+  return insertionMarkBetween($from.nodeBefore, doc.resolve(to).nodeAfter, $from.parent, ctx)
+}
+
+/** insertionMarkFor, given the nodes on either side of the new text and its parent. */
+function insertionMarkBetween(before: PMNode | null | undefined, after: PMNode | null | undefined, parent: PMNode, ctx: Ctx): Mark {
   let adjacent = [markOf(before, INSERTION_MARK), markOf(after, INSERTION_MARK)].find((mk) => ownSession(mk, ctx))
   if (!adjacent && !before) {
     // Typing at the start of a paragraph this session inserted: the same change as the paragraph.
-    const block = doc.resolve(from).parent.attrs[TRACKED_INSERT_ATTR] as ChangeStamp | null
+    const block = parent.attrs[TRACKED_INSERT_ATTR] as ChangeStamp | null
     if (block && block.author === ctx.author && sessionIds.has(block.id))
       adjacent = ctx.schema.marks[INSERTION_MARK].create({ ...block, authorColor: block.authorColor ?? null })
   }
@@ -428,6 +432,184 @@ function trackMarkStep(tr: Transaction, step: AddMarkStep | RemoveMarkStep, ctx:
   }
 }
 
+// ---- Replace All in one pass ----------------------------------------------------------------------
+
+/**
+ * From this many steps, a Replace All-shaped transaction (descending text replacements) is recorded
+ * run by run: one ReplaceStep per stretch of text holding matches, instead of an AddMarkStep and an
+ * insertion per match (Replace All of a common word: ~1,000 steps instead of ~20,000, and no
+ * per-match position resolving). The result equals the per-match path (record.test.ts).
+ */
+export const BATCH_MIN_STEPS = 16
+
+interface BatchMatch {
+  /** Index of the step in the transaction. */
+  step: number
+  F: number
+  T: number
+  slice: Slice
+}
+
+/** Consecutive children [c0, c1] of one textblock (text only) holding matches, ascending. */
+interface BatchRun {
+  parent: PMNode
+  /** Content start of the parent. */
+  start: number
+  /** Start offset of every child of the parent, relative to `start`. */
+  offsets: number[]
+  c0: number
+  c1: number
+  matches: BatchMatch[]
+}
+
+function childOffsets(parent: PMNode): number[] {
+  const out: number[] = []
+  parent.forEach((_n, off) => out.push(off))
+  return out
+}
+
+/** Index of the child covering relative offset `rel` (the last child starting at or before it). */
+function childAt(offsets: readonly number[], rel: number): number {
+  let lo = 0
+  let hi = offsets.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (offsets[mid] <= rel) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
+
+/**
+ * The runs of a Replace All-shaped transaction (`steps` descending), or null when it does not fit
+ * the batch (a match touching the next one, a match over anything but text, block content, an IME
+ * composition): the per-match path records it then.
+ */
+function planBatch(doc: PMNode, steps: readonly ReplaceStep[], ctx: Ctx): BatchRun[] | null {
+  if (ctx.composing || ctx.pending.length) return null
+  const runs: BatchRun[] = []
+  let run: BatchRun | null = null
+  let prevF = Infinity
+  for (let i = 0; i < steps.length; i++) {
+    const { from: F, to: T, slice } = steps[i]
+    if (F >= T || T >= prevF || slice.openStart !== 0 || slice.openEnd !== 0) return null
+    for (let k = 0; k < slice.content.childCount; k++) if (!slice.content.child(k).isInline) return null
+    prevF = F
+    let c0 = -1
+    let c1 = -1
+    if (run && F >= run.start && T <= run.start + run.parent.content.size) {
+      const a = childAt(run.offsets, F - run.start)
+      const b = childAt(run.offsets, T - 1 - run.start)
+      // In this textblock itself (not in a footnote's text inside it): both ends are in its text.
+      if (run.parent.child(a).isText && run.parent.child(b).isText) {
+        c0 = a
+        c1 = b
+      }
+    }
+    if (c0 < 0 || !run) {
+      const $F = doc.resolve(F)
+      const parent = $F.parent
+      const start = $F.start()
+      if (!parent.inlineContent || T > $F.end()) return null
+      const offsets = childOffsets(parent)
+      c0 = childAt(offsets, F - start)
+      c1 = childAt(offsets, T - 1 - start)
+      run = { parent, start, offsets, c0, c1, matches: [] }
+      runs.push(run)
+    }
+    for (let c = c0; c <= c1; c++) if (!run.parent.child(c).isText) return null
+    // Joins the run when only text lies between this match and the run.
+    let joins = true
+    for (let c = c1 + 1; c < run.c0; c++) if (!run.parent.child(c).isText) joins = false
+    if (!joins) {
+      run = { parent: run.parent, start: run.start, offsets: run.offsets, c0, c1, matches: [] }
+      runs.push(run)
+    }
+    run.c0 = Math.min(run.c0, c0)
+    run.matches.push({ step: i, F, T, slice })
+  }
+  for (const r of runs) r.matches.reverse()
+  return runs
+}
+
+/** A text node with `mark` added, where its parent allows it (as AddMarkStep does). */
+function withMark(node: PMNode, mark: Mark, parent: PMNode): PMNode {
+  return parent.type.allowsMarkType(mark.type) ? node.mark(mark.addToSet(node.marks)) : node
+}
+
+/** Append, joining text with the same marks (as ProseMirror's own steps leave it). */
+function pushInline(out: PMNode[], node: PMNode) {
+  const last = out[out.length - 1]
+  if (last && last.isText && node.isText && last.sameMarkup(node)) out[out.length - 1] = node.type.schema.text(last.text! + node.text!, last.marks)
+  else out.push(node)
+}
+
+/**
+ * Records a Replace All-shaped transaction in `out` run by run (see BATCH_MIN_STEPS), with the rules
+ * of trackReplace: matched text is marked deleted (your own insertions are really removed) and the
+ * replacement goes in after it as an insertion. Returns the retained size per step, or null (and
+ * `out` untouched) when the transaction does not fit.
+ */
+function trackReplaceBatch(out: Transaction, steps: readonly ReplaceStep[], ctx: Ctx): number[] | null {
+  const runs = planBatch(out.doc, steps, ctx)
+  if (!runs) return null
+  const retained = new Array<number>(steps.length).fill(0)
+  const built: { from: number; to: number; content: PMNode[] }[] = []
+  for (const run of runs) {
+    const { parent, start, offsets } = run
+    // The unchanged neighbours of a match: matches never touch, and earlier ones are not applied yet.
+    const nodeBefore = (pos: number) => (pos - start <= 0 ? null : parent.child(childAt(offsets, pos - start - 1)))
+    const nodeAfter = (pos: number) => (pos - start >= parent.content.size ? null : parent.child(childAt(offsets, pos - start)))
+    const content: PMNode[] = []
+    let mi = 0
+    for (let c = run.c0; c <= run.c1; c++) {
+      const child = parent.child(c)
+      const cs = start + offsets[c]
+      const ce = cs + child.nodeSize
+      let p = cs
+      while (p < ce) {
+        const m: BatchMatch | undefined = run.matches[mi]
+        if (!m || p < m.F) {
+          const q = m ? Math.min(ce, m.F) : ce
+          pushInline(content, child.cut(p - cs, q - cs))
+          p = q
+          continue
+        }
+        const q = Math.min(ce, m.T)
+        const piece = child.cut(p - cs, q - cs)
+        if (ownInsertion(child, ctx)) {
+          // Your own insertion: really removed.
+        } else if (markOf(child, DELETION_MARK)) {
+          pushInline(content, piece)
+          retained[m.step] += q - p
+        } else {
+          const adjacent = [markOf(nodeBefore(m.F), DELETION_MARK), markOf(nodeAfter(m.T), DELETION_MARK)].find((mk) => ownSession(mk, ctx))
+          pushInline(content, withMark(piece, adjacent ?? (ctx.del ??= changeMark(ctx, DELETION_MARK)), parent))
+          retained[m.step] += q - p
+        }
+        p = q
+        if (p === m.T) {
+          const slice = cleanSlice(m.slice)
+          if (slice.size > 0) {
+            // Next to the new text: the last piece kept of the match, else the text before the match.
+            const before = retained[m.step] > 0 ? content[content.length - 1] : nodeBefore(m.F)
+            const mark = insertionMarkBetween(before, nodeAfter(m.T), parent, ctx)
+            markInline(slice.content, mark, parent.type).forEach((n) => pushInline(content, n))
+          }
+          mi++
+        }
+      }
+    }
+    built.push({ from: start + offsets[run.c0], to: start + offsets[run.c1] + parent.child(run.c1).nodeSize, content })
+  }
+  // Runs come in descending order: each one's positions are still valid when it is applied.
+  for (const b of built) {
+    const res = out.maybeStep(new ReplaceStep(b.from, b.to, new Slice(Fragment.fromArray(b.content), 0, 0)))
+    if (res.failed) throw new Error(`Replace All batch: ${res.failed}`)
+  }
+  return retained
+}
+
 // ---- The transaction ------------------------------------------------------------------------------
 
 /** Retained (deletion-marked) runs in the coordinates of the original transaction's current doc. */
@@ -515,6 +697,8 @@ export interface TrackOptions {
   composing?: boolean
   /** Unmarked composed text of this author in `state.doc` (counts as own insertion). */
   pending?: readonly (readonly [number, number])[]
+  /** Record a Replace All-shaped transaction run by run (default: from BATCH_MIN_STEPS steps). */
+  batch?: boolean
 }
 
 export function trackTransaction(
@@ -531,8 +715,9 @@ export function trackTransaction(
     let runs: Run[] = []
     if (descendingReplaces(tr.steps)) {
       // Fast path (one step; Replace All): every step's positions are valid in `out` as it goes.
-      const retained: number[] = []
-      for (const s of tr.steps as ReplaceStep[]) retained.push(trackReplace(out, s.from, s.to, s.slice, ctx).retained)
+      const steps = tr.steps as ReplaceStep[]
+      const batch = (options.batch ?? steps.length >= BATCH_MIN_STEPS) ? trackReplaceBatch(out, steps, ctx) : null
+      const retained: number[] = batch ?? steps.map((s) => trackReplace(out, s.from, s.to, s.slice, ctx).retained)
       let shift = 0
       for (let i = tr.steps.length - 1; i >= 0; i--) {
         const s = tr.steps[i] as ReplaceStep

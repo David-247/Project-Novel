@@ -8,7 +8,7 @@ import { useStore } from '@/shared/store'
 import { createEditorExtensions, blockPlainText, collectFootnotes } from '@/features/editor'
 import { resolveFootnoteOptions } from '@/shared/book'
 import { acceptAll, rejectAll, acceptChange, listChanges } from './review'
-import { resetTrackingSession, TRACK_SKIP_META } from './record'
+import { resetTrackingSession, TRACK_SKIP_META, trackTransaction } from './record'
 import { TrackChanges, TRACK_FAILED_NOTICE } from './extension'
 import { setTracking } from './commands'
 
@@ -568,5 +568,116 @@ describe('view-aware text', () => {
     expect(blockPlainText(block)).toBe('OldNew Title')
     expect(blockPlainText(block, { markupView: 'none' })).toBe('New Title')
     expect(blockPlainText(block, { markupView: 'original' })).toBe('Old Title')
+  })
+})
+
+describe('Replace All recorded in one pass (batch)', () => {
+  /** Every occurrence of `query` inside one textblock's (or note's) text, document order, as the find engine skips all-deleted ones. */
+  function occurrences(doc: PMNode, query: string): [number, number][] {
+    const out: [number, number][] = []
+    doc.descendants((node, pos) => {
+      if (!node.inlineContent) return true
+      let text = ''
+      const at: number[] = []
+      node.forEach((c, off) => {
+        const s = c.isText ? c.text! : '￼'
+        for (let i = 0; i < s.length; i++) at.push(pos + 1 + off + i)
+        text += s
+      })
+      for (let i = text.indexOf(query); i >= 0; i = text.indexOf(query, i + query.length)) out.push([at[i], at[i + query.length - 1] + 1])
+      return true
+    })
+    out.sort((a, b) => a[0] - b[0])
+    return out.filter(([a, b]) => {
+      let all = true
+      doc.nodesBetween(a, b, (n) => {
+        if (n.isInline && !n.marks.some((m) => m.type.name === 'deletion')) all = false
+        return all
+      })
+      return !all
+    })
+  }
+
+  /** The untracked Replace All transaction, as the find engine builds it (last match first, marks of the first character). */
+  function replaceAllTr(ed: Editor, query: string, replacement: string) {
+    const tr = ed.state.tr
+    const ranges = occurrences(ed.state.doc, query)
+    for (let i = ranges.length - 1; i >= 0; i--) {
+      const [a, b] = ranges[i]
+      if (!replacement) tr.delete(a, b)
+      else {
+        const marks = (tr.doc.nodeAt(a)?.marks ?? []).filter((m) => !['insertion', 'deletion', 'formatChange'].includes(m.type.name))
+        tr.replaceWith(a, b, ed.schema.text(replacement, marks))
+      }
+    }
+    return { tr, count: ranges.length }
+  }
+
+  /** The document with change ids numbered in order of appearance and dates dropped. */
+  function normal(doc: PMNode): string {
+    const idMap = new Map<string, string>()
+    return JSON.stringify(doc.toJSON(), (k, v) => {
+      if (k === 'id' && typeof v === 'string' && v.startsWith('c')) {
+        if (!idMap.has(v)) idMap.set(v, `#${idMap.size}`)
+        return idMap.get(v)
+      }
+      return k === 'date' ? undefined : v
+    })
+  }
+
+  function compare(ed: Editor, query: string, replacement: string) {
+    const { tr, count } = replaceAllTr(ed, query, replacement)
+    const date = '2026-01-01T00:00:00.000Z'
+    const perMatch = trackTransaction(ed.state, tr, { name: author }, date, { batch: false })
+    const batched = trackTransaction(ed.state, tr, { name: author }, date, { batch: true })
+    expect(batched.getMeta('nvTrackFailed')).toBeUndefined()
+    expect(normal(batched.doc)).toBe(normal(perMatch.doc))
+    expect(batched.selection.toJSON()).toEqual(perMatch.selection.toJSON())
+    return { count, perMatch, batched }
+  }
+
+  it('equals the per-match recording: plain text, marks, other changes, a note, a comment', () => {
+    const ins = (id: string, who = 'Bob') => ({ type: 'insertion', attrs: { id, author: who, date: '2026-01-01T00:00:00.000Z', authorColor: null } })
+    const del = (id: string) => ({ type: 'deletion', attrs: { id, author: 'Bob', date: '2026-01-01T00:00:00.000Z', authorColor: null } })
+    const ed = make([
+      p(t('the cat and the dog by the sea')),
+      p(t('th', [{ type: 'bold' }]), t('e start, '), t('the', [del('d1')]), t(' gone, '), t('the', [ins('i1')]), t(' new')),
+      p(t('Claim the'), { type: 'footnote', content: [t('see the note, the end')] }, t(' then the end')),
+      p(t('a '), t('the', [{ type: 'comment', attrs: { id: 'k1' } }]), t(' commented, '), t('ththe', [ins('i2')])),
+    ])
+    const { count, perMatch, batched } = compare(ed, 'the', 'a')
+    expect(count).toBeGreaterThan(10)
+    expect(batched.steps.length).toBeLessThan(perMatch.steps.length / 2)
+  })
+
+  it("equals the per-match recording next to this session's own changes, and with an empty replacement", () => {
+    const ed = make([p(t('one the two the three')), p(t('the end'))])
+    // Your own insertion (removed for real when replaced) and your own deletion next to a match.
+    at(ed, 8)
+    type(ed, 'the')
+    at(ed, 4)
+    key(ed, 'Backspace')
+    compare(ed, 'the', 'a')
+    compare(ed, 'the', '')
+    compare(ed, 'e', 'E')
+  })
+
+  it('falls back to the per-match path when matches touch', () => {
+    const ed = make([p(t('aaaa and aa'))])
+    const { tr } = replaceAllTr(ed, 'a', 'b')
+    expect(tr.steps.length).toBeGreaterThanOrEqual(6)
+    compare(ed, 'a', 'b')
+  })
+
+  it('a dispatched Replace All of many matches is one undo step and keeps the selection in the document', () => {
+    const ed = make(Array.from({ length: 30 }, (_, i) => p(t(`Line ${i}: the fox and the hound.`))))
+    const before = ed.state.doc
+    const { tr, count } = replaceAllTr(ed, 'the', 'a')
+    expect(count).toBe(60)
+    ed.view.dispatch(tr)
+    expect(show(ed.state.doc).split(' | ')[0]).toBe('Line 0: {-the}{+a} fox and {-the}{+a} hound.')
+    expect(listChanges(ed.state.doc).length).toBe(2)
+    undo(ed.state, ed.view.dispatch)
+    expect(ed.state.doc.eq(before)).toBe(true)
   })
 })
