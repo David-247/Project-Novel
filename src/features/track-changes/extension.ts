@@ -34,6 +34,11 @@ export interface TrackChangesOptions {
   getAuthor: () => Author
   /** Whether changes are recorded now. Default: the project's book setting `trackChanges`. */
   isEnabled: () => boolean
+  /**
+   * Another view with the manuscript's schema (the re-write pages): no Mod-Shift-e, and a markup view
+   * change does not ask the manuscript's pagination to re-measure.
+   */
+  detached: boolean
 }
 
 export const trackChangesKey = new PluginKey<DecorationSet>('nvTrackChanges')
@@ -250,6 +255,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
     return {
       getAuthor: () => currentTrackAuthor(),
       isEnabled: () => useStore.getState().book.trackChanges === true,
+      detached: false,
     }
   },
 
@@ -301,10 +307,14 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
       return false
     }
     return {
-      'Mod-Shift-e': () => {
-        toggleTrackChanges()
-        return true
-      },
+      ...(this.options.detached
+        ? {}
+        : {
+            'Mod-Shift-e': () => {
+              toggleTrackChanges()
+              return true
+            },
+          }),
       Backspace: skip(-1),
       Delete: skip(1),
     }
@@ -357,7 +367,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
             applyMarkupViewAttribute(v)
             // Recompute what depends on the view (footnote numbers, breaks, find), then re-measure.
             view.dispatch(view.state.tr.setMeta(MARKUP_VIEW_META, v).setMeta('addToHistory', false))
-            repaginate?.(changedBlockPositions(view.state.doc))
+            if (!this.options.detached) repaginate?.(changedBlockPositions(view.state.doc))
           })
           return {
             destroy: () => {

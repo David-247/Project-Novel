@@ -1,7 +1,7 @@
 import { Extension } from '@tiptap/core'
-import type { Node as PMNode } from '@tiptap/pm/model'
+import { Fragment, Slice, type Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state'
-import type { Step } from '@tiptap/pm/transform'
+import { AddMarkStep, AddNodeMarkStep, Mapping, RemoveMarkStep, RemoveNodeMarkStep, type Step } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { TRACK_SKIP_META } from '@/features/track-changes'
 import { BULK_EDIT_META, REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
@@ -12,13 +12,17 @@ import { useStore } from '@/shared/store'
  *
  * - `rewriteId`, a block attribute on the top-level block types. Set with setNodeMarkup only (never
  *   AttrStep), outside the undo history, with TRACK_SKIP_META (never a tracked change). Not parsed
- *   from HTML and not rendered, so a copy pasted elsewhere never carries it; not kept on split.
+ *   from HTML and not rendered, stripped from pasted and dropped slices (a drag-copy too), not kept
+ *   on split: a copy never carries it. An open re-write's blocks that lose it (rejecting a tracked
+ *   style change restores the attributes from before) get it back (appendTransaction).
  * - The lock: while a re-write is open (status 'open'), its passage (the run of top-level blocks
  *   carrying its anchor) is read-only. A filterTransaction refuses edits inside it, a beforeinput
  *   handler stops the browser from typing there, and the refusal raises a notice that offers to open
- *   the re-write. Programmatic edits pass: Replace All (BULK_EDIT_META), accept / reject
- *   (TRACK_SKIP_META), undo / redo, and the re-write's own writes (REWRITE_ALLOW_META); when one of
- *   the first three changes the passage, the re-write is marked "original changed".
+ *   the re-write. Undo / redo that would change the passage is refused too (with its own notice).
+ *   Programmatic edits pass: Replace All (BULK_EDIT_META), accept / reject (TRACK_SKIP_META) and the
+ *   re-write's own writes (REWRITE_ALLOW_META); when one of the first two changes the passage, the
+ *   re-write is marked "original changed". Comments pass (the comment mark and thread steps): a
+ *   locked passage can be commented on, like protected text in Word.
  * - Decorations: a side bar and a faint tint on the locked blocks (no box change, so the pagination
  *   measurement is untouched).
  */
@@ -69,10 +73,40 @@ export function passageRanges(doc: PMNode, anchor: string): { from: number; to: 
   return out
 }
 
-/** The passage of `anchor`: from its first block to its last one, or null when no block carries it. */
+/**
+ * The passage of `anchor` (its one run of blocks), or null when no block carries it or when the
+ * blocks carrying it are not one run (an error: `passageProblem` says which). Never spans the text
+ * between two runs.
+ */
 export function passageRange(doc: PMNode, anchor: string): { from: number; to: number } | null {
   const runs = passageRanges(doc, anchor)
-  return runs.length ? { from: runs[0].from, to: runs[runs.length - 1].to } : null
+  return runs.length === 1 ? runs[0] : null
+}
+
+/** Why passageRange(doc, anchor) is null: 'missing' (no block carries it), 'split' (more than one run); null when fine. */
+export function passageProblem(doc: PMNode, anchor: string): 'missing' | 'split' | null {
+  const n = passageRanges(doc, anchor).length
+  return n === 0 ? 'missing' : n > 1 ? 'split' : null
+}
+
+/** `slice` without re-write anchors (pasted, dropped, drag-copied content is never part of a passage). */
+export function stripAnchors(slice: Slice): Slice {
+  let found = false
+  slice.content.descendants((n) => {
+    if (n.attrs[REWRITE_BLOCK_ATTR]) found = true
+    return !found && !n.isTextblock
+  })
+  if (!found) return slice
+  const strip = (fragment: Fragment): Fragment => {
+    const out: PMNode[] = []
+    fragment.forEach((n) => {
+      if (n.isText || n.isInline) return void out.push(n)
+      const attrs = n.attrs[REWRITE_BLOCK_ATTR] ? { ...n.attrs, [REWRITE_BLOCK_ATTR]: null } : n.attrs
+      out.push(n.type.create(attrs, n.isTextblock ? n.content : strip(n.content), n.marks))
+    })
+    return Fragment.from(out)
+  }
+  return new Slice(strip(slice.content), slice.openStart, slice.openEnd)
 }
 
 function computeRanges(doc: PMNode, anchors: ReadonlySet<string>): LockedRange[] {
@@ -115,8 +149,14 @@ function buildDecorations(doc: PMNode, ranges: readonly LockedRange[]): Decorati
   return DecorationSet.create(doc, decos)
 }
 
+const isCommentStep = (step: Step) =>
+  (step instanceof AddMarkStep || step instanceof RemoveMarkStep || step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep) &&
+  step.mark.type.name === 'comment'
+
 /** [from, to] touched by a step in the doc it applies to, or null (a step that changes no content range). */
 function stepRange(step: Step): [number, number] | null {
+  // Comments may be added to and removed from locked text (thread steps have no range either).
+  if (isCommentStep(step)) return null
   const s = step as unknown as { from?: unknown; to?: unknown; pos?: unknown }
   if (typeof s.from === 'number' && typeof s.to === 'number') return [s.from, s.to]
   if (typeof s.pos === 'number') return [s.pos, s.pos + 1]
@@ -162,7 +202,12 @@ export function setSideBarClickHandler(fn: ((anchor: string) => void) | null): v
 }
 
 function programmatic(tr: Transaction): boolean {
-  return tr.getMeta(BULK_EDIT_META) === true || tr.getMeta(TRACK_SKIP_META) === true || !!tr.getMeta('history$')
+  return tr.getMeta(BULK_EDIT_META) === true || tr.getMeta(TRACK_SKIP_META) === true
+}
+
+/** Undo / redo refused because it would change a passage in re-write. */
+function refusedUndo(id: string) {
+  useStore.getState().rewriteActions.setNotice({ kind: 'undo', id, seq: ++seq })
 }
 
 function selectionLocked(state: EditorState): LockedRange | null {
@@ -206,11 +251,37 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         queueMicrotask(() => onOriginalChanged?.(anchor))
         return true
       }
-      refused(hit.id)
+      if (tr.getMeta('history$')) refusedUndo(hit.id)
+      else refused(hit.id)
       return false
+    },
+    // An open re-write's block that lost its anchor (a programmatic edit restored attributes from
+    // before it existed: rejecting a tracked style change) gets it back, outside the undo history.
+    appendTransaction(trs, oldState, newState) {
+      if (!trs.some((t) => t.docChanged) || trs.some((t) => t.getMeta(REWRITE_ALLOW_META))) return null
+      const old = rewriteAnchorKey.getState(oldState)?.ranges
+      if (!old?.length) return null
+      const mapping = new Mapping()
+      for (const t of trs) mapping.appendMapping(t.mapping)
+      const out = newState.tr
+      for (const r of old) {
+        const from = mapping.map(r.from, 1)
+        const to = mapping.map(r.to, -1)
+        if (to <= from) continue
+        newState.doc.nodesBetween(from, to, (node, pos) => {
+          if (pos < from) return true
+          if ((ANCHOR_TYPES as readonly string[]).includes(node.type.name) && node.attrs[REWRITE_BLOCK_ATTR] !== r.id) {
+            out.setNodeMarkup(pos, undefined, { ...node.attrs, [REWRITE_BLOCK_ATTR]: r.id })
+          }
+          return false
+        })
+      }
+      return out.docChanged ? out.setMeta(REWRITE_ALLOW_META, true).setMeta(TRACK_SKIP_META, true).setMeta('addToHistory', false) : null
     },
     props: {
       decorations: (state) => rewriteAnchorKey.getState(state)?.decorations,
+      // Paste and drop (a drag-copy inserts the dragged slice as it is): never a second passage.
+      transformPasted: (slice) => stripAnchors(slice),
       handleDOMEvents: {
         beforeinput: (view, event) => {
           const hit = selectionLocked(view.state)
@@ -282,7 +353,7 @@ export function setRewriteShortcutHandler(fn: (() => boolean) | null): void {
 }
 
 /** Re-write Passage… (Review). The editor keymap runs it from the manuscript. */
-export const REWRITE_SHORTCUT = 'Mod-Alt-r'
+export const REWRITE_SHORTCUT = 'Mod-Alt-w'
 
 /**
  * The `rewriteId` block attribute, the passage lock and its decorations. In the editor's extension

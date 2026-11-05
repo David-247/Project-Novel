@@ -1,11 +1,13 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
+import { closeHistory } from '@tiptap/pm/history'
 import { chapterIndexAt, getChapters, getEditor } from '@/features/editor'
 import { sideFileChanged } from '@/features/storage'
 import type { DocNodeJSON } from '@/shared/document'
 import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { useStore, type RewriteRecord, type RewriteVersion } from '@/shared/store'
 import {
+  passageProblem,
   passageRange,
   setAnchor,
   setOriginalChangedHandler,
@@ -155,8 +157,18 @@ export function rewritePassage(): boolean {
   const original = passageDoc(blocks.map(compact))
   const version: RewriteVersion = { id: newRewriteId('v'), name: 'Version 1', doc: original, updatedAt: now }
   const record: RewriteRecord = { id, createdAt: now, anchor: id, original, versions: [version], currentVersionId: version.id, status: 'open' }
+  // The anchor first (a filtered dispatch must not leave a record without a passage). Undo never merges
+  // edits from before the re-write with later ones (the history group is closed).
+  // The manuscript gives up the focus first: with its selection in the DOM, redrawing the passage's
+  // blocks would make the browser lay the whole manuscript out again to re-place a long selection
+  // (over 200 ms for a chapter). Its selection stays in the editor state; closing focuses it again.
+  if (ed.view.hasFocus()) {
+    ;(ed.view.dom as HTMLElement).blur()
+    globalThis.getSelection?.()?.removeAllRanges()
+  }
+  ed.view.dispatch(closeHistory(setAnchor(state.tr, from, to, id)))
+  if (ed.state.doc.nodeAt(from)?.attrs[REWRITE_BLOCK_ATTR] !== id) return false
   actions().changed([...store().rewrite.rewrites, record])
-  ed.view.dispatch(setAnchor(state.tr, from, to, id))
   sideFileChanged()
   return openRewrite(id)
 }
@@ -286,7 +298,7 @@ export function goToPassage(id: string): boolean {
   if (!r || !ed) return false
   const range = passageRange(ed.state.doc, r.anchor)
   if (!range) {
-    actions().setNotice({ kind: 'missing', seq: nextSeq() })
+    actions().setNotice({ kind: passageProblem(ed.state.doc, r.anchor) === 'split' ? 'split' : 'missing', seq: nextSeq() })
     return false
   }
   closeRewrite()

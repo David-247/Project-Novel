@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { getChapters, chapterIndexAt, getEditor, blockPlainText } from '@/features/editor'
 import { useStore, type RewriteRecord } from '@/shared/store'
-import { Button, Dialog, Tooltip } from '@/shared/ui'
+import { Button, cn, Dialog, Tooltip } from '@/shared/ui'
 import { passageRange } from './anchor'
 import { dismissNotice, focusRevision, openList, openRewrite, setViewHooks } from './commands'
 import { REWRITE_CONTROLS as C } from './controls'
@@ -38,6 +38,8 @@ export function RewriteHost({ children }: RewriteHostProps) {
       {open ? (
         <div className="nv-rw-overlay">
           <RewriteView />
+          {/* Notices that can come up while the view is open (a refused undo). */}
+          <RewriteNotice inView />
         </div>
       ) : (
         <RewriteNotice />
@@ -63,34 +65,48 @@ export function RewriteHost({ children }: RewriteHostProps) {
 /**
  * The manuscript's re-write notice, floating over the top of the pages: shown while the caret is in a
  * passage that is being re-written (with the way back to its re-write), stronger after an edit there
- * was refused, and when a selection spans more than one chapter.
+ * was refused, and when a selection spans more than one chapter. `inView`: over the comparison view,
+ * only what can happen while it is open (an undo refused because it would change the passage).
  */
-function RewriteNotice() {
+function RewriteNotice({ inView = false }: { inView?: boolean }) {
   const notice = useStore((s) => s.rewrite.notice)
   const caretIn = useStore((s) => s.rewrite.caretIn)
   const rewrites = useStore((s) => s.rewrite.rewrites)
-  const anchorId = notice?.kind === 'locked' ? notice.id : caretIn
+  const anchorId = notice?.kind === 'locked' || notice?.kind === 'undo' ? notice.id : caretIn
   const record = anchorId ? rewrites.find((r) => r.anchor === anchorId && r.status === 'open') : undefined
-  // A refused edit's notice goes away once the caret leaves the passage.
+  // A refused edit's notice stays until the caret moves to or from a passage (or Dismiss): an edit
+  // refused at a passage's edge (Backspace joining into it) leaves the caret outside, and still shows.
+  const lastCaret = useRef(caretIn)
   useEffect(() => {
-    if (notice?.kind === 'locked' && caretIn !== notice.id) dismissNotice()
+    if (lastCaret.current === caretIn) return
+    lastCaret.current = caretIn
+    if (notice?.kind === 'locked') dismissNotice()
   }, [caretIn, notice])
   let text: string | null = null
-  if (notice?.kind === 'span') text = 'A re-write covers one chapter at most. Select paragraphs within one chapter and try again.'
+  if (notice?.kind === 'undo') text = "Undo can't change a passage that is in re-write. Close or finish the re-write first."
+  else if (inView) text = null
+  else if (notice?.kind === 'span') text = 'A re-write covers one chapter at most. Select paragraphs within one chapter and try again.'
   else if (notice?.kind === 'missing') text = 'The passage of this re-write is no longer in the manuscript.'
+  else if (notice?.kind === 'split') text = 'The passage of this re-write is no longer in one piece in the manuscript.'
   else if (notice?.kind === 'locked' && record) text = 'This passage is being re-written, so it cannot be changed here. Edit it in its re-write.'
   else if (record) text = 'This passage is being re-written. It is locked until you choose a version.'
   if (!text) return null
   const alert = notice !== null
+  const offerOpen = record && !inView
   return (
-    <div className="pointer-events-none sticky top-0 z-10 flex h-0 items-start justify-center px-2 sm:px-4">
+    <div
+      className={cn(
+        'pointer-events-none z-30 flex h-0 items-start justify-center px-2 sm:px-4',
+        inView ? 'absolute inset-x-0 top-12' : 'sticky top-0',
+      )}
+    >
       <div
         role={alert ? 'alert' : 'status'}
         data-testid="rewrite-notice"
         className="pointer-events-auto mt-2 flex max-w-[min(40rem,100%)] flex-wrap items-center gap-x-3 gap-y-1 rounded-panel border border-border bg-surface-raised px-3 py-1.5 text-ui-sm text-text shadow-raised"
       >
         <span className="min-w-0 flex-1">{text}</span>
-        {record ? (
+        {offerOpen ? (
           <Tooltip controlId={C.noticeOpen.id}>
             <Button data-control-id={C.noticeOpen.id} variant={alert ? 'primary' : 'secondary'} onClick={() => openRewrite(record.id)}>
               {C.noticeOpen.label}

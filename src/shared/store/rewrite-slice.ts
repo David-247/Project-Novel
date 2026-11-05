@@ -34,6 +34,11 @@ export interface RewriteRecord {
   /** The version shown when the re-write is opened (last one viewed). */
   currentVersionId?: string
   status: RewriteStatus
+  /**
+   * A `status` rewrites.json gave that this Novel does not know (a newer one): treated as 'resolved'
+   * and written back as it was. Setting a status (withStatus in the rewrite slice) drops it.
+   */
+  unknownStatus?: unknown
   /** The passage was changed in the manuscript (Replace All, accept / reject, undo) after the snapshot. */
   originalChanged?: boolean
   extra?: Record<string, unknown>
@@ -42,8 +47,10 @@ export interface RewriteRecord {
 /** Why the last attempt was refused (shown in the manuscript's re-write notice). */
 export type RewriteNotice =
   | { kind: 'locked'; id: string; seq: number }
+  | { kind: 'undo'; id: string; seq: number }
   | { kind: 'span'; seq: number }
   | { kind: 'missing'; seq: number }
+  | { kind: 'split'; seq: number }
 
 export interface RewriteSlice {
   rewrite: {

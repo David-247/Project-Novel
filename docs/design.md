@@ -457,9 +457,17 @@ the author's colour when settings give one). Details: docs/track-changes.md.
 Slice `src/features/rewrite/` (public interface `index.ts`). Format: docs/project-format.md, "rewrites.json".
 The signature feature: a passage rewritten beside its original, compared like two facing pages of the book.
 
-- **Open**: Review ▸ Re-write Passage… (Mod-Alt-r) on the selection widened to whole paragraphs, or the paragraph
+- **Open**: Review ▸ Re-write Passage… (Mod-Alt-w) on the selection widened to whole paragraphs, or the paragraph
   at the caret; at most one chapter (a wider selection is refused with a notice). A selection inside a passage
-  already in re-write opens that re-write.
+  already in re-write opens that re-write. The spec's selection context menu entry is deferred out of Phase 3:
+  the app has no context menus anywhere.
+- **Menus while the view is open**: one mechanism for the menu bar (pointer and keyboard), the native menu and
+  shortcuts. Text commands (formatting, styles, paragraph spacing, Edit history / clipboard, Insert breaks) act
+  through the editor slice's active editor (`getActiveEditor()`), which the view points at the revision while it
+  has the focus; with the focus elsewhere in the view they are disabled. A registry command gate
+  (`setCommandGate`) disables what makes no sense on a revision: Insert Footnote, comments, Find / Replace, Track
+  Changes, Go to Page, page view and zoom. Copy stays available on both pages. The pages behind the view do not
+  scroll.
 - **The spread**: the comparison view lies over the pages (they stay mounted, laid out and scrolled where they
   were, so opening costs no reflow). Two pages on the desk at the book's trim width, margins and paper surface
   (`.nv-page`, verso / recto spine shading), typeset by the book style sheet with the manuscript's base face: the
@@ -483,6 +491,9 @@ The signature feature: a passage rewritten beside its original, compared like tw
   version copies the version shown). Each version keeps its own undo history while the view is open (undo is local
   to the revision). Flip Pages (Mod-Alt-k) swaps the sides; Go to Left / Right Page (Mod-Alt-ArrowLeft / Right)
   moves the focus between them. Escape or Close returns to the manuscript; the re-write stays a draft.
+- **Undo** in the manuscript that would change an open re-write's passage is refused, with a notice ("Undo can't
+  change a passage that is in re-write. Close or finish the re-write first."), shown over the view too. Comments
+  can still be added to and removed from the passage.
 - **In the manuscript** an open re-write's passage is read-only and marked by a faint `--page-rw-lock-bg` tint and
   a dashed "tacking stitch" bar in the left margin with a ring at its top (pseudo-elements: no box changes, so
   pagination is untouched). A click on the bar reopens the re-write; so do the notice that floats over the pages

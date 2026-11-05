@@ -59,10 +59,11 @@ export function parseRewrite(raw: unknown): RewriteRecord | null {
     original: raw.original,
     versions: versions as RewriteVersion[],
     ...(typeof raw.currentVersionId === 'string' && ids.has(raw.currentVersionId) ? { currentVersionId: raw.currentVersionId } : {}),
-    // Unknown statuses (a newer Novel) are kept out of the way: treated as resolved, written back as read.
+    // An unknown status (a newer Novel) is treated as resolved (no lock) and written back as read.
     status: raw.status === 'open' ? 'open' : 'resolved',
+    ...(raw.status !== 'open' && raw.status !== 'resolved' ? { unknownStatus: raw.status } : {}),
     ...(raw.originalChanged === true ? { originalChanged: true } : {}),
-    ...(raw.status !== 'open' && raw.status !== 'resolved' ? { extra: { ...(extra ?? {}), status: raw.status } } : extra ? { extra } : {}),
+    ...(extra ? { extra } : {}),
   }
 }
 
@@ -109,14 +110,21 @@ export function serializeRewrite(r: RewriteRecord): Record<string, unknown> {
     original: r.original,
     versions: r.versions.map(serializeVersion),
     ...(r.currentVersionId ? { currentVersionId: r.currentVersionId } : {}),
-    // A status this Novel did not know stays in `extra` (written back above) unless it changed it.
-    ...(r.extra && 'status' in r.extra ? {} : { status: r.status }),
+    // A status this Novel did not know is written back as read, until a status is set (withStatus).
+    status: r.unknownStatus !== undefined ? r.unknownStatus : r.status,
     ...(r.originalChanged ? { originalChanged: true } : {}),
   }
 }
 
 export function serializeRewritesFile(file: Omit<RewritesFileData, 'newer'>): Record<string, unknown> {
   return { ...file.extra, version: REWRITES_VERSION, rewrites: [...file.rewrites.map(serializeRewrite), ...file.unreadable] }
+}
+
+/** The re-write with `status` set (an unknown status read from the file is replaced). */
+export function withStatus(r: RewriteRecord, status: RewriteRecord['status']): RewriteRecord {
+  const { unknownStatus: _u, ...rest } = r
+  void _u
+  return { ...rest, status }
 }
 
 // ---- Passage JSON -------------------------------------------------------------------------------

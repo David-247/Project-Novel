@@ -12,15 +12,18 @@
 // - RewriteAnchor in the editor's extension list (editor slice, extensions.ts; detached copies for
 //   the comparison pages).
 // - registerRewritesSideFile() once at start: rewrites.json saved / recovered with the manuscript.
-// - registerRewriteCommands(): Review > Re-write Passage… (Mod-Alt-r), Re-writes…, Next / Previous
+// - registerRewriteCommands(): Review > Re-write Passage… (Mod-Alt-w), Re-writes…, Next / Previous
 //   Re-write, Show Differences (Mod-Shift-d), Flip Pages (Mod-Alt-k), Go to Left / Right Page
 //   (Mod-Alt-ArrowLeft / Right), New Version, Close Re-write (command registry; returns unregister).
 // - <RewriteHost>{paginated view}</RewriteHost>: the comparison view in place of the pages while a
 //   re-write is open, the manuscript's re-write notice and the Re-writes list.
+// - While the view is open it registers the editor slice's active editor source (text commands act on
+//   the revision while it has the focus) and the registry's command gate (manuscript-wide commands off).
 //
-// For T9 (keep original / keep this version): getRewrite, passageRange, flushLiveVersions,
-// versionDoc, setAnchor, REWRITE_ALLOW_META (see commands.ts).
-export { RewriteAnchor, REWRITE_ALLOW_META, REWRITE_SHORTCUT, passageRange, passageRanges, setAnchor, lockedAtSelection } from './anchor'
+// For T9 (keep original / keep this version): getRewrite, passageRange (null when missing or split:
+// passageProblem), flushLiveVersions, versionDoc, setAnchor, withStatus, REWRITE_ALLOW_META (see
+// commands.ts).
+export { RewriteAnchor, REWRITE_ALLOW_META, REWRITE_SHORTCUT, passageRange, passageRanges, passageProblem, stripAnchors, setAnchor, lockedAtSelection } from './anchor'
 export type { RewriteAnchorOptions, LockedRange } from './anchor'
 export {
   rewritePassage,
@@ -46,6 +49,6 @@ export type { RewriteHostProps } from './RewriteHost'
 export { rewriteDebug } from './RewriteView'
 export { REWRITE_CONTROLS } from './controls'
 export type { RewriteControlMeta, RewriteControlKey } from './controls'
-export { REWRITES_FILE, REWRITES_VERSION } from './model'
+export { REWRITES_FILE, REWRITES_VERSION, withStatus } from './model'
 export { alignBlocks, diffPassages, similarity } from './align'
 export type { AlignedRow, PassageDiff } from './align'

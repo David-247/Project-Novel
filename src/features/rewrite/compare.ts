@@ -119,6 +119,8 @@ export function computePads(rows: readonly AlignedRow[], natL: readonly number[]
   let sumR = 0
   const stitches: Stitch[] = []
   for (const row of rows) {
+    // Rows from before a paragraph was added or removed (re-pairing is debounced): skip what is gone.
+    if ((row.left !== null && row.left >= natL.length) || (row.right !== null && row.right >= natR.length)) continue
     if (row.left !== null && row.right !== null) {
       const l = natL[row.left] + sumL
       const r = natR[row.right] + sumR

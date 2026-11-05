@@ -36,14 +36,14 @@ async function project(page: Page, name: string) {
   await waitForLayout(page)
 }
 
-/** Select from inside block `a` to inside block `b` in the manuscript, then Re-write Passage… (Mod-Alt-r). */
+/** Select from inside block `a` to inside block `b` in the manuscript, then Re-write Passage… (Mod-Alt-w). */
 async function openOn(page: Page, a: number, b: number) {
   await editor(page).click()
   await page.evaluate(async ([x, y]) => {
     const e = window.__nvE2E
     e.selectText(e.blockPos(x) + 3, e.blockPos(y) + 3)
   }, [a, b] as const)
-  await page.keyboard.press('ControlOrMeta+Alt+r')
+  await page.keyboard.press('ControlOrMeta+Alt+w')
   await expect(view(page)).toBeVisible()
   await expect(revision(page)).toBeFocused()
 }
@@ -153,6 +153,38 @@ test('open a re-write on a selection: book typesetting, aligned paragraphs, live
   await expect(revision(page).locator('p').nth(3)).toContainText('Slowly.')
 })
 
+test('menus act on the revision while it has the focus; manuscript-wide commands are off in the view', async ({ page }) => {
+  await project(page, 'Menus')
+  await openOn(page, 1, 1)
+  const menuTitle = (id: string) => page.locator(`[data-control-id="menu.${id}"]`)
+  const menuItem = (id: string) => page.locator(`[role="menu"] [data-control-id="${id}"]`)
+  // Select the start of the revision, then Format ▸ Bold with the pointer.
+  await page.keyboard.press('ControlOrMeta+Home')
+  for (let i = 0; i < 8; i++) await page.keyboard.press('Shift+ArrowRight')
+  await menuTitle('format').click()
+  await menuItem('toolbar.bold').click()
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(revision(page).locator('strong')).toHaveCount(1)
+  // The manuscript was not touched.
+  expect(JSON.stringify(await page.evaluate(() => window.__nvE2E.docJSON()))).not.toContain('"bold"')
+  // Undo from the Edit menu undoes in the revision.
+  await menuTitle('edit').click()
+  await menuItem('history.undo').click()
+  await expect(revision(page).locator('strong')).toHaveCount(0)
+  // Find, New Comment and Go to Page make no sense here: disabled.
+  await menuTitle('edit').click()
+  await expect(menuItem('find.open')).toHaveAttribute('data-disabled', '')
+  await expect(menuItem('edit.go_to_page')).toHaveAttribute('data-disabled', '')
+  await page.keyboard.press('Escape')
+  // With the focus on a version tab (not a page), text commands are disabled.
+  await page.getByRole('tab').first().focus()
+  expect(await page.evaluate(() => window.__nvE2E.runCommand('toolbar.bold'))).toBe(false)
+  await revision(page).click()
+  expect(await page.evaluate(() => window.__nvE2E.runCommand('toolbar.bold'))).toBe(true)
+  // The pages behind the view do not scroll.
+  expect(await page.getByRole('main', { name: 'Editor' }).evaluate((m) => getComputedStyle(m).overflowY)).toBe('hidden')
+})
+
 test('several versions: create, rename, switch by keyboard and pointer; focus keys and Flip', async ({ page }) => {
   await project(page, 'Versions')
   await openOn(page, 2, 2)
@@ -211,7 +243,7 @@ test('a selection over two chapters is refused; Phase 2 projects open without re
   await project(page, 'Span')
   await editor(page).click()
   await page.evaluate(() => window.__nvE2E.selectText(window.__nvE2E.blockPos(3) + 2, window.__nvE2E.blockPos(6) + 2))
-  await page.keyboard.press('ControlOrMeta+Alt+r')
+  await page.keyboard.press('ControlOrMeta+Alt+w')
   await expect(page.getByTestId('rewrite-notice')).toContainText('one chapter at most')
   await expect(view(page)).toHaveCount(0)
   expect((await rw(page)).rewrites).toHaveLength(0)

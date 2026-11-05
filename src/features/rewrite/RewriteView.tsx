@@ -3,10 +3,11 @@ import type { Node as PMNode } from '@tiptap/pm/model'
 import { EditorState } from '@tiptap/pm/state'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { createEditorExtensions, SYSTEM_FONT_STACK } from '@/features/editor'
+import { activeEditorChanged, createEditorExtensions, setActiveEditorSource, SYSTEM_FONT_STACK } from '@/features/editor'
 import { sideFileChanged } from '@/features/storage'
 import { pageBox, ptToPx } from '@/shared/book'
 import type { DocNodeJSON } from '@/shared/document'
+import { notifyCommandStateChanged, setCommandGate } from '@/shared/commands'
 import { useStore, type RewriteRecord } from '@/shared/store'
 import { ariaKeyshortcuts, Button, cn, detectPlatform, IconButton, ToggleButton, Tooltip } from '@/shared/ui'
 import { alignBlocks, diffPassages, type AlignedRow } from './align'
@@ -25,10 +26,13 @@ import {
   toggleShowDiff,
 } from './commands'
 import { REWRITE_CONTROLS as C } from './controls'
+import { rewriteCommandGate } from './gate'
 import './rewrite.css'
 
-/** Word highlights follow typing after this pause (the alignment itself follows every keystroke). */
+/** Word highlights follow typing after this pause (the levelling itself follows every keystroke). */
 export const DIFF_DEBOUNCE_MS = 150
+/** A paragraph added or removed: the pairs are redone after this pause (Enter / Backspace held down). */
+export const REALIGN_DEBOUNCE_MS = 60
 /** The revision is copied into the store after this pause (and on every save, snapshot, close). */
 const FLUSH_MS = 400
 /** The gap between the pages (px): the spine with its stitches. */
@@ -120,6 +124,7 @@ function Comparison({ record }: { record: RewriteRecord }) {
   const dirty = useRef(new Set<string>())
   const shownVersion = useRef(version.id)
   const rows = useRef<AlignedRow[]>([])
+  const rowsStale = useRef(false)
   const live = useRef({ showDiff, narrow, recordId: record.id })
   useLayoutEffect(() => {
     live.current = { showDiff, narrow, recordId: record.id }
@@ -134,6 +139,9 @@ function Comparison({ record }: { record: RewriteRecord }) {
     const e = eds.current
     const text = textRef.current
     if (!e || !text || e.orig.isDestroyed || e.rev.isDestroyed) return
+    // The pairs are out of date (a paragraph was added or removed): the pads stay on their blocks
+    // (decorations follow the edit) until the pairs are redone, instead of levelling the wrong ones.
+    if (rowsStale.current) return
     if (live.current.narrow) {
       applyPads(e.orig.view, [])
       applyPads(e.rev.view, [])
@@ -164,6 +172,7 @@ function Comparison({ record }: { record: RewriteRecord }) {
     const a = e.orig.state.doc
     const b = e.rev.state.doc
     rows.current = alignBlocks(a, b)
+    rowsStale.current = false
     rewriteDebug.rows = rows.current
     const diff = live.current.showDiff ? diffPassages(a, b, rows.current) : null
     applyDiff(e.orig.view, 'left', diff)
@@ -214,13 +223,14 @@ function Comparison({ record }: { record: RewriteRecord }) {
       sideFileChanged()
       clearTimeout(flushTimer.current)
       flushTimer.current = setTimeout(flush, FLUSH_MS)
-      // A paragraph added or removed: align at once; otherwise keep the pairs, re-measure, diff after a pause.
-      if (transaction.doc.childCount !== transaction.before.childCount) compare()
-      else {
-        scheduleLayout()
-        clearTimeout(diffTimer.current)
-        diffTimer.current = setTimeout(compare, DIFF_DEBOUNCE_MS)
-      }
+      // Re-measure every frame; redo the pairs and the word diff after a pause (shorter when a paragraph
+      // was added or removed; until then the levelling waits, see layout).
+      const countChanged = transaction.doc.childCount !== transaction.before.childCount
+      if (countChanged) rowsStale.current = true
+      scheduleLayout()
+      const delay = countChanged ? REALIGN_DEBOUNCE_MS : DIFF_DEBOUNCE_MS
+      clearTimeout(diffTimer.current)
+      diffTimer.current = setTimeout(compare, delay)
     }
     rev.on('transaction', onTr)
     compare()
@@ -228,6 +238,22 @@ function Comparison({ record }: { record: RewriteRecord }) {
     const ro = new ResizeObserver(scheduleLayout)
     ro.observe(orig.view.dom)
     ro.observe(rev.view.dom)
+    // Text commands (menus, shortcuts, native menu) act on the revision while it has the focus in the
+    // view, and are disabled while another part of the view has it; manuscript-wide commands are off.
+    let revisionActive = true
+    const onFocusIn = (e: FocusEvent) => {
+      const t = e.target as Node | null
+      const root = rootRef.current
+      if (!t || !root) return
+      const next = rev.view.dom.contains(t) ? true : root.contains(t) ? false : revisionActive
+      if (next === revisionActive) return
+      revisionActive = next
+      activeEditorChanged()
+      notifyCommandStateChanged()
+    }
+    document.addEventListener('focusin', onFocusIn)
+    const offSource = setActiveEditorSource(() => (revisionActive ? rev : null))
+    const offGate = setCommandGate(rewriteCommandGate)
     setLiveView({
       flush,
       focus: (side) => {
@@ -244,6 +270,9 @@ function Comparison({ record }: { record: RewriteRecord }) {
       if (!rev.isDestroyed) rev.commands.focus('start')
     })
     return () => {
+      document.removeEventListener('focusin', onFocusIn)
+      offGate()
+      offSource()
       ro.disconnect()
       setLiveView(null)
       clearTimeout(flushTimer.current)
@@ -563,7 +592,7 @@ function RenameField({ name, onDone }: { name: string; onDone: (name: string | n
 function ChangedBanner({ current }: { current: boolean }) {
   return (
     <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface-raised px-3 py-1.5 text-ui-sm text-text" data-testid="rewrite-changed">
-      <span>The passage changed in the manuscript after you started this re-write (Replace All, or accepting or rejecting a change).</span>
+      <span>The passage changed in the manuscript after you started this re-write.</span>
       <Tooltip controlId={C.compareCurrent.id}>
         <ToggleButton data-control-id={C.compareCurrent.id} pressed={current} onPressedChange={toggleShowCurrent} className="px-2.5 text-ui-sm">
           {C.compareCurrent.label}

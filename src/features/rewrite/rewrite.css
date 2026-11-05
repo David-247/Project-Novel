@@ -86,6 +86,11 @@
   height: 100%;
   margin-bottom: -100%;
 }
+/* The pages' scroller does not scroll behind the view (its gutter is kept: no width change, no refit). */
+:has(> .nv-rw-overlay) {
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
 
 /* ---- The comparison view -------------------------------------------------------------------- */
 .nv-rw {
