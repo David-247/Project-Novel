@@ -1,5 +1,6 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection, type EditorState } from '@tiptap/pm/state'
+import { Mapping, StepMap } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { resolveStyleSheet, type BookView, type StyleSheetJSON } from '@/shared/book'
 import { useStore, type PageInfo } from '@/shared/store'
@@ -876,8 +877,12 @@ export function createPaginationPlugin(handlers: {
         const next = tr.getMeta(paginationKey) as DecorationSet | undefined
         if (next) return { set: next, unmapped: false }
         if (!tr.docChanged) return value
-        if (tr.steps.length > MAP_STEP_LIMIT) return { set: DecorationSet.empty, unmapped: true }
-        return { set: value.set.map(tr.mapping, tr.doc), unmapped: value.unmapped }
+        // Steps that move nothing (AttrStep: a block attribute such as a re-write anchor) count for
+        // nothing: their maps are empty, so they are left out of the mapping too.
+        const maps = tr.mapping.maps.filter((m) => m !== StepMap.empty)
+        if (maps.length > MAP_STEP_LIMIT) return { set: DecorationSet.empty, unmapped: true }
+        const mapping = maps.length === tr.mapping.maps.length ? tr.mapping : new Mapping(maps)
+        return { set: value.set.map(mapping, tr.doc), unmapped: value.unmapped }
       },
     },
     props: {

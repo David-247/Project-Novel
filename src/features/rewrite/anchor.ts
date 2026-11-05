@@ -10,8 +10,11 @@ import { useStore } from '@/shared/store'
 /**
  * The re-write anchor in the manuscript (docs/project-format.md, "rewrites.json"):
  *
- * - `rewriteId`, a block attribute on the top-level block types. Set with setNodeMarkup only (never
- *   AttrStep), outside the undo history, with TRACK_SKIP_META (never a tracked change). Not parsed
+ * - `rewriteId`, a block attribute on the top-level block types. Set with AttrStep (setNodeAttribute:
+ *   its step map is empty, so positions, decorations and the undo history map through it for free, and
+ *   the pagination does not drop its decorations for a chapter-long passage; the attribute is not
+ *   formatting, so the style index need not see it), outside the undo history, with TRACK_SKIP_META
+ *   (never a tracked change). Not parsed
  *   from HTML and not rendered, stripped from pasted and dropped slices (a drag-copy too), not kept
  *   on split: a copy never carries it. An open re-write's blocks that lose it (rejecting a tracked
  *   style change restores the attributes from before) get it back (appendTransaction).
@@ -437,7 +440,7 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         newState.doc.nodesBetween(from, to, (node, pos) => {
           if (pos < from) return true
           if ((ANCHOR_TYPES as readonly string[]).includes(node.type.name) && node.attrs[REWRITE_BLOCK_ATTR] !== r.id) {
-            out.setNodeMarkup(pos, undefined, { ...node.attrs, [REWRITE_BLOCK_ATTR]: r.id })
+            out.setNodeAttribute(pos, REWRITE_BLOCK_ATTR, r.id)
           }
           return false
         })
@@ -574,7 +577,7 @@ export function setAnchor(tr: Transaction, from: number, to: number, anchor: str
   tr.doc.nodesBetween(from, to, (node, pos) => {
     if (pos < from) return true
     if ((ANCHOR_TYPES as readonly string[]).includes(node.type.name) && node.attrs[REWRITE_BLOCK_ATTR] !== anchor) {
-      tr.setNodeMarkup(pos, undefined, { ...node.attrs, [REWRITE_BLOCK_ATTR]: anchor })
+      tr.setNodeAttribute(pos, REWRITE_BLOCK_ATTR, anchor)
     }
     return false
   })
