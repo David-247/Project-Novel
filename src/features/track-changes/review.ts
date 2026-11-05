@@ -138,7 +138,12 @@ function removeBoundary(tr: Transaction, pos: number) {
   if ($pos.nodeBefore?.isTextblock && canJoin(tr.doc, pos)) tr.join(pos)
 }
 
-function resolve(state: EditorState, filter: Filter, mode: Mode): Transaction | null {
+/**
+ * `clip`: only the part of each inline change inside [from, to) is resolved (the rest stays pending,
+ * same id); a footnote reference (an atom) and block-level changes (boundaries, breaks, styles) that
+ * the range touches are resolved whole.
+ */
+function resolve(state: EditorState, filter: Filter, mode: Mode, clip?: { from: number; to: number }): Transaction | null {
   const tr = state.tr.setMeta(TRACK_SKIP_META, true)
   const schema = state.schema
   const doc = state.doc
@@ -147,36 +152,47 @@ function resolve(state: EditorState, filter: Filter, mode: Mode): Transaction | 
   const deletions: [number, number][] = []
   const markOps: (() => void)[] = []
   doc.descendants((node, pos) => {
-    if (!node.isInline) return true
-    const end = pos + node.nodeSize
+    if (!node.isInline) return hasTrackedChanges(node)
+    let a = pos
+    let b = pos + node.nodeSize
+    if (clip) {
+      if (b <= clip.from || a >= clip.to) return true
+      // Text is split at the range's ends; an atom (a footnote) is one unit.
+      if (node.isText) {
+        a = Math.max(a, clip.from)
+        b = Math.min(b, clip.to)
+      }
+    }
     const onNode = !node.isText && !node.isLeaf
     for (const m of node.marks) {
       if (!isTrackingMark(m) || !filter(m.attrs.id)) continue
       const name = m.type.name
       const remove = (name === INSERTION_MARK && mode === 'reject') || (name === DELETION_MARK && mode === 'accept')
       if (remove) {
-        deletions.push([pos, end])
+        deletions.push([a, b])
         continue
       }
       if (name === FORMAT_CHANGE_MARK && mode === 'reject') {
         const before = ((m.attrs.before as unknown[]) ?? []).map((j) => schema.markFromJSON(j))
         const current = node.marks.filter((x) => !isTrackingMark(x) && x.type.name !== 'comment')
         markOps.push(() => {
-          for (const x of current) if (!x.isInSet(before)) tr.removeMark(pos, end, x)
-          for (const x of before) if (!x.isInSet(current)) tr.addMark(pos, end, x)
+          for (const x of current) if (!x.isInSet(before)) tr.removeMark(a, b, x)
+          for (const x of before) if (!x.isInSet(current)) tr.addMark(a, b, x)
         })
       }
-      markOps.push(() => (onNode ? tr.removeNodeMark(pos, m) : tr.removeMark(pos, end, m)))
+      markOps.push(() => (onNode ? tr.removeNodeMark(a, m) : tr.removeMark(a, b, m)))
     }
     return true
   })
   for (const op of markOps) op()
   for (const [a, b] of mergeRanges(deletions).reverse()) tr.delete(a, b)
 
-  // 2. Blocks (on the result of 1), last to first.
+  // 2. Blocks (on the result of 1), last to first. With a range: the blocks it touches.
+  const range = clip && { from: tr.mapping.map(clip.from, -1), to: tr.mapping.map(clip.to, 1) }
   const blocks: { pos: number; attrs: Record<string, unknown>; type: PMNode['type']; marks: readonly Mark[]; join: boolean }[] = []
   tr.doc.descendants((node, pos) => {
-    if (node.isInline) return false
+    if (node.isInline || !hasTrackedChanges(node)) return false
+    if (range && (pos >= range.to || pos + node.nodeSize <= range.from)) return false
     if (!(TRACKED_STYLE_ATTR in node.attrs)) return true
     const ins = node.attrs[TRACKED_INSERT_ATTR] as ChangeStamp | null
     const del = node.attrs[TRACKED_DELETE_ATTR] as ChangeStamp | null
@@ -226,9 +242,20 @@ function resolve(state: EditorState, filter: Filter, mode: Mode): Transaction | 
 
 const one = (id: string): Filter => (x) => x === id
 const all: Filter = (x) => typeof x === 'string'
-function inRange(state: EditorState, from: number, to: number): Filter {
-  const ids = new Set(listChanges(state.doc).filter((c) => c.from < to && c.to > from || (from === to && c.from <= from && c.to >= to)).map((c) => c.id))
+/** Changes containing a collapsed caret at `pos` (resolved whole). */
+function atCaret(state: EditorState, pos: number): Filter {
+  const ids = new Set(listChanges(state.doc).filter((c) => c.from <= pos && c.to >= pos).map((c) => c.id))
   return (x) => typeof x === 'string' && ids.has(x)
+}
+/**
+ * The range variants, as Word does: only the selected part of an inline change is accepted or
+ * rejected (the rest stays pending with the same id, author and date); plain text between two pieces
+ * of one change does not count; block-level changes the range touches are resolved whole. An empty
+ * range resolves every change containing it, whole.
+ */
+function inRange(state: EditorState, from: number, to: number, mode: Mode): Transaction | null {
+  if (from >= to) return resolve(state, atCaret(state, from), mode)
+  return resolve(state, all, mode, { from, to })
 }
 
 /** Accept one change (all its marks and blocks). */
@@ -239,10 +266,10 @@ export const rejectChange = (state: EditorState, id: string) => resolve(state, o
 export const acceptAll = (state: EditorState) => resolve(state, all, 'accept')
 /** Reject every change. */
 export const rejectAll = (state: EditorState) => resolve(state, all, 'reject')
-/** Accept every change touching [from, to) (or containing `from` when the range is empty). */
-export const acceptChangesInRange = (state: EditorState, from: number, to: number) => resolve(state, inRange(state, from, to), 'accept')
-/** Reject every change touching [from, to). */
-export const rejectChangesInRange = (state: EditorState, from: number, to: number) => resolve(state, inRange(state, from, to), 'reject')
+/** Accept the selected part of every change in [from, to) (see inRange; whole changes at an empty range). */
+export const acceptChangesInRange = (state: EditorState, from: number, to: number) => inRange(state, from, to, 'accept')
+/** Reject the selected part of every change in [from, to). */
+export const rejectChangesInRange = (state: EditorState, from: number, to: number) => inRange(state, from, to, 'reject')
 
 function byAuthor(state: EditorState, author: string): Filter {
   const ids = new Set(listChanges(state.doc).filter((c) => c.author === author).map((c) => c.id))
