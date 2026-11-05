@@ -697,7 +697,7 @@ async function saveProjectCopyUnguarded(): Promise<boolean> {
   const meta = currentMeta
   if (!source || !meta) return false
   let skipped: string[] = []
-  let written = false
+  let written: boolean
   try {
     const p = provider()
     const docs = inMemoryCopyDocuments(p)

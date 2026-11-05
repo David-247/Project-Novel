@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { contrastRatio } from '../src/shared/theme/contrast'
 import { editor, editorHTML, launch, newProject, readFile, saveStatus } from './helpers'
 
 /**
@@ -205,4 +206,119 @@ test('the native menu is the same registry: snapshot, and menu://command runs th
   await expect
     .poll(async () => flat((await snapshot())!.menus.find((m) => m.id === 'format')!.items).find((n) => n.id === 'toolbar.bold')?.checked)
     .toBe(true)
+  // The macOS Window menu: OS Minimize and Close Window (which runs the close guard).
+  const win = (await snapshot())!.menus.find((m) => m.id === 'window')!
+  expect(win.items.filter((n) => n.kind === 'predefined').map((n) => (n as { name?: string }).name)).toEqual(['minimize', 'closeWindow'])
+
+  // Full Screen: the check mark follows the window's real state.
+  const fullScreenChecked = async () => flat((await snapshot())!.menus.find((m) => m.id === 'view')!.items).find((n) => n.id === 'view.fullScreen')?.checked
+  await page.evaluate(() => window.__nvE2E.emit('menu://command', 'view.fullScreen'))
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.fullscreen())).toBe(true)
+  await expect.poll(fullScreenChecked).toBe(true)
+  await page.evaluate(() => window.__nvE2E.emit('menu://command', 'view.fullScreen'))
+  await expect.poll(fullScreenChecked).toBe(false)
+
+  // A native Format item while another text field has focus does not touch the manuscript.
+  await page.keyboard.press('ControlOrMeta+f')
+  await expect(page.getByRole('textbox', { name: 'Find', exact: true })).toBeFocused()
+  await page.evaluate(() => window.__nvE2E.emit('menu://command', 'toolbar.italic'))
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 100)))
+  await expect(editor(page).locator('em')).toHaveCount(0)
+})
+
+test('Format > Font lists the picker fonts; Book Details needs a project; F10 stays out of a modal', async ({ page }) => {
+  await launch(page)
+  await editor(page).click()
+  await page.keyboard.type('Typeface')
+  await selectBack(page, 8)
+  await choose(page, 'format', 'format.fontFamily.E2E Serif', ['menu.format.font'])
+  await expect(editor(page).locator('span[style*="E2E Serif"]')).toHaveText('Typeface')
+  await expect.poll(() => selectedText(page)).toBe('Typeface')
+  await title(page, 'format').click()
+  await item(page, 'menu.format.font').click()
+  await expect(item(page, 'format.fontFamily.E2E Serif')).toHaveAttribute('aria-checked', 'true')
+  await expect(item(page, 'format.fontFamily.system-default')).toHaveAttribute('aria-checked', 'false')
+  await expect(item(page, 'format.fontFamily.E2E Sans')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+
+  // No project open: Book Details (title and author in project.json) is disabled.
+  await title(page, 'file').click()
+  await expect(item(page, 'book.details')).toHaveAttribute('aria-disabled', 'true')
+  await page.keyboard.press('Escape')
+
+  // Behind a modal dialog, F10 and Alt do not reach the menu bar.
+  await choose(page, 'help', 'help.about')
+  const about = page.getByRole('dialog', { name: 'About Novel' })
+  await expect(about).toBeVisible()
+  await expect(about.getByTestId('about-version')).toHaveText('0.1.0')
+  await page.keyboard.press('F10')
+  await page.keyboard.press('Alt')
+  // (CSS locator: the modal hides the menu bar from the accessibility tree.)
+  await expect(page.locator('[data-nv-menubar] [data-control-id="menu.file"]')).not.toBeFocused()
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(true)
+  await expect(about).toBeVisible()
+})
+
+test('menu bar text meets WCAG AA in every state, on the four papers in light and dark', async ({ page }) => {
+  test.setTimeout(120_000)
+  await launch(page)
+  await editor(page).click()
+  await page.keyboard.type('Contrast')
+  /** Text colour composited on its effective background, as #rrggbb pairs. */
+  const sample = (selector: string) =>
+    page.locator(selector).first().evaluate((el) => {
+      const parse = (c: string) => {
+        const p = (c.match(/rgba?\(([^)]+)\)/)?.[1] ?? '0,0,0,0').split(/[ ,/]+/).filter(Boolean).map(Number)
+        return [p[0], p[1], p[2], p[3] ?? 1]
+      }
+      const over = (top: number[], under: number[]) => [0, 1, 2].map((i) => top[i] * top[3] + under[i] * (1 - top[3]))
+      const layers: number[][] = []
+      for (let n: Element | null = el; n; n = n.parentElement) {
+        const c = parse(getComputedStyle(n).backgroundColor)
+        if (c[3] > 0) {
+          layers.push(c)
+          if (c[3] >= 1) break
+        }
+      }
+      let bg = [255, 255, 255]
+      for (const l of layers.reverse()) bg = over(l, bg)
+      const fg = over(parse(getComputedStyle(el).color), bg)
+      const hex = (rgb: number[]) => '#' + rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')
+      return { fg: hex(fg), bg: hex(bg) }
+    })
+  const failures: string[] = []
+  let checked = 0
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+    for (const surface of ['auto', 'book', 'white', 'dark']) {
+      await page.locator(`[data-control-id="book.surface.${surface}"]`).click()
+      await title(page, 'edit').click()
+      await item(page, 'history.undo').hover() // highlighted
+      await expect(item(page, 'history.undo')).toHaveAttribute('data-highlighted', '')
+      await page.evaluate(() => new Promise((r) => setTimeout(r, 350)))
+      const states: [string, string][] = [
+        ['title (closed)', '[data-control-id="menu.file"]'],
+        ['title (open)', '[data-control-id="menu.edit"]'],
+        ['item', '[role="menu"] [data-control-id="edit.cut"] [data-part="label"]'],
+        ['shortcut', '[role="menu"] [data-control-id="edit.cut"] [data-part="shortcut"]'],
+        ['highlighted item', '[role="menu"] [data-control-id="history.undo"] [data-part="label"]'],
+        ['highlighted shortcut', '[role="menu"] [data-control-id="history.undo"] [data-part="shortcut"]'],
+        ['disabled item', '[role="menu"] [data-control-id="history.redo"] [data-part="label"]'],
+        ['disabled shortcut', '[role="menu"] [data-control-id="history.redo"] [data-part="shortcut"]'],
+      ]
+      for (const [what, sel] of states) {
+        const { fg, bg } = await sample(sel)
+        const ratio = contrastRatio(fg, bg)
+        checked++
+        if (ratio < 4.5) failures.push(`${scheme}/${surface} ${what}: ${ratio.toFixed(2)}:1 (${fg} on ${bg})`)
+      }
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('menu')).toHaveCount(0)
+    }
+  }
+  expect(checked).toBe(64)
+  expect(failures).toEqual([])
 })

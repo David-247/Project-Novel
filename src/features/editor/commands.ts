@@ -4,6 +4,7 @@ import { notifyCommandStateChanged, registerCommands, type Command } from '@/sha
 import { useStore } from '@/shared/store'
 import { detectPlatform, type Platform } from '@/shared/ui'
 import { getEditor, subscribeDocLoad, subscribeEditor } from './controller'
+import { fontFamilyCss, loadSystemFonts } from './fonts'
 import { INSERT_ITEMS } from './breaks/controls'
 import { FIND_CONTROLS } from './find/controls'
 import { openFind } from './find/engine'
@@ -331,13 +332,48 @@ export function styleCommands(): Command[] {
   }))
 }
 
-/** Format > Font: the toolbar's size presets. */
+/**
+ * Format > Font: the font picker's choices (System Default, then the installed families from the same
+ * list as the toolbar picker, `loadSystemFonts`). `failed`: the OS list could not be read.
+ */
+export function fontFamilyCommands(fonts: readonly string[], failed = false): Command[] {
+  const current = () => state().fontFamily
+  const def: Command = {
+    id: 'format.fontFamily.system-default',
+    label: failed ? 'System Default (installed fonts unavailable)' : 'System Default',
+    description: 'Remove a typeface set by hand, so the text uses the default font.',
+    menu: { id: 'format', group: 'font', order: 5, submenu: 'Font' },
+    isEnabled: can,
+    isChecked: () => can() && current() === '',
+    run: () => {
+      const ed = ready()
+      if (ed) markChain(ed).unsetFontFamily().run()
+    },
+  }
+  return [
+    def,
+    ...[...new Set(fonts)].map((f, i) => ({
+      id: `format.fontFamily.${f}`,
+      label: f,
+      description: 'Set the selected text in this typeface.',
+      menu: { id: 'format' as const, group: 'font', order: 5 + (i + 1) / 100_000, submenu: 'Font' },
+      isEnabled: can,
+      isChecked: () => can() && current() === f,
+      run: () => {
+        const ed = ready()
+        if (ed) markChain(ed).setFontFamily(fontFamilyCss(f)).run()
+      },
+    })),
+  ]
+}
+
+/** Format > Font Size: the toolbar's size presets. */
 export function fontSizeCommands(): Command[] {
   return FONT_SIZES.map((p, i) => ({
     id: `format.fontSize.${p.value || 'default'}`,
     label: p.value ? p.label : 'Default Size',
     description: p.value ? `Set the selected text in ${p.label}.` : 'Remove a size set by hand from the selected text.',
-    menu: { id: 'format', group: 'font', order: 5 + i / 1000, submenu: 'Font' },
+    menu: { id: 'format', group: 'font', order: 6 + i / 1000, submenu: 'Font Size' },
     isEnabled: can,
     isChecked: () => can() && state().fontSize === p.value,
     run: () => {
@@ -356,6 +392,21 @@ export function fontSizeCommands(): Command[] {
 export function registerEditorCommands(): () => void {
   const offFixed = registerCommands([...editorCommands(), ...fontSizeCommands()])
   let offStyles = registerCommands(styleCommands())
+  // Font families: System Default now, the installed families once the OS list arrived.
+  let disposed = false
+  let offFonts = registerCommands(fontFamilyCommands([]))
+  const showFonts = (fonts: string[], failed: boolean) => {
+    if (disposed) return
+    offFonts()
+    offFonts = registerCommands(fontFamilyCommands(fonts, failed))
+  }
+  loadSystemFonts().then(
+    (fonts) => showFonts(fonts, false),
+    (e) => {
+      console.warn('Listing installed fonts for the Font menu failed:', e)
+      showFonts([], true)
+    },
+  )
   const offStore = useStore.subscribe((s, prev) => {
     if (s.book.styles !== prev.book.styles) {
       offStyles()
@@ -379,6 +430,8 @@ export function registerEditorCommands(): () => void {
     offEditor()
     watched?.off('transaction', notifyCommandStateChanged)
     offStore()
+    disposed = true
+    offFonts()
     offStyles()
     offFixed()
   }

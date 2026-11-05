@@ -7,14 +7,30 @@ import { openMenuDialog } from './dialog-state'
 
 let fullScreen = false
 
+/**
+ * Read the window's real full-screen state (desktop app: the OS can change it too, e.g. the green
+ * button or Esc on macOS) and refresh the check mark when it differs.
+ */
+export async function syncFullScreen(): Promise<void> {
+  try {
+    const now = isTauri() ? await getCurrentWindow().isFullscreen() : !!document.fullscreenElement
+    if (now !== fullScreen) {
+      fullScreen = now
+      notifyCommandStateChanged()
+    }
+  } catch (e) {
+    console.warn('Reading the full-screen state failed:', e)
+  }
+}
+
 /** View > Full Screen: the window (desktop app) or the page (web build). */
 async function toggleFullScreen(): Promise<void> {
   try {
     if (isTauri()) {
       const win = getCurrentWindow()
-      const next = !(await win.isFullscreen())
-      await win.setFullscreen(next)
-      fullScreen = next
+      await win.setFullscreen(!(await win.isFullscreen()))
+      await syncFullScreen()
+      return
     } else if (document.fullscreenElement) {
       await document.exitFullscreen()
       fullScreen = false
@@ -82,7 +98,20 @@ export function registerMenuCommands(): () => void {
     notifyCommandStateChanged()
   }
   document.addEventListener('fullscreenchange', onChange)
+  // Desktop app: entering or leaving full screen resizes the window; read the state then.
+  let frame = 0
+  const onResize = () => {
+    if (!isTauri() || frame) return
+    frame = requestAnimationFrame(() => {
+      frame = 0
+      void syncFullScreen()
+    })
+  }
+  window.addEventListener('resize', onResize)
+  void syncFullScreen()
   return () => {
+    if (frame) cancelAnimationFrame(frame)
+    window.removeEventListener('resize', onResize)
     document.removeEventListener('fullscreenchange', onChange)
     off()
   }

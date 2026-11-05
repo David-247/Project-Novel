@@ -386,7 +386,7 @@ control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
   Details…, Page Setup ▸ | Quit Novel), Edit (Undo, Redo | Cut, Copy, Paste, Paste as Plain Text, Select All | Find…,
   Replace… | Go to Page…), View (Single Page, Two-Page Spread | Zoom In, Zoom Out, Fit Spread, Fit Width, Actual
   Size | Paper ▸ | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote), Format (Bold, Italic,
-  Underline | Font ▸ | Paragraph Style ▸, Alignment ▸, Lists ▸ | Clear Formatting | Modify Style…, Manage Styles… |
+  Underline | Font ▸ (System Default and the installed families, as in the picker), Font Size ▸ | Paragraph Style ▸, Alignment ▸, Lists ▸ | Clear Formatting | Modify Style…, Manage Styles… |
   Headers & Page Numbers…, Footnote Options…), Help (Keyboard Shortcuts, Project Folder Format | About Novel).
 - **Keyboard** (one window listener, `installCommandShortcuts`): bubble phase, so a key the editor's keymap already
   handled is not run again; Cut/Copy/Paste keep the webview's own handling (`nativeShortcut`); text commands (Edit

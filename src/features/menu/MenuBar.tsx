@@ -21,7 +21,7 @@ const contentClass = cn(
 )
 const itemClass = cn(
   'relative flex min-h-control-lg cursor-default select-none items-center gap-3 rounded-control py-1.5 pl-7 pr-2.5',
-  'text-ui-sm outline-none data-[highlighted]:bg-surface-hover data-[disabled]:text-text-muted data-[disabled]:opacity-70',
+  'text-ui-sm outline-none data-[highlighted]:bg-surface-hover data-[disabled]:text-text-muted',
   focusRing,
 )
 
@@ -55,6 +55,9 @@ function MnemonicLabel({ label, mnemonic }: { label: string; mnemonic: string })
     </>
   )
 }
+
+/** A modal dialog (or the native message box stand-in) is open. */
+const modalOpen = () => !!document.querySelector('[role="dialog"], [role="alertdialog"]')
 
 const safeChecked = (c: Command) => {
   try {
@@ -108,7 +111,8 @@ export function MenuBar() {
         return
       }
       altAlone = false
-      if (e.defaultPrevented) return
+      // A modal dialog owns the keyboard: the menu bar behind it stays out of reach.
+      if (e.defaultPrevented || modalOpen()) return
       if (e.key === 'F10' && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
         e.preventDefault()
         if (inBar()) {
@@ -128,6 +132,7 @@ export function MenuBar() {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== 'Alt' || !altAlone) return
       altAlone = false
+      if (modalOpen()) return
       e.preventDefault()
       if (inBar()) {
         changeValue('')
@@ -224,8 +229,8 @@ export function MenuBar() {
       const body = (
         <>
           {c.isChecked ? <Check /> : null}
-          <span className="flex-1">{c.label}</span>
-          {c.shortcut ? <span className="text-ui-xs text-text-muted">{formatShortcut(c.shortcut, platform)}</span> : null}
+          <span data-part="label" className="flex-1">{c.label}</span>
+          {c.shortcut ? <span data-part="shortcut" className="text-ui-xs text-text-muted">{formatShortcut(c.shortcut, platform)}</span> : null}
         </>
       )
       return (
