@@ -9,6 +9,7 @@ import { setNavigator, spreadEdges, type Navigator } from './navigation'
 import { placePages, rowCountFor } from './placement'
 import { resolvePageGeometry } from './geometry'
 import { TurnControls } from './TurnControls'
+import { wheelGestureStarts } from './PaginatedView'
 
 const fakeNav = (): Navigator & { [k: string]: ReturnType<typeof vi.fn> } =>
   ({ goToPage: vi.fn(() => true), turn: vi.fn(() => true), edge: vi.fn(() => true), reveal: vi.fn(() => true), showPage: vi.fn(() => true) }) as never
@@ -104,5 +105,32 @@ describe('navigation commands', () => {
     expect(nav.edge).toHaveBeenCalledWith(-1)
     // No registry shortcut: the view's own PageUp / PageDown handling is the only binding.
     for (const id of [C.previousSpread.id, C.nextSpread.id, 'view.firstSpread', 'view.lastSpread']) expect(getCommand(id)!.shortcut).toBeUndefined()
+  })
+})
+
+describe('wheelGestureStarts', () => {
+  const fresh = () => ({ lastAt: -Infinity, last: 0, peak: 0, dir: 0 as 0 | 1 | -1 })
+  /** Feed [t, magnitude] events; count gesture starts. */
+  const starts = (events: [number, number][], dir: 1 | -1 = 1) => {
+    const g = fresh()
+    return events.filter(([t, a]) => wheelGestureStarts(g, t, a, dir)).length
+  }
+  it('a long smoothly decaying momentum tail (1.2 s) is one gesture', () => {
+    const ev: [number, number][] = []
+    for (let i = 0; i < 75; i++) ev.push([i * 16, Math.max(1, 80 * Math.exp(-i / 18))])
+    expect(starts(ev)).toBe(1)
+  })
+  it('a new strong flick inside the decaying stream is a second gesture', () => {
+    const ev: [number, number][] = []
+    for (let i = 0; i < 30; i++) ev.push([i * 16, Math.max(1, 80 * Math.exp(-i / 8))])
+    for (let i = 0; i < 20; i++) ev.push([(30 + i) * 16, [20, 50, 80, 70, 60][Math.min(i, 4)] * Math.exp(-Math.max(0, i - 4) / 8)])
+    expect(starts(ev)).toBe(2)
+  })
+  it('a pause or a change of direction starts a gesture; noise in the tail does not', () => {
+    expect(starts([[0, 40], [16, 30], [400, 30]])).toBe(2)
+    const g = fresh()
+    expect(wheelGestureStarts(g, 0, 40, 1)).toBe(true)
+    expect(wheelGestureStarts(g, 16, 40, -1)).toBe(true)
+    expect(starts([[0, 60], [16, 20], [32, 4], [48, 2], [64, 5], [80, 1], [96, 4]])).toBe(1)
   })
 })

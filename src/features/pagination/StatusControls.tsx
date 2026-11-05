@@ -1,5 +1,6 @@
 import { useStore } from '@/shared/store'
-import { IconButton, Select, ToggleButton, Tooltip } from '@/shared/ui'
+import { runCommand } from '@/shared/commands'
+import { Button, IconButton, Select, ToggleButton, Tooltip } from '@/shared/ui'
 import { PAGINATION_CONTROLS as C } from './controls'
 import { MAX_SCALE, MIN_SCALE, stepZoom, ZOOM_STEPS } from './placement'
 
@@ -11,16 +12,30 @@ export function pageIndicatorText(first: number, last: number, count: number): s
   return a === b ? `Page ${a} of ${count}` : `Pages ${a}–${b} of ${count}`
 }
 
-/** Status-bar page indicator. Plain text (not a control), polite live region off: it changes on scroll. */
+/**
+ * Status-bar page indicator: the spread in view ("Pages 12–13 of 384"). It is also a button that
+ * opens Edit > Go to Page (the command registry's `edit.go_to_page`), which jumps to the spread
+ * holding the page asked for. No live region: it changes on every turn or scroll.
+ */
 export function PageIndicator() {
   const count = useStore((s) => s.layout.pageCount)
   const first = useStore((s) => s.layout.visibleSpread.first)
   const last = useStore((s) => s.layout.visibleSpread.last)
   if (count <= 0) return null
+  const text = pageIndicatorText(first, last, count)
   return (
-    <span className="tabular-nums whitespace-nowrap" data-testid="page-indicator">
-      {pageIndicatorText(first, last, count)}
-    </span>
+    <Tooltip>
+      <Button
+        variant="ghost"
+        className="tabular-nums whitespace-nowrap px-2 text-ui-xs font-normal"
+        data-control-id={C.pageIndicator.id}
+        data-testid="page-indicator"
+        aria-label={`${text}. ${C.pageIndicator.label}`}
+        onClick={() => runCommand('edit.go_to_page')}
+      >
+        {text}
+      </Button>
+    </Tooltip>
   )
 }
 

@@ -46,6 +46,21 @@ function canvasTopIn(scroller: HTMLElement, sizer: HTMLElement | null): number {
 /** Wheel / trackpad events closer together than this belong to one gesture (one page turn). */
 export const WHEEL_GESTURE_GAP_MS = 220
 
+/**
+ * Wheel gesture tracking (pure, unit-tested): true when the event at `t` with magnitude `a` (px) in
+ * direction `dir` starts a new gesture. A gesture ends after a pause of WHEEL_GESTURE_GAP_MS or a
+ * change of direction; inside a momentum stream that has decayed below half its peak, a sharp rise
+ * (a second flick) starts a new one. A long, smoothly decaying momentum tail stays one gesture.
+ */
+export function wheelGestureStarts(g: { lastAt: number; last: number; peak: number; dir: 0 | 1 | -1 }, t: number, a: number, dir: 1 | -1): boolean {
+  const start = t - g.lastAt > WHEEL_GESTURE_GAP_MS || dir !== g.dir || (g.last < g.peak * 0.5 && a > g.last * 2 && a - g.last > 8)
+  g.lastAt = t
+  g.dir = dir
+  g.peak = start ? a : Math.max(g.peak, a)
+  g.last = a
+  return start
+}
+
 /** Duration of the page-turn transition (skipped when motion is reduced). */
 const TURN_MS = 160
 
@@ -210,8 +225,12 @@ export function PaginatedView({ children }: PaginatedViewProps) {
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
     const rowCount = () => live.current.placement.rowCount
-    /** Book mode: show `row` (clamped). `sync` renders it before returning (hit tests right after). */
-    const showRow = (row: number, sync = false) => {
+    /**
+     * Book mode: show `row` (clamped). `sync` renders it before returning (hit tests right after).
+     * Zoomed in (the spread taller than the window), a turn starts at its top, or at its bottom with
+     * `atEnd` (turning back: reading continues at the end of the previous spread).
+     */
+    const showRow = (row: number, sync = false, atEnd = false) => {
       const p = live.current.placement
       const r = Math.max(0, Math.min(p.rowCount - 1, row))
       const [first, last] = p.pagesInRow(r)
@@ -219,14 +238,14 @@ export function PaginatedView({ children }: PaginatedViewProps) {
       const apply = () => actions.setVisibleSpread({ index: r, first, last: Math.min(last, count - 1) })
       if (r !== live.current.bookRow) {
         const scroller = scrollerRef.current
-        if (scroller) scroller.scrollTop = 0
+        if (scroller) scroller.scrollTop = atEnd ? scroller.scrollHeight : 0
       }
       if (sync) flushSync(apply)
       else apply()
     }
-    const scrollToRow = (row: number) => {
+    const scrollToRow = (row: number, atEnd = false) => {
       // Rendered before returning: the caret-follow that a selection change queues compares with it.
-      if (live.current.book) return showRow(row, true)
+      if (live.current.book) return showRow(row, true, atEnd)
       const scroller = scrollerRef.current
       if (!scroller) return
       const top = canvasTopIn(scroller, sizerRef.current)
@@ -243,9 +262,26 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     let followQueued = false
     let followAfterPass = false
     let followScroll = false
+    let followAfterComposition = false
     const follow = () => {
       followQueued = false
       if (!live.current.book || editor.isDestroyed) return
+      // Never turn under an IME composition (the pass does not run then either): once it ends.
+      if (editor.view.composing) {
+        if (!followAfterComposition) {
+          followAfterComposition = true
+          editor.view.dom.addEventListener(
+            'compositionend',
+            () =>
+              setTimeout(() => {
+                followAfterComposition = false
+                queueFollow(true)
+              }, 0),
+            { once: true },
+          )
+        }
+        return
+      }
       const engine = getEngine()
       if (engine?.pending && !engine.catchingUp) {
         // A document change not laid out yet: its page is known after the pass.
@@ -327,7 +363,7 @@ export function PaginatedView({ children }: PaginatedViewProps) {
         const current = live.current.book ? live.current.bookRow : useStore.getState().layout.visibleSpread.index
         const row = current + dir
         if (row < 0 || row >= rowCount()) return false
-        scrollToRow(row)
+        scrollToRow(row, dir < 0)
         return true
       },
       showPage: (index) => {
@@ -386,25 +422,32 @@ export function PaginatedView({ children }: PaginatedViewProps) {
   useEffect(() => {
     const host = hostRef.current
     if (!book || !host) return
-    // One gesture: wheel events less than WHEEL_GESTURE_GAP_MS apart (a trackpad swipe and its
-    // momentum, a fast spin of the wheel). It turns at most one spread.
-    let lastAt = -Infinity
+    // One gesture turns at most one spread: a trackpad swipe and its momentum, a fast spin of the
+    // wheel (see wheelGestureStarts). A new strong flick during a decaying momentum stream is a new
+    // gesture.
+    const gesture = { lastAt: -Infinity, last: 0, peak: 0, dir: 0 as 0 | 1 | -1 }
     let turned = false
     let scrolls = false
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.defaultPrevented) return // pinch zoom / handled
       const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY)
-      const d = horizontal ? e.deltaX : e.deltaY
+      const d = (horizontal ? e.deltaX : e.deltaY) * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1)
       if (Math.abs(d) < 0.5) return
       const dir: 1 | -1 = d > 0 ? 1 : -1
-      const start = e.timeStamp - lastAt > WHEEL_GESTURE_GAP_MS
-      lastAt = e.timeStamp
-      if (start) {
+      if (wheelGestureStarts(gesture, e.timeStamp, Math.abs(d), dir)) {
         turned = false
-        // A spread taller than the window (zoomed in) scrolls within itself; a gesture that starts
-        // at its edge turns the page.
-        const scroller = scrollerRef.current
-        const room = !scroller || horizontal ? 0 : dir > 0 ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop : scroller.scrollTop
+        // A spread larger than the window (zoomed in) scrolls (pans) within itself, vertically and
+        // horizontally; a gesture that starts at its edge turns the page.
+        const s = scrollerRef.current
+        const room = !s
+          ? 0
+          : horizontal
+            ? dir > 0
+              ? s.scrollWidth - s.clientWidth - s.scrollLeft
+              : s.scrollLeft
+            : dir > 0
+              ? s.scrollHeight - s.clientHeight - s.scrollTop
+              : s.scrollTop
         scrolls = room > 1
       }
       if (scrolls) return
@@ -823,7 +866,30 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean, ens
   const sel = extend ? extendTo(view.state.doc, view.state.selection.anchor, $pos.pos, dir) : TextSelection.near($pos)
   view.dispatch(view.state.tr.setSelection(sel).scrollIntoView())
   if (!extend && dir > 0) caretToPageStart(view, pages[q].from)
+  // ArrowUp onto the end of the last line of a page that ends mid-paragraph: that position is also
+  // the start of the next page's first line (where the caret came from). Draw it at the line end.
+  if (!extend && dir < 0) caretToLineEnd(view, pages[q].to)
   return true
+}
+
+/** The mirror of caretToPageStart: a caret at `pos` (a page end inside a paragraph) is drawn at the end of the line. */
+function caretToLineEnd(view: EditorView, pos: number) {
+  const sel = view.state.selection
+  if (!sel.empty || sel.head !== pos) return
+  try {
+    let { node, offset } = view.domAtPos(pos, -1)
+    // Between elements: into the end of the last text before the position (the line's own text).
+    while (node.nodeType !== Node.TEXT_NODE && offset > 0) {
+      const prev: Node = node.childNodes[offset - 1]
+      if (!prev) break
+      node = prev
+      offset = prev.nodeType === Node.TEXT_NODE ? (prev.textContent ?? '').length : prev.childNodes.length
+    }
+    if (node.nodeType !== Node.TEXT_NODE) return
+    view.dom.ownerDocument.getSelection()?.collapse(node, offset)
+  } catch {
+    // Position without DOM: leave the caret where ProseMirror put it.
+  }
 }
 
 /** The caret at `pos` is painted on the line through client y. */
