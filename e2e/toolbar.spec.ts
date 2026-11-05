@@ -48,13 +48,13 @@ test('ribbon controls have 32px targets, one row and no horizontal scroll at the
   await page.setViewportSize({ width: 2400, height: 700 })
   await page.goto('/')
   const toolbar = page.getByRole('toolbar', { name: 'Formatting' })
-  // Every tab stays mounted, so the toolbar holds every control at a wide window (58): 5 tabs, 16 formatting
+  // Every tab stays mounted, so the toolbar holds every control at a wide window (59): 5 tabs, 16 formatting
   // controls + 4 Styles + undo, redo, find.open, Replace (Home); insert.menu + 3 break buttons +
   // footnote.options + Footnote + Comment (Insert); book.trimSize + book.headerFooter + the paper picker
   // (group + 4 options) + Book Details (Layout); review.track + review.markup + comment.new + Previous /
-  // Next Comment (Review); Single Page, Two-Page Spread, 5 zoom buttons, comment.panel, Full Screen (View).
-  // (5 + 24 + 7 + 8 + 5 + 9.)
-  await expect(toolbar.locator('[data-control-id]')).toHaveCount(58)
+  // Next Comment + Show Resolved Comments (Review); Single Page, Two-Page Spread, 5 zoom buttons, comment.panel, Full Screen (View).
+  // (5 + 24 + 7 + 8 + 6 + 9.)
+  await expect(toolbar.locator('[data-control-id]')).toHaveCount(59)
   await expect(toolbar.locator('[data-control-id^="ribbon.group."], [data-control-id="ribbon.more"]')).toHaveCount(0)
 
   await page.setViewportSize({ width: 480, height: 700 })
