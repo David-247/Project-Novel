@@ -318,7 +318,6 @@ export class PaginationEngine {
     this.flush()
   }
 
-  /** Run a pending pass now (tests, and callers that need the model synchronously). */
   private windowOnly = false
 
   /**
@@ -337,6 +336,7 @@ export class PaginationEngine {
     if (this.pendingNodes.size) this.schedule(false, true)
   }
 
+  /** Run a pending pass now (tests, and callers that need the model synchronously). */
   flush() {
     if (this.frame) cancelAnimationFrame(this.frame)
     this.frame = 0

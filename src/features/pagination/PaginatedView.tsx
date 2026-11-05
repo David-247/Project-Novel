@@ -824,7 +824,12 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean, ens
   }
   // The caret's line on its page, by painted position.
   const y = ((caret.top + caret.bottom) / 2 - rect.top) / s
-  const edge = dir > 0 ? r.endLine - 1 : r.startLine
+  // The page's last (first) line with text: a page break atom closing a page takes a zero-height line.
+  const textLine = (from: number, to: number, step: 1 | -1) => {
+    for (let i = from; step > 0 ? i <= to : i >= to; i += step) if (lines[i].bottom - lines[i].top > 0.5) return i
+    return from
+  }
+  const edge = dir > 0 ? textLine(r.endLine - 1, r.startLine, -1) : textLine(r.startLine, r.endLine - 1, 1)
   const edgeMid = (lines[edge].top + lines[edge].bottom) / 2 + offsets[p].dy
   const half = (lines[edge].bottom - lines[edge].top) / 2
   if (Math.abs(y - edgeMid) > half) return false
@@ -832,7 +837,7 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean, ens
   let q = p + dir
   while (q >= 0 && q < pages.length && ranges[q] && ranges[q].endLine <= ranges[q].startLine) q += dir
   if (q < 0 || q >= pages.length || !ranges[q]) return false
-  const target = dir > 0 ? ranges[q].startLine : ranges[q].endLine - 1
+  const target = dir > 0 ? textLine(ranges[q].startLine, ranges[q].endLine - 1, 1) : textLine(ranges[q].endLine - 1, ranges[q].startLine, -1)
   const ty = (lines[target].top + lines[target].bottom) / 2 + offsets[q].dy
   const x = (caret.left - rect.left) / s - placement.content(p).x + placement.content(q).x
   // Book mode: the browser hit-tests only what is painted, and only one spread is. Turn to the
@@ -856,7 +861,9 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean, ens
   }
   const px = rect.left + x * s
   const py = rect.top + ty * s
-  let hit = posAtPaintedPoint(view, px, py)
+  // A press target around an inline node with content (a footnote reference's 32 px hit area) answers
+  // with a position inside it (the note's text): take the side of the node nearer to x instead.
+  let hit = outsideInlineNode(view, posAtPaintedPoint(view, px, py), px)
   // The browser's answer past the end of a short line can be on another line (a paragraph continued
   // from the page before: its layout box is not where the line is painted). Then walk the target line
   // itself, from the page edge, for the position painted nearest to x.
@@ -895,6 +902,20 @@ function caretToLineEnd(view: EditorView, pos: number) {
   }
 }
 
+/** `pos`, or when it is inside an inline node with content, the node's side nearer to client x. */
+function outsideInlineNode(view: EditorView, pos: number | null, x: number): number | null {
+  if (pos === null) return null
+  const $p = view.state.doc.resolve(pos)
+  for (let d = $p.depth; d > 0; d--) {
+    if (!$p.node(d).isInline) continue
+    const before = $p.before(d)
+    const dom = view.nodeDOM(before)
+    const r = dom instanceof Element ? dom.getBoundingClientRect() : null
+    return r && x >= (r.left + r.right) / 2 ? $p.after(d) : before
+  }
+  return pos
+}
+
 /** Client x where the caret at `pos` is painted (NaN without layout). */
 function paintedLeft(view: EditorView, pos: number): number {
   try {
@@ -919,30 +940,39 @@ function paintedOnLine(view: EditorView, pos: number, y: number): boolean {
  * first position going forward, or its last going back) while the positions stay on that line.
  */
 function nearestOnLine(view: EditorView, edge: number, dir: 1 | -1, x: number, y: number): number | null {
-  const size = view.state.doc.content.size
+  const doc = view.state.doc
+  const size = doc.content.size
   let best: number | null = null
   let bestD = Infinity
   let seen = false
-  for (let i = 0, pos = Math.max(0, Math.min(size, edge)); i < 400 && pos >= 0 && pos <= size; i++, pos += dir) {
-    let c: { left: number; top: number; bottom: number }
+  // A few positions off the line are tolerated once on it: a raised mark (a footnote number) or an
+  // atom whose box misses the line's middle must not end the walk before the line end.
+  let misses = 0
+  let pos = Math.max(0, Math.min(size, edge))
+  for (let i = 0; i < 600 && pos >= 0 && pos <= size; i++) {
+    const $p = doc.resolve(pos)
+    // Inline nodes with content (a footnote reference holds its note's text) are stepped over whole:
+    // positions inside them are the note, not this line.
+    const over = dir > 0 ? $p.nodeAfter : $p.nodeBefore
+    const step = over && over.isInline && !over.isText && over.content.size > 0 ? over.nodeSize : 1
+    let c: { left: number; top: number; bottom: number } | null
     try {
       c = view.coordsAtPos(pos, dir > 0 ? 1 : -1)
     } catch {
-      continue
+      c = null
     }
-    const on = c.top - 1 <= y && c.bottom + 1 >= y
-    if (!on) {
-      if (seen) break
-      continue
-    }
-    seen = true
-    const d = Math.abs(c.left - x)
-    if (d < bestD) {
-      bestD = d
-      best = pos
-    }
+    if (c && c.top - 1 <= y && c.bottom + 1 >= y) {
+      seen = true
+      misses = 0
+      const d = Math.abs(c.left - x)
+      if (d < bestD) {
+        bestD = d
+        best = pos
+      }
+    } else if (seen && ++misses > 3) break
+    pos += dir * step
   }
-  return best === null ? null : TextSelection.near(view.state.doc.resolve(best)).head
+  return best === null ? null : TextSelection.near(doc.resolve(best)).head
 }
 
 /**

@@ -1026,3 +1026,173 @@ test('ArrowUp onto the end of the line above, where the next page starts, draws 
   expect(after.page, `caret drawn on page ${k} (head ${head})`).toBe(k)
   await expect(indicator(page)).toHaveText(`Pages ${k + 1}–${k + 2} of ${l.pageCount}`)
 })
+
+// ---- Arrow keys onto a short line that holds a footnote reference (the off-column walk steps over
+// the reference: positions inside it are the note's text, and its raised number's box can miss the
+// line's middle). Both modes, both engines.
+
+const NOTE = 'A note.'
+/** Size of a footnote node holding NOTE (open + text + close). */
+const NOTE_SIZE = NOTE.length + 2
+
+/** Press on page `index`'s painted line through client y, at a column relative to its text block. */
+async function pressAtColumn(page: Page, index: number, column: number, y: number) {
+  const f = (await page.locator(`.nv-frames .nv-page[data-page-index="${index}"]`).boundingBox())!
+  await page.mouse.click(f.x + (await textLeftOf(page, index)) + column, y)
+  await page.evaluate(() => window.__nvE2E.syncSelection())
+}
+
+/** Painted column (relative to the page's text block) of the right edge of the footnote reference's number. */
+async function refColumn(page: Page, index: number) {
+  const f = (await page.locator(`.nv-frames .nv-page[data-page-index="${index}"]`).boundingBox())!
+  const r = (await editor(page).locator('[data-footnote-ref]').first().evaluate((el) => {
+    const b = el.getBoundingClientRect()
+    return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }
+  }))!
+  return { right: r.right - f.x - (await textLeftOf(page, index)), mid: (r.top + r.bottom) / 2 }
+}
+
+const headNow = async (page: Page) => {
+  const sel = (await page.evaluate(() => window.__nvE2E.editorDiag()!.selection)) as { type: string; head?: number; anchor: number }
+  expect(sel.type, JSON.stringify(sel)).toBe('text')
+  return sel.head!
+}
+
+test('ArrowUp onto a short last line holding a footnote reference: next to the reference, and past the line end', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(80))
+  let l = await layout(page)
+  // A verso that ends with a paragraph's short last line, facing a recto that starts a paragraph.
+  let k = -1
+  for (let i = 1; i < l.pages.length - 1 && k < 0; i += 2) {
+    if (l.pages[i].isBlank || l.pages[i + 1].startsBlockType !== 'paragraph') continue
+    await showPage(page, i)
+    const end = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), l.pages[i].to - 1))!
+    const f = (await page.locator(`.nv-frames .nv-page[data-page-index="${i}"]`).boundingBox())!
+    if (end.left - f.x - (await textLeftOf(page, i)) < 200) k = i
+  }
+  expect(k, 'a verso ending on a short paragraph line').toBeGreaterThan(0)
+  const end0 = l.pages[k].to - 1
+  const refPos = end0 - 3
+  await page.evaluate(([pos, t]) => window.__nvE2E.insertFootnoteAt(pos as number, t as string), [refPos, NOTE] as const)
+  await waitForLayout(page)
+  l = await layout(page)
+  await showPage(page, k)
+  const ref = await refColumn(page, k)
+  expect(await pageOfPaintedY(page, ref.mid)).toBe(k)
+  const paraEnd = end0 + NOTE_SIZE
+  const lineEnd = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), paraEnd))!
+  const fk = (await page.locator(`.nv-frames .nv-page[data-page-index="${k}"]`).boundingBox())!
+  const endColumn = lineEnd.left - fk.x - (await textLeftOf(page, k))
+  const rectoTop = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, 1), l.pages[k + 1].from + 1))!
+  const y = (rectoTop.top + rectoTop.bottom) / 2
+
+  // Just right of the reference: the caret lands right after it.
+  await pressAtColumn(page, k + 1, ref.right + 2, y)
+  expect((await paintedCaret(page)).page).toBe(k + 1)
+  await page.keyboard.press('ArrowUp')
+  await turnSettled(page)
+  expect(await pageOfHead(page)).toBe(k)
+  const near = await headNow(page)
+  expect(near, `head ${near}, reference ${refPos}..${refPos + NOTE_SIZE}`).toBeGreaterThanOrEqual(refPos + NOTE_SIZE)
+  expect(near).toBeLessThanOrEqual(refPos + NOTE_SIZE + 1)
+
+  // Past the end of the short line: the caret goes to the line end, after the reference.
+  await showPage(page, k)
+  await pressAtColumn(page, k + 1, endColumn + 60, y)
+  expect((await paintedCaret(page)).page).toBe(k + 1)
+  await page.keyboard.press('ArrowUp')
+  await turnSettled(page)
+  expect(await pageOfHead(page)).toBe(k)
+  expect(await headNow(page)).toBe(paraEnd)
+})
+
+test('ArrowDown onto a short first line holding a footnote reference: next to the reference, and past the line end', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(80))
+  await page.waitForTimeout(600)
+  let l = await layout(page)
+  // A page break right after a long line (so the line above the next page reaches far right), then a
+  // short paragraph ("Ab cd") at the top of the new page, holding a reference.
+  const p0 = 6
+  await showPage(page, p0)
+  const f0 = (await page.locator(`.nv-frames .nv-page[data-page-index="${p0}"]`).boundingBox())!
+  const left0 = f0.x + (await textLeftOf(page, p0))
+  let cut = -1
+  for (let pos = l.pages[p0].from + 40; pos < l.pages[p0].to - 40 && cut < 0; pos++) {
+    const c = (await page.evaluate((x) => window.__nvE2E.coordsAt(x, 1), pos))!
+    if (c.left - left0 > 270) cut = pos
+  }
+  expect(cut, 'a position far right on a line').toBeGreaterThan(0)
+  await page.evaluate((pos) => window.__nvE2E.selectText(pos, pos), cut)
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await waitForLayout(page)
+  l = await layout(page)
+  const h = l.pages.findIndex((p) => p.from > cut)
+  expect(h).toBeGreaterThan(0)
+  const start = l.pages[h].from + 1
+  await page.evaluate((pos) => window.__nvE2E.selectText(pos, pos), start)
+  await page.keyboard.type('Ab cd')
+  await page.keyboard.press('Enter')
+  await waitForLayout(page)
+  const refPos = start + 3 // "Ab " | ref | "cd"
+  await page.evaluate(([pos, t]) => window.__nvE2E.insertFootnoteAt(pos as number, t as string), [refPos, NOTE] as const)
+  await waitForLayout(page)
+  l = await layout(page)
+  expect(l.pages[h].from + 1, 'the short paragraph opens the page').toBe(start)
+  const shortEnd = start + 5 + NOTE_SIZE // after "Ab " + ref + "cd"
+  await showPage(page, h)
+  const ref = await refColumn(page, h)
+  expect(await pageOfPaintedY(page, ref.mid)).toBe(h)
+  await showPage(page, h - 1)
+  const prevEnd = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), cut))!
+  const fp = (await page.locator(`.nv-frames .nv-page[data-page-index="${h - 1}"]`).boundingBox())!
+  const prevEndColumn = prevEnd.left - fp.x - (await textLeftOf(page, h - 1))
+  const y = (prevEnd.top + prevEnd.bottom) / 2
+  expect(prevEndColumn, 'the line above reaches past the short line').toBeGreaterThan(ref.right + 60)
+
+  // Just right of the reference.
+  await pressAtColumn(page, h - 1, ref.right + 2, y)
+  expect(await pageOfHead(page)).toBe(h - 1)
+  await page.keyboard.press('ArrowDown')
+  await turnSettled(page)
+  expect(await pageOfHead(page)).toBe(h)
+  const near = await headNow(page)
+  expect(near, `head ${near}, reference ${refPos}..${refPos + NOTE_SIZE}`).toBeGreaterThanOrEqual(refPos + NOTE_SIZE)
+  expect(near).toBeLessThanOrEqual(refPos + NOTE_SIZE + 1)
+
+  // From further right than the short line reaches: the caret goes to its end, after the reference.
+  await showPage(page, h - 1)
+  await pressAtColumn(page, h - 1, prevEndColumn - 4, y)
+  expect(await pageOfHead(page)).toBe(h - 1)
+  await page.keyboard.press('ArrowDown')
+  await turnSettled(page)
+  expect(await pageOfHead(page)).toBe(h)
+  expect(await headNow(page)).toBe(shortEnd)
+})
+
+/** Page frame index (among the frames rendered) where the caret at the selection head is painted. */
+async function pageOfHead(page: Page) {
+  const head = await headNow(page)
+  const c = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), head))!
+  return page.evaluate(([x, y]) => {
+    for (const f of Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page'))) {
+      const b = f.getBoundingClientRect()
+      if (x >= b.left - 1 && x <= b.right + 1 && y >= b.top && y <= b.bottom) return Number(f.dataset.pageIndex)
+    }
+    return -1
+  }, [c.left, (c.top + c.bottom) / 2] as const)
+}
+
+/** Page frame index whose box holds client y (in the frames rendered), or -1. */
+async function pageOfPaintedY(page: Page, y: number) {
+  return page.evaluate((cy) => {
+    const ref = document.querySelector('[data-footnote-ref]')!.getBoundingClientRect()
+    const cx = (ref.left + ref.right) / 2
+    for (const f of Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page'))) {
+      const b = f.getBoundingClientRect()
+      if (cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom) return Number(f.dataset.pageIndex)
+    }
+    return -1
+  }, y)
+}
