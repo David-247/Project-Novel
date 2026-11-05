@@ -1,6 +1,6 @@
 [package]
 name = "novel"
-version = "0.1.0"
+version = "0.3.0"
 description = "Novel - a desktop novel-writing app"
 license = "MIT"
 edition = "2021"
