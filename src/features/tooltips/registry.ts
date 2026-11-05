@@ -16,6 +16,7 @@ import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
+import { MARKUP_VIEW_OPTIONS, TRACK_CHANGES_CONTROLS } from '@/features/track-changes'
 import { SURFACE_CONTROLS } from '@/shared/theme'
 import { TRIM_SIZES } from '@/shared/book'
 import type { TooltipCopy } from '@/shared/ui'
@@ -248,6 +249,17 @@ const FOOTNOTE_TOOLTIPS: Record<string, TooltipCopy> = {
   ...fromMeta(FOOTNOTE_EDITOR_CONTROLS, { done: 'Finish the footnote and put the cursor back after its number in the text.' }),
 }
 
+/** Review: Track Changes and the markup view picker with its choices (track-changes slice). */
+const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
+  ...Object.fromEntries(
+    Object.values(TRACK_CHANGES_CONTROLS).map((c): [string, TooltipCopy] => [
+      c.id,
+      { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+    ]),
+  ),
+  ...Object.fromEntries(MARKUP_VIEW_OPTIONS.map((o): [string, TooltipCopy] => [o.id, { title: o.label, description: o.description }])),
+}
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -272,6 +284,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...BOOK_TOOLTIPS,
   ...INSERT_TOOLTIPS,
   ...FOOTNOTE_TOOLTIPS,
+  ...REVIEW_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
 })

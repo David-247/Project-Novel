@@ -25,7 +25,8 @@ import {
   SaveStatusIndicator,
   useStorageIntegration,
 } from '@/features/storage'
-import { PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
+import { invalidatePaginationAt, PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
+import { MarkupViewMenu, setMarkupViewRepaginate, TrackChangesButton } from '@/features/track-changes'
 import { FootnoteOptionsButton, useFootnotePagination } from '@/features/footnotes'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
@@ -54,6 +55,8 @@ export function App() {
   useStorageIntegration()
   // Footnotes at the bottom of their page (bottom reservations + the footnote area page slot).
   useFootnotePagination()
+  // Track changes: a markup view switch re-measures the blocks holding changes (hidden text).
+  useEffect(() => setMarkupViewRepaginate(invalidatePaginationAt), [])
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
@@ -83,6 +86,15 @@ export function App() {
                     </ToolbarItem>
                     <ToolbarItem>
                       <FootnoteOptionsButton />
+                    </ToolbarItem>
+                  </ToolbarGroup>
+                  <ToolbarSeparator />
+                  <ToolbarGroup label="Review">
+                    <ToolbarItem>
+                      <TrackChangesButton />
+                    </ToolbarItem>
+                    <ToolbarItem>
+                      <MarkupViewMenu />
                     </ToolbarItem>
                   </ToolbarGroup>
                   <ToolbarSeparator />

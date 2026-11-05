@@ -6,12 +6,12 @@ export const TRACK_CHANGES_CONTROLS = {
     id: 'review.track',
     label: 'Track Changes',
     shortcut: 'Mod-Shift-e',
-    description: 'Record every insertion, deletion and formatting change with your name and the date. Saved with the project.',
+    description: 'Record insertions, deletions and formatting with your name and the date. Saved with the project.',
   },
   markup: {
     id: 'review.markup',
     label: 'Markup',
-    description: 'Choose how tracked changes are shown on the pages: all of them, a change bar, the final text, or the original.',
+    description: 'How tracked changes show on the pages: all markup, a change bar, the final text or the original.',
   },
 } as const
 
