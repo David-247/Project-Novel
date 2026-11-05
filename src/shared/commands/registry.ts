@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { formatShortcut, shortcutParts, type ShortcutSpec } from '@/shared/ui'
+import { detectPlatform, formatShortcut, shortcutParts, type Platform, type ShortcutSpec } from '@/shared/ui'
 
 /**
  * The command registry: every user-facing action of the app with its label, one-line description,
@@ -54,22 +54,26 @@ export const COMMAND_STATE_DEBOUNCE_MS = 120
 
 const DEV = import.meta.env.DEV
 
-/** Canonical form of a shortcut, so "Shift-Mod-z" and "Mod-Shift-Z" compare equal. */
-export function shortcutKey(spec: ShortcutSpec): string {
+/**
+ * Canonical form of a shortcut on `platform` (the keys actually pressed there), so "Shift-Mod-z" and
+ * "Mod-Shift-Z" compare equal. Per platform because Mod is Cmd on macOS: there "Ctrl-Mod-f" (Full
+ * Screen) and "Mod-f" (Find) are different keys, while elsewhere both would be Ctrl+F.
+ */
+export function shortcutKey(spec: ShortcutSpec, platform: Platform = detectPlatform()): string {
   shortcutParts(spec) // throws on an unknown modifier
-  return formatShortcut(spec, 'other').toLowerCase()
+  return formatShortcut(spec, platform).toLowerCase()
 }
 
 /** Why `cmd` cannot be registered next to `existing`, or null. */
-export function commandProblem(cmd: Command, existing: Iterable<Command>): string | null {
+export function commandProblem(cmd: Command, existing: Iterable<Command>, platform: Platform = detectPlatform()): string | null {
   if (!cmd.id) return 'a command needs an id'
   if (!cmd.label?.trim()) return `command "${cmd.id}" has no label`
   if (!cmd.description?.trim()) return `command "${cmd.id}" has no description`
   if (cmd.description.includes('\n')) return `command "${cmd.id}": the description must be one line`
-  const key = cmd.shortcut ? shortcutKey(cmd.shortcut) : null
+  const key = cmd.shortcut ? shortcutKey(cmd.shortcut, platform) : null
   for (const other of existing) {
     if (other.id === cmd.id) return `duplicate command id "${cmd.id}"`
-    if (key && other.shortcut && shortcutKey(other.shortcut) === key) {
+    if (key && other.shortcut && shortcutKey(other.shortcut, platform) === key) {
       return `shortcut ${cmd.shortcut} of "${cmd.id}" is already bound to "${other.id}"`
     }
   }

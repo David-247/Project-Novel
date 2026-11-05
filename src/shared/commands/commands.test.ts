@@ -4,12 +4,14 @@ import {
   __resetCommandsForTests,
   buildMenuModel,
   COMMAND_STATE_DEBOUNCE_MS,
+  commandProblem,
   getCommands,
   menuBarKind,
   nativeMenuSnapshot,
   notifyCommandStateChanged,
   registerCommand,
   registerCommands,
+  shortcutKey,
   runCommand,
   subscribeCommandState,
   toAccelerator,
@@ -51,6 +53,14 @@ describe('command registry', () => {
     registerCommand(cmd('a', { shortcut: 'Mod-Shift-z' }))
     expect(() => registerCommand(cmd('b', { shortcut: 'Shift-Mod-Z' }))).toThrow(/already bound to "a"/)
     expect(() => registerCommand(cmd('c', { shortcut: 'Mod-z' }))).not.toThrow()
+  })
+
+  it('compares shortcuts as pressed on the platform: Ctrl-Mod-f is not Mod-f on macOS', () => {
+    const find = cmd('find', { shortcut: 'Mod-f' })
+    expect(commandProblem(cmd('full', { shortcut: 'Ctrl-Mod-f' }), [find], 'mac')).toBeNull()
+    expect(commandProblem(cmd('full', { shortcut: 'Ctrl-Mod-f' }), [find], 'other')).toMatch(/already bound to "find"/)
+    expect(commandProblem(cmd('meta', { shortcut: 'Cmd-f' }), [find], 'mac')).toMatch(/already bound to "find"/)
+    expect(shortcutKey('Shift-Mod-Z', 'mac')).toBe(shortcutKey('Mod-Shift-z', 'mac'))
   })
 
   it('throws on a command without a description or label', () => {
