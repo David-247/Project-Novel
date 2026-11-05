@@ -166,8 +166,14 @@ test('Keep Original (keyboard) records the choice; the Re-writes list shows it; 
   expect((await rw(page)).rewrites[0].status).toBe('open')
   // Locked again (the manuscript is hidden from the accessibility tree behind the view).
   await expect(page.locator('.nv-rw-locked')).toHaveCount(2)
-  // Change of mind: keep the version now (keyboard).
+  // Change of mind: keep the version now (keyboard). The closed list first returns the focus (via the hidden
+  // manuscript, which hands it to the revision) a moment after it is gone: let that settle, then Tab-like focus.
+  await expect(list).toHaveCount(0)
+  await expect(revision(page)).toBeFocused()
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 100)))
+  await expect(revision(page)).toBeFocused()
   await ctl(page, 'rewrite.keepVersion').focus()
+  await expect(ctl(page, 'rewrite.keepVersion')).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(view(page)).toHaveCount(0)
   expect((await blocks(page))[2]).toBe('Quietly, She closed the window and listened to the house settle around her.')
@@ -358,4 +364,19 @@ test('Discard: a notice offers undo, which brings the re-write back', async ({ p
   await expect.poll(async () => (await rw(page)).rewrites.length).toBe(1)
   expect(JSON.stringify((await rw(page)).rewrites[0].versions[0].doc)).toContain('Gone The rain')
   await expect(locked(page)).toHaveCount(1)
+})
+
+test('Space on the focused Keep This Version button keeps the version (keyboard activation)', async ({ page }) => {
+  // Runs on both engines. (An earlier WebKit failure of a Space press was the test focusing the button in
+  // the frame right after the view opened, when the view still moves the focus to the revision: wait for
+  // the focus to settle before pressing, as below.)
+  await project(page, 'Space')
+  await openOn(page, 1, 1)
+  await page.keyboard.type('Briefly, ')
+  await ctl(page, 'rewrite.keepVersion').focus()
+  await expect(ctl(page, 'rewrite.keepVersion')).toBeFocused()
+  await page.keyboard.press('Space')
+  await expect(view(page)).toHaveCount(0)
+  expect((await blocks(page))[1]).toMatch(/^Briefly, The rain came/)
+  expect((await rw(page)).rewrites[0].status).toBe('resolved')
 })

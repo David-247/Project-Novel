@@ -374,8 +374,8 @@ A re-write:
 | `originalChanged`  | boolean | Optional, `true` once a bulk edit (Replace All, accepting or rejecting a tracked change, undo) changed the passage after the snapshot. |
 | `choice`           | string  | Optional, resolved re-writes only (Phase 3, T9): `"original"` (Keep Original) or the `id` of the version kept (Keep This Version). Read only when `status` is not `"open"` and it names `"original"` or an existing version; otherwise dropped. |
 | `resolvedAt`       | string  | Optional, resolved re-writes only: ISO 8601 time of the choice. |
-| `kept`             | object  | Optional, Keep This Version only: a frozen copy of the passage kept (a passage doc like `original`), so the record stays true to the manuscript when the version is edited later. A `choice` whose version no longer exists is kept when `kept` is there. |
-| `location`         | object  | Optional, resolved re-writes only: where the passage was, Reopen's hint. `{ block, chapter, before, after }`: the top-level index of its first block, the chapter index there (`-1` before the first chapter), and the first 60 characters (plain text) of the paragraph before and after it (`""` at an edge). |
+| `kept`             | object  | Optional, Keep This Version only: a frozen copy of the passage kept (a passage doc like `original`), so the record stays true to the manuscript when the version is edited later. **Written only when it differs from the chosen version's `doc`** (usually it is that doc: no second copy); a resolved re-write without it reads it from the chosen version. A `choice` whose version no longer exists is kept when `kept` is there. |
+| `location`         | object  | Optional, resolved re-writes only: where the passage was, Reopen's hint. `{ block, chapter, before, after, chapterTitle?, offset? }`: the top-level index of its first block, the chapter index there (`-1` before the first chapter), the first 60 characters (plain text) of the paragraph before and after it (`""` at an edge), the chapter's title (60 characters; `""` before the first chapter) and the block index counted from the chapter's start. `chapterTitle` and `offset` may be missing (then `chapter` and `block` are used). |
 
 ```json
 {
@@ -418,10 +418,12 @@ A re-write:
   removed). The choice is part of the manuscript's undo history: one undo restores the text, the anchor and
   `status` `"open"` (with every version) at once, and redo applies the choice again; the file follows. Reopening a
   resolved re-write (Review ▸ Re-writes…) looks for its text in the manuscript (`kept`, else the chosen version or the
-  original; word for word, else the most similar runs of paragraphs). With `location`, a match must have the same
-  neighbouring paragraphs, or else start within a few blocks of `block` in the same `chapter`; without it (an older
-  file) the match must be the only one. Several equal matches, or none close: nothing is reopened and the app says
-  so (it never guesses). Found, it is anchored again, becomes the new `original`, and `status` goes back to
+  original; word for word, else the most similar runs of paragraphs). A word-for-word match that is the only one in
+  the book is taken wherever it is now (edits elsewhere move it). Otherwise `location` ranks the candidates: each
+  matching neighbouring paragraph, then the chapter (by its title, so chapters added or removed before it do not
+  matter), then the place in the chapter (`offset`, within a few blocks). The single best is taken; a tie, or no
+  candidate matching anything of `location`, reopens nothing and the app says so (it never guesses). Without
+  `location` (an older file) the match must be the only one. Found, it is anchored again, becomes the new `original`, and `status` goes back to
   `"open"`, also in one undo step. Projects without these keys open unchanged.
 - **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the
   version being typed is written into the side file at every save and every recovery snapshot.

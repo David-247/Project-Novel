@@ -30,6 +30,10 @@ export interface RewriteLocation {
   /** The start of the paragraph before and after the passage (plain text, up to 60 characters; '' at an edge). */
   before: string
   after: string
+  /** The chapter's title there (normalized, up to 60 characters; '' before the first chapter). Optional (older files). */
+  chapterTitle?: string
+  /** Block index of the passage counted from the start of its chapter. Optional (older files). */
+  offset?: number
 }
 
 export interface RewriteRecord {

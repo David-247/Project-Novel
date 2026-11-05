@@ -1,15 +1,15 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
-import { TextSelection, type Transaction } from '@tiptap/pm/state'
+import { EditorState, TextSelection, type Transaction } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
 import type { Editor } from '@tiptap/core'
 import { blockPlainText, chapterIndexAt, getChapters, getEditor } from '@/features/editor'
-import { currentTrackAuthor, isTracking, trackTransaction, TRACK_FAILED_META, TRACK_FAILED_NOTICE, TRACK_SKIP_META } from '@/features/track-changes'
+import { currentTrackAuthor, isTracking, trackTransaction, TRACK_FAILED_META, TRACK_FAILED_NOTICE, TRACK_SKIP_META, TRACKED_META } from '@/features/track-changes'
 import type { DocNodeJSON } from '@/shared/document'
 import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { useStore, type RewriteLocation, type RewriteRecord } from '@/shared/store'
 import { similarity } from './align'
 import { ANCHOR_TYPES, openAnchorsIn, passageProblem, passageRange, REWRITE_ALLOW_META } from './anchor'
-import { chapterChanges, replacePassage } from './apply'
+import { chapterChanges, passageOps, replacePassage } from './apply'
 import { closeRewrite, compact, currentPassageDoc, flushLiveVersions, getRewrite, nextSeq, openRewrite, versionDoc } from './commands'
 import { CHOICE_ORIGINAL, passageDoc } from './model'
 import { RewriteStateStep, type RewriteStepState } from './step'
@@ -123,7 +123,15 @@ function locationOf(doc: PMNode, from: number, to: number): RewriteLocation {
   const block = doc.resolve(from).index(0)
   const last = doc.resolve(Math.min(to, doc.content.size)).index(0)
   const text = (i: number) => (i >= 0 && i < doc.childCount ? plain(doc.child(i)).slice(0, 60) : '')
-  return { block, chapter: chapterIndexAt(getChapters(doc), from), before: text(block - 1), after: text(last) }
+  const where = chapterOf(doc, getChapters(doc), from)
+  return { block, chapter: where.index, before: text(block - 1), after: text(last), chapterTitle: where.title, offset: block - where.start }
+}
+
+/** The chapter holding `pos`: its index, title (normalized, 60 characters; '' before the first chapter) and first block index. */
+function chapterOf(doc: PMNode, chapters: ReturnType<typeof getChapters>, pos: number): { index: number; title: string; start: number } {
+  const index = chapterIndexAt(chapters, pos)
+  const c = index >= 0 ? chapters[index] : null
+  return { index, title: c ? norm(c.title).slice(0, 60) : '', start: c ? doc.resolve(c.from).index(0) : 0 }
 }
 
 function toNode(ed: Editor, json: DocNodeJSON): PMNode | null {
@@ -186,16 +194,10 @@ export function keepVersionNow(versionId: string, id?: string): boolean {
   if (!left || !right) return false
   const state = ed.state
   let tr = state.tr
-  replacePassage(tr, range.from, left, right)
   // Track Changes: recorded here (the recorder would also take the anchor steps below for style changes).
-  if (tr.docChanged && isTracking()) {
-    tr = trackTransaction(state, tr, currentTrackAuthor())
-    // Could not be recorded: applied untracked with the recorder's own warning (and never tracked by the hook).
-    if (tr.getMeta(TRACK_FAILED_META)) {
-      useStore.getState().trackChangesActions.setNotice(TRACK_FAILED_NOTICE)
-      tr.setMeta(TRACK_SKIP_META, true)
-    }
-  } else tr.setMeta(TRACK_SKIP_META, true)
+  if (isTracking()) tr = trackedReplacement(state, range.from, left, right)
+  else replacePassage(tr, range.from, left, right)
+  if (!tr.getMeta(TRACKED_META)) tr.setMeta(TRACK_SKIP_META, true)
   const start = tr.mapping.map(range.from, -1)
   const location = locationOf(tr.doc, start, tr.mapping.map(range.to, 1))
   clearAnchor(tr, record.anchor)
@@ -213,6 +215,34 @@ export function keepVersionNow(versionId: string, id?: string): boolean {
   dispatchAlone(ed, tr, caret)
   backToManuscript(ed)
   return true
+}
+
+/**
+ * The replacement as tracked changes: each edit recorded on its own, as if made one after the other (the
+ * recorder handles a block inserted next to one deleted in separate edits, not in one), on a bare state
+ * of the document, and their steps gathered into one transaction of `state` (one undo step). When an
+ * edit cannot be recorded, the whole replacement is applied untracked with the recorder's warning.
+ */
+function trackedReplacement(state: EditorState, base: number, left: PMNode, right: PMNode): Transaction {
+  const out = state.tr
+  const author = currentTrackAuthor()
+  const date = new Date().toISOString()
+  let bare = EditorState.create({ schema: state.schema, doc: state.doc })
+  for (const run of passageOps(out, base, left, right)) {
+    const sub = bare.tr
+    run(sub)
+    if (!sub.docChanged) continue
+    const tracked = trackTransaction(bare, sub, author, date)
+    if (tracked.getMeta(TRACK_FAILED_META)) {
+      useStore.getState().trackChangesActions.setNotice(TRACK_FAILED_NOTICE)
+      const plain = state.tr
+      replacePassage(plain, base, left, right)
+      return plain
+    }
+    for (const step of tracked.steps) out.step(step)
+    bare = EditorState.create({ schema: state.schema, doc: tracked.doc })
+  }
+  return out.docChanged ? out.setMeta(TRACKED_META, true) : out
 }
 
 /** Keep Original: the passage stays as it is; the re-write is resolved (its versions kept). */
@@ -295,7 +325,7 @@ export function locatePassage(doc: PMNode, kept: PMNode, open: ReadonlySet<strin
   }
   const range = (i: number) => ({ from: starts[i], to: starts[i + n - 1] + blocks[i + n - 1].nodeSize })
 
-  let candidates: { i: number; score: number }[] = []
+  const candidates: { i: number; score: number }[] = []
   for (let i = 0; i + n <= blocks.length; i++) {
     if (textAt(i) !== want[0]) continue
     let k = 1
@@ -320,16 +350,28 @@ export function locatePassage(doc: PMNode, kept: PMNode, open: ReadonlySet<strin
     if (sorted[0].score < 1 && sorted[0].score - sorted[1].score >= 0.1) return range(sorted[0].i)
     return { ambiguous: true }
   }
+  // The kept text word for word, once in the whole book: that is it, wherever the edits since moved it.
+  if (candidates.length === 1 && candidates[0].score === 1) return range(candidates[0].i)
   if (!hint) return one(candidates)
 
+  // The hint ranks the candidates: neighbouring paragraphs (each one counts), then the chapter (by its title,
+  // so chapters added or removed earlier do not matter), then the place in that chapter (blocks from its start).
   const chapters = getChapters(doc)
-  const context = (i: number) => (i > 0 ? textAt(i - 1).slice(0, 60) : '') === hint.before && (i + n < blocks.length ? textAt(i + n).slice(0, 60) : '') === hint.after
-  const inContext = candidates.filter((c) => context(c.i))
-  if (inContext.length) return one(inContext)
-  // Its neighbours were edited too: only near the remembered place, in the same chapter.
-  candidates = candidates.filter((c) => Math.abs(c.i - hint.block) <= Math.max(NEAR_BLOCKS, n) && chapterIndexAt(chapters, starts[c.i]) === hint.chapter)
-  if (!candidates.length) return null
-  return one(candidates)
+  const rank = (i: number) => {
+    const where = chapterOf(doc, chapters, starts[i])
+    const before = (i > 0 ? textAt(i - 1).slice(0, 60) : '') === hint.before
+    const after = (i + n < blocks.length ? textAt(i + n).slice(0, 60) : '') === hint.after
+    const chapter = hint.chapterTitle !== undefined ? where.title === hint.chapterTitle : where.index === hint.chapter
+    const offset = hint.offset !== undefined ? i - where.start - hint.offset : i - hint.block
+    const near = chapter && Math.abs(offset) <= Math.max(NEAR_BLOCKS, n)
+    return (+before + +after) * 4 + +chapter * 2 + +near
+  }
+  const ranked = candidates.map((c) => ({ ...c, rank: rank(c.i) }))
+  const top = Math.max(...ranked.map((c) => c.rank))
+  // Nothing about any of them matches where the passage was: not close.
+  if (top === 0) return null
+  const best = ranked.filter((c) => c.rank === top)
+  return one(best)
 }
 
 /** The passage a resolved re-write left in the manuscript: the frozen kept copy, else the version chosen, else the original. */

@@ -178,15 +178,25 @@ function inlineOps(a: PMNode, b: PMNode, start: number, ops: Op[]): void {
 
 /** Add to `tr` the steps turning the passage `left` (at `base` in tr.doc) into `right`. Returns the number of ops. */
 export function replacePassage(tr: Transaction, base: number, left: PMNode, right: PMNode): number {
+  const ops = passageOps(tr, base, left, right)
+  for (const run of ops) run(tr)
+  return ops.length
+}
+
+/**
+ * The edits of replacePassage, each one a function adding its steps to a transaction, in the order to
+ * run them. Descending: every position is valid in the start document, and stays valid after the
+ * edits before it in this order (they all change the document at or after their own position, tracked
+ * or not), so they can also be recorded one by one (Track Changes: choice.ts). At one position, the op
+ * over a range runs before an insertion there (the insertion goes before that range); several
+ * insertions at one position run last first, so they end up in order.
+ */
+export function passageOps(tr: Transaction, base: number, left: PMNode, right: PMNode): ((tr: Transaction) => void)[] {
   const ops: Op[] = []
   childOps(tr, left, right, base, ops)
-  // Descending: every position is valid in the start document. At one position, the op over a range
-  // runs before an insertion there (the insertion goes before that range); several insertions at one
-  // position run last first, so they end up in order.
   const order = ops.map((op, i) => ({ op, i }))
   order.sort((x, y) => y.op.from - x.op.from || y.op.to - x.op.to || y.i - x.i)
-  for (const { op } of order) op.run(tr)
-  return ops.length
+  return order.map(({ op }) => op.run)
 }
 
 /** Containers whose children are paired and diffed like the passage's blocks (a one-word edit in a list item stays one word). */
@@ -249,6 +259,9 @@ export function chapterChanges(left: PMNode, right: PMNode, opens: (doc: PMNode)
   const removed: number[] = []
   const added: number[] = []
   if (!a.size && !b.size) return { removed, added }
+  // As many openings, at the same block positions: a title renamed (however much) is still that chapter.
+  const at = (s: ReadonlySet<number>) => [...s].sort((x, y) => x - y).join(' ')
+  if (a.size === b.size && at(a) === at(b)) return { removed, added }
   for (const row of alignBlocks(left, right)) {
     const l = row.left !== null && a.has(row.left)
     const r = row.right !== null && b.has(row.right)

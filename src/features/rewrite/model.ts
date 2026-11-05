@@ -69,7 +69,12 @@ export function parseRewrite(raw: unknown): RewriteRecord | null {
     // The choice of a resolved re-write: Keep Original, or a version (that still exists, or whose kept copy is here).
     ...(raw.status !== 'open' && (raw.choice === CHOICE_ORIGINAL || (isRewriteId(raw.choice) && (ids.has(raw.choice) || isPassageDoc(raw.kept)))) ? { choice: raw.choice as string } : {}),
     ...(raw.status !== 'open' && isDate(raw.resolvedAt) ? { resolvedAt: raw.resolvedAt } : {}),
-    ...(raw.status !== 'open' && isPassageDoc(raw.kept) ? { kept: raw.kept } : {}),
+    // `kept` is left out of the file when it is the chosen version's doc: restored from it here.
+    ...(raw.status !== 'open' && isPassageDoc(raw.kept)
+      ? { kept: raw.kept }
+      : raw.status !== 'open' && typeof raw.choice === 'string' && raw.choice !== CHOICE_ORIGINAL && ids.has(raw.choice)
+        ? { kept: (versions as RewriteVersion[]).find((x) => x.id === raw.choice)!.doc }
+        : {}),
     ...(raw.status !== 'open' && parseLocation(raw.location) ? { location: parseLocation(raw.location)! } : {}),
     ...(extra ? { extra } : {}),
   }
@@ -78,9 +83,16 @@ export function parseRewrite(raw: unknown): RewriteRecord | null {
 /** A resolved re-write's `location` (Reopen's hint), or null when it is not usable. */
 function parseLocation(v: unknown): RewriteLocation | null {
   if (!isObject(v)) return null
-  const { block, chapter, before, after } = v
+  const { block, chapter, before, after, chapterTitle, offset } = v
   if (!Number.isInteger(block) || (block as number) < 0 || !Number.isInteger(chapter) || typeof before !== 'string' || typeof after !== 'string') return null
-  return { block: block as number, chapter: chapter as number, before: before.slice(0, 60), after: after.slice(0, 60) }
+  return {
+    block: block as number,
+    chapter: chapter as number,
+    before: before.slice(0, 60),
+    after: after.slice(0, 60),
+    ...(typeof chapterTitle === 'string' ? { chapterTitle: chapterTitle.slice(0, 60) } : {}),
+    ...(Number.isInteger(offset) && (offset as number) >= 0 ? { offset: offset as number } : {}),
+  }
 }
 
 export interface RewritesFileData {
@@ -117,6 +129,8 @@ function serializeVersion(v: RewriteVersion): Record<string, unknown> {
   return { ...(v.extra ?? {}), id: v.id, name: v.name, doc: v.doc, updatedAt: v.updatedAt }
 }
 
+const sameDoc = (a: DocNodeJSON, b: DocNodeJSON | undefined) => b !== undefined && (a === b || JSON.stringify(a) === JSON.stringify(b))
+
 export function serializeRewrite(r: RewriteRecord): Record<string, unknown> {
   return {
     ...(r.extra ?? {}),
@@ -131,7 +145,8 @@ export function serializeRewrite(r: RewriteRecord): Record<string, unknown> {
     ...(r.originalChanged ? { originalChanged: true } : {}),
     ...(r.choice ? { choice: r.choice } : {}),
     ...(r.resolvedAt ? { resolvedAt: r.resolvedAt } : {}),
-    ...(r.kept ? { kept: r.kept } : {}),
+    // The kept copy only when it differs from the chosen version (it usually is that version: no second copy).
+    ...(r.kept && !sameDoc(r.kept, r.versions.find((v) => v.id === r.choice)?.doc) ? { kept: r.kept } : {}),
     ...(r.location ? { location: r.location } : {}),
   }
 }

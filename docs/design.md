@@ -644,15 +644,17 @@ The signature feature: a passage rewritten beside its original, compared like tw
   insertions / deletions for Accept / Reject (if recording fails, the recorder's own status-bar warning shows and
   the edit is applied untracked). The kept passage is frozen into the record (`kept`), so a redo after the version
   was edited still matches the record. A version that removes or adds a chapter opening asks first (the app's
-  message dialog); openings are compared by position on the paired blocks, so a renamed title does not ask and a
-  version that demotes one title and promotes another does. After a choice the view closes and the caret is
+  message dialog). Openings are compared by position: as many openings at the same block positions is a rename,
+  however different the words; otherwise the paired blocks decide, so a version that demotes one title and promotes
+  another asks. After a choice the view closes and the caret is
   at the start of the passage, scrolled to its page or spread; the pages reflow from there. **Undo**: the choice is
   one manuscript transaction with a `RewriteStateStep` (like the comments' thread step), so one Mod-z puts the text
   back and the re-write open again with every version; redo applies it again. Review ▸ Re-writes… lists re-writes in
   progress, then the resolved ones with their choice ("Kept Version 2", "Kept the original") and a Reopen button:
-  the passage as it is now becomes the original, beside the saved versions. Reopen looks where the passage was
-  (the saved location and its neighbouring paragraphs) and never guesses: a short paragraph such as "He nodded."
-  elsewhere in the book is not taken; several equal matches, or none nearby, give a notice instead.
+  the passage as it is now becomes the original, beside the saved versions. Reopen takes the kept text if it is
+  the only word-for-word match in the book; otherwise it ranks the candidates by the saved location (neighbouring
+  paragraphs, the chapter by its title, the place in the chapter) and never guesses: a short paragraph such as
+  "He nodded." elsewhere in the book is not taken; a tie, or nothing matching where it was, gives a notice.
 - **While the view is open the ribbon follows the command gate**, like the menus: registry buttons read
   `isCommandEnabled` (gate included); the slices' own controls for gated commands (Find, New Comment, Track
   Changes) are disabled with their command (`GatedItem` in src/ribbon-groups.tsx); the formatting controls, Undo /

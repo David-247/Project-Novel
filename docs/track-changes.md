@@ -105,10 +105,16 @@ Changes is turned off or on again.
 
 **Re-write: Keep This Version** (rewrite slice, `choice.ts`). The kept version is applied as a minimal
 word-level edit (descending ReplaceSteps, mark steps for formatting, setNodeMarkup for a paragraph
-style), and the rewrite slice runs `trackTransaction` on it itself before adding the re-write's own
-steps (anchor attributes, the `RewriteStateStep`): those are never recorded as style changes. The result
-is ordinary insertions, deletions and formatting / style changes by the current author, reviewed with
-Accept / Reject like any other; one undo reverts the whole Keep.
+style), and the rewrite slice records it itself before adding the re-write's own steps (anchor
+attributes, the `RewriteStateStep`): those are never recorded as style changes. Each edit is recorded on
+its own (`trackTransaction` on a plugin-free state of the document, one edit after the other, as a user
+would make them) and the steps are gathered into one transaction, so one undo reverts the whole Keep. The
+result is ordinary insertions, deletions and formatting / style changes by the current author, reviewed
+with Accept / Reject like any other.
+**Known limitation: list items.** A list item is not a tracked block (`TRACKED_BLOCK_TYPES`: its paragraph
+is). An item deleted while recording keeps its (deleted) paragraph; accepting the deletion leaves the
+item empty, and rejecting an inserted item leaves an empty item. Words inside items are tracked as
+usual. Making list items tracked blocks belongs to the recorder and the review, not the re-write.
 
 **IME composition.** While the view is composing, the composed text is inserted **without** its
 insertion mark: wrapping the composing text node in a mark span mid-composition cancels or doubles the
