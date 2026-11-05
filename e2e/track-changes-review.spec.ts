@@ -189,6 +189,50 @@ test('Next and Previous Change go across pages in spread and single-page view; t
   expect(w.page).toBeLessThanOrEqual(w.last)
 })
 
+test('Book mode: Next / Previous Change turn the page to the change (menu, ribbon, status count), never scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await launch(page)
+  const para = (n: number) => Array.from({ length: 90 }, (_, i) => `w${n}x${i}`).join(' ')
+  const content = Array.from({ length: 30 }, (_, i) =>
+    i === 0 || i === 14 || i === 29
+      ? { type: 'paragraph', content: [text(`Chg${i}`, [tc('insertion', `c${i}`, 'Ann')]), text(` ${para(i)}`)] }
+      : { type: 'paragraph', content: [text(para(i))] },
+  )
+  await seedReview(page, '/projects/Turn', content)
+  await expect(page.locator('.nv-desk[data-navigation="book"]')).toHaveCount(1)
+  const state = () =>
+    page.evaluate(() => {
+      const l = window.__nvE2E.layout()
+      const sel = window.__nvE2E.selection()!
+      const p = l.pages.findIndex((pg, i) => sel.from >= pg.from && (sel.from < pg.to || i === l.pages.length - 1))
+      const scroller = document.querySelector('main') as HTMLElement
+      return { page: p, first: l.visibleSpread.first, last: l.visibleSpread.last, index: l.visibleSpread.index, scrollTop: scroller.scrollTop }
+    })
+  const shown = async () => {
+    const s = await state()
+    return s.page >= s.first && s.page <= s.last
+  }
+  await page.evaluate(() => window.__nvE2E.selectText(1, 1))
+  // Review menu: Next Change turns to c14's spread.
+  await reviewMenu(page, 'review.change.next')
+  // (Poll for the move itself: before it, c0's spread is shown too.)
+  await expect.poll(async () => (await state()).index).toBeGreaterThan(0)
+  await expect.poll(shown).toBe(true)
+  const a = await state()
+  expect(a.scrollTop).toBe(0)
+  // Ribbon (focus stays in the manuscript): Next Change turns again, to c29.
+  await ribbonTab(page, 'review')
+  await (await reveal(page, 'ribbon.cmd.review.change.next')).click()
+  await expect.poll(async () => (await state()).index).toBeGreaterThan(a.index)
+  expect(await shown()).toBe(true)
+  // Previous Change from the focus outside the manuscript (the status count's button) turns back.
+  await page.getByTestId('changes-indicator').focus()
+  await page.evaluate(() => window.__nvE2E.runCommand('review.change.prev'))
+  await expect.poll(async () => (await state()).index).toBe(a.index)
+  expect(await shown()).toBe(true)
+  expect((await state()).scrollTop).toBe(0)
+})
+
 test('the popover from the keyboard: Alt+Enter, Tab, Escape; tooltips and AA contrast on all papers', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await launch(page)

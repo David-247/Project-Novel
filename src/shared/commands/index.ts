@@ -24,6 +24,7 @@ export {
   isCommandEnabled,
   commandGuard,
   setCommandGate,
+  commandGateAllows,
   shortcutKey,
   commandProblem,
   COMMAND_STATE_DEBOUNCE_MS,

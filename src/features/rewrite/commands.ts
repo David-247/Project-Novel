@@ -2,6 +2,7 @@ import type { Node as PMNode } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
 import { chapterIndexAt, getChapters, getEditor } from '@/features/editor'
+import { revealPosition } from '@/features/pagination'
 import { sideFileChanged } from '@/features/storage'
 import type { DocNodeJSON } from '@/shared/document'
 import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
@@ -309,6 +310,8 @@ export function goToPassage(id: string): boolean {
   const sel = TextSelection.near(ed.state.doc.resolve(range.from + 1))
   ed.view.dispatch(ed.state.tr.setSelection(sel).scrollIntoView())
   ed.view.focus()
+  // Book mode turns to the passage's spread (continuous scroll centres it), as Next Comment does.
+  revealPosition(sel.from)
   return true
 }
 

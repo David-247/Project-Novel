@@ -77,6 +77,10 @@ async function timeOpen(page: Page, first: number, count = PARAGRAPHS): Promise<
       const e = window.__nvE2E
       e.selectText(e.blockPos(a) + 2, e.blockPos(a + n - 1) + 2)
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+      // Book mode (the default) turns to the selection's spread: let the turn finish (as a writer who
+      // selects the passage on the spread shown would see it) so its transition is not timed as the open.
+      await Promise.all(document.getAnimations().map((x) => x.finished.catch(() => undefined)))
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
       const t0 = performance.now()
       if (!e.runCommand('rewrite.open')) throw new Error('Re-write Passage… is disabled')
       await new Promise<void>((resolve) => {

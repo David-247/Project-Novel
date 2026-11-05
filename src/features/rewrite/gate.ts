@@ -12,7 +12,7 @@ import { commandGuard, type Command } from '@/shared/commands'
  *   clipboard in a text field (the version name), which act on the field;
  * - commands about the manuscript as a whole make no sense on a revision and are disabled: Insert
  *   Footnote, comments, Find / Replace, Track Changes and its review (Next Change, Accept / Reject ...),
- *   Go to Page, page view and zoom.
+ *   Go to Page, page view, zoom, navigation mode and the spread turns (Previous / Next Spread ...).
  */
 // Built on first use: this module is evaluated inside the editor <-> rewrite import cycle.
 let off: Set<string> | null = null
@@ -34,6 +34,9 @@ const focusedInput = () => {
   return el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color'].includes(el.type))
 }
 
+/** The View menu groups about the pages (pagination commands.ts). */
+const VIEW_GROUPS = new Set<string>(['layout', 'zoom', 'navigation', 'spreads'])
+
 /** The Review menu groups of the track changes review commands (track-changes menu-commands.ts). */
 const REVIEW_GROUPS = new Set<string>(['changes', 'accept', 'reject'])
 
@@ -43,7 +46,8 @@ const ANY_PAGE = new Set<string>(['edit.copy'])
 export function rewriteCommandGate(cmd: Command): boolean {
   if (OFF().has(cmd.id)) return false
   const menu = cmd.menu
-  if (menu?.id === 'view' && (menu.group === 'layout' || menu.group === 'zoom')) return false
+  // Page view, zoom, Book / Continuous Scroll and the spread turns: the pages are hidden behind the view.
+  if (menu?.id === 'view' && VIEW_GROUPS.has(menu.group)) return false
   // The track changes review (Previous / Next Change, Show Change Details, Accept / Reject, All, All by
   // Author) acts on the manuscript, which the view hides: off until the view closes.
   if (menu?.id === 'review' && REVIEW_GROUPS.has(menu.group)) return false

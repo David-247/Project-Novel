@@ -22,6 +22,31 @@ export interface RewriteHostProps {
 export function RewriteHost({ children }: RewriteHostProps) {
   const open = useStore((s) => s.rewrite.openId !== null)
   const restore = useRef(false)
+  const overlay = useRef<HTMLDivElement>(null)
+
+  const behind = useRef<HTMLDivElement>(null)
+  const gutter = useRef<'stable' | 'none'>('stable')
+
+  // The pages' scroller stops scrolling behind the view (rewrite.css) and keeps its scrollbar's room
+  // only when it shows a scrollbar that takes room: Book mode's one-spread desk usually fits the
+  // window and has none (and overlay scrollbars take none), so reserving a gutter there would narrow
+  // the pages and refit them on every open and close. Measured when the store opens a re-write,
+  // before React renders the view (the scroller is still as it was).
+  useEffect(
+    () =>
+      useStore.subscribe((s, prev) => {
+        if (s.rewrite.openId === null || prev.rewrite.openId !== null) return
+        const scroller = behind.current?.parentElement
+        if (!(scroller instanceof HTMLElement)) return
+        const cs = getComputedStyle(scroller)
+        const bar = scroller.offsetWidth - scroller.clientWidth - parseFloat(cs.borderLeftWidth || '0') - parseFloat(cs.borderRightWidth || '0')
+        gutter.current = bar > 0.5 && scroller.scrollHeight > scroller.clientHeight + 1 ? 'stable' : 'none'
+      }),
+    [],
+  )
+  useLayoutEffect(() => {
+    if (open && overlay.current) overlay.current.dataset.gutter = gutter.current
+  }, [open])
 
   useEffect(() => setViewHooks({ afterClose: () => void (restore.current = true) }), [])
 
@@ -36,7 +61,7 @@ export function RewriteHost({ children }: RewriteHostProps) {
   return (
     <>
       {open ? (
-        <div className="nv-rw-overlay">
+        <div ref={overlay} className="nv-rw-overlay">
           <RewriteView />
           {/* Notices that can come up while the view is open (a refused undo). */}
           <RewriteNotice inView />
@@ -48,6 +73,7 @@ export function RewriteHost({ children }: RewriteHostProps) {
           the view's last control lands in the manuscript's view otherwise). Not `inert`: that restyles
           the whole manuscript on every open (over 200 ms at 100k words). */}
       <div
+        ref={behind}
         aria-hidden={open || undefined}
         onFocusCapture={(e) => {
           if (!open) return

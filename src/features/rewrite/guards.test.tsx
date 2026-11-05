@@ -312,6 +312,9 @@ describe('commands while the view is open (the gate)', () => {
     expect(rewriteCommandGate(cmd('edit.copy', { id: 'edit', group: 'clipboard', order: 1 }))).toBe(true)
     for (const id of ['find.open', 'edit.replace', 'review.track', 'comment.new', 'footnote.insert', 'edit.go_to_page']) expect(rewriteCommandGate(cmd(id)), id).toBe(false)
     expect(rewriteCommandGate(cmd('view.zoomIn', { id: 'view', group: 'zoom', order: 1 }))).toBe(false)
+    // Book mode (T5): the navigation mode radio pair and the spread turns are off too.
+    for (const [id, group] of [['view.bookNavigation', 'navigation'], ['pagination.nextSpread', 'spreads'], ['view.lastSpread', 'spreads']] as const)
+      expect(rewriteCommandGate(cmd(id, { id: 'view', group, order: 1 })), id).toBe(false)
     expect(rewriteCommandGate(cmd('file.save', { id: 'file', group: 'save', order: 1 }))).toBe(true)
     // A text field in the view (the version name): Edit history / clipboard act on it.
     const input = document.createElement('input')

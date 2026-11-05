@@ -86,10 +86,14 @@
   height: 100%;
   margin-bottom: -100%;
 }
-/* The pages' scroller does not scroll behind the view (its gutter is kept: no width change, no refit). */
+/* The pages' scroller does not scroll behind the view (a scrollbar's room is kept: no width change, no refit). */
 :has(> .nv-rw-overlay) {
   overflow: hidden;
   scrollbar-gutter: stable;
+}
+/* Nothing to scroll (Book mode's one-spread desk): no gutter either, or the pages would narrow (RewriteHost). */
+:has(> .nv-rw-overlay[data-gutter='none']) {
+  scrollbar-gutter: auto;
 }
 
 /* ---- The comparison view -------------------------------------------------------------------- */

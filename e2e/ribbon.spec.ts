@@ -132,7 +132,12 @@ const REACH: Record<RibbonTab, Record<string, [string, string][]>> = {
     ],
   },
   view: {
-    'view.views': [['ribbon.cmd.view.singlePage', 'view.singlePage'], ['ribbon.cmd.pagination.spreadView', 'pagination.spreadView']],
+    'view.views': [
+      ['ribbon.cmd.view.singlePage', 'view.singlePage'],
+      ['ribbon.cmd.pagination.spreadView', 'pagination.spreadView'],
+      ['ribbon.cmd.view.bookNavigation', 'view.bookNavigation'],
+      ['ribbon.cmd.view.scrollNavigation', 'view.scrollNavigation'],
+    ],
     'view.zoom': [['ribbon.cmd.pagination.zoomIn', 'pagination.zoomIn'], ['ribbon.cmd.view.fitWidth', 'view.fitWidth'], ['ribbon.cmd.view.actualSize', 'view.actualSize']],
     'view.show': [['comment.panel', 'comment.panel']],
     'view.window': [['ribbon.cmd.view.fullScreen', 'view.fullScreen']],

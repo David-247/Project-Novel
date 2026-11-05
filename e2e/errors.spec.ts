@@ -98,7 +98,10 @@ test('opening a project shows "Opening…" until it is loaded', async ({ page })
   const surface = page.locator('main [contenteditable]')
   await expect(surface).toHaveAttribute('contenteditable', 'false')
   await expect(page.getByTestId('writing-surface')).toHaveAttribute('aria-busy', 'true')
-  await expect(saveStatus(page)).toHaveText('Slow: All changes saved')
+  // Every file read waits 700 ms and opening reads them one after another (book, manuscript and the
+  // side files: comments, rewrites ...), about 4.5 s locally: more than the default expect timeout on
+  // a slow runner.
+  await expect(saveStatus(page)).toHaveText('Slow: All changes saved', { timeout: 15_000 })
   await expect(surface).toHaveAttribute('contenteditable', 'true')
   await expect(editor(page)).toHaveText('Loaded at last.')
 })

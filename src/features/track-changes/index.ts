@@ -37,7 +37,8 @@ export {
 export type { TrackedChange, ChangeKind } from './review'
 // Review UI (docs/track-changes.md, "Review"): commands as plain functions, the change popover and
 // the status-bar count; setReviewConfirm (Accept / Reject All above 50 changes) and
-// setChangeRevealer (how a change is brought into sight; default: scroll) are wired by the root, as is
+// setChangeRevealer (how a change is brought into sight; default: the pagination slice's revealPosition, which turns
+// the page in Book mode) are wired by the root, as is
 // setReviewViewSource (the manuscript view: other editors with TrackChanges are never reviewed;
 // TrackChanges.configure({ review: false }) leaves the review side out of such an editor entirely).
 export {

@@ -210,11 +210,65 @@ test('the ribbon: Review > Re-write opens it; in the view its buttons follow the
   // Undo in the quick access bar undoes in the revision.
   await ctl(ribbon, 'history.undo').click()
   await expect(revision(page).locator('strong')).toHaveCount(0)
-  // Closed: the controls are back on the manuscript.
-  await page.keyboard.press('Escape')
-  await expect(view(page)).toBeHidden()
+  // Closed: the controls are back on the manuscript. (The pointer rests on Undo: on a slow runner its
+  // tooltip can be up, and the first Escape closes the tooltip.)
+  await expect(async () => {
+    await page.keyboard.press('Escape')
+    await expect(view(page)).toBeHidden({ timeout: 1000 })
+  }).toPass({ timeout: 10_000 })
   await expect(ctl(ribbon, 'find.open')).toBeEnabled()
   await expect(ctl(ribbon, 'comment.new')).toBeEnabled()
+})
+
+test('Book mode: with the view open the pages behind it never turn (keys, wheel, View menu); closed, they do', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await launch(page)
+  await newProject(page, '/projects/Turns')
+  const long = 'The river ran on past the mill and the bridge and the quiet houses by the water. '.repeat(14)
+  await page.evaluate((d) => window.__nvE2E.setDoc(d), { type: 'doc', content: [h('One'), ...Array.from({ length: 30 }, () => p(long))] })
+  await waitForLayout(page)
+  expect(await page.evaluate(() => !!document.querySelector('.nv-desk[data-navigation="book"]'))).toBe(true)
+  const spread = () => page.evaluate(() => window.__nvE2E.layout().visibleSpread.index)
+  expect(await spread()).toBe(0)
+  const width = () => page.getByRole('main', { name: 'Editor' }).evaluate((m) => m.clientWidth)
+  const before = await width()
+  await openOn(page, 1, 1)
+  // The desk fits the window (no scrollbar): opening reserves no gutter, so the pages do not refit.
+  expect(await width()).toBe(before)
+  const menuTitle = page.locator('[data-control-id="menu.view"]')
+  const menuItem = (id: string) => page.locator(`[role="menu"] [data-control-id="${id}"]`)
+  await menuTitle.click()
+  for (const id of ['pagination.nextSpread', 'view.lastSpread', 'view.bookNavigation', 'view.scrollNavigation']) await expect(menuItem(id), id).toHaveAttribute('data-disabled', '')
+  await page.keyboard.press('Escape')
+  // Focus nowhere (the window's PageDown listener), a wheel over the view, a direct turn: no turn.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.keyboard.press('PageDown')
+  await page.keyboard.press('ControlOrMeta+End')
+  const box = (await view(page).boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.wheel(0, 400)
+  expect(await page.evaluate(() => window.__nvE2E.turnSpread(1))).toBe(false)
+  await page.waitForTimeout(300)
+  expect(await spread()).toBe(0)
+  // The turn controls are behind the view: a press at the next control's place lands on the view.
+  const next = (await page.locator('[data-control-id="pagination.nextSpread"]').boundingBox())!
+  const hit = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.nv-rw-overlay'), [next.x + next.width / 2, next.y + next.height / 2])
+  expect(hit).toBe(true)
+  // Closed: the pages turn again.
+  await revision(page).click()
+  await page.keyboard.press('Escape')
+  await expect(view(page)).toBeHidden()
+  expect(await page.evaluate(() => window.__nvE2E.turnSpread(1))).toBe(true)
+  await expect.poll(spread).toBe(1)
+  // Continuous scroll (the pages overflow: a scrollbar where scrollbars take room, as in WebView2; none
+  // in headless browsers or with macOS overlay scrollbars): the width does not change either.
+  await page.evaluate(() => window.__nvE2E.setPageNavigation('scroll'))
+  await waitForLayout(page)
+  const main = page.getByRole('main', { name: 'Editor' })
+  await expect.poll(() => main.evaluate((m) => m.scrollHeight > m.clientHeight)).toBe(true)
+  const scrollWidth = await width()
+  await openOn(page, 1, 1)
+  expect(await width()).toBe(scrollWidth)
 })
 
 test('several versions: create, rename, switch by keyboard and pointer; focus keys and Flip', async ({ page }) => {

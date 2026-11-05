@@ -147,14 +147,15 @@ function selectMatch(tr: Transaction, m: MatchRange) {
   tr.setSelection(note ? NodeSelection.create(tr.doc, note[0]) : TextSelection.create(tr.doc, m.from, m.to)).scrollIntoView()
 }
 
-let beforeReveal: (() => void) | null = null
+let beforeReveal: ((el: Element | null) => boolean | void) | null = null
 
 /**
- * Hook run before the find panel scrolls the current match into view by its DOM position. A host
- * that lays the editor out (pagination) uses it to finish pending layout work first, so the match is
- * where it is painted. One hook; `null` removes it.
+ * Hook run before the find panel scrolls the current match (its highlight element, `el`) into view by
+ * its DOM position. A host that lays the editor out (pagination) uses it to finish pending layout work
+ * first, so the match is where it is painted; returning true means the host revealed it itself (Book
+ * mode turns to the match's spread) and the panel does not scroll. One hook; `null` removes it.
  */
-export function setFindRevealHook(hook: (() => void) | null): void {
+export function setFindRevealHook(hook: ((el: Element | null) => boolean | void) | null): void {
   beforeReveal = hook
 }
 
@@ -163,7 +164,7 @@ export function setFindRevealHook(hook: (() => void) | null): void {
  * is not the case while typing in the find field, so scroll the current highlight ourselves.
  */
 function revealCurrent(ed: Editor) {
-  beforeReveal?.()
+  if (beforeReveal?.(ed.view.dom.querySelector(`.${CURRENT_CLASS}`))) return
   const el = ed.view.dom.querySelector(`.${CURRENT_CLASS}`)
   if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center', inline: 'nearest' })
 }

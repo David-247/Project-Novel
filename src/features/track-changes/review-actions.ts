@@ -1,6 +1,7 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { NodeSelection, Selection, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
+import { revealPosition } from '@/features/pagination'
 import {
   acceptAll,
   acceptAllByAuthor,
@@ -33,32 +34,37 @@ export const CONFIRM_ABOVE = 50
 // ---- Reveal (page navigation) ---------------------------------------------------------------------
 
 /**
- * Brings document position `pos` of `view` into sight once the selection is set. Default: scroll the
- * pages so the position is in the middle of the editor region (both the spread and the single-page
- * view scroll). The composition root can swap it for the pagination slice's reveal (page-turn view).
+ * Brings document position `pos` of `view` into sight once the selection is set. Default: the
+ * pagination slice's revealPosition (Book mode turns to the spread where the change is painted,
+ * continuous scroll centres it in the editor region); with no paginated view mounted, scroll the
+ * nearest scroller so the position is in its middle. Replaceable (setChangeRevealer).
  */
 export type ChangeRevealer = (view: EditorView, pos: number) => void
 
-const scrollToMiddle: ChangeRevealer = (view, pos) => {
+const scrollToMiddle = (view: EditorView, pos: number): void => {
+  let scroller: HTMLElement | null = view.dom.parentElement
+  while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+  if (!scroller) return
+  try {
+    const c = view.coordsAtPos(Math.min(pos, view.state.doc.content.size), 1)
+    const r = scroller.getBoundingClientRect()
+    scroller.scrollTop += (c.top + c.bottom) / 2 - (r.top + r.height / 2)
+  } catch {
+    // No layout (tests): nothing to scroll.
+  }
+}
+
+const revealInPages: ChangeRevealer = (view, pos) => {
   requestAnimationFrame(() => {
     if ((view as unknown as { isDestroyed?: boolean }).isDestroyed) return
-    let scroller: HTMLElement | null = view.dom.parentElement
-    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
-    if (!scroller) return
-    try {
-      const c = view.coordsAtPos(Math.min(pos, view.state.doc.content.size), 1)
-      const r = scroller.getBoundingClientRect()
-      scroller.scrollTop += (c.top + c.bottom) / 2 - (r.top + r.height / 2)
-    } catch {
-      // No layout (tests): nothing to scroll.
-    }
+    if (!revealPosition(pos)) scrollToMiddle(view, pos)
   })
 }
 
-let revealer: ChangeRevealer = scrollToMiddle
-/** Replace how a change is brought into sight (null restores the scroll default). */
+let revealer: ChangeRevealer = revealInPages
+/** Replace how a change is brought into sight (null restores the default, revealInPages). */
 export function setChangeRevealer(fn: ChangeRevealer | null): void {
-  revealer = fn ?? scrollToMiddle
+  revealer = fn ?? revealInPages
 }
 
 // ---- Confirmation -----------------------------------------------------------------------------------

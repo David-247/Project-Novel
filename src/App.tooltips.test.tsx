@@ -56,7 +56,8 @@ describe('tooltip coverage (every control in the app has a registered, wired too
       ...Object.values(TOOLBAR_CONTROLS),
       ...Object.values(HISTORY_CONTROLS),
       ...Object.values(FIND_CONTROLS),
-      ...Object.values(PAGINATION_CONTROLS),
+      // (The page indicator button shows once pages are laid out; jsdom lays none out.)
+      ...Object.values(PAGINATION_CONTROLS).filter((m) => m.id !== PAGINATION_CONTROLS.pageIndicator.id),
     ]
     const surfaces = Object.values(SURFACE_CONTROLS).map((m) => m.id)
     expect(new Set(rendered)).toEqual(
@@ -96,6 +97,8 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'rewrite.next',
           'view.singlePage',
           'pagination.spreadView',
+          'view.bookNavigation',
+          'view.scrollNavigation',
           'pagination.zoomOut',
           'pagination.zoomIn',
           'view.fitSpread',

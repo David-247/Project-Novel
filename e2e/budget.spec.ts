@@ -14,3 +14,14 @@ test('perf budgets block in CI only on Windows Chromium, locally on both shippin
   expect(budgetBlocks(testInfo, 'darwin', false)).toBe(browserName === 'webkit')
   expect(budgetBlocks(testInfo, 'win32', false)).toBe(browserName === 'chromium')
 })
+
+// A CI-advisory measure (free runners miss it for runner reasons) never blocks in CI, on any pair, and
+// blocks locally exactly where an ordinary budget does.
+test('a CI-advisory budget reports in CI and blocks locally on the shipping pairs', ({ browserName }, testInfo) => {
+  const advisory = { ciAdvisory: true }
+  for (const os of ['win32', 'darwin'] as const) expect(budgetBlocks(testInfo, os, true, advisory)).toBe(false)
+  expect(budgetBlocks(testInfo, 'win32', false, advisory)).toBe(browserName === 'chromium')
+  expect(budgetBlocks(testInfo, 'darwin', false, advisory)).toBe(browserName === 'webkit')
+  // Without the flag nothing changes.
+  expect(budgetBlocks(testInfo, 'win32', true, {})).toBe(browserName === 'chromium')
+})

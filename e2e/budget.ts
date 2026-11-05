@@ -7,7 +7,15 @@ import { expect, type TestInfo } from '@playwright/test'
  * code, so there a macOS miss is a warning; run the perf specs on a real Mac to enforce them.
  * Wherever a budget does not block, the measurement still runs and is reported; a miss is a warning
  * (test annotation + console line), not a failure. Functional assertions are never routed through here.
+ *
+ * A measure the free CI runners keep missing for runner rather than app reasons is CI-advisory
+ * (`{ ciAdvisory: true }`): in CI it is reported, never blocking, on every pair; outside CI it blocks
+ * on the shipping pairs like any budget. Each use names the decision behind it.
  */
+export interface BudgetOptions {
+  /** Reported, not blocking, in CI (still blocking locally on the shipping pairs). */
+  ciAdvisory?: boolean
+}
 export type Engine = 'chromium' | 'webkit' | 'firefox'
 
 /** The project's browser engine, from its configuration (`use.browserName` / `defaultBrowserType`). */
@@ -27,24 +35,29 @@ export function isShippingPair(testInfo: TestInfo, platform: NodeJS.Platform = p
   return (platform === 'darwin' && engine === 'webkit') || (platform === 'win32' && engine === 'chromium')
 }
 
-/** Whether a budget miss fails the test here: a shipping pair, except macOS in CI (decision f040009b). */
+/**
+ * Whether a budget miss fails the test here: a shipping pair, except macOS in CI (decision f040009b)
+ * and CI-advisory measures in CI.
+ */
 export function budgetBlocks(
   testInfo: TestInfo,
   platform: NodeJS.Platform = process.platform,
   ci: boolean = !!process.env.CI,
+  opts: BudgetOptions = {},
 ): boolean {
+  if (ci && opts.ciAdvisory) return false
   return isShippingPair(testInfo, platform) && !(ci && platform === 'darwin')
 }
 
 /** Assert `value < limit` where budgets block (see budgetBlocks); elsewhere warn on a miss. Returns whether it was within budget. */
-export function budget(testInfo: TestInfo, name: string, value: number, limit: number): boolean {
+export function budget(testInfo: TestInfo, name: string, value: number, limit: number, opts: BudgetOptions = {}): boolean {
   const ok = value < limit
-  if (budgetBlocks(testInfo)) {
+  if (budgetBlocks(testInfo, process.platform, !!process.env.CI, opts)) {
     expect(value, `${name} (budget ${limit})`).toBeLessThan(limit)
     return ok
   }
   if (!ok) {
-    const description = `${name}: ${value} >= ${limit} on ${testInfo.project.name} / ${process.platform} (${isShippingPair(testInfo) ? 'macOS CI runner' : 'not a shipping pair'}: reported, not blocking)`
+    const description = `${name}: ${value} >= ${limit} on ${testInfo.project.name} / ${process.platform} (${opts.ciAdvisory && process.env.CI ? 'CI-advisory measure' : isShippingPair(testInfo) ? 'macOS CI runner' : 'not a shipping pair'}: reported, not blocking)`
     testInfo.annotations.push({ type: 'perf-budget-warning', description })
     console.warn(`[perf-budget-warning] ${description}`)
   }

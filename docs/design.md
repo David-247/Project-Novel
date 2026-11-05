@@ -323,13 +323,39 @@ The writing surface is now a desk with book pages on it (`src/features/paginatio
 - **Book points.** The page surface sets `--nv-pt` to a true point (96/72 px); zoom is a transform on
   top, so style sizes (`calc(N * var(--nv-pt))`) are exact at 100 % and line breaks never depend on zoom.
 - **Status bar page controls** sit at the trailing end, after the project actions: the page indicator
-  ("Pages 12–13 of 384", tabular figures), the spread toggle (an open-book icon, pressed = two pages),
+  ("Pages 12–13 of 384", tabular figures; since Phase 3 a ghost button that opens Go to Page, with
+  its tooltip and the Go to Page shortcut; the button keeps the status bar's container-query shortening),
+  the spread toggle (an open-book icon, pressed = two pages),
   zoom out, the zoom select (Fit spread / Fit width / 50–200 %) and zoom in. All are standard
   `IconButton` / `ToggleButton` / `Select` controls: 32 px targets, tooltips from the registry, keyboard
   reachable in the footer's tab order, existing contrast pairs.
 - **Fit spread is the default zoom**: the whole spread fits the window, like holding the book open.
   Narrow windows fall back to single pages (touch-tolerant; no hover-only actions). A press on a margin
   or the desk puts the caret on the nearest line of that page.
+
+### Navigation modes: Book and Continuous Scroll (Phase 3)
+
+The user asked for the pages to behave "like an actual book instead of a goofy Word doc". So the
+default navigation is **Book**: one spread (or one page) on the desk, centred, with no scrolling between
+spreads. **Continuous Scroll** (the Phase 2 view, unchanged) is the alternative. The choice is an app
+preference (`pageNavigation` in preferences.json, Settings > Page navigation, View > Book / Continuous
+Scroll), not a book setting.
+
+- **Turning pages.** Click or tap the blank desk right of the spread for the next one, left for the
+  previous one. A press on the pages still places the caret. One wheel or trackpad gesture (a swipe and
+  its momentum, horizontal too) turns one spread. Page Up / Page Down and Ctrl+Home / Ctrl+End (Cmd+Up /
+  Cmd+Down on macOS) also turn, as does Go to Page.
+- **Turn controls** sit in a 48 px lane on each side of the spread, at the middle of the window. They are
+  small paper tabs: `--page-bg` with a 1 px border of `--page-fg` mixed 80 % into `--page-bg` (3:1 or more against the desk on every surface), a `--page-fg` chevron, and the
+  page shadow, so they read as part of the book on every surface. They are 36 × 64 px targets, always
+  visible (never hover-only), with tooltips, and reachable by Tab. A press does not take the focus from the
+  manuscript. At the first or last spread the control is dimmed to 40 % and marked `aria-disabled`; it stays
+  focusable, so its tooltip still explains it. They use `--page-focus-ring` for focus.
+- **Turn transition.** A 160 ms ease-in (opacity 0.55 to 1, 14 px slide from the turning side). It is
+  skipped when motion is reduced (Settings > Motion, or the OS setting). There is no page curl.
+- **The caret drives the view.** When the selection moves off the spread (typing onto the next page,
+  arrows, Find, Next Comment, a footnote), the view turns to it. Turning by hand leaves the caret where it
+  is, and the next keystroke turns back to it, as in a word processor.
 
 ## Headers, footers and page numbers (Phase 2)
 
@@ -448,7 +474,7 @@ What Word does, and what we took from it:
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
 | Review | Re-write | Re-write Passage…, Re-writes…, Previous Re-write, Next Re-write (the group's own buttons: an icon on the first, short labels Re-write / Re-writes / Previous / Next; tooltips and the dropdown keep the full names) |
-| View | Views | Single Page, Two-Page Spread (T5: Book page-turn / Continuous scroll) |
+| View | Views | Single Page, Two-Page Spread; Book, Continuous Scroll (two radio pairs: page view, then navigation mode; Previous / Next Spread are the turn controls on the canvas edges and View menu items, not ribbon buttons) |
 | View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |
 | View | Show | Comments panel |
 | View | Window | Full Screen |

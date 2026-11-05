@@ -163,6 +163,18 @@ export function setCommandGate(fn: ((cmd: Command) => boolean) | null): () => vo
   }
 }
 
+/**
+ * Does the gate (if one is set) let `cmd` run? For a slice's own input handling that does what a
+ * command does without going through it (Book mode's wheel / desk / key page turns).
+ */
+export function commandGateAllows(cmd: Command): boolean {
+  try {
+    return !gate || gate(cmd)
+  } catch {
+    return false
+  }
+}
+
 export function isCommandEnabled(cmd: Command): boolean {
   try {
     if (gate && !gate(cmd)) return false
