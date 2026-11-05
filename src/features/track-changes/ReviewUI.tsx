@@ -169,24 +169,31 @@ export function ChangesIndicator() {
   const { count } = useChangeSummary()
   const on = useStore((s) => isTracking(s))
   if (!on && count === 0) return null
+  // Status bar rules (docs/design.md, "Ribbon" > Status bar): one row, never clipped. In a narrow bar
+  // (`statusbar` container) "No changes" hides below 640px and "12 changes" shortens to "12" (the
+  // accessible name and tooltip keep the full text).
   if (count === 0)
     return (
-      <StatusText tone="muted" data-testid="changes-indicator">
+      <StatusText tone="muted" data-testid="changes-indicator" className="shrink-0 @max-[640px]/statusbar:hidden">
         No changes
       </StatusText>
     )
-  const text = `${count.toLocaleString()} ${count === 1 ? 'change' : 'changes'}`
+  const noun = count === 1 ? 'change' : 'changes'
+  const text = `${count.toLocaleString()} ${noun}`
   return (
     <Tooltip controlId={C.changes.id}>
       <Button
         variant="ghost"
         data-control-id={C.changes.id}
         data-testid="changes-indicator"
-        className="tabular-nums whitespace-nowrap"
+        className="shrink-0 tabular-nums whitespace-nowrap"
         aria-label={`${text}. Go to the next change`}
         onClick={() => void nextChange()}
       >
-        {text}
+        <span>
+          {count.toLocaleString()}
+          <span className="@max-[640px]/statusbar:hidden"> {noun}</span>
+        </span>
       </Button>
     </Tooltip>
   )

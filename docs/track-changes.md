@@ -243,7 +243,13 @@ the focus in it), when the caret leaves the change, when the focus goes elsewher
 view changes to No Markup / Original. While it is closed nothing is computed for it per keystroke.
 
 **Status bar** (`ChangesIndicator`, next to `TrackChangesNotice`): "N changes" while tracking is on or
-changes exist (recounted 200 ms after edits pause); a button that runs Next Change.
+changes exist (recounted 200 ms after edits pause); a button that runs Next Change. In a narrow status
+bar (below 640px, the `statusbar` container query) it shows just the number ("12"; its name and tooltip keep
+the full text) and "No changes" hides.
+
+**Ribbon** (Review > Changes): Previous Change, Next Change, then Accept ▾ and Reject ▾ split buttons (the
+main half is Accept / Reject Change; the arrow lists and Move to Next, All Changes and All by Author ▸).
+See docs/design.md, "Ribbon".
 
 **Page navigation.** The default reveal scrolls the pages (both the spread and the single-page view).
 `setChangeRevealer(fn)` swaps it, e.g. for the page-turn view's reveal.

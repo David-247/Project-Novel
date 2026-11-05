@@ -502,7 +502,8 @@ focus to the button.
 (`@container/statusbar`) and its items shrink with container queries, lowest priority first: below 800px the
 no-project buttons (Save as project…, New project…, Open project…) show icons (their names stay); below 760px the
 page indicator shortens to "12 / 384" and below 560px it hides; below 640px zoom keeps only its menu (every level and
-the fit modes; spread is on the View tab) and "Backup available — Restore…" becomes "Restore…". The save status
+the fit modes; spread is on the View tab), "Backup available — Restore…" becomes "Restore…" and the tracked changes
+count ("12 changes", T7) shows just the number ("No changes" hides). The save status
 and warnings truncate (full text in the title). Hidden items are `display: none`, so they are out of the Tab order.
 
 **Tests**: `src/features/ribbon/layout.test.ts` (step order, hysteresis, stability),
@@ -513,7 +514,7 @@ from 1400 to 480 and back on all five tabs: one row, constant height, no canvas 
 through the group's menu, its collapsed button or More; keyboard access to collapsed groups and More; formatting from
 a dropdown keeps the selection; tab kept for the session; AA contrast on the four papers in light and dark at 1280,
 480 and 360, collapsed-group icons at 3:1, open group and More menus), `e2e/statusbar.spec.ts` (480/600/800 with and
-without a project: every visible control inside the footer, nothing hidden focusable), `e2e/toolbar.spec.ts`
+without a project, and with tracked changes: every visible control inside the footer, nothing hidden focusable), `e2e/toolbar.spec.ts`
 (control count, 32px targets).
 Screenshots: `scripts/capture-ribbon.mjs`.
 

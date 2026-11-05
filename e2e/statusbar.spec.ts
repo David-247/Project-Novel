@@ -83,3 +83,27 @@ test('a project open: page indicator shortens then hides, zoom keeps its menu', 
   // The save status truncates (full text on hover) rather than pushing the zoom menu out.
   await expect(saveStatus(page)).toHaveAttribute('title', /A rather long project title/)
 })
+
+test('tracked changes: the "N changes" count stays whole, as just the number when narrow', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 700 })
+  await launch(page)
+  const text = (s: string, marks?: unknown[]) => ({ type: 'text', text: s, ...(marks ? { marks } : {}) })
+  const ins = (id: string) => [{ type: 'insertion', attrs: { id, author: 'Ann', date: new Date().toISOString(), authorColor: null } }]
+  const content = Array.from({ length: 12 }, (_, i) => ({
+    type: 'paragraph',
+    content: [text(`Paragraph ${i + 1} of a short book. `.repeat(6)), text('added', ins(`c${i}`))],
+  }))
+  await seedProject(page, '/projects/A rather long project title with changes', 'A rather long project title with changes', { type: 'doc', content })
+  await openRecent(page, '/projects/A rather long project title with changes')
+  await expect(saveStatus(page)).toContainText('All changes saved')
+  await waitForLayout(page)
+  const count = page.getByTestId('changes-indicator')
+  await expect(count).toHaveText('12 changes')
+  await check(page, 'with changes')
+  // 480 (the last width of check): the number only; its name and tooltip still say what it is.
+  await expect(count).toBeVisible()
+  await expect(count).toHaveAccessibleName('12 changes. Go to the next change')
+  expect(await count.evaluate((el) => (el as HTMLElement).innerText.trim())).toBe('12')
+  await page.setViewportSize({ width: 800, height: 700 })
+  await expect.poll(() => count.evaluate((el) => (el as HTMLElement).innerText.trim())).toBe('12 changes')
+})
