@@ -13,6 +13,7 @@ import {
   setOriginalChangedHandler,
   setRewriteShortcutHandler,
   setSideBarClickHandler,
+  setStateStepsMirroredHandler,
 } from './anchor'
 import { cleanVersionName, newRewriteId, nextVersionName, passageDoc } from './model'
 
@@ -30,7 +31,7 @@ const store = () => useStore.getState()
 const actions = () => useStore.getState().rewriteActions
 
 let noticeSeq = 0
-const nextSeq = () => ++noticeSeq
+export const nextSeq = (): number => ++noticeSeq
 
 /** The open comparison view registers itself here (flush the revision being typed, focus a page). */
 export interface LiveView {
@@ -86,7 +87,7 @@ export function storeVersionDoc(rewriteId: string, versionId: string, doc: DocNo
 }
 
 /** Block JSON without attributes at their schema default: what manuscript.json would hold. */
-function compact(node: PMNode): DocNodeJSON {
+export function compact(node: PMNode): DocNodeJSON {
   const walk = (j: DocNodeJSON, n: PMNode): DocNodeJSON => {
     if (j.attrs) {
       const specs = (n.type.spec.attrs ?? {}) as Record<string, { default?: unknown }>
@@ -180,7 +181,8 @@ export function rewritePassage(): boolean {
 /** Open the comparison view on re-write `id` (its last viewed version, or `versionId`). */
 export function openRewrite(id: string, versionId?: string): boolean {
   const r = getRewrite(id)
-  if (!r) return false
+  // A resolved re-write is reopened through its history step (choice.ts, reopenRewrite).
+  if (!r || r.status !== 'open') return false
   const vid = versionId && r.versions.some((v) => v.id === versionId) ? versionId : (r.currentVersionId ?? r.versions[r.versions.length - 1].id)
   if (store().rewrite.openId === id) {
     selectVersion(vid)
@@ -315,6 +317,13 @@ export function goToPassage(id: string): boolean {
 /** Wire the manuscript's anchor plugin to these actions (once, at start). Returns unwire. */
 export function wireRewriteAnchors(): () => void {
   setOriginalChangedHandler(markOriginalChanged)
+  // Keep / Discard / Reopen (and their undo / redo) changed the re-writes: rewrites.json is unsaved.
+  setStateStepsMirroredHandler(() => {
+    sideFileChanged()
+    // The open view's re-write was resolved or removed (an undo, a redo): back to the manuscript.
+    const openId = store().rewrite.openId
+    if (openId && getRewrite(openId)?.status !== 'open') closeRewrite()
+  })
   setSideBarClickHandler((anchor) => {
     const r = store().rewrite.rewrites.find((x) => x.anchor === anchor && x.status === 'open')
     if (r) openRewrite(r.id)
@@ -325,6 +334,7 @@ export function wireRewriteAnchors(): () => void {
   })
   return () => {
     setOriginalChangedHandler(null)
+    setStateStepsMirroredHandler(null)
     setSideBarClickHandler(null)
     setRewriteShortcutHandler(null)
   }

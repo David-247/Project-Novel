@@ -23,7 +23,10 @@ const isDate = (v: unknown): v is string => typeof v === 'string' && !Number.isN
 const isPassageDoc = (v: unknown): v is DocNodeJSON =>
   isObject(v) && v.type === 'doc' && Array.isArray(v.content) && v.content.length > 0 && v.content.every((n) => isObject(n) && typeof n.type === 'string')
 
-const RECORD_KEYS = ['id', 'createdAt', 'anchor', 'original', 'versions', 'currentVersionId', 'status', 'originalChanged'] as const
+const RECORD_KEYS = ['id', 'createdAt', 'anchor', 'original', 'versions', 'currentVersionId', 'status', 'originalChanged', 'choice', 'resolvedAt'] as const
+
+/** Keep Original's choice value (otherwise a choice is the kept version's id). */
+export const CHOICE_ORIGINAL = 'original'
 const VERSION_KEYS = ['id', 'name', 'doc', 'updatedAt'] as const
 
 function extraOf(raw: Record<string, unknown>, known: readonly string[]): Record<string, unknown> | undefined {
@@ -63,6 +66,9 @@ export function parseRewrite(raw: unknown): RewriteRecord | null {
     status: raw.status === 'open' ? 'open' : 'resolved',
     ...(raw.status !== 'open' && raw.status !== 'resolved' ? { unknownStatus: raw.status } : {}),
     ...(raw.originalChanged === true ? { originalChanged: true } : {}),
+    // The choice of a resolved re-write: Keep Original, or a version that still exists.
+    ...(raw.status !== 'open' && (raw.choice === CHOICE_ORIGINAL || (typeof raw.choice === 'string' && ids.has(raw.choice))) ? { choice: raw.choice as string } : {}),
+    ...(raw.status !== 'open' && isDate(raw.resolvedAt) ? { resolvedAt: raw.resolvedAt } : {}),
     ...(extra ? { extra } : {}),
   }
 }
@@ -113,6 +119,8 @@ export function serializeRewrite(r: RewriteRecord): Record<string, unknown> {
     // A status this Novel did not know is written back as read, until a status is set (withStatus).
     status: r.unknownStatus !== undefined ? r.unknownStatus : r.status,
     ...(r.originalChanged ? { originalChanged: true } : {}),
+    ...(r.choice ? { choice: r.choice } : {}),
+    ...(r.resolvedAt ? { resolvedAt: r.resolvedAt } : {}),
   }
 }
 

@@ -41,6 +41,13 @@ export interface RewriteRecord {
   unknownStatus?: unknown
   /** The passage was changed in the manuscript (Replace All, accept / reject, undo) after the snapshot. */
   originalChanged?: boolean
+  /**
+   * How a resolved re-write was resolved: 'original' (Keep Original) or the id of the version kept
+   * (Keep This Version). Absent while open.
+   */
+  choice?: string
+  /** ISO 8601 time of the choice. Absent while open. */
+  resolvedAt?: string
   extra?: Record<string, unknown>
 }
 
@@ -51,6 +58,8 @@ export type RewriteNotice =
   | { kind: 'span'; seq: number }
   | { kind: 'missing'; id?: string; seq: number }
   | { kind: 'split'; id?: string; seq: number }
+  /** Reopen: the kept text of a resolved re-write was not found in the manuscript. */
+  | { kind: 'notFound'; seq: number }
 
 export interface RewriteSlice {
   rewrite: {
