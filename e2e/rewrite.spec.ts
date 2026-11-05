@@ -210,9 +210,12 @@ test('the ribbon: Review > Re-write opens it; in the view its buttons follow the
   // Undo in the quick access bar undoes in the revision.
   await ctl(ribbon, 'history.undo').click()
   await expect(revision(page).locator('strong')).toHaveCount(0)
-  // Closed: the controls are back on the manuscript.
-  await page.keyboard.press('Escape')
-  await expect(view(page)).toBeHidden()
+  // Closed: the controls are back on the manuscript. (The pointer rests on Undo: on a slow runner its
+  // tooltip can be up, and the first Escape closes the tooltip.)
+  await expect(async () => {
+    await page.keyboard.press('Escape')
+    await expect(view(page)).toBeHidden({ timeout: 1000 })
+  }).toPass({ timeout: 10_000 })
   await expect(ctl(ribbon, 'find.open')).toBeEnabled()
   await expect(ctl(ribbon, 'comment.new')).toBeEnabled()
 })
