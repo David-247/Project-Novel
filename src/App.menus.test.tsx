@@ -135,7 +135,8 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
       await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     }
     expect(items).toBeGreaterThan(50)
-  })
+    // Opens ~20 menus and audits the whole app each time: ~2.5 s locally, over 5 s on a loaded CI runner.
+  }, 20_000)
 
   it('checked and enabled state is live: Bold in bold text, the current paper, Undo with history', async () => {
     await renderApp()
