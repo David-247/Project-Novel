@@ -575,6 +575,8 @@ test('page break node: the next block starts a new page, and the break takes no 
   expect(l.pages[1].startsBlockType).toBe('paragraph')
   // The page break atom closes page 1 with zero height; the paragraph after it is painted on page 2.
   expect(await editor(page).locator('[data-page-break]').evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(0)
+  // (Book mode: page 2 is on the next spread; show it rather than rely on the caret follow's timing.)
+  await showPage(page, 1)
   const after = (await editor(page).locator('p', { hasText: 'After the break' }).boundingBox())!
   const f1 = (await frame(page, 1).boundingBox())!
   expect(after.x).toBeGreaterThan(f1.x)
