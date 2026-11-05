@@ -91,6 +91,24 @@ describe('shortcut dispatcher and the native menu (one press, one run)', () => {
     expect(runs['file.save']).toBe(1)
   })
 
+  it('Review commands (Track Changes, New Comment) do not act from another field or behind a dialog', () => {
+    command('review.track', 'Mod-Shift-e', { id: 'review', group: 'tracking', order: 1 })
+    field.focus()
+    press(field, 'E', { shiftKey: true })
+    expect(runFromNativeMenu('review.track', manuscript)).toBe(false)
+    expect(runs['review.track']).toBe(0)
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    const button = document.createElement('button')
+    dialog.append(button)
+    document.body.append(dialog)
+    press(button, 'E', { shiftKey: true })
+    expect(runs['review.track']).toBe(0)
+    // From the manuscript it runs.
+    press(manuscript, 'E', { shiftKey: true })
+    expect(runs['review.track']).toBe(1)
+  })
+
   it('nativeShortcut keys are left to the webview and not remembered', () => {
     const e = press(manuscript, 'c')
     expect(e.defaultPrevented).toBe(false)

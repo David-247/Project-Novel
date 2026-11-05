@@ -7,7 +7,7 @@ import { getCommand, getCommands, isCommandEnabled, type Command } from './regis
  * - Bubble phase, after every app handler: a key the editor's own keymap already handled (Mod-b in
  *   the manuscript, which then calls preventDefault) is left alone, so nothing runs twice.
  * - `nativeShortcut` commands (Cut, Copy, Paste, ...) are never dispatched: the webview does them.
- * - Text commands (Edit history/clipboard, Insert, Format) do not reach into the manuscript while
+ * - Text commands (Edit history/clipboard, Insert, Format, Review) do not reach into the manuscript while
  *   another text field or a modal dialog has focus (Mod-z there undoes the field, not the book), nor
  *   while an open in-app menu has focus.
  * - A disabled command leaves the key to the browser.
@@ -41,7 +41,8 @@ function remember(cmd: Command) {
 function isTextCommand(cmd: Command): boolean {
   const m = cmd.menu
   if (!m) return false
-  return m.id === 'insert' || m.id === 'format' || (m.id === 'edit' && (m.group === 'history' || m.group === 'clipboard'))
+  // Review (comments, Track Changes) acts on the manuscript too: never behind a dialog or from another field.
+  return m.id === 'insert' || m.id === 'format' || m.id === 'review' || (m.id === 'edit' && (m.group === 'history' || m.group === 'clipboard'))
 }
 
 const isHistoryCommand = (cmd: Command) => cmd.menu?.id === 'edit' && cmd.menu.group === 'history'

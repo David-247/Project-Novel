@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cancelDraft, currentAuthor } from '@/features/comments'
+import { currentTrackAuthor } from '@/features/track-changes'
 import { getEditor, setDocJSON } from '@/features/editor'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
 import { buildMenuModel, getCommands, shortcutKey, type MenuNode } from '@/shared/commands'
@@ -102,7 +103,8 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
     ])
     expect(names(model[2].children)).toContain('Comments Panel')
     expect(names(model[3].children)).toEqual(['Chapter Break', 'Page Break', 'Scene Break', '—', 'Footnote', 'Comment'])
-    expect(names(model[5].children)).toEqual(['New Comment', '—', 'Next Comment', 'Previous Comment', '—', 'Show Resolved Comments'])
+    expect(names(model[2].children)).toContain('Markup ▸')
+    expect(names(model[5].children)).toEqual(['Track Changes', '—', 'New Comment', '—', 'Next Comment', 'Previous Comment', '—', 'Show Resolved Comments'])
     expect(names(model[6].children)).toEqual(['Keyboard Shortcuts', 'Project Folder Format', '—', 'About Novel'])
   })
 
@@ -151,6 +153,61 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
     expect(cmd('book.surface.dark').isChecked!()).toBe(true)
     expect(cmd('book.surface.book').isChecked!()).toBe(false)
     act(() => useStore.getState().bookActions.setSurface('auto'))
+  })
+
+  it('track changes commands: Mod-Shift-e is Track Changes, Mod-e is Align Center; state from the store', async () => {
+    await renderApp()
+    const cmd = (id: string) => getCommands().find((c) => c.id === id)!
+    expect(cmd('review.track').shortcut).toBe('Mod-Shift-e')
+    expect(cmd('review.track').menu?.id).toBe('review')
+    expect(cmd('toolbar.alignCenter').shortcut).toBe('Mod-e')
+    expect(getTooltipCopy('toolbar.alignCenter')!.shortcut).toBe('Mod-e')
+    expect(cmd('review.track').isChecked!()).toBe(false)
+    await waitFor(() => expect(useStore.getState().preferences.loaded).toBe(true))
+    act(() => useStore.getState().preferencesActions.load({ authorName: 'Ada Lovelace' }))
+    act(() => cmd('review.track').run())
+    expect(useStore.getState().book.trackChanges).toBe(true)
+    expect(cmd('review.track').isChecked!()).toBe(true)
+    expect(currentTrackAuthor()).toEqual({ name: 'Ada Lovelace', color: null })
+    act(() => cmd('review.track').run())
+    expect(cmd('review.track').isChecked!()).toBe(false)
+    for (const v of ['simple', 'none', 'original', 'all'] as const) {
+      act(() => cmd(`review.markup.${v}`).run())
+      expect(useStore.getState().trackChanges.markupView).toBe(v)
+      expect(['all', 'simple', 'none', 'original'].filter((o) => cmd(`review.markup.${o}`).isChecked!())).toEqual([v])
+    }
+  })
+
+  it('switching Track Changes on with no author name asks the one-time question; tracked changes say "Unknown author" without one', async () => {
+    await renderApp()
+    await waitFor(() => expect(useStore.getState().preferences.loaded).toBe(true))
+    act(() => useStore.getState().preferencesActions.load({ authorName: '' }))
+    expect(currentTrackAuthor().name).toBe('Unknown author')
+    act(() => getCommands().find((c) => c.id === 'review.track')!.run())
+    const field = await screen.findByRole('textbox', { name: 'Your name' })
+    fireEvent.change(field, { target: { value: 'Grace Hopper' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
+    await waitFor(() => expect(currentTrackAuthor().name).toBe('Grace Hopper'))
+    // Off and on again: asked once only.
+    act(() => getCommands().find((c) => c.id === 'review.track')!.run())
+    act(() => getCommands().find((c) => c.id === 'review.track')!.run())
+    expect(screen.queryByRole('textbox', { name: 'Your name' })).toBeNull()
+    act(() => useStore.getState().bookActions.setTrackChanges(false))
+  })
+
+  it('the status bar shows the Track Changes notice and the side-file warning together', async () => {
+    await renderApp()
+    act(() => {
+      useStore.getState().projectActions.setSideFileWarning('comments.json is damaged.')
+      useStore.getState().trackChangesActions.setNotice('Track Changes could not record your last edit.')
+    })
+    const bar = screen.getByRole('contentinfo', { name: 'Status bar' })
+    expect(bar.querySelector('[data-testid="side-file-warning"]')).toHaveTextContent('comments.json is damaged.')
+    expect(bar.querySelector('[data-testid="track-changes-notice"]')).toHaveTextContent('Track Changes could not record')
+    act(() => {
+      useStore.getState().projectActions.setSideFileWarning(null)
+      useStore.getState().trackChangesActions.setNotice(null)
+    })
   })
 
   it('comment commands: enabled and checked state from the comments slice', async () => {

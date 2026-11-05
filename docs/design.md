@@ -364,7 +364,7 @@ an optional shortcut (ProseMirror syntax, the only place a shortcut is declared)
 (`{ id, group, order, submenu? }`), live `isEnabled()` / `isChecked()` and `run()`. Slices register their commands
 through their public index (`registerStorageCommands`, `registerEditorCommands`, `registerPaginationCommands`,
 `registerSurfaceCommands`, `registerBookSettingsCommands`, `registerHeaderFooterCommands`,
-`registerFootnoteCommands`, `registerSettingsCommands`, `registerCommentsCommands`; the menu slice adds its own) and the composition root calls them. Ids reuse the matching
+`registerFootnoteCommands`, `registerSettingsCommands`, `registerCommentsCommands`, `registerTrackChangesCommands`; the menu slice adds its own) and the composition root calls them. Ids reuse the matching
 control's `data-control-id`, so a menu item, its toolbar button and its tooltip share one copy. A duplicate id or
 shortcut, or a missing description, throws in development; `App.menus.test.tsx` checks the whole app's registry
 (one-line descriptions of at most 100 characters, no shortcut twice, the same shortcut on a command and on its
@@ -384,14 +384,14 @@ control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
 - **Structure**: File (New Project…, Open Project…, Open Recent ▸, Close Project | Save, Save a Copy… | Book
   Details…, Page Setup ▸ | Settings… | Quit Novel; on macOS Settings… and Quit are in the Novel menu), Edit (Undo, Redo | Cut, Copy, Paste, Paste as Plain Text, Select All | Find…,
   Replace… | Go to Page…), View (Single Page, Two-Page Spread | Zoom In, Zoom Out, Fit Spread, Fit Width, Actual
-  Size | Paper ▸ | Comments Panel | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote,
+  Size | Paper ▸ | Markup ▸ (All Markup, Simple Markup, No Markup, Original) | Comments Panel | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote,
   Comment), Format (Bold, Italic,
   Underline | Font ▸ (System Default and the installed families, as in the picker), Font Size ▸ | Paragraph Style ▸, Alignment ▸, Lists ▸ | Clear Formatting | Modify Style…, Manage Styles… |
-  Headers & Page Numbers…, Footnote Options…), Review (New Comment | Next Comment, Previous Comment | Show Resolved
+  Headers & Page Numbers…, Footnote Options…), Review (Track Changes | New Comment | Next Comment, Previous Comment | Show Resolved
   Comments), Help (Keyboard Shortcuts, Project Folder Format | About Novel).
 - **Keyboard** (one window listener, `installCommandShortcuts`): bubble phase, so a key the editor's keymap already
   handled is not run again; Cut/Copy/Paste keep the webview's own handling (`nativeShortcut`); text commands (Edit
-  history and clipboard, Insert, Format) do not act on the manuscript while another text field or a dialog has
+  history and clipboard, Insert, Format, Review) do not act on the manuscript while another text field or a dialog has
   focus. On macOS, a native menu event right after the same key press in the webview is ignored (`wasJustPressed`).
 - **In-app bar**: Alt alone or F10 moves focus to File (again: back to the text), Alt+underlined letter opens a menu
   (not on macOS, where Option types characters), arrows move between menus and items, Enter/Space choose, Escape

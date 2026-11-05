@@ -232,8 +232,13 @@ mark), so a tracked Replace All costs about twice an untracked one.
 From `@/features/track-changes`: `toggleTrackChanges(editor?)`, `setTracking(on)`, `isTracking(state?)`,
 `setMarkupView(view)`, `getMarkupView(state?)`. Toolbar Review group: Track Changes toggle
 (`review.track`, Mod-Shift-e, pressed while recording) and the Markup picker (`review.markup`, items
-`review.markup.all|simple|none|original`). The command registry and menus are wired by the composition
-root. Align center moved from Mod-Shift-e to Mod-e (as in Word).
+`review.markup.all|simple|none|original`). Menus (command registry, `registerTrackChangesCommands`):
+Review > Track Changes (check, Mod-Shift-e) and View > Markup > All Markup / Simple Markup / No Markup /
+Original (radio checks; View only, as the registry places a command in one menu). Align center moved from
+Mod-Shift-e to Mod-e (as in Word). The author of new changes is the Settings author
+(`setTrackChangesAuthorSource`; "Unknown author" without a name). Switching recording on with no name
+known asks the one-time name question (`setOnTrackingSwitchedOn`); the recorder does not wait for it.
+Comment marks and comment thread steps are never recorded as changes.
 
 ## Tests
 

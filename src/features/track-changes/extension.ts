@@ -222,6 +222,24 @@ export function skipDeleted(state: EditorState, dir: -1 | 1): number | null {
  * Backspace / Delete past deleted text, final-text copy, and the hidden-block decorations of the
  * markup views. See docs/track-changes.md.
  */
+const DEFAULT_AUTHOR: Author = { name: 'Author' }
+let authorSource: () => Author = () => DEFAULT_AUTHOR
+
+/** The author of new changes (default option `getAuthor`): the injected source, else "Author". */
+export function currentTrackAuthor(): Author {
+  try {
+    const a = authorSource()
+    return a && typeof a.name === 'string' && a.name.trim() ? a : DEFAULT_AUTHOR
+  } catch {
+    return DEFAULT_AUTHOR
+  }
+}
+
+/** Replace the author source (the composition root wires it to the settings slice); null resets. */
+export function setTrackChangesAuthorSource(fn: (() => Author) | null): void {
+  authorSource = fn ?? (() => DEFAULT_AUTHOR)
+}
+
 export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesStorage>({
   name: 'trackChanges',
   // Before the core keymap (Backspace / Delete) and TextAlign (whose Mod-Shift-e moved to Mod-e).
@@ -229,7 +247,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
 
   addOptions() {
     return {
-      getAuthor: () => ({ name: 'Author' }),
+      getAuthor: () => currentTrackAuthor(),
       isEnabled: () => useStore.getState().book.trackChanges === true,
     }
   },
