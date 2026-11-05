@@ -193,18 +193,45 @@ describe('project side files', () => {
     expect(copies.map((k) => backend.files.get(k))).toEqual([newer])
   })
 
-  it('when the copy of a guarded file cannot be kept, the save fails and writes nothing', async () => {
+  it('when the copy of a guarded file cannot be kept, only that file is skipped: the manuscript is saved, the change stays unsaved', async () => {
     await createProject()
     backend.files.set(NOTES, 'damaged')
     await launch()
     await reopen()
-    const before = backend.files.get(MANUSCRIPT)
     side.change(['x'])
+    editor.update(textDoc('text to keep'))
     backend.failWrite = (p) => (p.includes('notes.damaged-') ? { kind: 'permission_denied', message: 'denied' } : null)
-    expect(await saveProject({ silent: true })).toBe(false)
-    expect(useStore.getState().project.saveError).toMatch(/could not keep a copy of the existing notes\.json/)
+    expect(await saveProject({ silent: true })).toBe(true)
+    expect(JSON.parse(backend.files.get(MANUSCRIPT)!)).toEqual(textDoc('text to keep'))
     expect(backend.files.get(NOTES)).toBe('damaged')
-    expect(backend.files.get(MANUSCRIPT)).toBe(before)
+    expect(warning()).toMatch(/Your changes to notes.json were not saved/)
+    expect(editor.isDirty()).toBe(true)
+    // The copy works again: the next save copies the original aside and writes the file.
+    backend.failWrite = null
+    expect(await saveProject()).toBe(true)
+    expect(onDisk().items).toEqual(['x'])
+    expect(editor.isDirty()).toBe(false)
+    expect(warning()).toBeNull()
+  })
+
+  it('a side file that stays unreadable never blocks saving the manuscript', async () => {
+    await createProject()
+    backend.files.set(NOTES, JSON.stringify({ version: 1, items: ['on disk'] }))
+    backend.failRead = (p) => (p === NOTES ? { kind: 'permission_denied', message: 'locked' } : null)
+    await launch()
+    backend.failRead = (p) => (p === NOTES ? { kind: 'permission_denied', message: 'locked' } : null)
+    await reopen()
+    expect(warning()).toMatch(/notes.json is damaged or could not be read/)
+    side.change(['new'])
+    for (const text of ['first save', 'second save']) {
+      editor.update(textDoc(text))
+      expect(await saveProject({ silent: true })).toBe(true)
+      expect(JSON.parse(backend.files.get(MANUSCRIPT)!)).toEqual(textDoc(text))
+      expect(warning()).toMatch(/were not saved/)
+      expect(editor.isDirty()).toBe(true)
+    }
+    expect(JSON.parse(backend.files.get(NOTES)!).items).toEqual(['on disk'])
+    backend.failRead = null
   })
 
   it('autosave snapshots the side file; a side-only change is offered (not judged identical) and restored', async () => {

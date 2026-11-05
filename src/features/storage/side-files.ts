@@ -166,23 +166,38 @@ export function asideName(name: string, kind: 'damaged' | 'newer'): string {
 
 /**
  * The side files to write with a save of `folder`, in the batch before the manuscript. A guarded
- * file is left out until the user changed it; then its original is copied aside first (a failed copy
- * throws: the save fails and nothing is written). A missing file is created only when not empty.
- * Call under the write lock; call `sideFilesSaved` after the batch succeeded.
+ * file is left out until the user changed it; then its original is copied aside first. When that
+ * copy cannot be kept (the file stays unreadable, the folder refuses the copy), only that side file is
+ * left out (`skipped`): the manuscript and the other files are still saved, like a book.json whose
+ * copy failed, and the caller keeps the project unsaved. A missing file is created only when not
+ * empty. Call under the write lock; call `sideFilesSaved` after the batch succeeded.
  */
-export async function sideFilesForSave(folder: string): Promise<{ files: BatchFile[]; written: string[] }> {
+export async function sideFilesForSave(folder: string): Promise<{ files: BatchFile[]; written: string[]; skipped: string[] }> {
   const files: BatchFile[] = []
   const written: string[] = []
+  const skipped: string[] = []
   for (const entry of entries.values()) {
     const { file, guard } = entry
     if (guard && file.getVersion() === guard.loadedVersion) continue
     const { data, empty } = file.serialize()
     if (!entry.present && empty) continue
-    if (guard) await keepGuarded(folder, file.name, guard)
+    if (guard && !(await keepGuarded(folder, file.name, guard))) {
+      skipped.push(file.name)
+      continue
+    }
     files.push({ path: joinPath(folder, file.name), contents: serialize(data), label: file.name })
     written.push(file.name)
   }
-  return { files, written }
+  return { files, written, skipped }
+}
+
+/** Status-bar text when a guarded side file could not be copied aside (it was then not replaced). */
+export function sideFileCopyFailedText(names: readonly string[]): string {
+  const list = names.join(', ')
+  return (
+    `Your changes to ${list} were not saved: Novel could not keep a copy of the existing file before replacing it, ` +
+    `so it was left as it is. The manuscript was saved. Saving again will retry.`
+  )
 }
 
 /** Save As into a new folder: every side file that is not empty (nothing is on disk there yet). */
@@ -213,26 +228,28 @@ export function hasGuardedSideFile(): boolean {
   return [...entries.values()].some((e) => e.guard !== null)
 }
 
-async function keepGuarded(folder: string, name: string, guard: SideGuard): Promise<void> {
-  let original = guard.original
-  if (original === null) {
-    try {
-      original = await readTextFile(joinPath(folder, name), name)
-    } catch (e) {
-      if (e instanceof ProjectError && e.code === 'missing-file') return
-      throw e
-    }
-  }
+/**
+ * Copy a guarded side file aside before its first overwrite. Never throws: false when no copy could
+ * be kept (the file must then not be replaced). A file that is gone has nothing to keep (true).
+ */
+async function keepGuarded(folder: string, name: string, guard: SideGuard): Promise<boolean> {
   try {
+    let original = guard.original
+    if (original === null) {
+      try {
+        original = await readTextFile(joinPath(folder, name), name)
+      } catch (e) {
+        if (e instanceof ProjectError && e.code === 'missing-file') return true
+        throw e
+      }
+    }
     await writeFileAtomic(joinPath(folder, asideName(name, guard.kind)), original, `${name} copy`)
+    guard.original = original
+    return true
   } catch (e) {
-    throw new ProjectError(
-      'io',
-      `Novel could not keep a copy of the existing ${name} before replacing it, so nothing was saved. Saving again will retry.`,
-      { cause: e },
-    )
+    console.warn(`Keeping a copy of the guarded ${name} failed; it is not replaced:`, e)
+    return false
   }
-  guard.original = original
 }
 
 /** Side-file contents for a crash-recovery snapshot: every non-empty file, or one on disk. */

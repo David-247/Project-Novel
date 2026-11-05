@@ -248,8 +248,10 @@ re-write feature adds `rewrites.json`). All side files follow the same rules, im
 - **Damaged, unreadable or newer files are guarded** like book.json: the content is treated as empty (damaged,
   unreadable) or used as far as this Novel understands it (a `version` above the one it knows), the status bar
   says so, and saves leave the file alone until the user changes its content. Just before the first overwrite the
-  original is copied to `<name>.damaged-<timestamp>.json` or `<name>.newer-<timestamp>.json`; if that copy cannot be
-  written the save fails and nothing is written. Novel never deletes these copies. The rewritten file is at the
+  original is copied to `<name>.damaged-<timestamp>.json` or `<name>.newer-<timestamp>.json`. If that copy cannot be
+  written (the file stays unreadable, or the folder refuses the copy), only that side file is left out, as with
+  book.json: the manuscript and the other files are saved, the side-file changes stay unsaved (prompts and autosave
+  snapshots keep them), the status bar says so, and the next save retries. Novel never deletes these copies. The rewritten file is at the
   current version.
 - New Project refuses a folder that holds a side file without a project.json, like the other leftovers.
 
@@ -361,7 +363,8 @@ staged (temp file written and fsynced, as above); a failure there (disk full, pe
 and changes nothing. Only then are the temp files renamed over their targets, back to back, side files first and
 manuscript.json last. A crash or failure inside that rename phase (a few milliseconds) can leave a newer side file
 beside the older manuscript; each file on its own is still wholly old or wholly new, and a thread whose anchor is
-not in the manuscript is simply hidden. Guarded side files are copied aside before the batch.
+not in the manuscript is simply hidden. Guarded side files are copied aside before the batch (a side file whose copy
+fails is left out of it; see "Side files").
 
 Save order: `manuscript.json` with its side files, then `book.json`, then `project.json` (`updatedAt`), then a `revisions` row. After a save that leaves
 the document clean, `.recovery/manuscript.json` is deleted.

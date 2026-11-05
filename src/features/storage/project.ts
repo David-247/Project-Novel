@@ -50,6 +50,7 @@ import {
   sideFilesForNewProject,
   sideFilesForSave,
   sideFilesKey,
+  sideFileCopyFailedText,
   sideFilesSaved,
   writeSideFilesOnClose,
 } from './side-files'
@@ -486,7 +487,9 @@ async function writeProject(
       const side = await sideFilesForSave(folder)
       await writeFilesAtomic([...side.files, { path: joinPath(folder, MANUSCRIPT_FILE), contents: text, label: MANUSCRIPT_FILE }])
       sideFilesSaved(side.written)
-      if (side.written.length && !hasGuardedSideFile()) actions().setSideFileWarning(null)
+      // A guarded side file whose copy could not be kept was left out: its changes stay unsaved.
+      if (side.skipped.length) actions().setSideFileWarning(sideFileCopyFailedText(side.skipped))
+      else if (side.written.length && !hasGuardedSideFile()) actions().setSideFileWarning(null)
       // An unreadable / damaged / newer book.json is only replaced once the user changed a book setting
       // other than view / surface, and only after a copy of it was kept.
       let bookSaved = true
@@ -505,7 +508,9 @@ async function writeProject(
       const updated: ProjectMeta = { ...base, updatedAt: new Date().toISOString() }
       await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
       if (currentMeta === base) currentMeta = updated
-      p.markClean(version)
+      // Side-file changes are document steps (comment threads): with a side file left out, the manuscript
+      // stays unsaved so prompts and autosave snapshots keep those changes, and the next save retries.
+      if (!side.skipped.length) p.markClean(version)
       // Book settings that could not be written stay unsaved (prompts, autosave snapshots keep them).
       if (bookSaved) bookActions().markBookClean(bookVersion)
       // A clean save makes any crash-recovery snapshot obsolete.

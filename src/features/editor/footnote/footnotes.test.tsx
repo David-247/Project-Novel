@@ -200,7 +200,7 @@ describe('footnote editor (nested view, unified undo)', () => {
     const inner = activeFootnoteView()!
     const paste = (s: Slice) => {
       let out = s
-      inner.someProp('transformPasted', (f) => void (out = f(out, inner)))
+      inner.someProp('transformPasted', (f) => void (out = f(out, inner, false)))
       let marked = false
       out.content.descendants((n) => void (marked ||= n.marks.some((m) => m.type.name === 'comment' && m.attrs.id === id)))
       return marked
