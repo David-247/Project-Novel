@@ -96,6 +96,11 @@ export async function clickBlockStart(page: Page, block: Locator): Promise<void>
       return { x: rc.left + Math.min(2, rc.width / 2), y: rc.top + rc.height / 2 }
     })
   const main = page.getByRole('main', { name: 'Editor' })
+  // Book mode (the default) shows one spread: turn to the block's spread first.
+  if (await isBookMode(page)) {
+    await block.evaluate((el) => window.__nvE2E.revealElement(el))
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
+  }
   const box = (await main.boundingBox())!
   let p = await point()
   if (p.y < box.y + 40 || p.y > box.y + box.height - 40) {
@@ -105,6 +110,20 @@ export async function clickBlockStart(page: Page, block: Locator): Promise<void>
   }
   await page.mouse.click(p.x, p.y)
   await page.evaluate(() => window.__nvE2E?.syncSelection())
+}
+
+/** The writing view is in Book mode (page turns; the default): one spread shown, no scrolling between spreads. */
+export async function isBookMode(page: Page): Promise<boolean> {
+  return page.evaluate(() => !!document.querySelector('.nv-desk[data-navigation="book"]'))
+}
+
+/**
+ * Continuous scroll (the Phase 2 view) for a spec that scrolls through the pages: set the app
+ * preference, as Settings > Page navigation would.
+ */
+export async function chooseScrollNavigation(page: Page): Promise<void> {
+  await page.evaluate(() => window.__nvE2E.setPageNavigation('scroll'))
+  await expect(page.locator('.nv-desk[data-navigation="scroll"]')).toBeAttached()
 }
 
 /** Wait until the pagination engine has laid out the current document (no reflow pending) and painted. */

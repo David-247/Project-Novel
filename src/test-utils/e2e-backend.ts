@@ -20,7 +20,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getDocJSON, getEditor, getFootnotes, setDocJSON } from '@/features/editor'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
-import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
+import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition } from '@/features/pagination'
 import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
 import { commentsDebug } from '@/features/comments'
@@ -214,6 +214,19 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     /** Book settings without the settings UI (owned by the book settings ticket). */
     setTrimSize: (id: string) => useStore.getState().bookActions.setTrimSize(id),
     setBookView: (view: 'spread' | 'single') => useStore.getState().bookActions.setView(view),
+    /** Page navigation (app preference): Book (page turns, the default) or continuous scroll. */
+    setPageNavigation: (mode: 'book' | 'scroll') => useStore.getState().preferencesActions.set('pageNavigation', mode),
+    pageNavigation: () => useStore.getState().preferences.pageNavigation,
+    /** Bring an editor element's start into view (Book mode turns to its spread). */
+    revealElement: (el: Element) => {
+      const ed = getEditor()
+      if (!ed) return false
+      try {
+        return revealPosition(ed.view.posAtDOM(el, 0))
+      } catch {
+        return false
+      }
+    },
     /**
      * Emit `data-break-before` on top-level blocks, as style definitions will: `match` selects
      * blocks by node type (and heading level). Call with `null` to remove.
