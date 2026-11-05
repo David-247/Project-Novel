@@ -488,8 +488,9 @@ Book mode only changes what is on screen:
 - **The engine draws the shown spread first.** `setViewWindowProvider` hands the engine the spread's pages
   (±2) in place of the scroll viewport for the progressive draw. When a turn lands on a spread while a
   progressive reflow is still catching up, the view runs one catch-up pass in the same task, before paint
-  (a layout effect). That pass draws every pending block on the new spread. So a turned-to spread is fully
-  drawn when it is first painted, and `.nv-stale` blocks are never visible (decision b4f37763).
+  (a layout effect, `engine.drawWindowNow()`). That pass draws only the pending blocks on the pages shown
+  (±2); the other pending blocks follow in the next frames. So a turned-to spread is fully drawn when it is
+  first painted, and `.nv-stale` blocks are never visible (decision b4f37763).
 - The desk keeps a 48 px lane (`TURN_LANE`) on each side for the turn controls. Fit zooms and the narrow
   fallback measure the width without the lanes. Fit spread still fits the one spread to the window.
 - Zoomed in, a spread can be taller than the window. Then the editor region scrolls *within* that spread,
@@ -500,13 +501,14 @@ Book mode only changes what is on screen:
 | Input | Effect |
 |---|---|
 | Click / tap on the blank desk left / right of the spread | previous / next spread (the press never takes the focus from the manuscript) |
-| Wheel or trackpad (vertical or horizontal) | one spread per gesture: events less than `WHEEL_GESTURE_GAP_MS` (220 ms) apart are one gesture, so a swipe with momentum turns once. Ctrl+wheel (pinch zoom) is left alone |
+| Wheel or trackpad (vertical or horizontal) | one spread per gesture (`wheelGestureStarts`, unit-tested). A gesture ends after a 220 ms pause (`WHEEL_GESTURE_GAP_MS`) or a change of direction. Inside a momentum stream that has decayed below half its peak, a sharp rise (a second flick) starts a new gesture; a long smooth tail (over 1 s) stays one turn. Zoomed in past the window, a gesture first scrolls or pans the spread vertically or horizontally, and only a gesture that starts at the scroll edge turns. Ctrl+wheel (pinch zoom) is left alone |
 | PageUp / PageDown in the manuscript | as in Phase 2: the caret moves to the first page of the previous / next spread, and the view turns there. On the last (first) spread it goes to the end (start) of the book |
 | Ctrl+Home / Ctrl+End (Cmd+Up / Cmd+Down) in the manuscript | caret to the start / end of the book; the view follows |
 | PageUp / PageDown, Ctrl+Home / Ctrl+End with the focus outside a text field, a dialog or the manuscript (the turn controls, nothing focused) | turn / first / last spread, view only |
 | Turn controls (`pagination.previousSpread` / `pagination.nextSpread`), Home / End on them | previous / next spread, first / last spread, view only |
 | View > Previous / Next / First / Last Spread | the same, view only (in continuous scroll they scroll to that row) |
-| Edit > Go to Page | caret to the page; the spread holding it is shown (the page indicator shows that spread) |
+| Edit > Go to Page, or the status-bar page indicator (a button, `pagination.pageIndicator`, that opens it) | caret to the page; the spread holding it is shown |
+| Turning back while zoomed in | lands at the bottom of the previous spread, where reading continues (a turn forward lands at the top) |
 
 At the first / last spread every path stops there. The turn controls show the disabled state
 (`aria-disabled`, still focusable for their tooltip), and the commands are disabled. The keys are not
@@ -520,6 +522,7 @@ When the selection head leaves the spread shown, the view turns to the spread ho
 
 - after a selection change without a document change (arrows, clicks, Find, Next Comment, a footnote
   popover closing, Shift-extension), in a microtask;
+- never under an IME composition: a follow asked for then runs after `compositionend`;
 - after a transaction that asks to scroll the selection into view (typing, paste, undo). There Book mode
   takes over ProseMirror's `handleScrollToSelection`, so the clipped stream is never scrolled. If the
   document changed, the turn waits for the pass that lays it out (`onPass`), so typing that overflows onto
@@ -566,12 +569,23 @@ anchor positions, never from the scroll position, so it shows the shown spread's
   still drawing off-screen blocks; every turn must paint a complete spread in its first frame, blocking).
 - Navigation modes (Phase 3): `e2e/page-turn.spec.ts` covers every turn path, the disabled edges, caret
   follow (typing over the recto, arrows, Find, a footnote), comments, a header double-click, single page
-  and narrow windows, the View menu, persistence and the turn controls' tooltips. The Phase 2 suites
-  (pagination, footnotes, headers) run in Book mode, the default: `showPage` / `acrossSpreads`
-  (e2e/helpers.ts) turn to a page before its frame is read, and `clickBlockStart` turns to the block. The
-  tests that are about scrolling through the stream (progressive draw at scroll positions; DOM identity of
-  heads several rows apart) run in continuous scroll, seeded with `seedPreferences(page, { pageNavigation:
-  'scroll' })`. They keep the Phase 2 coverage.
+  and narrow windows, the View menu, persistence, the turn controls' tooltips, wheel gestures (a long
+  momentum tail, a second flick, panning at 200 %) and the page indicator.
+  **Both modes:** the pagination, footnotes, headers and page-turn suites run in Book mode (projects
+  `chromium` / `webkit`) and again in continuous scroll (projects `chromium-scroll` / `webkit-scroll`,
+  `BOTH_MODES` in playwright.config.ts). The scroll projects seed preferences.json from the project
+  metadata through `seedProjectNavigation`. CI runs all four. The tests are mode-agnostic: `showPage` /
+  `acrossSpreads` (e2e/helpers.ts) turn to a page before its frame is read in Book mode, and
+  `clickBlockStart` turns to the block. Where the Phase 2 assertion is about the scrolled column (the first
+  split paragraph, a recto → next-row verso included; ArrowDown to a row below the viewport and its scroll),
+  the scroll branch keeps it and Book mode checks its own variant. Book-only tests skip in the scroll
+  projects. Tests about scroll positions or about rows mounted together (progressive draw at scroll
+  positions; DOM identity of heads several rows apart) seed continuous scroll themselves in every project.
+- Caret hit tests (both modes, both engines): ArrowDown onto a continued paragraph keeps the column, and
+  ArrowUp onto the last line of a page that ends mid-paragraph keeps it too. When that line's end is the
+  very position the next page starts at, the caret is drawn on the page above. Past the end of a short
+  line the browser's hit test can answer from the paragraph's layout box, so `moveLineAcrossPages` checks
+  the answer (same line, same column) and otherwise walks the painted target line (`nearestOnLine`).
 - Cross-engine fixture (`e2e/pagination-fixture.spec.ts`): the deterministic manuscript
   (`e2e/fixtures/pagination-manuscript.ts`) typeset in the bundled OFL test font (`e2e/fixtures/fonts`,
   Libre Baskerville, `OFL.txt`), with chapters breaking in `page` mode and in `recto` mode, for every
