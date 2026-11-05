@@ -3,7 +3,7 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import tseslint from 'typescript-eslint'
 
-export const SLICES = ['editor', 'storage', 'tooltips', 'app-shell', 'book-settings', 'pagination', 'header-footer', 'footnotes', 'menu', 'track-changes']
+export const SLICES = ['editor', 'storage', 'tooltips', 'app-shell', 'book-settings', 'pagination', 'header-footer', 'footnotes', 'menu', 'track-changes', 'settings', 'comments']
 
 /**
  * A file in slice A may import slice B only via its index (`@/features/B`),

@@ -26,5 +26,7 @@ export type { Author } from './author'
 export { prefersReducedMotion, useReducedMotion } from './motion'
 // flushPreferences(): write pending changes now; await it in the quit / window-close path.
 export { flushPreferences } from './persistence'
+// The pieces useSettingsIntegration() runs (for tests that drive preferences without React).
+export { loadPreferences, startPreferencesWriter } from './persistence'
 export { SETTINGS_CONTROLS, SETTINGS_SHORTCUT } from './controls'
 export type { SettingsControlMeta, SettingsControlKey } from './controls'

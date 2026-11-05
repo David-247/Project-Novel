@@ -24,7 +24,7 @@ import {
 } from './index'
 import { __resetAutosaveForTests } from './autosave'
 import { prepareToExit } from './integration'
-import { loadPreferences, startPreferencesWriter } from '@/features/settings/persistence'
+import { loadPreferences, startPreferencesWriter } from '@/features/settings'
 import { __resetStorageForTests } from './project'
 import { parseBook, serializeBook } from './book-file'
 import { serializeManuscript, type ProjectMeta } from './format'
