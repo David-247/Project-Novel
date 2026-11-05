@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * T6 step 1: screenshots of the single-row toolbar prototypes (`?toolbar=overflow|tabs|groups`) and
- * of the current wrapping toolbar, at several window widths in OS light and dark, for the user to
- * choose a pattern. Not part of any test run.
+ * T6: screenshots of the ribbon (the toolbar) at several window widths in OS light and dark, plus
+ * one shot per tab, for review. Not part of any test run.
  *
- *   node scripts/capture-toolbar-protos.mjs [outDir] [--no-build]
+ *   node scripts/capture-ribbon.mjs [outDir] [--no-build]
  *
  * Builds the e2e web app (fake Tauri backend), serves it with `vite preview`, seeds a small
- * manuscript through window.__nvE2E and writes `<variant>-<width>-<scheme>.png` plus a few
- * `-open` shots with a dropdown open.
+ * manuscript through window.__nvE2E and writes `ribbon-<width>-<scheme>.png`,
+ * `ribbon-1100-light-<tab>.png` and `ribbon-<width>-light-open.png` (the More menu or a collapsed
+ * group open).
  */
 /* global window */
 import { spawn, spawnSync } from 'node:child_process'
@@ -22,7 +22,7 @@ const port = Number(process.env.PW_PORT ?? 4191)
 const base = `http://127.0.0.1:${port}`
 const WIDTHS = [1280, 1100, 800, 600, 480]
 const SCHEMES = ['light', 'dark']
-const VARIANTS = ['current', 'overflow', 'tabs', 'groups']
+const VARIANTS = ['ribbon']
 const HEIGHT = 720
 const CLIP_H = 300
 
@@ -73,7 +73,7 @@ async function shoot(browser, variant, width, scheme, extra) {
   const ctx = await browser.newContext({ viewport: { width, height: HEIGHT }, colorScheme: scheme, deviceScaleFactor: 1 })
   const page = await ctx.newPage()
   page.on('pageerror', (e) => console.error(`[pageerror ${variant}-${width}-${scheme}] ${e.message}`))
-  await page.goto(variant === 'current' ? `${base}/` : `${base}/?toolbar=${variant}`)
+  await page.goto(`${base}/`)
   await page.locator('main [contenteditable="true"]').waitFor()
   await page.waitForFunction(() => !!window.__nvE2E)
   await page.evaluate(async (doc) => {
@@ -93,12 +93,17 @@ async function shoot(browser, variant, width, scheme, extra) {
   let suffix = ''
   if (extra === 'open') {
     suffix = '-open'
-    const trigger = variant === 'overflow' ? page.locator('[data-control-id="toolbarProto.more"]') : page.locator('[data-control-id^="toolbarProto.group."]:visible').first()
+    const more = page.locator('[data-control-id="ribbon.more"]:visible')
+    const trigger = (await more.count()) ? more : page.locator('[role="tabpanel"]:visible [data-control-id^="ribbon.group."]').first()
     await trigger.click()
     await page.waitForTimeout(300)
+    if (await more.count()) {
+      await page.locator('[role="menu"] [data-control-id^="ribbon.group."]').first().hover()
+      await page.waitForTimeout(300)
+    }
   } else if (extra) {
     suffix = `-${extra}`
-    await page.locator(`[data-control-id="toolbarProto.tab.${extra}"]`).click()
+    await page.locator(`[data-control-id="ribbon.tab.${extra}"]`).click()
     await page.waitForTimeout(400)
   }
   const file = resolve(outDir, `${variant}-${width}-${scheme}${suffix}.png`)
@@ -112,8 +117,8 @@ try {
   await waitForServer()
   const browser = await chromium.launch()
   for (const variant of VARIANTS) for (const scheme of SCHEMES) for (const w of WIDTHS) await shoot(browser, variant, w, scheme)
-  for (const variant of ['overflow', 'tabs', 'groups']) for (const w of [800, 480]) await shoot(browser, variant, w, 'light', 'open')
-  for (const tab of ['insert', 'review', 'view']) await shoot(browser, 'tabs', 800, 'light', tab)
+  for (const tab of ['home', 'insert', 'layout', 'review', 'view']) await shoot(browser, 'ribbon', 1100, 'light', tab)
+  for (const w of [800, 480]) await shoot(browser, 'ribbon', w, 'light', 'open')
   await browser.close()
 } finally {
   server.kill()
