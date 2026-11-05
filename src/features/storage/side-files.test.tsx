@@ -66,6 +66,7 @@ async function launch() {
   __resetWriteLockForTests()
   __resetSideFilesForTests()
   useStore.setState({ project: initialProjectState })
+  useStore.getState().bookActions.resetBook()
   unregister()
   editor = createMemoryDocumentProvider()
   unregister = registerDocumentProvider(editor)
@@ -293,5 +294,111 @@ describe('project side files', () => {
     backend.pick = ROOT
     expect(await newProject()).toBe(false)
     expect(backend.messages.at(-1)?.text).toMatch(/notes\.json from an earlier project/)
+  })
+})
+
+describe('a Save that leaves a guarded file unsaved, in the unsaved-changes prompt', () => {
+  const QUIT = 'Quit anyway (keep changes for recovery)'
+  const CONTINUE = 'Continue anyway (keep changes for recovery)'
+  const BOOK = `${ROOT}/book.json`
+  let answers: string[] = []
+
+  beforeEach(() => {
+    answers = []
+    // One answer per native message box, in order (the prompt, then the left-unsaved question).
+    Object.defineProperty(backend, 'answer', { configurable: true, get: () => answers.shift() ?? 'Cancel', set: () => {} })
+  })
+  afterEach(() => {
+    delete (backend as { answer?: string }).answer
+    backend.answer = 'Cancel'
+    backend.failRead = null
+    backend.failWrite = null
+  })
+
+  /** A project whose notes.json cannot be read, with an unsaved note change and unsaved text. */
+  async function unreadableNotes() {
+    await createProject()
+    backend.files.set(NOTES, JSON.stringify({ version: 1, items: ['on disk'] }))
+    await launch()
+    backend.failRead = (p) => (p === NOTES ? { kind: 'permission_denied', message: 'locked' } : null)
+    await reopen()
+    side.change(['unsaved note'])
+    editor.update(textDoc('saved text'))
+  }
+
+  it('quit: Save then Cancel stays; nothing is lost', async () => {
+    await unreadableNotes()
+    answers = ['Save', 'Cancel']
+    expect(await prepareToExit('quitting')).toBe(false)
+    expect(backend.messages.at(-1)!.text).toMatch(/notes\.json could not be saved\. notes\.json could not be read/)
+    expect((backend.messages.at(-1)!.opts as { buttons: { ok: string } }).buttons.ok).toBe(QUIT)
+    expect(JSON.parse(backend.files.get(MANUSCRIPT)!)).toEqual(textDoc('saved text'))
+    expect(editor.isDirty()).toBe(true)
+  })
+
+  it('quit: "Quit anyway" goes on only after a recovery snapshot holding the side file is written', async () => {
+    await unreadableNotes()
+    answers = ['Save', QUIT]
+    expect(await prepareToExit('quitting')).toBe(true)
+    const snap = parseRecovery(backend.files.get(RECOVERY)!)!
+    expect(snap.sideFiles?.['notes.json']).toEqual({ version: 1, items: ['unsaved note'] })
+    expect(snap.doc).toEqual(textDoc('saved text'))
+    // Relaunch: the backup is offered and brings the note back.
+    backend.failRead = null
+    await launch()
+    await reopen()
+    expect(useStore.getState().project.recoveryPrompt).toMatchObject({ kind: 'restore' })
+    expect(await restoreRecovery()).toBe(true)
+    expect(side.items()).toEqual(['unsaved note'])
+  })
+
+  it('quit: when the snapshot cannot be written, the app does not go on', async () => {
+    await unreadableNotes()
+    backend.failWrite = (p) => (p.includes('/.recovery') ? { kind: 'disk_full', message: 'full' } : null)
+    answers = ['Save', QUIT]
+    expect(await prepareToExit('quitting')).toBe(false)
+    expect(backend.messages.at(-1)!.text).toMatch(/could not write a backup/)
+  })
+
+  it('New / Open: Save then Cancel keeps the project open; "Continue anyway" snapshots, then switches', async () => {
+    await unreadableNotes()
+    answers = ['Save', 'Cancel']
+    backend.pick = '/books/other'
+    backend.dirs.add('/books/other')
+    expect(await newProject()).toBe(false)
+    expect(useStore.getState().project.path).toBe(ROOT)
+    answers = ['Save', CONTINUE]
+    expect(await newProject()).toBe(true)
+    expect(useStore.getState().project.path).toBe('/books/other')
+    const snap = parseRecovery(backend.files.get(RECOVERY)!)!
+    expect(snap.sideFiles?.['notes.json']).toEqual({ version: 1, items: ['unsaved note'] })
+    // Opening it again offers the backup.
+    await loadRecentProjects()
+    answers = []
+    expect(await openProject(ROOT)).toBe(true)
+    expect(useStore.getState().project.recoveryPrompt).toMatchObject({ kind: 'restore' })
+  })
+
+  it('book.json follows the same rule (an unreadable guarded book.json)', async () => {
+    await createProject()
+    await launch()
+    backend.failRead = (p) => (p === BOOK ? { kind: 'permission_denied', message: 'locked' } : null)
+    await reopen()
+    useStore.getState().bookActions.setTrimSize('uk-a5')
+    answers = ['Save', 'Cancel']
+    expect(await prepareToExit('closing')).toBe(false)
+    expect(backend.messages.at(-1)!.text).toMatch(/book\.json could not be saved\. book\.json could not be read/)
+    expect((backend.messages.at(-1)!.opts as { buttons: { ok: string } }).buttons.ok).toBe('Close anyway (keep changes for recovery)')
+    expect(useStore.getState().project.bookWarning).toMatch(/Your book settings were not saved: book\.json could not be read/)
+  })
+
+  it('a clean Save proceeds without the extra question', async () => {
+    await createProject()
+    side.change(['fine'])
+    answers = ['Save']
+    const ok = await prepareToExit('quitting')
+    expect(ok).toBe(true)
+    expect(backend.messages).toHaveLength(1)
+    expect(onDisk().items).toEqual(['fine'])
   })
 })

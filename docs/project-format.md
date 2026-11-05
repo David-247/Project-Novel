@@ -211,6 +211,12 @@ built-in Footnote Text style in `styles` (`footnote-text`).
     next save tries again. Because that save moved `updatedAt`, autosave takes a fresh snapshot at once (even with
     no further edits), so a crash still offers the unsaved settings. The same applies to any save that leaves
     the project unsaved.
+  - **Save in the unsaved-changes prompt** (close, quit, New Project, Open Project) that leaves the project
+    unsaved this way (book.json or a side file could not be read or copied, so it was not replaced) does not go
+    on as if saved. A second question names the file and the reason and offers **Cancel** (stay) or **Quit /
+    Close / Continue anyway (keep changes for recovery)**. Going on first writes a crash-recovery snapshot of
+    everything unsaved, side files included, and waits for it (and for any snapshot already being written); if
+    it cannot be written, Novel says so and stays. The snapshot is offered when the project is opened next.
   - Restoring a crash-recovery snapshot whose book settings equal the loaded ones changes no book setting, so a
     text-only restore never replaces a guarded book.json.
 - A `version` higher than this Novel's (an integer above `1`): the file was written by a newer Novel. Its fields are
@@ -251,7 +257,8 @@ re-write feature adds `rewrites.json`). All side files follow the same rules, im
   original is copied to `<name>.damaged-<timestamp>.json` or `<name>.newer-<timestamp>.json`. If that copy cannot be
   written (the file stays unreadable, or the folder refuses the copy), only that side file is left out, as with
   book.json: the manuscript and the other files are saved, the side-file changes stay unsaved (prompts and autosave
-  snapshots keep them), the status bar says so, and the next save retries. Novel never deletes these copies. The rewritten file is at the
+  snapshots keep them), the status bar says so, and the next save retries; "Save" in a close / quit prompt then
+  asks before going on (see book.json, "Save in the unsaved-changes prompt"). Novel never deletes these copies. The rewritten file is at the
   current version.
 - New Project refuses a folder that holds a side file without a project.json, like the other leftovers.
 

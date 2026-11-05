@@ -8,6 +8,7 @@ import {
   onProjectOpened,
   onSaveLeftUnsaved,
   preserveUnansweredRecoveryUnlocked,
+  setRecoverySnapshotter,
 } from './project'
 import {
   RECOVERY_FORMAT,
@@ -178,6 +179,20 @@ export function forceNextSnapshot(): void {
   arm(0)
 }
 
+/**
+ * A snapshot of everything unsaved (text, book settings, side files) now, even if the versions did
+ * not change since the last one; waits for a snapshot already in flight first. True once written.
+ */
+async function snapshotForPrompt(): Promise<boolean> {
+  clearTimer()
+  // Queued behind a snapshot in flight (autosaveNow chains), so it never overlaps or races one.
+  const pending = inFlight
+  if (pending) await pending
+  lastSnapshotVersion = null
+  lastSnapshotBookVersion = null
+  return (await autosaveNow()) === 'written'
+}
+
 /** Book settings changes arm the snapshot timer exactly like text edits. */
 function watchBook(): () => void {
   return useStore.subscribe((s, prev) => {
@@ -213,6 +228,8 @@ export function startAutosave(): () => void {
       failures = 0
     }),
     onSaveLeftUnsaved(forceNextSnapshot),
+    // The unsaved-changes prompt's "go on anyway" waits for this snapshot (project.ts).
+    (setRecoverySnapshotter(snapshotForPrompt), () => setRecoverySnapshotter(null)),
   ]
   // Work restored from a backup (or edited before autosave started) is protected too.
   rearmIfStillDirty()

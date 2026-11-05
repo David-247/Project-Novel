@@ -172,18 +172,21 @@ export function asideName(name: string, kind: 'damaged' | 'newer'): string {
  * copy failed, and the caller keeps the project unsaved. A missing file is created only when not
  * empty. Call under the write lock; call `sideFilesSaved` after the batch succeeded.
  */
-export async function sideFilesForSave(folder: string): Promise<{ files: BatchFile[]; written: string[]; skipped: string[] }> {
+export async function sideFilesForSave(folder: string): Promise<{ files: BatchFile[]; written: string[]; skipped: SkippedFile[] }> {
   const files: BatchFile[] = []
   const written: string[] = []
-  const skipped: string[] = []
+  const skipped: SkippedFile[] = []
   for (const entry of entries.values()) {
     const { file, guard } = entry
     if (guard && file.getVersion() === guard.loadedVersion) continue
     const { data, empty } = file.serialize()
     if (!entry.present && empty) continue
-    if (guard && !(await keepGuarded(folder, file.name, guard))) {
-      skipped.push(file.name)
-      continue
+    if (guard) {
+      const kept = await keepGuarded(folder, file.name, guard)
+      if (kept !== true) {
+        skipped.push({ name: file.name, reason: kept })
+        continue
+      }
     }
     files.push({ path: joinPath(folder, file.name), contents: serialize(data), label: file.name })
     written.push(file.name)
@@ -191,13 +194,25 @@ export async function sideFilesForSave(folder: string): Promise<{ files: BatchFi
   return { files, written, skipped }
 }
 
-/** Status-bar text when a guarded side file could not be copied aside (it was then not replaced). */
-export function sideFileCopyFailedText(names: readonly string[]): string {
-  const list = names.join(', ')
-  return (
-    `Your changes to ${list} were not saved: Novel could not keep a copy of the existing file before replacing it, ` +
-    `so it was left as it is. The manuscript was saved. Saving again will retry.`
-  )
+/** Why a guarded file was not replaced by a save: it could not be read, or its copy not written. */
+export type SkipReason = 'unreadable' | 'copy'
+export interface SkippedFile {
+  name: string
+  reason: SkipReason
+}
+
+/** One sentence: why `name` was left as it is (status bar, the close / quit prompt). */
+export function skippedFileReason(name: string, reason: SkipReason): string {
+  return reason === 'unreadable'
+    ? `${name} could not be read, so Novel could not keep a copy of it and left it as it is.`
+    : `Novel could not keep a copy of the existing ${name} before replacing it, so ${name} was left as it is.`
+}
+
+/** Status-bar text when guarded side files were left out of a save. */
+export function sideFileSkippedText(skipped: readonly SkippedFile[]): string {
+  const list = skipped.map((s) => s.name).join(', ')
+  const why = skipped.map((s) => skippedFileReason(s.name, s.reason)).join(' ')
+  return `Your changes to ${list} were not saved: ${why} The manuscript was saved. Saving again will retry.`
 }
 
 /** Save As into a new folder: every side file that is not empty (nothing is on disk there yet). */
@@ -229,26 +244,27 @@ export function hasGuardedSideFile(): boolean {
 }
 
 /**
- * Copy a guarded side file aside before its first overwrite. Never throws: false when no copy could
- * be kept (the file must then not be replaced). A file that is gone has nothing to keep (true).
+ * Copy a guarded side file aside before its first overwrite. Never throws: true when the copy was
+ * kept (or the file is gone: nothing to keep), otherwise why not (the file must then not be replaced).
  */
-async function keepGuarded(folder: string, name: string, guard: SideGuard): Promise<boolean> {
-  try {
-    let original = guard.original
-    if (original === null) {
-      try {
-        original = await readTextFile(joinPath(folder, name), name)
-      } catch (e) {
-        if (e instanceof ProjectError && e.code === 'missing-file') return true
-        throw e
-      }
+async function keepGuarded(folder: string, name: string, guard: SideGuard): Promise<true | SkipReason> {
+  let original = guard.original
+  if (original === null) {
+    try {
+      original = await readTextFile(joinPath(folder, name), name)
+    } catch (e) {
+      if (e instanceof ProjectError && e.code === 'missing-file') return true
+      console.warn(`Reading the guarded ${name} failed; it is not replaced:`, e)
+      return 'unreadable'
     }
+  }
+  try {
     await writeFileAtomic(joinPath(folder, asideName(name, guard.kind)), original, `${name} copy`)
     guard.original = original
     return true
   } catch (e) {
     console.warn(`Keeping a copy of the guarded ${name} failed; it is not replaced:`, e)
-    return false
+    return 'copy'
   }
 }
 
