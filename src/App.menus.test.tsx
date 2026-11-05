@@ -104,7 +104,24 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
     expect(names(model[2].children)).toContain('Comments Panel')
     expect(names(model[3].children)).toEqual(['Chapter Break', 'Page Break', 'Scene Break', '—', 'Footnote', 'Comment'])
     expect(names(model[2].children)).toContain('Markup ▸')
-    expect(names(model[5].children)).toEqual(['Track Changes', '—', 'New Comment', '—', 'Next Comment', 'Previous Comment', '—', 'Show Resolved Comments'])
+    expect(names(model[5].children)).toEqual([
+      'Track Changes',
+      '—',
+      'Previous Change',
+      'Next Change',
+      'Show Change Details',
+      '—',
+      'Accept Change',
+      'Accept and Move to Next',
+      'Accept All Changes',
+      'Accept All by Author ▸',
+      '—',
+      'Reject Change',
+      'Reject and Move to Next',
+      'Reject All Changes',
+      'Reject All by Author ▸',
+      '—',
+      'New Comment', '—', 'Next Comment', 'Previous Comment', '—', 'Show Resolved Comments'])
     expect(names(model[6].children)).toEqual(['Keyboard Shortcuts', 'Project Folder Format', '—', 'About Novel'])
   })
 

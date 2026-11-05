@@ -29,12 +29,36 @@ export {
   rejectChangesInRange,
   listChanges,
   countChanges,
+  acceptAllByAuthor,
+  rejectAllByAuthor,
+  listAuthors,
+  changeIdAt,
 } from './review'
 export type { TrackedChange, ChangeKind } from './review'
+// Review UI (docs/track-changes.md, "Review"): commands as plain functions, the change popover and
+// the status-bar count; setReviewConfirm (Accept / Reject All above 50 changes) and
+// setChangeRevealer (how a change is brought into sight; default: scroll) are wired by the root.
+export {
+  nextChange,
+  prevChange,
+  resolveSelection,
+  resolveAndNext,
+  resolveChange,
+  resolveAll,
+  resolveAtSelection,
+  setReviewConfirm,
+  setChangeRevealer,
+  CONFIRM_ABOVE,
+} from './review-actions'
+export type { ReviewMode, ReviewConfirm, ReviewConfirmRequest, ChangeRevealer } from './review-actions'
+export { showChangeAtCaret, describeChange, relativeDate } from './popover-actions'
+export { getChangeSummary, useChangeSummary, openChangePopover, closeChangePopover, getChangePopover } from './review-state'
+export type { ChangeSummary } from './review-state'
+export { ChangePopover, ChangesIndicator } from './ReviewUI'
 export { copiedSlice } from './copy'
 export { isTracking, setTracking, toggleTrackChanges, getMarkupView, setMarkupView, setOnTrackingSwitchedOn } from './commands'
-export { registerTrackChangesCommands, trackChangesCommands } from './menu-commands'
-export { TRACK_CHANGES_CONTROLS, MARKUP_VIEW_OPTIONS, markupViewLabel } from './controls'
+export { registerTrackChangesCommands, trackChangesCommands, reviewCommands, byAuthorCommands, byAuthorCommandId } from './menu-commands'
+export { TRACK_CHANGES_CONTROLS, MARKUP_VIEW_OPTIONS, markupViewLabel, BY_AUTHOR_SUBMENU } from './controls'
 export type { MarkupViewOption } from './controls'
 export { TrackChangesButton, MarkupViewMenu, TrackChangesNotice } from './ReviewControls'
 export type { ReviewControlProps } from './ReviewControls'
