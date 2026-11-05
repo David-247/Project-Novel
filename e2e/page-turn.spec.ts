@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { chooseScrollNavigation, docEnd, docStart, editor, launch, openRecent, projectNavigation, saveStatus, seedProject, seedProjectNavigation, waitForLayout, writeFile } from './helpers'
+import { chooseScrollNavigation, docEnd, docStart, editor, isBookMode, launch, openRecent, pressTab, projectNavigation, saveStatus, seedProject, seedProjectNavigation, waitForLayout, writeFile } from './helpers'
 
 // Book mode flows. In the *-scroll projects (continuous scroll) only the tests that hold in both modes run.
 const BOTH_MODES = new Set([
@@ -206,7 +206,10 @@ test('keys in the manuscript: PageDown / PageUp and Ctrl+Home / Ctrl+End turn wi
   await expect(indicator(page)).toHaveText(`Pages 2–3 of ${pageCount}`)
   await docEnd(page)
   const last = (await layout(page)).pages.length - 1
-  await expect.poll(async () => (await spread(page)).last).toBe(last)
+  if (await isBookMode(page)) await expect.poll(async () => (await spread(page)).last).toBe(last)
+  // Continuous scroll: the visible spread is the row at the middle of the window, which at the end of
+  // the scroll range depends on the fit zoom (scrollbar widths differ by platform); the last page is in view.
+  else await expect(page.locator(`.nv-frames .nv-page[data-page-index="${last}"]`)).toBeInViewport()
   await expect.poll(async () => (await layout(page)).currentPage).toBe(last)
   await docStart(page)
   await expect(indicator(page)).toHaveText(`Page 1 of ${pageCount}`)
@@ -442,7 +445,8 @@ test('turn controls: tooltips on hover and keyboard focus; the coverage audit pa
   await page.mouse.move(700, 10)
   // Keyboard: Tab from the previous control reaches the next one.
   await prevCtl(page).focus()
-  await page.keyboard.press('Tab')
+  // (Safari on macOS skips buttons on Tab unless Option is held: pressTab.)
+  await pressTab(page)
   await expect(nextCtl(page)).toBeFocused()
   await expect(page.locator('[data-tooltip-body]')).toContainText('Next pages')
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])

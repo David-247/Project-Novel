@@ -215,9 +215,10 @@ test('Book mode: Next / Previous Change turn the page to the change (menu, ribbo
   await page.evaluate(() => window.__nvE2E.selectText(1, 1))
   // Review menu: Next Change turns to c14's spread.
   await reviewMenu(page, 'review.change.next')
+  // (Poll for the move itself: before it, c0's spread is shown too.)
+  await expect.poll(async () => (await state()).index).toBeGreaterThan(0)
   await expect.poll(shown).toBe(true)
   const a = await state()
-  expect(a.index).toBeGreaterThan(0)
   expect(a.scrollTop).toBe(0)
   // Ribbon (focus stays in the manuscript): Next Change turns again, to c29.
   await ribbonTab(page, 'review')

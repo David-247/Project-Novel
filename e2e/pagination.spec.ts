@@ -1151,15 +1151,28 @@ test('ArrowDown onto a short first line holding a footnote reference: next to th
   const y = (prevEnd.top + prevEnd.bottom) / 2
   expect(prevEndColumn, 'the line above reaches past the short line').toBeGreaterThan(ref.right + 60)
 
-  // Just right of the reference.
+  // Just right of the reference. The press puts the caret at the nearest character boundary of the
+  // line above (font metrics differ by platform), so the expected position on the short line is the
+  // one nearest that caret's column: right after the reference or within "cd", never before it.
   await pressAtColumn(page, h - 1, ref.right + 2, y)
   expect(await pageOfHead(page)).toBe(h - 1)
+  const columnOf = async (index: number, pos: number) => {
+    const f = (await page.locator(`.nv-frames .nv-page[data-page-index="${index}"]`).boundingBox())!
+    const c = (await page.evaluate((x) => window.__nvE2E.coordsAt(x, 1), pos))!
+    return c.left - f.x - (await textLeftOf(page, index))
+  }
+  const above = await columnOf(h - 1, await headNow(page))
   await page.keyboard.press('ArrowDown')
   await turnSettled(page)
   expect(await pageOfHead(page)).toBe(h)
   const near = await headNow(page)
-  expect(near, `head ${near}, reference ${refPos}..${refPos + NOTE_SIZE}`).toBeGreaterThanOrEqual(refPos + NOTE_SIZE)
-  expect(near).toBeLessThanOrEqual(refPos + NOTE_SIZE + 1)
+  const refEnd = refPos + NOTE_SIZE
+  const candidates = [refEnd, refEnd + 1, refEnd + 2]
+  const dist = await Promise.all(candidates.map(async (pos) => Math.abs((await columnOf(h, pos)) - above)))
+  const best = Math.min(...dist)
+  // The nearest boundary (or one as near, within a pixel).
+  const ok = candidates.filter((_, i) => dist[i] <= best + 1)
+  expect(ok, `head ${near}, reference ${refPos}..${refEnd}, column above ${above}, distances ${dist}`).toContain(near)
 
   // From further right than the short line reaches: the caret goes to its end, after the reference.
   await showPage(page, h - 1)
