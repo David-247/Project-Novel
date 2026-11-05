@@ -15,6 +15,7 @@ import {
 import { toggleTrackChanges } from './commands'
 import { copiedSlice } from './copy'
 import { hasTrackedChanges } from './has-changes'
+import { showChangeAtCaret } from './popover-actions'
 import { reviewPlugin } from './review-plugin'
 import {
   cleanSlice,
@@ -288,6 +289,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
     return {
       'Mod-Shift-e': () => {
         toggleTrackChanges()
+        return true
+      },
+      // Show Change Details (also a registry command): ProseMirror keeps Enter-with-modifiers from the
+      // window's shortcut dispatcher (it prevents the default of every Enter), so it is bound here too.
+      'Alt-Enter': () => {
+        showChangeAtCaret()
         return true
       },
       Backspace: skip(-1),

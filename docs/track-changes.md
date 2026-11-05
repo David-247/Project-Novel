@@ -3,13 +3,14 @@
 The `track-changes` slice (`src/features/track-changes/`, public interface `index.ts`) records edits as
 tracked changes, shows them in four markup views, and holds the pure accept / reject core. Names and the
 view rules every slice needs (mark names, `MarkupView`, `isInlineHidden`, `isBlockHidden`) are in
-`src/shared/track-changes.ts`. The review UI (accept / reject buttons, the change list) is the next ticket;
-it builds on the core described here. Export of revision marks and collaboration are out of scope.
+`src/shared/track-changes.ts`. The review UI (Review menu commands, the change popover, the status-bar
+count) is described under [Review](#review). Export of revision marks and collaboration are out of scope.
 
 - [Model](#model)
 - [Recording](#recording)
 - [Markup views](#markup-views)
 - [Accept and reject](#accept-and-reject)
+- [Review](#review)
 - [Pagination](#pagination)
 - [Other features](#other-features)
 - [Commands and controls](#commands-and-controls)
@@ -167,7 +168,11 @@ change) or `null` when there is nothing to do.
 - `acceptAll(state)`, `rejectAll(state)`.
 - `acceptChangesInRange(state, from, to)`, `rejectChangesInRange(state, from, to)`: every change whose
   marks or blocks touch the range (or contain `from` when the range is empty).
-- `listChanges(doc)` → `{ id, kinds, author, date, from, to }[]` in document order; `countChanges(state)`.
+- `acceptAllByAuthor(state, author)`, `rejectAllByAuthor(state, author)`: every change by that author.
+- `listChanges(doc)` → `{ id, kinds, author, date, from, to }[]` in document order (it skips blocks
+  without changes, cached per node); `countChanges(state)`; `listAuthors(changes)`.
+- `changeIdAt(doc, pos)`: the change at a caret: the text after it, then before it (the innermost mark
+  when changes overlap), then a break beside it, then the boundary or style of the block holding it.
 
 | | Accept | Reject |
 |---|---|---|
@@ -184,6 +189,45 @@ The order matters for a break inserted mid-paragraph (Mod-Enter in "abcd" gives 
 +¶cd`): the break goes before "cd" can join "ab", so rejecting gives "abcd" back. **Removing a boundary:** a break is deleted; an empty block is deleted (unless it is its
 parent's only child); otherwise the block is joined to the textblock before it when they can join, and
 left as it is when they cannot (the first block, after a list).
+
+## Review
+
+`review-actions.ts`, `popover-actions.ts`, `ReviewUI.tsx`, registered by `registerTrackChangesCommands`.
+Each accept / reject is one transaction (`TRACK_SKIP_META`): one undo step, never recorded, even with
+tracking on.
+
+| Review menu | Shortcut | Does |
+|---|---|---|
+| Previous Change / Next Change | Mod-Alt-↑ / Mod-Alt-↓ | Selects the change before / after the selection (wraps) and scrolls its page into the middle of the editor region. Inline changes: their text is selected; a break: the break (node selection); a boundary or style change: the caret at the block's start. |
+| Show Change Details | Alt-Enter | The change popover for the change at the caret, with the focus on Accept (All / Simple Markup). |
+| Accept Change / Reject Change | | The change Next Change selected, else the change at a collapsed caret (`changeIdAt`), else every change touching the selection. |
+| Accept and Move to Next / Reject and Move to Next | Mod-Alt-a / Mod-Alt-r | The same, then Next Change. |
+| Accept All Changes / Reject All Changes | | Every change. More than 50 (`CONFIRM_ABOVE`) asks first with the app's native message dialog (`setReviewConfirm`, wired to storage's `askConfirm`). |
+| Accept All by Author ▸ / Reject All by Author ▸ | | One item per author present (re-registered when the authors change). |
+
+Guards: navigation `none`; Accept / Reject at the caret and Show Change Details `manuscript`; All and By
+Author `modal`. Alt-Enter is also bound in the manuscript keymap (ProseMirror prevents the default of
+every Enter, so the window dispatcher never sees it there). Mod-Alt-Enter (asked for in the brief) is Insert
+Scene Break.
+
+**Change popover** (`ChangePopover`, portalled): author, relative date, kind ("Inserted", "Deleted",
+"Replaced", "New paragraph", "Joined paragraphs", "Inserted page break", "Formatted", "Paragraph
+formatting changed") and a preview, with Accept and Reject. Opens on a click or tap on a change in All or
+Simple Markup (ProseMirror's `handleClick`, which never fires after a drag-selection: the innermost
+tracked span under the pointer, or a changed block clicked outside its text), or with Show Change Details.
+Placed with the footnote editor's placement (`placeAnchored`, `@/shared/ui`). Tab cycles its buttons;
+Escape returns to the text. It closes when the caret leaves the change, the change is gone, the focus
+goes elsewhere (a menu), or the view changes to No Markup / Original.
+
+**Status bar** (`ChangesIndicator`, next to `TrackChangesNotice`): "N changes" while tracking is on or
+changes exist (recounted 200 ms after edits pause); a button that runs Next Change.
+
+**Page navigation.** The default reveal scrolls the pages (both the spread and the single-page view).
+`setChangeRevealer(fn)` swaps it, e.g. for the page-turn view's reveal.
+
+Perf (`e2e/perf.spec.ts`, 100k words, 2,000 changes, local Windows 11): Accept All 230 ms / Reject All
+218 ms in Chromium, 357 / 480 ms in WebKit, from the confirmation to the repaginated pages in view
+(< 2 s).
 
 ## Pagination
 
@@ -252,6 +296,9 @@ Comment marks and comment thread steps are never recorded as changes.
 
 ## Tests
 
+- Review: `review-ui.test.tsx` (accept / reject per kind, nested and adjacent changes, splits, joins,
+  footnotes, breaks, by author; the commands' undo steps; Next / Previous; the confirmation; the
+  popover and the status count); e2e `e2e/track-changes-review.spec.ts` (chromium + webkit).
 - Vitest: `record.test.ts` (typing, own and others' insertions, sessions, Backspace / Delete, deleting
   own insertions, cross-change deletes, paste, Replace All, IME, split / join, whole paragraphs, footnote
   insert / delete and edits inside a note, page breaks, bold, paragraph style and alignment, undo),

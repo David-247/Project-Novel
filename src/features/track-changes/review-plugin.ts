@@ -5,6 +5,7 @@ import { listChanges } from './review'
 import { closeChangePopover, getChangePopover, getReviewView, refreshChangeSummary, scheduleChangeSummary, setReviewView } from './review-state'
 
 export const reviewKey = new PluginKey('nvTrackReview')
+const POPOVER_SELECTOR = '[data-testid="change-popover"]'
 
 /** The popover's change is gone, or the caret left it (a click elsewhere, arrow keys). */
 function popoverStale(view: EditorView, docChanged: boolean): boolean {
@@ -32,6 +33,19 @@ export function reviewPlugin(): Plugin {
         // The click still places the caret.
         return false
       },
+      handleDOMEvents: {
+        // The focus went elsewhere (the menu bar, a panel): a popover opened by a click closes, so it
+        // never covers what the user turned to. Into the popover itself (Tab, a press) it stays.
+        blur: (_view, event) => {
+          const next = (event as FocusEvent).relatedTarget as Node | null
+          if (getChangePopover() && !(next && document.querySelector(POPOVER_SELECTOR)?.contains(next))) {
+            requestAnimationFrame(() => {
+              if (!document.querySelector(POPOVER_SELECTOR)?.contains(document.activeElement) && document.activeElement !== getReviewView()?.dom) closeChangePopover()
+            })
+          }
+          return false
+        },
+      },
       handleKeyDown: (_view, event) => {
         if (event.key !== 'Escape' || !getChangePopover()) return false
         closeChangePopover()
@@ -46,7 +60,7 @@ export function reviewPlugin(): Plugin {
           const docChanged = v.state.doc !== prev.doc
           if (docChanged) scheduleChangeSummary(v.state.doc)
           // Focus in the popover (its buttons) keeps it: Tab does not move the caret.
-          if ((docChanged || v.state.selection !== prev.selection) && getChangePopover() && !document.querySelector('[data-testid="change-popover"]')?.contains(document.activeElement)) {
+          if ((docChanged || v.state.selection !== prev.selection) && getChangePopover() && !document.querySelector(POPOVER_SELECTOR)?.contains(document.activeElement)) {
             if (popoverStale(v, docChanged)) closeChangePopover()
           }
         },
