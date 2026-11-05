@@ -1,4 +1,5 @@
 import { defaultHeaderFooter, type HeaderFooterSettings } from './header-footer'
+import { getTrimSize } from './trim-sizes'
 
 // Shared book-level types (Phase 2 contract). Pure types/data only; no slice imports.
 // Running head / page number settings: shape, validation and per-page resolution in ./header-footer.
@@ -45,6 +46,11 @@ export interface BookSettings {
   surface: PaperSurface
   view: BookView
   /**
+   * Track Changes recording is on for this project (Phase 3, track changes ticket). Absent (off) in
+   * default settings and in books saved before it existed.
+   */
+  trackChanges?: boolean
+  /**
    * Unknown top-level keys of book.json (written by a newer Novel), kept so a save does not drop them.
    * Added by the Book settings ticket; absent for default settings.
    */
@@ -69,6 +75,16 @@ export function defaultBookSettings(): BookSettings {
     surface: 'auto',
     view: 'spread',
   }
+}
+
+/**
+ * Book settings of a NEW project: the defaults, with the paper surface and trim size (and that trim
+ * size's margins) the user chose in Settings. An unknown trim size id falls back to the default.
+ */
+export function newProjectBookSettings(prefs: { defaultPaper: PaperSurface; defaultTrimSize: TrimSizeId }): BookSettings {
+  const base = defaultBookSettings()
+  const trim = getTrimSize(prefs.defaultTrimSize)
+  return { ...base, surface: prefs.defaultPaper, ...(trim ? { trimSize: trim.id, margins: { ...trim.margins } } : {}) }
 }
 
 // Paragraph and chapter styles (styles ticket): concrete style shape, built-ins, resolution and

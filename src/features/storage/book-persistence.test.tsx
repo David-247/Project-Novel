@@ -24,6 +24,7 @@ import {
 } from './index'
 import { __resetAutosaveForTests } from './autosave'
 import { prepareToExit } from './integration'
+import { loadPreferences, startPreferencesWriter } from '@/features/settings'
 import { __resetStorageForTests } from './project'
 import { parseBook, serializeBook } from './book-file'
 import { serializeManuscript, type ProjectMeta } from './format'
@@ -90,6 +91,19 @@ describe('book.json persistence', () => {
     await createProject()
     expect(onDisk()).toMatchObject({ format: 'novel-book', version: 1, trimSize: 'us-5.5x8.5', surface: 'auto', view: 'spread' })
     expect(book().dirty).toBe(false)
+  })
+
+  it('a new project starts with the paper and trim size chosen in Settings (and that size\'s margins)', async () => {
+    const prefs = useStore.getState().preferencesActions
+    prefs.set('defaultPaper', 'book')
+    prefs.set('defaultTrimSize', 'uk-a5')
+    try {
+      await createProject()
+      expect(onDisk()).toMatchObject({ trimSize: 'uk-a5', surface: 'book', margins: { top: 56, inside: 64, outside: 46 } })
+      expect(book()).toMatchObject({ trimSize: 'uk-a5', surface: 'book', dirty: false })
+    } finally {
+      prefs.reset()
+    }
   })
 
   it('a trim size change marks the project unsaved, survives save, close and reopen', async () => {
@@ -402,6 +416,17 @@ describe('unsaved-changes prompts and exit', () => {
     expect(onDisk().trimSize).toBe('us-6x9')
   })
 
+  it('the exit flow writes a preference changed a moment ago (debounce not yet elapsed)', async () => {
+    const stop = startPreferencesWriter()
+    await loadPreferences()
+    useStore.getState().preferencesActions.set('authorName', 'Quit Fast')
+    expect(backend.preferences).toBeNull()
+    expect(await prepareToExit('quitting')).toBe(true)
+    expect(JSON.parse(backend.preferences!)).toMatchObject({ authorName: 'Quit Fast' })
+    stop()
+    useStore.getState().preferencesActions.reset()
+  })
+
   it("Don't Save drops the book change and stops it being snapshotted again", async () => {
     await createProject()
     bookActions().setTrimSize('us-6x9')
@@ -421,7 +446,7 @@ describe('crash recovery of book settings', () => {
     expect(backend.files.has(RECOVERY)).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
     const snap = parseRecovery(backend.files.get(RECOVERY)!)!
-    expect(snap.version).toBe(2)
+    expect(snap.version).toBe(3)
     expect(snap.book?.trimSize).toBe('uk-royal')
     expect(onDisk().trimSize).toBe('us-5.5x8.5') // never over book.json
   })

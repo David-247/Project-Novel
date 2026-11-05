@@ -83,16 +83,21 @@ export const HANDLED_COMMANDS = [
   'storage_restore_project_root',
   'storage_clear_project_root',
   'storage_write_file_atomic',
+  'storage_write_files_atomic',
   'storage_read_text_file',
   'storage_path_exists',
   'storage_ensure_dir',
   'storage_remove_file',
   'storage_read_recent',
   'storage_remember_recent',
-  'storage_set_recent_menu',
+  'menu_set',
   'storage_exit_app',
   'storage_probe_recent_recovery',
   'storage_list_dir',
+  'preferences_read',
+  'preferences_write',
+  'preferences_default_author',
+  'storage_list_subdirs',
   'list_system_fonts',
   'plugin:dialog|message',
   'plugin:sql|load',
@@ -101,7 +106,13 @@ export const HANDLED_COMMANDS = [
   'plugin:sql|close',
   'plugin:window|theme',
   'plugin:window|destroy',
+  'plugin:window|is_fullscreen',
+  'plugin:window|set_fullscreen',
+  'plugin:app|version',
 ] as const
+
+/** What `plugin:app|version` answers (tauri.conf.json `version` in the real app). */
+export const FAKE_APP_VERSION = '0.1.0'
 
 const notFound = (p: string): FakeError => ({ kind: 'not_found', message: `${p}: not found` })
 const outside = (p: string): FakeError => ({ kind: 'outside_project', message: `${p} is outside the open project folder` })
@@ -139,7 +150,14 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     active: null as string | null,
     previous: null as string | null,
     recent: [] as RecentEntry[],
-    menu: [] as unknown[],
+    /** Raw preferences.json in the app config dir (null = no file), and the OS user's name. */
+    preferences: null as string | null,
+    preferenceWrites: 0,
+    defaultAuthor: 'Test Writer',
+    /** Last native menu snapshot (menu_set; src/shared/commands NativeMenuSnapshot), or null. */
+    menu: null as null | { menus: { id: string; label: string; items: unknown[] }[] },
+    menuSets: 0,
+    fullscreen: false,
     /** Result of the native folder dialog (null = cancelled); see `pickOnce`. */
     pick: null as string | null,
     exits: 0,
@@ -168,7 +186,12 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     state.writes.length = 0
     state.active = state.previous = null
     state.recent = []
-    state.menu = []
+    state.preferences = null
+    state.preferenceWrites = 0
+    state.defaultAuthor = 'Test Writer'
+    state.menu = null
+    state.menuSets = 0
+    state.fullscreen = false
     state.pick = null
     state.exits = 0
     state.windowDestroys = 0
@@ -191,6 +214,7 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
       if (r.kind === 'file') state.files.set(r.key.slice('file:'.length), r.value)
       else if (r.kind === 'dir') state.dirs.add(r.value)
       else if (r.key === 'meta:recent') state.recent = JSON.parse(r.value) as RecentEntry[]
+      else if (r.key === 'meta:preferences') state.preferences = JSON.parse(r.value) as string | null
       else if (r.key === 'meta:sql') {
         for (const [k, v] of JSON.parse(r.value) as [string, number][]) state.sqlVersions.set(k, v)
       }
@@ -325,6 +349,21 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
         await persist.file(c, args.contents as string)
         return null
       }
+      case 'storage_write_files_atomic': {
+        // Like Rust: every file is confined and "staged" (failWrite checked) before any is replaced,
+        // so a failure while staging changes nothing; then all are written in order.
+        const files = args.files as { path: string; contents: string }[]
+        const targets = files.map((f) => confined(f.path, true))
+        if (new Set(targets).size !== targets.length) throw { kind: 'invalid_path', message: 'A file is listed twice' }
+        for (const c of targets) checkWrite(c)
+        for (const c of targets) if (state.writeGate) await state.writeGate(c)
+        for (const [i, c] of targets.entries()) {
+          state.files.set(c, files[i].contents)
+          state.writes.push(c)
+          await persist.file(c, files[i].contents)
+        }
+        return null
+      }
       case 'storage_ensure_dir': {
         const c = confined(path, true)
         checkWrite(c)
@@ -356,6 +395,15 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
           .sort()
       }
 
+      case 'storage_list_subdirs': {
+        const c = confined(path, false)
+        if (state.files.has(c)) throw { kind: 'invalid_path', message: `Not a folder: ${path}` }
+        return [...state.dirs]
+          .filter((d) => d !== c && parentOf(d) === c)
+          .map((d) => d.slice(c.length + 1))
+          .sort()
+      }
+
       case 'storage_read_recent':
         return state.recent.length ? recentJSON() : null
       case 'storage_remember_recent': {
@@ -368,8 +416,21 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
         await persist.meta('recent', state.recent)
         return recentJSON()
       }
-      case 'storage_set_recent_menu':
-        state.menu = args.entries as unknown[]
+      case 'preferences_read':
+        return state.preferences
+      case 'preferences_write': {
+        const contents = args.contents as string
+        if (contents.length > 256 * 1024) throw { kind: 'invalid_path', message: 'Preferences are too large' }
+        state.preferences = contents
+        state.preferenceWrites++
+        await persist.meta('preferences', contents)
+        return null
+      }
+      case 'preferences_default_author':
+        return state.defaultAuthor
+      case 'menu_set':
+        state.menu = (args.snapshot as typeof state.menu) ?? null
+        state.menuSets++
         return null
 
       case 'plugin:dialog|message':
@@ -420,11 +481,24 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
       case 'plugin:window|destroy':
         state.windowDestroys++
         return null
+      case 'plugin:window|is_fullscreen':
+        return state.fullscreen
+      case 'plugin:window|set_fullscreen':
+        state.fullscreen = !!args.value
+        return null
+      case 'plugin:app|version':
+        return FAKE_APP_VERSION
 
       default:
         throw new Error(`unexpected command ${cmd}`)
     }
   }
 
-  return { state, handle, reset, hydrate, seedFile, seedRecent, ensureFolderExists }
+  /** Test setup: put raw text (even damaged JSON) in preferences.json, or remove the file (null). */
+  async function seedPreferences(text: string | null) {
+    state.preferences = text
+    await persist.meta('preferences', text)
+  }
+
+  return { state, handle, reset, hydrate, seedFile, seedRecent, seedPreferences, ensureFolderExists }
 }

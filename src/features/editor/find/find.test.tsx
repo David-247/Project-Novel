@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { JSONContent } from '@tiptap/core'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { installCommandShortcuts } from '@/shared/commands'
 import { useStore } from '@/shared/store'
-import { FindButton, FindReplacePanel, getEditor, HISTORY_DEPTH, HistoryButtons, NovelEditor, setDocJSON } from '../index'
+import { FindButton, FindReplacePanel, getEditor, HISTORY_DEPTH, HistoryButtons, NovelEditor, registerEditorCommands, setDocJSON } from '../index'
 import { installLayoutPolyfills } from '../jsdom-polyfills.test-util'
-import { getMatches, HIGHLIGHT_WINDOW, replaceAll, scanNow } from './engine'
+import { getMatches, HIGHLIGHT_WINDOW, replaceAll, replaceCurrent, scanNow } from './engine'
 import { CURRENT_CLASS, MATCH_CLASS } from './plugin'
 import { findMatches } from './search'
 
@@ -12,7 +13,19 @@ beforeAll(installLayoutPolyfills)
 
 const INITIAL_FIND = useStore.getState().find
 
+// Mod-f outside the editor is the find.open command, bound by the shared command registry.
+let uninstall = () => {}
+beforeEach(() => {
+  const offCommands = registerEditorCommands()
+  const offKeys = installCommandShortcuts({ manuscript: () => getEditor()?.view.dom })
+  uninstall = () => {
+    offKeys()
+    offCommands()
+  }
+})
+
 afterEach(() => {
+  uninstall()
   cleanup()
   useStore.setState({ find: { ...INITIAL_FIND } })
   setDocJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
@@ -479,5 +492,59 @@ describe('find & replace inside footnotes (note text travels with find)', () => 
     expect(ed.state.doc.firstChild!.child(1).type.name).toBe('footnote')
     act(() => void ed.commands.undo())
     expect(ed.state.doc.firstChild!.child(1).textContent).toBe('Source: the cat book.')
+  })
+})
+
+describe('replace with Track Changes on (All Markup finds deleted text)', () => {
+  const deletedText = (ed: ReturnType<typeof mountAll>) => {
+    let out = ''
+    ed.state.doc.descendants((n) => {
+      if (n.isText && n.marks.some((m) => m.type.name === 'deletion')) out += n.text
+    })
+    return out
+  }
+
+  it('Replace goes past the replaced (now deleted) match; nothing left: returns false', () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    try {
+      const ed = mountAll({ type: 'doc', content: [para(t('a cat and a cat'))] })
+      act(() => useStore.setState((s) => ({ find: { ...s.find, open: true, query: 'cat', replacement: '' } })))
+      act(() => scanNow())
+      let r = false
+      act(() => void (r = replaceCurrent()))
+      expect(r).toBe(true)
+      act(() => void (r = replaceCurrent()))
+      expect(r).toBe(true)
+      expect(deletedText(ed)).toBe('catcat')
+      act(() => void (r = replaceCurrent()))
+      expect(r).toBe(false)
+      expect(replaceAll()).toBe(0)
+    } finally {
+      act(() => useStore.getState().bookActions.resetBook())
+    }
+  })
+
+  it('Replace All counts only what it replaced; the replacement never inherits tracking marks', () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    try {
+      const del = { type: 'deletion', attrs: { id: 'd', author: 'Zed' } }
+      const ins = { type: 'insertion', attrs: { id: 'i', author: 'Zed' } }
+      const ed = mountAll({
+        type: 'doc',
+        content: [para({ type: 'text', text: 'cat', marks: [del] }, t(' '), { type: 'text', text: 'cat', marks: [ins] }, t(' cat'))],
+      })
+      act(() => useStore.setState((s) => ({ find: { ...s.find, open: true, query: 'cat', replacement: 'dog' } })))
+      act(() => scanNow())
+      let n = 0
+      act(() => void (n = replaceAll()))
+      expect(n).toBe(2)
+      const authors: string[] = []
+      ed.state.doc.descendants((node) => {
+        if (node.isText && node.text === 'dog') authors.push(node.marks.map((m) => `${m.type.name}:${m.attrs.author}`).join())
+      })
+      expect(authors).toEqual(['insertion:Unknown author', 'insertion:Unknown author'])
+    } finally {
+      act(() => useStore.getState().bookActions.resetBook())
+    }
   })
 })

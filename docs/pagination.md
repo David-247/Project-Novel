@@ -11,6 +11,7 @@ directly on the pages: there is one ProseMirror view, and it stays the single so
 - [Extension points](#extension-points)
 - [View, zoom, keys](#view-zoom-and-keys)
 - [Tests and fixtures](#tests-and-fixtures)
+- Track changes and hidden text (Phase 3): [docs/track-changes.md](track-changes.md#pagination)
 
 ---
 
@@ -309,6 +310,14 @@ below the last line, in the bottom margin, outside layout. Known limitation: wit
 be selected with the mouse, only with the keyboard (Backspace after it selects it, a second one
 deletes it).
 
+### Hidden text (track changes)
+
+Markup views hide text (deleted text in No Markup, inserted text in Original). Hidden inline text is
+`display: none`; a hidden block collapses to zero height with nothing inside it laid out, leaving one
+zero-height line. A view switch re-measures the blocks holding changes (`invalidatePaginationAt`). The
+rules, and the e2e check that a view's breaks equal the manuscript with its changes applied or rejected,
+are in [docs/track-changes.md](track-changes.md#pagination).
+
 ### Invalidation
 
 - `relayoutPagination()`: re-break the pages on the next frame from the measured lines (reservation
@@ -436,7 +445,9 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
 
 - **Spread** by default; **single page** when `book.view === 'single'` or when two pages would be
   narrower than 75 % of their size in the window (`MIN_READABLE_SPREAD_SCALE`). Page breaks never
-  depend on the view or the zoom.
+  depend on the view or the zoom. The width that counts is the desk's own (`PaginatedView`'s host),
+  so something beside it in the scrolling editor region (the comments margin panel, Phase 3) narrows
+  the room for the pages, and the fit zooms fit the pages into what is left.
 - **Zoom** (status bar): Fit spread (default; the whole spread fits the window), Fit width, and 50 %
   to 200 % steps; zoom out / in step through the presets. A CSS transform, so zoom never changes
   line breaking.

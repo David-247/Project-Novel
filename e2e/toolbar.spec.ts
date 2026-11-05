@@ -16,7 +16,7 @@ test('formatting toolbar: shortcuts, active state and roving keyboard focus', as
   await lineStart(page)
   await expect(bold).toHaveAttribute('aria-pressed', 'false')
 
-  await page.keyboard.press('ControlOrMeta+Shift+e')
+  await page.keyboard.press('ControlOrMeta+e')
   await expect(editor.locator('p').first()).toHaveCSS('text-align', 'center')
   await expect(toolbar.locator('[data-control-id="toolbar.alignCenter"]')).toHaveAttribute('aria-pressed', 'true')
   // Align right shares its combo with hard reload; the reload guard (on in e2e builds) must let the
@@ -25,7 +25,7 @@ test('formatting toolbar: shortcuts, active state and roving keyboard focus', as
   await expect(editor.locator('p').first()).toHaveCSS('text-align', 'right')
   await expect(toolbar.locator('[data-control-id="toolbar.alignRight"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(editor).toContainText('Hello bold')
-  await page.keyboard.press('ControlOrMeta+Shift+e')
+  await page.keyboard.press('ControlOrMeta+e')
   await expect(editor.locator('p').first()).toHaveCSS('text-align', 'center')
 
   // Keyboard: focus a control, arrows move within the toolbar, Enter activates, Escape returns.
@@ -50,8 +50,9 @@ test('toolbar controls have 32px targets and wrap at narrow widths', async ({ pa
   const toolbar = page.getByRole('toolbar', { name: 'Formatting' })
   const controls = toolbar.locator('[data-control-id]')
   // 16 formatting controls + 4 in the Styles group + undo, redo, find.open + book.trimSize + book.headerFooter +
-  // insert.menu + footnote.options + the paper picker (group + 4 options), wired in App; waits for the app to boot.
-  await expect(controls).toHaveCount(32)
+  // insert.menu + footnote.options + the paper picker (group + 4 options) + settings.open +
+  // comment.new + comment.panel + review.track + review.markup, wired in App; waits for the app to boot.
+  await expect(controls).toHaveCount(37)
   const n = await controls.count()
   for (let i = 0; i < n; i++) {
     const box = await controls.nth(i).boundingBox()

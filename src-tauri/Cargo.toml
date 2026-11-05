@@ -20,3 +20,4 @@ fontdb = "0.24"
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-sql = { version = "2.6.0", features = ["sqlite"] }
 tempfile = "3.27.0"
+whoami = "2"

@@ -1,4 +1,4 @@
-import { defaultBookSettings, type BookSettings } from '@/shared/book'
+import { defaultBookSettings, newProjectBookSettings, type BookSettings } from '@/shared/book'
 import { emptyDoc, getDocumentProvider, isEmptyDocJSON, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { useStore, type RecentProject } from '@/shared/store'
 import {
@@ -11,7 +11,7 @@ import {
   serializeBook,
 } from './book-file'
 import { openProjectIndex, recordRevision, type ProjectIndex } from './db'
-import { askUnsavedChanges, showError } from './dialogs'
+import { askLeftUnsaved, askUnsavedChanges, showError, showNotice } from './dialogs'
 import {
   baseName,
   INDEX_FILE,
@@ -36,10 +36,30 @@ import {
   readTextFile,
   rememberRecentRaw,
   restoreProjectRoot,
-  setRecentMenu,
+  listDir,
+  listSubdirs,
   writeFileAtomic,
+  writeFilesAtomic,
 } from './ipc'
-import { flagMissing, parseRecentFile } from './recent'
+import {
+  forgetSideFiles,
+  hasGuardedSideFile,
+  loadSideFiles,
+  resetSideFiles,
+  restoreSideFiles,
+  sideFileNames,
+  sideFilesForCopy,
+  sideFilesForNewProject,
+  sideFilesForSave,
+  sideFilesKey,
+  sideFileSkippedText,
+  skippedFileReason,
+  type SkipReason,
+  type SkippedFile,
+  sideFilesSaved,
+  writeSideFilesOnClose,
+} from './side-files'
+import { flagMissing, parseRecentFile, samePath } from './recent'
 import {
   deleteRecoveryFile,
   judgeRecovery,
@@ -67,6 +87,8 @@ let currentMeta: ProjectMeta | null = null
 let currentIndex: ProjectIndex | null = null
 let inFlightSave: Promise<boolean> | null = null
 let lastSaveDoneAt = 0
+/** Files the last save left out (guarded book.json / side files it could not replace). */
+let lastSkipped: SkippedFile[] = []
 /** Recovery snapshot found when the open project was opened, awaiting Restore / Discard. */
 type PendingRecovery = { folder: string; snapshot: RecoverySnapshot; text: string }
 let pendingRecovery: PendingRecovery | null = null
@@ -182,33 +204,33 @@ function onlyDisplayTogglesChanged(): boolean {
   return guardKey(currentBookSettings()) === guardKey(defaultBookSettings())
 }
 
-/** Status-bar text when the copy of a guarded book.json could not be kept (book.json was then not replaced). */
-const GUARD_COPY_FAILED =
-  `Your book settings were not saved: Novel could not keep a copy of the existing ${BOOK_FILE} before replacing it, ` +
-  `so ${BOOK_FILE} was left as it is. The manuscript was saved. Saving again will retry.`
+/** Status-bar text when a guarded book.json was not replaced (it could not be read, or its copy not kept). */
+const bookSkippedText = (reason: SkipReason) =>
+  `Your book settings were not saved: ${skippedFileReason(BOOK_FILE, reason)} The manuscript was saved. Saving again will retry.`
 
 /**
  * Copy the guarded book.json aside as `book.damaged-<timestamp>.json` (damaged / unreadable) or
- * `book.newer-<timestamp>.json` (from a newer Novel). Never throws: resolves false when no copy could be
- * kept, and the caller must then not replace book.json. A file that is gone has nothing to keep (true).
+ * `book.newer-<timestamp>.json` (from a newer Novel). Never throws: true when the copy was kept (or the file
+ * is gone: nothing to keep), otherwise why not; the caller must then not replace book.json.
  */
-async function keepGuardedBook(folder: string, guard: BookGuard): Promise<boolean> {
-  try {
-    let original = guard.original
-    if (original === null) {
-      try {
-        original = await readTextFile(joinPath(folder, BOOK_FILE), BOOK_FILE)
-      } catch (e) {
-        if (e instanceof ProjectError && e.code === 'missing-file') return true
-        throw e
-      }
+async function keepGuardedBook(folder: string, guard: BookGuard): Promise<true | SkipReason> {
+  let original = guard.original
+  if (original === null) {
+    try {
+      original = await readTextFile(joinPath(folder, BOOK_FILE), BOOK_FILE)
+    } catch (e) {
+      if (e instanceof ProjectError && e.code === 'missing-file') return true
+      console.warn('Reading the guarded book.json failed; it is not replaced:', e)
+      return 'unreadable'
     }
+  }
+  try {
     const stamp = new Date().toISOString().replace(/[^0-9A-Za-z-]/g, '-')
     await writeFileAtomic(joinPath(folder, `book.${guard.kind}-${stamp}.json`), original, 'book.json copy')
     return true
   } catch (e) {
     console.warn(`Keeping a copy of the ${guard.kind} book.json failed; it is not replaced:`, e)
-    return false
+    return 'copy'
   }
 }
 
@@ -330,7 +352,7 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
     )
   }
   // Never overwrite leftovers of a project whose project.json is gone.
-  for (const file of [MANUSCRIPT_FILE, BOOK_FILE, INDEX_FILE]) {
+  for (const file of [MANUSCRIPT_FILE, BOOK_FILE, INDEX_FILE, ...sideFileNames()]) {
     if (await pathExists(joinPath(folder, file))) {
       throw new ProjectError(
         'already-exists',
@@ -342,18 +364,27 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   const version = p.getDocVersion()
   const content = doc ?? p.getDocJSON()
   const meta = newProjectMeta(baseName(folder))
-  await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), serializeManuscript(content), MANUSCRIPT_FILE)
-  // A new project starts with default book settings; Save As keeps the current ones.
-  const book = doc ? defaultBookSettings() : currentBookSettings()
+  // Side files (comments.json, ...): a new project starts without any; Save As keeps the current ones.
+  const side = doc ? { files: [], written: [] } : sideFilesForNewProject(folder)
+  await writeFilesAtomic([
+    ...side.files,
+    { path: joinPath(folder, MANUSCRIPT_FILE), contents: serializeManuscript(content), label: MANUSCRIPT_FILE },
+  ])
+  // A new project starts with the default book settings plus the user's new-project preferences
+  // (paper, trim size); Save As keeps the current ones.
+  const book = doc ? newProjectBookSettings(useStore.getState().preferences) : currentBookSettings()
   const bookVersion = getBookVersion()
   await writeFileAtomic(joinPath(folder, BOOK_FILE), serializeBook(book), BOOK_FILE)
   await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(meta), PROJECT_FILE)
   if (doc) {
     loadDocument(p, doc)
+    resetSideFiles(true)
     bookActions().loadBook(book)
   } else {
     p.markClean(version)
     bookActions().markBookClean(bookVersion)
+    resetSideFiles(false)
+    sideFilesSaved(side.written)
   }
   await activate(folder, meta, await switchIndex(folder))
 }
@@ -383,9 +414,12 @@ export async function openProjectAt(folder: string): Promise<void> {
   const book = await readBookFile(folder)
   loadDocument(p, parseManuscript(docText))
   bookActions().loadBook(book.settings)
+  // After the manuscript: a side file's content refers to it (comment anchors).
+  const sideWarnings = await loadSideFiles(folder)
   await activate(folder, meta, await switchIndex(folder))
   bookGuard = book.guard
   actions().setBookWarning(book.warning)
+  actions().setSideFileWarning(sideWarnings.length ? sideWarnings.join(' ') : null)
   await detectRecovery(folder, meta, docText, book.settings)
 }
 
@@ -447,6 +481,9 @@ async function writeProject(
   silent: boolean,
 ): Promise<boolean> {
   actions().saveStarted()
+  // Files this save leaves out (guarded book.json / side files); the close and quit prompts report them.
+  const skipped: SkippedFile[] = []
+  lastSkipped = skipped
   try {
     // The content is taken when Save is requested. Version read before the doc:
     // edits made during the async write keep the doc dirty.
@@ -456,14 +493,24 @@ async function writeProject(
     const bookText = serializeBook(currentBookSettings())
     // The write lock keeps this from overlapping an autosave snapshot.
     await withWriteLock(async () => {
-      await writeFileAtomic(joinPath(folder, MANUSCRIPT_FILE), text, MANUSCRIPT_FILE)
+      // The manuscript and its side files (comments.json, ...) in one batch: all staged before any
+      // is replaced, the manuscript renamed last (docs/project-format.md, "Saving").
+      const side = await sideFilesForSave(folder)
+      await writeFilesAtomic([...side.files, { path: joinPath(folder, MANUSCRIPT_FILE), contents: text, label: MANUSCRIPT_FILE }])
+      sideFilesSaved(side.written)
+      // A guarded side file whose copy could not be kept was left out: its changes stay unsaved.
+      skipped.push(...side.skipped)
+      if (side.skipped.length) actions().setSideFileWarning(sideFileSkippedText(side.skipped))
+      else if (side.written.length && !hasGuardedSideFile()) actions().setSideFileWarning(null)
       // An unreadable / damaged / newer book.json is only replaced once the user changed a book setting
       // other than view / surface, and only after a copy of it was kept.
       let bookSaved = true
       if (!bookGuard || (isBookDirty() && guardedBookChanged(bookGuard))) {
-        if (bookGuard && !(await keepGuardedBook(folder, bookGuard))) {
+        const kept = bookGuard ? await keepGuardedBook(folder, bookGuard) : true
+        if (kept !== true) {
           bookSaved = false
-          actions().setBookWarning(GUARD_COPY_FAILED)
+          skipped.push({ name: BOOK_FILE, reason: kept })
+          actions().setBookWarning(bookSkippedText(kept))
         } else {
           await writeFileAtomic(joinPath(folder, BOOK_FILE), bookText, BOOK_FILE)
           bookGuard = null
@@ -475,7 +522,9 @@ async function writeProject(
       const updated: ProjectMeta = { ...base, updatedAt: new Date().toISOString() }
       await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(updated), PROJECT_FILE)
       if (currentMeta === base) currentMeta = updated
-      p.markClean(version)
+      // Side-file changes are document steps (comment threads): with a side file left out, the manuscript
+      // stays unsaved so prompts and autosave snapshots keep those changes, and the next save retries.
+      if (!side.skipped.length) p.markClean(version)
       // Book settings that could not be written stay unsaved (prompts, autosave snapshots keep them).
       if (bookSaved) bookActions().markBookClean(bookVersion)
       // A clean save makes any crash-recovery snapshot obsolete.
@@ -550,8 +599,9 @@ export async function confirmUnsavedChanges(action = 'continuing'): Promise<bool
     const choice = await askUnsavedChanges(useStore.getState().project.title, action)
     if (choice === 'save') {
       // Inside a New/Open flow with no project yet, Save is a Save-As that belongs to that flow.
-      if (folderFlowBusy && !getCurrentProjectPath()) return await saveAsNewProjectUnguarded()
-      return await saveProject()
+      const saved = folderFlowBusy && !getCurrentProjectPath() ? await saveAsNewProjectUnguarded() : await saveProject()
+      // A save that left something unsaved (a guarded file it could not replace) is not "saved".
+      return saved && (await confirmLeftUnsaved(action))
     }
     if (choice === 'discard') await discardUnsavedForRecovery(p)
     return choice === 'discard'
@@ -561,6 +611,55 @@ export async function confirmUnsavedChanges(action = 'continuing'): Promise<bool
     console.error('Unsaved-changes prompt failed:', e)
     return fallbackConfirm(`You have unsaved changes. Continue ${action} without saving them?`)
   }
+}
+
+/** Label of the "go on" button of the left-unsaved prompt, for the action the user asked for. */
+function anywayLabel(action: string): string {
+  const verb = action === 'quitting' ? 'Quit' : action === 'closing' || action === 'closing the project' ? 'Close' : 'Continue'
+  return `${verb} anyway (keep changes for recovery)`
+}
+
+/**
+ * After "Save" in the unsaved-changes prompt: if the project is still unsaved (a guarded book.json or
+ * side file could not be replaced, or edits arrived during the save), say which file and why, and ask
+ * Cancel (stay) or go on anyway. Going on first waits for a crash-recovery snapshot of everything
+ * unsaved, side files included (and for any snapshot already in flight); if it cannot be written, the
+ * user stays. Resolves true when it is OK to proceed.
+ */
+async function confirmLeftUnsaved(action: string): Promise<boolean> {
+  const p = getDocumentProvider()
+  if (!p || !isProjectDirty(p)) return true
+  const why = lastSkipped.length
+    ? lastSkipped.map((s) => skippedFileReason(s.name, s.reason)).join(' ')
+    : 'Some changes were made while saving.'
+  const files = lastSkipped.length ? lastSkipped.map((s) => s.name).join(', ') : 'Some changes'
+  const label = anywayLabel(action)
+  let go: boolean
+  try {
+    go = (await askLeftUnsaved(`${files} could not be saved. ${why}`, label)) === 'continue'
+  } catch (e) {
+    console.error('Left-unsaved prompt failed:', e)
+    go = fallbackConfirm(`${files} could not be saved. ${why} ${label}?`)
+  }
+  if (!go) return false
+  const kept = snapshotNow ? await snapshotNow().catch(() => false) : false
+  if (!kept) {
+    await showError(
+      'Could not keep your changes',
+      new ProjectError('io', 'Novel could not write a backup of the unsaved changes, so it did not go on. Free up space or check the project folder, then try again.'),
+    )
+    return false
+  }
+  return true
+}
+
+let snapshotNow: (() => Promise<boolean>) | null = null
+/**
+ * Autosave registers how to take a crash-recovery snapshot now (forced, awaited, after any snapshot in
+ * flight); resolves true once it is written. Internal to the storage slice.
+ */
+export function setRecoverySnapshotter(fn: (() => Promise<boolean>) | null): void {
+  snapshotNow = fn
 }
 
 function fallbackConfirm(text: string): boolean {
@@ -592,6 +691,7 @@ export function newProject(): Promise<boolean> {
 
 async function newProjectUnguarded(): Promise<boolean> {
   if (!(await confirmUnsavedChanges('creating a new project'))) return false
+  await finishSideFilesOnClose()
   try {
     provider()
     const folder = await pickProjectFolder('Choose a folder for the new project')
@@ -614,6 +714,7 @@ export function openProject(folder?: string): Promise<boolean> {
 
 async function openProjectUnguarded(folder?: string): Promise<boolean> {
   if (!(await confirmUnsavedChanges('opening another project'))) return false
+  await finishSideFilesOnClose()
   let target = folder ?? null
   try {
     provider()
@@ -640,8 +741,141 @@ export async function closeProject(): Promise<void> {
   lastSaveDoneAt = 0
   pendingRecovery = null
   bookGuard = null
+  forgetSideFiles()
   bookActions().resetBook()
   actions().projectClosed()
+}
+
+/**
+ * File > Close Project: the unsaved-changes prompt, then close and leave an empty untitled manuscript.
+ * Crash-recovery data is dropped only when nothing unsaved remains and no Restore/Discard answer is
+ * pending (as on quit). Resolves true when the project was closed.
+ */
+export function closeProjectInteractive(): Promise<boolean> {
+  return exclusiveFolderFlow(async () => {
+    if (!getCurrentProjectPath()) return false
+    if (!(await confirmUnsavedChanges('closing the project'))) return false
+    // As before New / Open: a saved project's side files get their close data (comment orphans pruned).
+    await finishSideFilesOnClose()
+    const p = provider()
+    if (!hasPendingRecovery() && !isProjectDirty(p)) await clearRecoveryData()
+    await closeProject()
+    loadDocument(p, emptyDoc())
+    // The untitled manuscript starts without the closed project's side-file data (its comments).
+    resetSideFiles(true)
+    return true
+  })
+}
+
+/** One file Save a Copy writes: its name at the top of the project folder, and its text. */
+export interface CopyDocument {
+  name: string
+  text: string
+}
+
+/**
+ * Save a Copy: the documents the copy takes from memory, as they are in the window now (unsaved
+ * changes included), and every name whose disk copy must not be used (`handled`: these documents
+ * plus empty side files). The registered side files (comments.json, ...) come from the side-files
+ * registry; an empty one is not written. project.json is written last, by the caller.
+ */
+export function inMemoryCopyDocuments(p: DocumentProvider): { docs: CopyDocument[]; handled: Set<string> } {
+  const side = sideFilesForCopy()
+  const docs = [
+    ...side.files,
+    { name: MANUSCRIPT_FILE, text: serializeManuscript(p.getDocJSON()) },
+    { name: BOOK_FILE, text: serializeBook(currentBookSettings()) },
+  ]
+  return { docs, handled: new Set([...docs.map((d) => d.name), ...side.handled]) }
+}
+
+/**
+ * File > Save a Copy…: write the open project, as it is now (unsaved changes included), to another
+ * folder chosen in the native dialog, and stay in the open project. Uses the confined storage
+ * commands only: the chosen folder is granted for the copy and the open project's root restored
+ * afterwards. The copy gets a new project id; other top-level text files of the project travel along.
+ * Resolves true when the copy was written.
+ */
+export function saveProjectCopy(): Promise<boolean> {
+  return exclusiveFolderFlow(saveProjectCopyUnguarded)
+}
+
+async function saveProjectCopyUnguarded(): Promise<boolean> {
+  const source = getCurrentProjectPath()
+  const meta = currentMeta
+  if (!source || !meta) return false
+  let skipped: string[] = []
+  let written: boolean
+  try {
+    const p = provider()
+    const { docs, handled: fromMemory } = inMemoryCopyDocuments(p)
+    written = await withWriteLock(async () => {
+      // Read before the copy's folder is granted (file commands reach only the granted root).
+      const extras: CopyDocument[] = []
+      for (const name of await listDir(source)) {
+        // The index is secondary data (a new one is made on open); dot files are app internals.
+        if (fromMemory.has(name) || name === PROJECT_FILE || name === INDEX_FILE || name.startsWith('.')) continue
+        try {
+          extras.push({ name, text: await readTextFile(joinPath(source, name), name) })
+        } catch (e) {
+          console.warn(`Save a Copy: ${name} could not be read:`, e)
+          skipped.push(name)
+        }
+      }
+      // Folders are not copied (.recovery holds crash backups of this project only).
+      skipped = [...skipped, ...(await listSubdirs(source)).filter((d) => d !== RECOVERY_DIR).map((d) => `${d}/`)]
+      const target = await pickProjectFolder('Choose a folder for the copy')
+      if (!target) return false
+      try {
+        if (samePath(target, source)) {
+          throw new ProjectError('already-exists', 'This is the open project. Choose another folder for the copy.')
+        }
+        const toWrite = [...docs, ...extras]
+        // Nothing in the chosen folder is ever overwritten.
+        const taken: string[] = []
+        for (const name of [PROJECT_FILE, INDEX_FILE, ...toWrite.map((d) => d.name)]) {
+          if (await pathExists(joinPath(target, name))) taken.push(name)
+        }
+        if (taken.length) {
+          throw new ProjectError(
+            'already-exists',
+            `This folder already contains ${taken.join(', ')}, and Novel will not overwrite ${taken.length === 1 ? 'it' : 'them'}. ` +
+              'Choose an empty folder for the copy.',
+          )
+        }
+        for (const d of toWrite) await writeFileAtomic(joinPath(target, d.name), d.text, d.name)
+        const copy: ProjectMeta = { ...meta, id: newProjectMeta(meta.title).id, updatedAt: new Date().toISOString() }
+        await writeFileAtomic(joinPath(target, PROJECT_FILE), serializeProjectMeta(copy), PROJECT_FILE)
+        return true
+      } finally {
+        // Back to the open project, whatever happened.
+        await restoreProjectRoot()
+      }
+    })
+  } catch (e) {
+    await showError('Could not save a copy', e)
+    return false
+  }
+  if (written && skipped.length) {
+    await showNotice(
+      'Copy saved',
+      `The copy was saved, but these were not copied: ${skipped.join(', ')}. ` +
+        'Novel copies the files at the top of the project folder that it can read; copy the rest yourself if you need them.',
+    )
+  }
+  return written
+}
+
+/**
+ * The open project is about to be closed (quit, or another project opened), after the
+ * unsaved-changes prompt: if nothing is unsaved, write the side files' close data (comments: threads
+ * whose anchor text is gone are pruned now, not on save). Never throws.
+ */
+export async function finishSideFilesOnClose(): Promise<void> {
+  const folder = getCurrentProjectPath()
+  const p = getDocumentProvider()
+  if (!folder || !p || isProjectDirty(p)) return
+  await withWriteLock(() => writeSideFilesOnClose(folder)).catch((e) => console.warn('Closing side files failed:', e))
 }
 
 // ---- Crash recovery ---------------------------------------------------------
@@ -750,7 +984,9 @@ async function judgeFoundRecovery(
       console.warn('Ignoring unreadable recovery data in', recoveryFilePath(folder))
       return
     }
-    const verdict = judgeRecovery(snapshot, meta, manuscriptText, savedBook)
+    // Side files changed without the text (a resolved comment) make the snapshot worth offering.
+    const sameSideFiles = !snapshot.sideFiles || sideFilesKey(snapshot.sideFiles) === sideFilesKey()
+    const verdict = judgeRecovery(snapshot, meta, manuscriptText, savedBook, sameSideFiles)
     if (verdict === 'identical') {
       await withWriteLock(() => clearRecoveryUnlocked(folder, true))
     } else if (verdict === 'unrelated') {
@@ -797,6 +1033,8 @@ export async function restoreRecovery(): Promise<boolean> {
   try {
     const p = provider()
     loadDocument(p, pending.snapshot.doc)
+    // Side files (comments) come back with the text they refer to.
+    restoreSideFiles(pending.snapshot.sideFiles)
     p.markDirty()
     // Unsaved book settings come back with the text (snapshots from before book settings have none).
     // Only when they differ: restoring equal settings would mark the book unsaved, and the next save would
@@ -856,17 +1094,9 @@ export async function offerReopenAfterCrash(recent: RecentProject[]): Promise<vo
 
 // ---- Recent projects (file written only by Rust) ---------------------------
 
-async function syncRecentMenu(list: RecentProject[]): Promise<void> {
-  try {
-    await setRecentMenu(list.map((r) => ({ path: r.path, label: `${r.name} (${r.path})`, missing: !!r.missing })))
-  } catch (e) {
-    console.warn('Updating the Open Recent menu failed:', e)
-  }
-}
-
+/** The store's list; File > Open Recent (storage commands) renders from it. */
 function setRecent(list: RecentProject[]): void {
   actions().setRecent(list)
-  void syncRecentMenu(list)
 }
 
 async function rememberRecent(name: string): Promise<void> {
@@ -877,7 +1107,7 @@ async function rememberRecent(name: string): Promise<void> {
   }
 }
 
-/** Load recent-projects.json from the app config dir, flag missing folders, update store + menu. */
+/** Load recent-projects.json from the app config dir, flag missing folders, update the store (and so the menu). */
 export async function loadRecentProjects(): Promise<RecentProject[]> {
   let list: RecentProject[] = []
   try {
@@ -889,7 +1119,6 @@ export async function loadRecentProjects(): Promise<RecentProject[]> {
     list.map(async (r) => ((await pathExists(joinPath(r.path, PROJECT_FILE))) ? r : { ...r, missing: true })),
   )
   actions().setRecent(checked)
-  await syncRecentMenu(checked)
   return checked
 }
 
@@ -904,4 +1133,5 @@ export async function __resetStorageForTests(): Promise<void> {
   bookGuard = null
   suppressSnapshotsAt(null)
   openedListeners.clear()
+  forgetSideFiles()
 }

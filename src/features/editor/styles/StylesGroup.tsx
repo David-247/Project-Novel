@@ -1,11 +1,11 @@
 import type { Editor } from '@tiptap/core'
-import { useState } from 'react'
+import { useEffect } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { DEFAULT_STYLE_ID } from '@/shared/book'
 import { IconButton, Select, ToolbarGroup, Tooltip } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
-import { blockPlainText } from '../block-text'
 import { TOOLBAR_CONTROLS } from '../toolbar/controls'
+import { modifyStyle, openModifyStyle, setManagingStyles, useStyleDialogs } from './dialog-state'
 import { ManageStylesDialog } from './ManageStylesDialog'
 import { ModifyStyleDialog } from './ModifyStyleDialog'
 import { useResolvedStyles } from './resolved'
@@ -56,9 +56,16 @@ const ClearIcon = () => (
  */
 export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }: StylesGroupProps) {
   const styles = useResolvedStyles()
-  const [modifying, setModifying] = useState<string | null>(null)
-  const [managing, setManaging] = useState(false)
-  const [sample, setSample] = useState<string | undefined>()
+  // Shared with the Format menu's Modify Style… / Manage Styles… commands.
+  const { modifying, managing, sample } = useStyleDialogs()
+  // The dialogs live here: closing with the group (no stale dialog when it mounts again).
+  useEffect(
+    () => () => {
+      modifyStyle(null)
+      setManagingStyles(false)
+    },
+    [],
+  )
 
   const options: SelectOption[] = [...styles.values()].map((s) => ({ value: s.id, label: s.name }))
   if (styleId && !styles.has(styleId)) {
@@ -68,10 +75,6 @@ export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }
   }
   if (!styleId) options.unshift({ value: '', label: 'No style' })
 
-  const currentText = () => {
-    const block = editor?.state.selection.$from.parent
-    return block ? blockPlainText(block).slice(0, 280) : undefined
-  }
   const picker = TOOLBAR_CONTROLS.stylePicker
   const edit = TOOLBAR_CONTROLS.styleEdit
   const manage = TOOLBAR_CONTROLS.styleManage
@@ -100,10 +103,7 @@ export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }
             label={edit.label}
             data-control-id={edit.id}
             disabled={disabled}
-            onClick={() => {
-              setSample(currentText())
-              setModifying(styles.has(styleId) ? styleId : fallbackStyleId || DEFAULT_STYLE_ID)
-            }}
+            onClick={() => openModifyStyle()}
           >
             <ModifyIcon />
           </IconButton>
@@ -111,7 +111,7 @@ export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }
       )}
       {item(
         <Tooltip>
-          <IconButton label={manage.label} data-control-id={manage.id} disabled={disabled} onClick={() => setManaging(true)}>
+          <IconButton label={manage.label} data-control-id={manage.id} disabled={disabled} onClick={() => setManagingStyles(true)}>
             <ManageIcon />
           </IconButton>
         </Tooltip>,
@@ -134,14 +134,11 @@ export function StylesGroup({ editor, disabled, styleId, fallbackStyleId, item }
       )}
       <ManageStylesDialog
         open={managing}
-        onOpenChange={setManaging}
+        onOpenChange={setManagingStyles}
         initialStyleId={styleId || DEFAULT_STYLE_ID}
-        onModify={(id) => {
-          setSample(undefined)
-          setModifying(id)
-        }}
+        onModify={modifyStyle}
       />
-      <ModifyStyleDialog styleId={modifying} onClose={() => setModifying(null)} sample={sample} />
+      <ModifyStyleDialog styleId={modifying} onClose={() => modifyStyle(null)} sample={sample} />
     </ToolbarGroup>
   )
 }

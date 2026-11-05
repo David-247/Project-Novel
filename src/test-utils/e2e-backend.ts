@@ -15,13 +15,19 @@
  * and folder picker through `window.__nvE2E` (see e2e/helpers.ts).
  */
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { getEditor, getFootnotes, setDocJSON } from '@/features/editor'
+import { getDocJSON, getEditor, getFootnotes, setDocJSON } from '@/features/editor'
+import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
+import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
+import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
+import { commentsDebug } from '@/features/comments'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
+import { getCommands } from '@/shared/commands'
+import { formatShortcut } from '@/shared/ui'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
 
@@ -31,6 +37,8 @@ export interface E2EConfig {
   failFonts?: boolean
   /** Families list_system_fonts returns. */
   fonts?: string[]
+  /** The OS user's name preferences_default_author returns ('' = none known). */
+  defaultAuthor?: string
 }
 
 // ---- IndexedDB persistence -------------------------------------------------
@@ -139,7 +147,28 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     listFiles: () => [...state.files.keys()].sort(),
     /** Add a folder to the Rust-owned recent list (as if opened before). */
     addRecent: (path: string, name: string) => core.seedRecent(path, name),
-    recentMenu: () => state.menu,
+    /** preferences.json as stored (null = no file); and replace it, even with damaged text. */
+    preferencesFile: () => state.preferences,
+    setPreferencesFile: (text: string | null) => core.seedPreferences(text),
+    /** Ask for the author name as a tracked change or comment would (shows the one-time question). */
+    ensureAuthorName: () => ensureAuthorName(),
+    /** The preferences slice as the app holds it. */
+    preferences: () => useStore.getState().preferences,
+    /** Labels of File > Open Recent in the last native menu snapshot (menu_set). */
+    recentMenu: () => {
+      type Node = { kind: string; label?: string; items?: Node[] }
+      const file = state.menu?.menus.find((m) => m.id === 'file')
+      const recent = (file?.items as Node[] | undefined)?.find((n) => n.kind === 'submenu' && n.label === 'Open Recent')
+      return (recent?.items ?? []).map((n) => n.label ?? '')
+    },
+    /** The last native menu snapshot (menu_set), as Rust would build it. */
+    nativeMenu: () => state.menu,
+    /** Registered commands with a shortcut, and the keys as shown on this platform. */
+    shortcutRows: () =>
+      getCommands()
+        .filter((c) => c.shortcut)
+        .map((c) => ({ id: c.id, label: c.label, keys: formatShortcut(c.shortcut!) })),
+    fullscreen: () => state.fullscreen,
     exits: () => state.exits,
     /** auditTooltipCoverage over the whole page incl. portals (the fake native dialog excluded). */
     auditTooltips: () =>
@@ -238,6 +267,46 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const schema = ed.schema
       ed.view.dispatch(ed.state.tr.insert(pos, schema.nodes.footnote.create(null, text ? schema.text(text) : null)))
     },
+    // ---- Track changes (Phase 3) ----
+    /** Turn recording on or off (the book setting the toolbar toggle writes). */
+    setTracking: (on: boolean) => setTracking(on),
+    /** View ▸ Markup. */
+    setMarkupView: (view: MarkupView) => setMarkupView(view),
+    /** Number of tracked changes in the document. */
+    countChanges: () => {
+      const ed = getEditor()
+      return ed ? countChanges(ed.state) : 0
+    },
+    /** Accept (or reject) every change, as one transaction. */
+    resolveAllChanges: (mode: 'accept' | 'reject') => {
+      const ed = getEditor()
+      if (!ed) return
+      const tr = mode === 'accept' ? acceptAll(ed.state) : rejectAll(ed.state)
+      if (tr) ed.view.dispatch(tr)
+    },
+    /**
+     * The first characters of text shown at the top of each page in the current markup view
+     * ('(blank)' for a blank page): compares page breaks between documents whose positions differ.
+     */
+    pageStarts: (chars = 24) => {
+      const ed = getEditor()
+      if (!ed) return []
+      const view = useStore.getState().trackChanges.markupView
+      const doc = ed.state.doc
+      return useStore.getState().layout.pages.map((pg) => {
+        if (pg.isBlank) return '(blank)'
+        let out = ''
+        doc.nodesBetween(pg.from, pg.to, (n, pos) => {
+          if (out.length >= chars || n.type.name === 'footnote') return false
+          if (n.isBlock && isBlockHidden(n, view)) return false
+          if (n.isText && !isInlineHidden(n, view)) out += n.text!.slice(Math.max(0, pg.from - pos))
+          return true
+        })
+        return out.slice(0, chars)
+      })
+    },
+    /** The document as saved (manuscript.json shape). */
+    docJSON: () => getDocJSON(),
     /** Editor document version (bumps on every document change; style edits must not bump it). */
     docVersion: () => useStore.getState().editor.docVersion,
     /**
@@ -248,6 +317,32 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     syncSelection: () => {
       const view = getEditor()?.view as unknown as { domObserver?: { flush(): void } } | undefined
       view?.domObserver?.flush()
+    },
+    // ---- Comments (Phase 3) ----
+    /** Start recording when each layoutVersion is published (performance.now()); returns the record. */
+    watchLayoutPublishes: () => {
+      const times: Record<number, number> = {}
+      useStore.subscribe((st, prev) => {
+        if (st.layout.layoutVersion !== prev.layout.layoutVersion) times[st.layout.layoutVersion] = performance.now()
+      })
+      ;(window as unknown as { __nvLayoutTimes: Record<number, number> }).__nvLayoutTimes = times
+    },
+    layoutPublishedAt: (version: number) => (window as unknown as { __nvLayoutTimes?: Record<number, number> }).__nvLayoutTimes?.[version] ?? null,
+    /** Select document positions `from..to` in the manuscript (as a mouse drag would). */
+    selectText: (from: number, to: number) => {
+      const view = getEditor()?.view
+      if (!view) return
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)))
+    },
+    /** Selection of the manuscript. */
+    selection: () => {
+      const s = getEditor()?.state.selection
+      return s ? { from: s.from, to: s.to } : null
+    },
+    /** The comments mirror (threads, active thread) and the last margin-panel layout. */
+    comments: () => {
+      const c = useStore.getState().comments
+      return { threads: c.threads, activeId: c.activeId, showResolved: c.showResolved, layout: { ...commentsDebug } }
     },
     /** book.styles as stored (overrides only). */
     bookStyles: () => useStore.getState().book.styles,
@@ -286,6 +381,7 @@ export async function installE2EBackend(): Promise<void> {
   const config = window.__nvE2EConfig ?? {}
   core.state.failFonts = !!config.failFonts
   if (config.fonts) core.state.fonts = config.fonts
+  if (config.defaultAuthor !== undefined) core.state.defaultAuthor = config.defaultAuthor
   mockWindows('main')
   mockIPC(
     async (cmd, args) => {

@@ -13,6 +13,9 @@ const PLUGIN_COMMANDS: [command: string, definedIn: string][] = [
   ['plugin:sql|close', 'node_modules/@tauri-apps/plugin-sql/dist-js/index.js'],
   ['plugin:window|theme', 'node_modules/@tauri-apps/api/window.js'],
   ['plugin:window|destroy', 'node_modules/@tauri-apps/api/window.js'],
+  ['plugin:window|is_fullscreen', 'node_modules/@tauri-apps/api/window.js'],
+  ['plugin:window|set_fullscreen', 'node_modules/@tauri-apps/api/window.js'],
+  ['plugin:app|version', 'node_modules/@tauri-apps/api/app.js'],
 ]
 
 function* sourceFiles(dir: string): Generator<string> {

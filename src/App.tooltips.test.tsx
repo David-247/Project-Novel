@@ -60,7 +60,23 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     ]
     const surfaces = Object.values(SURFACE_CONTROLS).map((m) => m.id)
     expect(new Set(rendered)).toEqual(
-      new Set([...expected.map((m) => m.id), ...surfaces, 'book.trimSize', 'book.headerFooter', 'insert.menu', 'footnote.options', 'file.new_project', 'file.open_project']),
+      new Set([
+        ...expected.map((m) => m.id),
+        ...surfaces,
+        'book.trimSize',
+        'book.headerFooter',
+        'settings.open',
+        'insert.menu',
+        'footnote.options',
+        'comment.new',
+        'comment.panel',
+        'review.track',
+        'review.markup',
+        'file.new_project',
+        'file.open_project',
+        // The in-app menu bar's titles (its items are covered in App.menus.test.tsx).
+        ...['file', 'edit', 'view', 'insert', 'format', 'review', 'help'].map((m) => `menu.${m}`),
+      ]),
     )
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
@@ -209,6 +225,9 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     await renderFullApp(
       <>
         <button type="button">Mystery action</button>
+        {/* An explicit proxy is skipped; hidden and out of the tab order alone is not enough. */}
+        <input type="color" aria-hidden="true" tabIndex={-1} data-tooltip-proxy="" />
+        <input type="color" aria-hidden="true" tabIndex={-1} />
         <button type="button" data-control-id="nowhere.registered">
           Unregistered
         </button>
@@ -226,6 +245,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     )
     const problems = auditTooltipCoverage(document.body)
     expect(problems.map((p) => [p.reason, p.controlId])).toEqual([
+      ['missing-id', null],
       ['missing-id', null],
       ['unregistered', 'nowhere.registered'],
       ['not-wired', TOOLBAR_CONTROLS.bold.id],

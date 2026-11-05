@@ -1,5 +1,11 @@
 import type { TooltipCopy } from '@/shared/ui'
-import { TOOLTIP_REGISTRY } from './registry'
+import { getTooltipCopy, TOOLTIP_REGISTRY } from './registry'
+
+/**
+ * Opt-out for a control's hidden helper element (aria-hidden, tabindex -1) that another control
+ * drives, e.g. the colour input behind Settings > Author colour. Use on nothing a user can reach.
+ */
+export const TOOLTIP_PROXY_ATTR = 'data-tooltip-proxy'
 
 /** Everything a user can operate: native controls plus ARIA widget roles. */
 export const CONTROL_SELECTOR = [
@@ -52,7 +58,8 @@ function describedByText(el: Element): string {
 
 /**
  * Lists every interactive control under `root` that would show no tooltip. The manuscript itself
- * (the contenteditable writing surface) is the document, not a control, and is skipped.
+ * (the contenteditable writing surface) is the document, not a control, and is skipped, as is an
+ * element marked `data-tooltip-proxy` (hidden, out of the tab order, driven by a real control).
  */
 export function auditTooltipCoverage(
   root: ParentNode,
@@ -61,13 +68,22 @@ export function auditTooltipCoverage(
   const problems: CoverageProblem[] = []
   for (const el of Array.from(root.querySelectorAll(CONTROL_SELECTOR))) {
     if (el.getAttribute('contenteditable') === 'true') continue
+    // An explicit proxy no one operates directly (the colour input the Author colour button opens):
+    // the control that drives it carries the tooltip.
+    if (el.hasAttribute(TOOLTIP_PROXY_ATTR)) continue
     const controlId = el.getAttribute('data-control-id')
     const label = describe(el)
     if (!controlId) {
       problems.push({ element: el, controlId, reason: 'missing-id', label })
       continue
     }
-    const copy = Object.prototype.hasOwnProperty.call(registry, controlId) ? registry[controlId] : undefined
+    // The app's registry includes copy derived from registered commands (menu items).
+    const copy =
+      registry === TOOLTIP_REGISTRY
+        ? getTooltipCopy(controlId)
+        : Object.prototype.hasOwnProperty.call(registry, controlId)
+          ? registry[controlId]
+          : undefined
     if (!copy) {
       problems.push({ element: el, controlId, reason: 'unregistered', label })
       continue

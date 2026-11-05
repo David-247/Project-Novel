@@ -14,5 +14,7 @@ export { HeaderFooter } from './HeaderFooter'
 export { HeaderFooterButton } from './HeaderFooterButton'
 export type { HeaderFooterButtonProps } from './HeaderFooterButton'
 export { openHeaderFooterDialog, closeHeaderFooterDialog } from './dialog-state'
+// File > Book Details…, Format > Headers & Page Numbers… (shared command registry). Returns unregister.
+export { registerHeaderFooterCommands } from './commands'
 export { HEADER_FOOTER_CONTROLS } from './controls'
 export type { HeaderFooterControlMeta, HeaderFooterControlKey } from './controls'

@@ -1,5 +1,7 @@
-import type { Mark, Node as PMNode, Schema } from '@tiptap/pm/model'
+import { Fragment, Slice, type Mark, type Node as PMNode, type Schema } from '@tiptap/pm/model'
 import type { Transaction } from '@tiptap/pm/state'
+import { ReplaceStep } from '@tiptap/pm/transform'
+import { DELETION_MARK, isBlockHidden, isInlineHidden, TRACKING_MARKS, type MarkupView } from '@/shared/track-changes'
 
 export interface FindOptions {
   caseSensitive: boolean
@@ -70,11 +72,14 @@ export function buildMatcher(query: string, options: FindOptions): RegExp | null
  * stay 1:1 (the note's text starts at the node's position + 1), and a match never spans the
  * reference's boundary (LEAF never matches a typed query).
  */
-export function blockText(block: PMNode): string {
-  if (block.childCount === 1 && block.firstChild!.isText) return block.firstChild!.text!
+export function blockText(block: PMNode, markupView: MarkupView = 'all'): string {
+  const hidden = (n: PMNode) => markupView !== 'all' && n.marks.length > 0 && isInlineHidden(n, markupView)
+  if (block.childCount === 1 && block.firstChild!.isText && !hidden(block.firstChild!)) return block.firstChild!.text!
   let out = ''
   block.forEach((child) => {
-    if (child.isText) out += child.text!
+    // Text the markup view hides (track changes) is never found: LEAF keeps the positions 1:1.
+    if (hidden(child)) out += LEAF.repeat(child.nodeSize)
+    else if (child.isText) out += child.text!
     else if (!child.isLeaf && child.inlineContent && child.content.size === child.textContent.length)
       out += LEAF + child.textContent + LEAF
     else out += LEAF.repeat(child.nodeSize)
@@ -86,24 +91,27 @@ export function blockText(block: PMNode): string {
  * All matches in document order. Searches each textblock's full text (not individual text
  * nodes), so a match may span mark boundaries (e.g. "wor**ld**"). Matches never span two
  * textblocks or a hard break. O(document size) per call. Never throws: an engine error yields [].
+ * Track changes: `markupView` (default 'all') skips the text that view hides, so Find in No Markup
+ * or Simple Markup never lands on deleted text, and in Original never on inserted text.
  */
-export function findMatches(doc: PMNode, query: string, options: FindOptions): MatchRange[] {
+export function findMatches(doc: PMNode, query: string, options: FindOptions, markupView: MarkupView = 'all'): MatchRange[] {
   const re = buildMatcher(query, options)
   if (!re) return []
   try {
-    return scan(doc, re, options.wholeWord)
+    return scan(doc, re, options.wholeWord, markupView)
   } catch (err) {
     console.error('[find] search failed', err)
     return []
   }
 }
 
-function scan(doc: PMNode, re: RegExp, wholeWord: boolean): MatchRange[] {
+function scan(doc: PMNode, re: RegExp, wholeWord: boolean, markupView: MarkupView): MatchRange[] {
   const out: MatchRange[] = []
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true
     if (node.content.size === 0) return false
-    const text = blockText(node)
+    if (markupView !== 'all' && isBlockHidden(node, markupView)) return false
+    const text = blockText(node, markupView)
     const start = pos + 1
     re.lastIndex = 0
     let m: RegExpExecArray | null
@@ -137,28 +145,59 @@ export function indexAtOrAfter(matches: readonly MatchRange[], pos: number): num
   return lo < matches.length ? lo : 0
 }
 
-/** Marks of the first matched character, so a replacement keeps e.g. bold/italic/font. */
+/**
+ * Marks of the first matched character, so a replacement keeps e.g. bold/italic/font. Track changes
+ * marks are not formatting: the replacement never inherits them (the recorder marks it when tracking).
+ */
 function marksAt(doc: PMNode, from: number): readonly Mark[] {
-  return doc.nodeAt(from)?.marks ?? []
+  const marks = doc.nodeAt(from)?.marks ?? []
+  return marks.some((m) => TRACKING_MARKS.includes(m.type.name)) ? marks.filter((m) => !TRACKING_MARKS.includes(m.type.name)) : marks
+}
+
+/** Every character of the range is tracked-deleted text (found in All Markup): nothing to replace. */
+export function deletedRange(doc: PMNode, range: MatchRange): boolean {
+  const type = doc.type.schema.marks[DELETION_MARK]
+  if (!type) return false
+  let all = true
+  doc.nodesBetween(range.from, range.to, (n) => {
+    if (n.isInline && !type.isInSet(n.marks)) all = false
+    return all
+  })
+  return all
 }
 
 /** Replace one range with literal text in `tr`, keeping the marks of the first matched char. */
 export function replaceRange(tr: Transaction, schema: Schema, range: MatchRange, replacement: string): Transaction {
-  if (replacement.length === 0) return tr.delete(range.from, range.to)
-  const marks = marksAt(tr.doc, range.from)
-  return tr.replaceWith(range.from, range.to, schema.text(replacement, marks))
+  if (deletedRange(tr.doc, range)) return tr
+  return replaceText(tr, schema, range, replacement)
+}
+
+/**
+ * The replacement step itself. Text in a textblock is one plain ReplaceStep (what tr.replaceWith
+ * makes of it, without fitting the slice: Replace All makes one per match); anything else goes
+ * through tr.replaceWith / tr.delete.
+ */
+function replaceText(tr: Transaction, schema: Schema, range: MatchRange, replacement: string): Transaction {
+  const content = replacement.length ? Fragment.from(schema.text(replacement, marksAt(tr.doc, range.from))) : Fragment.empty
+  if (!tr.maybeStep(new ReplaceStep(range.from, range.to, new Slice(content, 0, 0))).failed) return tr
+  return replacement.length ? tr.replaceWith(range.from, range.to, content) : tr.delete(range.from, range.to)
 }
 
 /**
  * Replace every range in ONE transaction (one undo step). Ranges must be in document order and
- * non-overlapping; they are applied from last to first so earlier positions never shift.
+ * non-overlapping; they are applied from last to first so earlier positions never shift. Ranges
+ * that are all deleted text are skipped; `replaceable` (one flag per range, from the caller's
+ * count) saves checking again.
  */
 export function replaceAllRanges(
   tr: Transaction,
   schema: Schema,
   ranges: readonly MatchRange[],
   replacement: string,
+  replaceable?: readonly boolean[],
 ): Transaction {
-  for (let i = ranges.length - 1; i >= 0; i--) replaceRange(tr, schema, ranges[i], replacement)
+  for (let i = ranges.length - 1; i >= 0; i--) {
+    if (replaceable ? replaceable[i] : !deletedRange(tr.doc, ranges[i])) replaceText(tr, schema, ranges[i], replacement)
+  }
   return tr
 }

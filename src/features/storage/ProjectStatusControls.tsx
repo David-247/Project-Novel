@@ -46,6 +46,7 @@ export function RecoveryStatus() {
   const promptOpen = useStore((s) => s.project.recoveryPrompt !== null)
   const notice = useStore((s) => s.project.recoveryNotice)
   const bookWarning = useStore((s) => s.project.bookWarning)
+  const sideFileWarning = useStore((s) => s.project.sideFileWarning)
   return (
     <>
       {pendingAt && !promptOpen ? (
@@ -58,6 +59,11 @@ export function RecoveryStatus() {
       {bookWarning ? (
         <StatusText tone="warning" live className="min-w-0 truncate" data-testid="book-warning" title={bookWarning}>
           {bookWarning}
+        </StatusText>
+      ) : null}
+      {sideFileWarning ? (
+        <StatusText tone="warning" live className="min-w-0 truncate" data-testid="side-file-warning" title={sideFileWarning}>
+          {sideFileWarning}
         </StatusText>
       ) : null}
       {notice ? (

@@ -12,8 +12,8 @@ import { ensureDir, listDir, readTextFile, removeFile, writeFileAtomic } from '.
 export const RECOVERY_DIR = '.recovery'
 export const RECOVERY_FILE = 'manuscript.json'
 export const RECOVERY_FORMAT = 'novel-recovery'
-/** 2 added the optional `book` field (book settings); version 1 snapshots stay readable. */
-export const RECOVERY_VERSION = 2
+/** 2 added the optional `book` field (book settings), 3 `sideFiles` (comments.json, ...); older snapshots stay readable. */
+export const RECOVERY_VERSION = 3
 /** Label used in error messages. */
 const LABEL = 'The backup copy'
 
@@ -31,6 +31,8 @@ export interface RecoverySnapshot {
   doc: DocJSON
   /** Book settings at snapshot time (version 2+); absent in older snapshots. */
   book?: BookSettings
+  /** Side files (file name -> JSON content) at snapshot time (version 3+); absent in older snapshots. */
+  sideFiles?: Record<string, unknown>
 }
 
 export const recoveryDirPath = (folder: string) => joinPath(folder, RECOVERY_DIR)
@@ -56,6 +58,9 @@ export function parseRecovery(text: string): RecoverySnapshot | null {
   if (typeof d.savedAt !== 'string' || Number.isNaN(Date.parse(d.savedAt))) return null
   if (!isDocJSON(d.doc)) return null
   const book = d.book === undefined ? undefined : normalizeBook(d.book).settings
+  const side = d.sideFiles
+  const sideFiles =
+    typeof side === 'object' && side !== null && !Array.isArray(side) ? (side as Record<string, unknown>) : undefined
   return {
     format: RECOVERY_FORMAT,
     version: d.version,
@@ -65,6 +70,7 @@ export function parseRecovery(text: string): RecoverySnapshot | null {
     docVersion: typeof d.docVersion === 'number' ? d.docVersion : 0,
     doc: d.doc,
     ...(book ? { book } : {}),
+    ...(sideFiles ? { sideFiles } : {}),
   }
 }
 
@@ -123,11 +129,13 @@ export function judgeRecovery(
   meta: ProjectMeta,
   manuscriptText?: string,
   savedBook?: BookSettings,
+  /** The snapshot's side files equal the loaded ones (or it has none). */
+  sameSideFiles = true,
 ): RecoveryVerdict {
   if (s.projectId && s.projectId !== meta.id) return 'unrelated'
   // Identical only if the book settings match too (a snapshot without them has nothing to lose there).
   const sameBook = !s.book || !savedBook || serializeBook(s.book) === serializeBook(savedBook)
-  if (manuscriptText !== undefined && sameBook && serializeManuscript(s.doc) === manuscriptText) return 'identical'
+  if (manuscriptText !== undefined && sameBook && sameSideFiles && serializeManuscript(s.doc) === manuscriptText) return 'identical'
   if (s.baseUpdatedAt) return s.baseUpdatedAt === meta.updatedAt ? 'offer' : 'unrelated'
   return Date.parse(s.savedAt) > Date.parse(meta.updatedAt) ? 'offer' : 'unrelated'
 }

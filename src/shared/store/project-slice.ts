@@ -55,6 +55,8 @@ export interface ProjectState {
   recoveryNotice: string | null
   /** Non-blocking note about book.json (damaged, unreadable or invalid values); null when fine. */
   bookWarning: string | null
+  /** Non-blocking note about a damaged or newer side file (comments.json, ...); null when fine. */
+  sideFileWarning: string | null
   /** True while a project is being opened (reading and loading a possibly large manuscript). */
   opening: boolean
 }
@@ -81,6 +83,7 @@ export interface ProjectSlice {
     setPendingRecovery: (savedAt: string | null) => void
     setRecoveryNotice: (notice: string | null) => void
     setBookWarning: (warning: string | null) => void
+    setSideFileWarning: (warning: string | null) => void
     /** Opening a project started / finished (success or failure). */
     openStarted: () => void
     openFinished: () => void
@@ -101,6 +104,7 @@ export const initialProjectState: ProjectState = {
   pendingRecoveryAt: null,
   recoveryNotice: null,
   bookWarning: null,
+  sideFileWarning: null,
   opening: false,
 }
 
@@ -123,6 +127,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
           pendingRecoveryAt: null,
           recoveryNotice: null,
           bookWarning: null,
+          sideFileWarning: null,
         }),
       projectClosed: () =>
         patch({
@@ -138,6 +143,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
           pendingRecoveryAt: null,
           recoveryNotice: null,
           bookWarning: null,
+          sideFileWarning: null,
           opening: false,
         }),
       projectDetailsChanged: ({ title, author }) => patch({ title, author }),
@@ -153,6 +159,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set) => {
       setPendingRecovery: (pendingRecoveryAt) => patch({ pendingRecoveryAt }),
       setRecoveryNotice: (recoveryNotice) => patch({ recoveryNotice }),
       setBookWarning: (bookWarning) => patch({ bookWarning }),
+      setSideFileWarning: (sideFileWarning) => patch({ sideFileWarning }),
       openStarted: () => patch({ opening: true }),
       openFinished: () => patch({ opening: false }),
     },

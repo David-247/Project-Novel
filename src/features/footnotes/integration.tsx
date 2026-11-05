@@ -43,11 +43,16 @@ export function installFootnotePagination(): () => void {
   })
   sync(getFootnotes())
   let prev = useStore.getState().book
+  let prevView = useStore.getState().trackChanges.markupView
   const unstore = useStore.subscribe((s) => {
     const p = prev
     prev = s.book
+    // Track changes: the markup view hides or shows text inside notes (their heights change).
+    const viewChanged = s.trackChanges.markupView !== prevView
+    prevView = s.trackChanges.markupView
+    if (viewChanged) clearNoteMeasurements()
     // The separator and the Footnote Text style change the areas without a document change.
-    if (unreserve && (s.book.footnotes !== p.footnotes || s.book.styles !== p.styles)) relayoutPagination()
+    if (unreserve && (viewChanged || s.book.footnotes !== p.footnotes || s.book.styles !== p.styles)) relayoutPagination()
   })
   const fonts = (document as Document & { fonts?: FontFaceSet }).fonts
   const onFonts = () => clearNoteMeasurements()

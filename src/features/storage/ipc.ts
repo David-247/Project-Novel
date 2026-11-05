@@ -8,19 +8,23 @@ export const COMMANDS = {
   restoreProjectRoot: 'storage_restore_project_root',
   clearProjectRoot: 'storage_clear_project_root',
   writeFileAtomic: 'storage_write_file_atomic',
+  writeFilesAtomic: 'storage_write_files_atomic',
   readTextFile: 'storage_read_text_file',
   pathExists: 'storage_path_exists',
   ensureDir: 'storage_ensure_dir',
   removeFile: 'storage_remove_file',
   readRecent: 'storage_read_recent',
   rememberRecent: 'storage_remember_recent',
-  setRecentMenu: 'storage_set_recent_menu',
   exitApp: 'storage_exit_app',
   probeRecentRecovery: 'storage_probe_recent_recovery',
   listDir: 'storage_list_dir',
+  listSubdirs: 'storage_list_subdirs',
 } as const
 
-/** Events emitted by the native File menu. `OPEN_RECENT` carries the folder path. */
+/**
+ * Storage events (still honoured). The native menu itself sends `menu://command` with a command id
+ * (menu slice); Rust sends QUIT for an exit request it held. `OPEN_RECENT` carries the folder path.
+ */
 export const MENU_EVENTS = {
   NEW_PROJECT: 'menu://new-project',
   OPEN_PROJECT: 'menu://open-project',
@@ -133,6 +137,30 @@ export async function writeFileAtomic(path: string, contents: string, fileLabel 
   }
 }
 
+/** One file of a batch write. */
+export interface BatchFile {
+  path: string
+  contents: string
+  /** Name used in error messages. */
+  label: string
+}
+
+/**
+ * Write several files as one save (Rust `storage_write_files_atomic`): every file is staged (temp file
+ * written and fsynced) before any is renamed over its target, so a failure while staging changes
+ * nothing. The renames then run back to back in the given order: put the manuscript last.
+ */
+export async function writeFilesAtomic(files: readonly BatchFile[]): Promise<void> {
+  if (files.length === 0) return
+  try {
+    await invoke(COMMANDS.writeFilesAtomic, { files: files.map(({ path, contents }) => ({ path, contents })) })
+  } catch (e) {
+    // Rust names the file in its message; the label of the first one is the friendliest fallback.
+    const named = files.find((f) => typeof (e as { message?: unknown })?.message === 'string' && (e as { message: string }).message.includes(f.path))
+    throw toProjectError(e, (named ?? files[files.length - 1]).label)
+  }
+}
+
 export async function readTextFile(path: string, fileLabel = path): Promise<string> {
   try {
     return await invoke<string>(COMMANDS.readTextFile, { path })
@@ -168,6 +196,15 @@ export async function listDir(path: string, fileLabel = path): Promise<string[]>
   }
 }
 
+/** Names of the folders directly inside a folder of the project root (none if it does not exist). */
+export async function listSubdirs(path: string, fileLabel = path): Promise<string[]> {
+  try {
+    return await invoke<string[]>(COMMANDS.listSubdirs, { path })
+  } catch (e) {
+    throw toProjectError(e, fileLabel)
+  }
+}
+
 export async function pathExists(path: string): Promise<boolean> {
   try {
     return await invoke<boolean>(COMMANDS.pathExists, { path })
@@ -185,15 +222,6 @@ export function rememberRecentRaw(name: string, openedAt: string): Promise<strin
   return invoke<string>(COMMANDS.rememberRecent, { name, openedAt })
 }
 
-export interface RecentMenuEntry {
-  path: string
-  label: string
-  missing: boolean
-}
-
-export function setRecentMenu(entries: RecentMenuEntry[]): Promise<void> {
-  return invoke(COMMANDS.setRecentMenu, { entries })
-}
 
 /** project.json + `.recovery/manuscript.json` of a recent project (raw text; null = missing). */
 export interface RecoveryProbe {

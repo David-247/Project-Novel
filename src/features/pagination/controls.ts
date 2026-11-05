@@ -10,9 +10,9 @@ export interface PaginationControlMeta {
 }
 
 export const PAGINATION_CONTROLS = {
-  zoomOut: { id: 'pagination.zoomOut', label: 'Zoom out' },
+  zoomOut: { id: 'pagination.zoomOut', label: 'Zoom out', shortcut: 'Mod--' },
   zoom: { id: 'pagination.zoom', label: 'Zoom' },
-  zoomIn: { id: 'pagination.zoomIn', label: 'Zoom in' },
+  zoomIn: { id: 'pagination.zoomIn', label: 'Zoom in', shortcut: 'Mod-=' },
   spreadView: { id: 'pagination.spreadView', label: 'Two-page spread' },
 } as const satisfies Record<string, PaginationControlMeta>
 

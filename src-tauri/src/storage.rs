@@ -1,5 +1,6 @@
 //! Project storage commands: atomic file writes, project file reads,
-//! the recent-projects file in the app config dir, and the native File menu.
+//! and the recent-projects file in the app config dir. (The native menu lives
+//! in menu.rs and is built from the frontend's command registry.)
 //!
 //! The frontend (src/features/storage) owns the project format; Rust only
 //! provides safe primitives. No network access, no secrets.
@@ -10,30 +11,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::{
-    Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu, SubmenuBuilder,
-};
-use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime, State};
 
 /// File name of the recent-projects list inside the app config dir.
 pub const RECENT_FILE_NAME: &str = "recent-projects.json";
 
-/// Menu item ids.
-pub const MENU_NEW_PROJECT: &str = "file.new_project";
-pub const MENU_OPEN_PROJECT: &str = "file.open_project";
-pub const MENU_OPEN_RECENT: &str = "file.open_recent";
-pub const MENU_OPEN_RECENT_ITEM_PREFIX: &str = "file.open_recent.";
-pub const MENU_OPEN_RECENT_EMPTY: &str = "file.open_recent.empty";
-pub const MENU_SAVE: &str = "file.save";
-pub const MENU_QUIT: &str = "app.quit";
-
-/// Events emitted to the frontend when menu items are chosen.
-pub const EVENT_NEW_PROJECT: &str = "menu://new-project";
-pub const EVENT_OPEN_PROJECT: &str = "menu://open-project";
-/// Payload: the project folder path (string).
-pub const EVENT_OPEN_RECENT: &str = "menu://open-recent";
-pub const EVENT_SAVE: &str = "menu://save";
-/// Quit requested (our Quit menu item / Cmd+Q, or an exit request held by
+/// Quit requested (the Quit command / Cmd+Q, or an exit request held by
 /// `allow_exit`): the frontend runs its unsaved-changes flow and then calls
 /// `storage_exit_app`. macOS Dock > Quit, logoff and Windows shutdown never get
 /// here (they bypass `ExitRequested`); crash recovery covers them (<= 30 s lost).
@@ -113,6 +96,14 @@ fn is_symlink(path: &Path) -> bool {
 /// either the old file or the new one, never a partial file. A target that is
 /// a symlink is refused.
 pub fn write_atomic(target: &Path, contents: &[u8]) -> Result<()> {
+    let tmp = stage_atomic(target, contents)?;
+    commit_atomic(tmp, target)
+}
+
+/// First half of an atomic write: the checks, then the temp file written and
+/// fsynced next to `target`. Nothing visible changes yet; dropping the result
+/// deletes the temp file.
+fn stage_atomic(target: &Path, contents: &[u8]) -> Result<tempfile::NamedTempFile> {
     let file_name = target
         .file_name()
         .ok_or_else(|| StorageError::invalid(format!("No file name in {}", target.display())))?;
@@ -142,11 +133,43 @@ pub fn write_atomic(target: &Path, contents: &[u8]) -> Result<()> {
     // On any error below, dropping `tmp` deletes the temp file.
     tmp.write_all(contents).map_err(|e| StorageError::io(target, e))?;
     tmp.as_file().sync_all().map_err(|e| StorageError::io(target, e))?;
+    Ok(tmp)
+}
+
+/// Second half: rename the staged temp file over `target`, then persist the
+/// rename itself (directory entry; not supported on Windows).
+fn commit_atomic(tmp: tempfile::NamedTempFile, target: &Path) -> Result<()> {
     persist_retrying(tmp, target).map_err(|e| StorageError::io(target, e))?;
-    // Persist the rename itself (directory entry). Not supported on Windows.
     #[cfg(unix)]
-    if let Ok(d) = fs::File::open(dir) {
-        let _ = d.sync_all();
+    if let Some(dir) = target.parent() {
+        if let Ok(d) = fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
+}
+
+/// Write several files as one save, as close to all-or-nothing as the file
+/// system allows. Every file is staged first (temp file written and fsynced);
+/// if any staging step fails, every temp file is deleted and no target has
+/// changed. Only then are the temp files renamed over their targets, back to
+/// back, in the given order. A failure (or a crash) during that rename phase
+/// can leave the files renamed before it replaced and the rest unchanged; each
+/// file on its own is still wholly old or wholly new. Callers put the file the
+/// others depend on (the manuscript) last.
+pub fn write_atomic_batch(files: &[(PathBuf, Vec<u8>)]) -> Result<()> {
+    for (i, (a, _)) in files.iter().enumerate() {
+        if files[..i].iter().any(|(b, _)| b == a) {
+            return Err(StorageError::invalid(format!("{} is listed twice", a.display())));
+        }
+    }
+    let mut staged = Vec::with_capacity(files.len());
+    for (target, contents) in files {
+        staged.push((stage_atomic(target, contents)?, target));
+    }
+    for (tmp, target) in staged {
+        // On failure the temp files not renamed yet are dropped (deleted).
+        commit_atomic(tmp, target)?;
     }
     Ok(())
 }
@@ -357,6 +380,29 @@ pub async fn storage_write_file_atomic(
         .map_err(lock_err)?
 }
 
+/// One file of a `storage_write_files_atomic` batch.
+#[derive(Debug, Deserialize)]
+pub struct FileWrite {
+    pub path: String,
+    pub contents: String,
+}
+
+/// Atomically write several UTF-8 text files inside the open project folder
+/// as one save (the manuscript and its side files such as `comments.json`):
+/// every file is staged before any is replaced (see `write_atomic_batch`).
+/// Runs off the main thread.
+#[tauri::command]
+pub async fn storage_write_files_atomic(state: State<'_, ProjectRoot>, files: Vec<FileWrite>) -> Result<()> {
+    let root = current_root(&state)?;
+    let mut resolved = Vec::with_capacity(files.len());
+    for f in files {
+        resolved.push((resolve_for_write(&root, &f.path)?, f.contents.into_bytes()));
+    }
+    tauri::async_runtime::spawn_blocking(move || write_atomic_batch(&resolved))
+        .await
+        .map_err(lock_err)?
+}
+
 /// Read a UTF-8 text file inside the open project folder.
 #[tauri::command]
 pub fn storage_read_text_file(state: State<'_, ProjectRoot>, path: String) -> Result<String> {
@@ -412,6 +458,15 @@ pub fn remove_file_in(root: &Path, path: &str) -> Result<bool> {
 /// (sorted; subfolders and symlinks are skipped). A folder that does not exist
 /// has no files.
 pub fn list_dir_in(root: &Path, path: &str) -> Result<Vec<String>> {
+    list_entries_in(root, path, false)
+}
+
+/// Names of the folders directly inside `path` (none if it does not exist); same rules as list_dir_in.
+pub fn list_subdirs_in(root: &Path, path: &str) -> Result<Vec<String>> {
+    list_entries_in(root, path, true)
+}
+
+fn list_entries_in(root: &Path, path: &str, dirs: bool) -> Result<Vec<String>> {
     let dir = match resolve_for_read(root, path) {
         Ok(d) => d,
         Err(e) if e.kind == "not_found" => return Ok(Vec::new()),
@@ -423,8 +478,9 @@ pub fn list_dir_in(root: &Path, path: &str) -> Result<Vec<String>> {
     let mut names = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|e| StorageError::io(&dir, e))? {
         let entry = entry.map_err(|e| StorageError::io(&dir, e))?;
-        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
-        if let (true, Some(name)) = (is_file, entry.file_name().to_str()) {
+        // Symlinks are neither (file_type does not follow them).
+        let wanted = entry.file_type().map(|t| if dirs { t.is_dir() } else { t.is_file() }).unwrap_or(false);
+        if let (true, Some(name)) = (wanted, entry.file_name().to_str()) {
             names.push(name.to_string());
         }
     }
@@ -438,6 +494,13 @@ pub fn list_dir_in(root: &Path, path: &str) -> Result<Vec<String>> {
 pub fn storage_list_dir(state: State<'_, ProjectRoot>, path: String) -> Result<Vec<String>> {
     let root = current_root(&state)?;
     list_dir_in(&root, &path)
+}
+
+/// List the folders directly inside a folder of the open project (Save a Copy reports them).
+#[tauri::command]
+pub fn storage_list_subdirs(state: State<'_, ProjectRoot>, path: String) -> Result<Vec<String>> {
+    let root = current_root(&state)?;
+    list_subdirs_in(&root, &path)
 }
 
 /// Create a subfolder (e.g. `.recovery`) inside the open project folder if needed.
@@ -651,143 +714,6 @@ pub fn storage_remember_recent<R: Runtime>(
     Ok(json)
 }
 
-/// One entry of the File > Open Recent submenu.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecentMenuEntry {
-    pub path: String,
-    pub label: String,
-    #[serde(default)]
-    pub missing: bool,
-}
-
-/// Paths currently shown in Open Recent, indexed by menu item suffix.
-#[derive(Default)]
-pub struct RecentMenuState(pub Mutex<Vec<String>>);
-
-fn build_recent_submenu<R: Runtime>(
-    app: &AppHandle<R>,
-    entries: &[RecentMenuEntry],
-) -> tauri::Result<Submenu<R>> {
-    let mut b = SubmenuBuilder::with_id(app, MENU_OPEN_RECENT, "Open Recent");
-    if entries.is_empty() {
-        let empty = MenuItemBuilder::with_id(MENU_OPEN_RECENT_EMPTY, "No Recent Projects")
-            .enabled(false)
-            .build(app)?;
-        b = b.item(&empty);
-    }
-    for (i, e) in entries.iter().enumerate() {
-        let label = if e.missing { format!("{} (missing)", e.label) } else { e.label.clone() };
-        let item = MenuItemBuilder::with_id(format!("{MENU_OPEN_RECENT_ITEM_PREFIX}{i}"), label)
-            .enabled(!e.missing)
-            .build(app)?;
-        b = b.item(&item);
-    }
-    b.build()
-}
-
-/// Build the application menu: File (New, Open, Open Recent, Save, Quit),
-/// plus the app and Edit menus macOS needs for standard shortcuts.
-pub fn build_menu<R: Runtime>(
-    app: &AppHandle<R>,
-    recent: &[RecentMenuEntry],
-) -> tauri::Result<Menu<R>> {
-    let new_project = MenuItemBuilder::with_id(MENU_NEW_PROJECT, "New Project...")
-        .accelerator("CmdOrCtrl+Shift+N")
-        .build(app)?;
-    let open_project = MenuItemBuilder::with_id(MENU_OPEN_PROJECT, "Open Project...")
-        .accelerator("CmdOrCtrl+O")
-        .build(app)?;
-    let save = MenuItemBuilder::with_id(MENU_SAVE, "Save").accelerator("CmdOrCtrl+S").build(app)?;
-    // Custom Quit (not PredefinedMenuItem::quit) so it runs the unsaved-changes flow.
-    let quit = MenuItemBuilder::with_id(MENU_QUIT, "Quit Novel").accelerator("CmdOrCtrl+Q").build(app)?;
-    let recent_menu = build_recent_submenu(app, recent)?;
-
-    let file_builder = SubmenuBuilder::new(app, "File")
-        .item(&new_project)
-        .item(&open_project)
-        .item(&recent_menu)
-        .separator()
-        .item(&save)
-        .separator()
-        .item(&PredefinedMenuItem::close_window(app, None)?);
-    #[cfg(not(target_os = "macos"))]
-    let file_builder = file_builder.item(&quit);
-    let file = file_builder.build()?;
-
-    let mut menu = MenuBuilder::new(app);
-    #[cfg(target_os = "macos")]
-    {
-        let app_menu = SubmenuBuilder::new(app, "Novel")
-            .about(None)
-            .separator()
-            .services()
-            .separator()
-            .hide()
-            .hide_others()
-            .show_all()
-            .separator()
-            .item(&quit)
-            .build()?;
-        let edit = SubmenuBuilder::new(app, "Edit")
-            .undo()
-            .redo()
-            .separator()
-            .cut()
-            .copy()
-            .paste()
-            .select_all()
-            .build()?;
-        menu = menu.item(&app_menu).item(&file).item(&edit);
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        menu = menu.item(&file);
-    }
-    menu.build()
-}
-
-/// Rebuild File > Open Recent from the frontend's list.
-#[tauri::command]
-pub fn storage_set_recent_menu<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, RecentMenuState>,
-    entries: Vec<RecentMenuEntry>,
-) -> std::result::Result<(), String> {
-    *state.0.lock().map_err(|e| e.to_string())? = entries.iter().map(|e| e.path.clone()).collect();
-    let menu = build_menu(&app, &entries).map_err(|e| e.to_string())?;
-    app.set_menu(menu).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Route a menu click to a frontend event.
-pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    let result = match id {
-        MENU_NEW_PROJECT => app.emit(EVENT_NEW_PROJECT, ()),
-        MENU_OPEN_PROJECT => app.emit(EVENT_OPEN_PROJECT, ()),
-        MENU_SAVE => app.emit(EVENT_SAVE, ()),
-        MENU_QUIT => app.emit(EVENT_QUIT, ()),
-        _ => match id.strip_prefix(MENU_OPEN_RECENT_ITEM_PREFIX).and_then(|i| i.parse::<usize>().ok()) {
-            Some(index) => {
-                let path = app
-                    .state::<RecentMenuState>()
-                    .0
-                    .lock()
-                    .ok()
-                    .and_then(|paths| paths.get(index).cloned());
-                match path {
-                    Some(path) => app.emit(EVENT_OPEN_RECENT, path),
-                    None => Ok(()),
-                }
-            }
-            None => Ok(()),
-        },
-    };
-    if let Err(e) = result {
-        eprintln!("failed to emit menu event {id}: {e}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -868,6 +794,44 @@ mod tests {
         write_atomic(&dir.join("manuscript.json"), b"doc").unwrap();
         assert_eq!(fs::read_to_string(&victim).unwrap(), "precious");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn batch_write_replaces_every_file_and_leaves_no_temp() {
+        let dir = temp_dir("batch");
+        fs::write(dir.join("manuscript.json"), "old").unwrap();
+        write_atomic_batch(&[
+            (dir.join("comments.json"), b"c".to_vec()),
+            (dir.join("manuscript.json"), b"m".to_vec()),
+        ])
+        .unwrap();
+        assert_eq!(fs::read_to_string(dir.join("comments.json")).unwrap(), "c");
+        assert_eq!(fs::read_to_string(dir.join("manuscript.json")).unwrap(), "m");
+        assert_eq!(entries(&dir), vec!["comments.json", "manuscript.json"]);
+    }
+
+    #[test]
+    fn batch_write_changes_nothing_when_a_file_cannot_be_staged() {
+        let dir = temp_dir("batch-fail");
+        fs::write(dir.join("manuscript.json"), "old").unwrap();
+        let err = write_atomic_batch(&[
+            (dir.join("comments.json"), b"c".to_vec()),
+            (dir.join("missing").join("x.json"), b"x".to_vec()),
+            (dir.join("manuscript.json"), b"m".to_vec()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.kind, "not_found");
+        assert_eq!(fs::read_to_string(dir.join("manuscript.json")).unwrap(), "old");
+        assert_eq!(entries(&dir), vec!["manuscript.json"]);
+    }
+
+    #[test]
+    fn batch_write_refuses_a_file_listed_twice() {
+        let dir = temp_dir("batch-dup");
+        let t = dir.join("comments.json");
+        let err = write_atomic_batch(&[(t.clone(), b"a".to_vec()), (t, b"b".to_vec())]).unwrap_err();
+        assert_eq!(err.kind, "invalid_path");
+        assert!(entries(&dir).is_empty());
     }
 
     #[test]
@@ -1143,6 +1107,9 @@ mod tests {
             vec!["manuscript.json", "unrestored-a.json", "unrestored-b.json"]
         );
         assert!(list_dir_in(&root, &s(root.join("missing"))).unwrap().is_empty());
+        assert_eq!(list_subdirs_in(&root, &s(root.join(".recovery"))).unwrap(), vec!["sub"]);
+        assert_eq!(list_subdirs_in(&root, &s(root.clone())).unwrap(), vec![".recovery"]);
+        assert_eq!(list_subdirs_in(&root, &s(base.clone())).unwrap_err().kind, "outside_project");
         assert_eq!(list_dir_in(&root, &s(base.clone())).unwrap_err().kind, "outside_project");
         assert_eq!(
             list_dir_in(&root, &s(root.join("..").join("project").join(".."))).unwrap_err().kind,

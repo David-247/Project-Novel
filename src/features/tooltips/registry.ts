@@ -13,9 +13,14 @@
  */
 import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
+import { COMMENT_CONTROLS } from '@/features/comments'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
+import { SETTINGS_CONTROLS } from '@/features/settings'
+import { MENU_DIALOG_CONTROLS } from '@/features/menu'
+import { getCommand, getCommands, submenuControlId } from '@/shared/commands'
+import { MARKUP_VIEW_OPTIONS, TRACK_CHANGES_CONTROLS } from '@/features/track-changes'
 import { SURFACE_CONTROLS } from '@/shared/theme'
 import { TRIM_SIZES } from '@/shared/book'
 import type { TooltipCopy } from '@/shared/ui'
@@ -248,6 +253,41 @@ const FOOTNOTE_TOOLTIPS: Record<string, TooltipCopy> = {
   ...fromMeta(FOOTNOTE_EDITOR_CONTROLS, { done: 'Finish the footnote and put the cursor back after its number in the text.' }),
 }
 
+/** Settings dialog and the one-time author question (settings slice). */
+const SETTINGS_DESCRIPTIONS: Record<keyof typeof SETTINGS_CONTROLS, string> = {
+  open: 'Your name, how pages turn, and what new projects start with. Applies to every project.',
+  authorName: 'The name on your tracked changes and comments. Starts as your computer account name.',
+  authorColor: 'The colour of your tracked changes and comments.',
+  authorColorAuto: 'Let Novel pick your colour instead of using the one you chose.',
+  pageNavigation: 'Applies to page navigation in the writing view: turn pages like a book, or scroll through them.',
+  reduceMotion: 'Follow your computer, or always reduce or allow animation such as page turns.',
+  defaultPaper: 'The paper a new project starts with. Projects you already have keep theirs.',
+  defaultTrimSize: 'The page size a new project starts with. Projects you already have keep theirs.',
+  reset: 'Put every setting back the way it came, including your name from your computer account.',
+  done: 'Close Settings. Changes are already applied.',
+  promptName: 'The name that goes on your tracked changes and comments. You can change it later in Settings.',
+  promptSave: 'Keep this name and continue.',
+  promptSkip: 'Continue without a name. You can add one later in Settings.',
+}
+/** Comments: toolbar buttons, the margin panel / drawer and the thread cards (comments slice). */
+const COMMENT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(COMMENT_CONTROLS).map((c): [string, TooltipCopy] => [
+    c.id,
+    { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+  ]),
+)
+
+/** Review: Track Changes and the markup view picker with its choices (track-changes slice). */
+const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
+  ...Object.fromEntries(
+    Object.values(TRACK_CHANGES_CONTROLS).map((c): [string, TooltipCopy] => [
+      c.id,
+      { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+    ]),
+  ),
+  ...Object.fromEntries(MARKUP_VIEW_OPTIONS.map((o): [string, TooltipCopy] => [o.id, { title: o.label, description: o.description }])),
+}
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -260,23 +300,73 @@ const PAGINATION_DESCRIPTIONS: Record<keyof typeof PAGINATION_CONTROLS, string> 
   spreadView: 'Show facing pages side by side like an open book, or one page at a time.',
 }
 
+/** In-app menu bar titles and the menu slice's dialogs. (Menu items: see getTooltipCopy.) */
+const MENU_TOOLTIPS: Record<string, TooltipCopy> = {
+  'menu.file': { title: 'File', description: 'Projects: new, open, save, a copy, book details and page setup.' },
+  'menu.edit': { title: 'Edit', description: 'Undo, the clipboard, find and replace, and going to a page.' },
+  'menu.view': { title: 'View', description: 'How the pages look on screen: spread, zoom, paper and full screen.' },
+  'menu.insert': { title: 'Insert', description: 'Add chapter, page and scene breaks, and footnotes.' },
+  'menu.format': { title: 'Format', description: 'Text and paragraph formatting, styles, headers and footnote options.' },
+  'menu.review': { title: 'Review', description: 'Revision tools for the manuscript.' },
+  'menu.help': { title: 'Help', description: 'Keyboard shortcuts, the project folder format and the version.' },
+  [MENU_DIALOG_CONTROLS.shortcutsSearch.id]: {
+    title: MENU_DIALOG_CONTROLS.shortcutsSearch.label,
+    description: 'Show only the shortcuts whose name, description or keys contain this text.',
+  },
+  [MENU_DIALOG_CONTROLS.goToPageNumber.id]: {
+    title: MENU_DIALOG_CONTROLS.goToPageNumber.label,
+    description: 'The number of the page to go to, from 1 to the last page. Enter goes there.',
+  },
+  [MENU_DIALOG_CONTROLS.goToPageGo.id]: {
+    title: MENU_DIALOG_CONTROLS.goToPageGo.label,
+    description: 'Put the cursor at the start of that page.',
+  },
+  [MENU_DIALOG_CONTROLS.goToPageCancel.id]: {
+    title: MENU_DIALOG_CONTROLS.goToPageCancel.label,
+    description: 'Close without moving the cursor.',
+  },
+  [MENU_DIALOG_CONTROLS.aboutClose.id]: { title: MENU_DIALOG_CONTROLS.aboutClose.label, description: 'Close this dialog.' },
+  [MENU_DIALOG_CONTROLS.formatClose.id]: { title: MENU_DIALOG_CONTROLS.formatClose.label, description: 'Close the document.' },
+}
+
 export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.freeze({
   ...fromMeta(TOOLBAR_CONTROLS, TOOLBAR_DESCRIPTIONS),
   ...fromMeta(PAGINATION_CONTROLS, PAGINATION_DESCRIPTIONS),
   ...fromMeta(HEADER_FOOTER_CONTROLS, HEADER_FOOTER_DESCRIPTIONS),
   ...fromMeta(HISTORY_CONTROLS, HISTORY_DESCRIPTIONS),
   ...fromMeta(FIND_CONTROLS, FIND_DESCRIPTIONS),
+  ...fromMeta(SETTINGS_CONTROLS, SETTINGS_DESCRIPTIONS),
   ...fromMeta(STYLE_DIALOG_CONTROLS, STYLE_DIALOG_DESCRIPTIONS),
   ...SURFACE_TOOLTIPS,
   ...FILE_TOOLTIPS,
   ...BOOK_TOOLTIPS,
   ...INSERT_TOOLTIPS,
   ...FOOTNOTE_TOOLTIPS,
+  ...REVIEW_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
+  ...COMMENT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
+  ...MENU_TOOLTIPS,
 })
 
-/** Lookup for `<TooltipProvider lookup={getTooltipCopy}>`. */
+const SUBMENU_ID = /^menu\.(file|edit|view|insert|format|review|help|app)\.[a-z0-9-]+$/
+
+/**
+ * Copy for a menu item or submenu with no entry above: a registered command's own label, description
+ * and shortcut (src/shared/commands; one source for the menu, this tooltip and the shortcuts sheet),
+ * and for a submenu title (`menu.<menu>.<slug>`) a line naming it.
+ */
+function derivedCopy(controlId: string): TooltipCopy | undefined {
+  const cmd = getCommand(controlId)
+  if (cmd) return { title: cmd.label.replace(/…$/, ''), description: cmd.description, shortcut: cmd.shortcut }
+  if (SUBMENU_ID.test(controlId)) {
+    const sub = getCommands().find((c) => c.menu?.submenu && submenuControlId(c.menu.id, c.menu.submenu) === controlId)
+    if (sub?.menu?.submenu) return { title: sub.menu.submenu, description: `Show the ${sub.menu.submenu} choices.` }
+  }
+  return undefined
+}
+
+/** Lookup for `<TooltipProvider lookup={getTooltipCopy}>`: the registry above, then registered commands. */
 export function getTooltipCopy(controlId: string): TooltipCopy | undefined {
-  return Object.prototype.hasOwnProperty.call(TOOLTIP_REGISTRY, controlId) ? TOOLTIP_REGISTRY[controlId] : undefined
+  return Object.prototype.hasOwnProperty.call(TOOLTIP_REGISTRY, controlId) ? TOOLTIP_REGISTRY[controlId] : derivedCopy(controlId)
 }

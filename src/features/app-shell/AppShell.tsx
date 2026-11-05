@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 
 export interface AppShellProps {
+  /** The in-app menu bar, above the toolbar (absent where the menu is native: macOS). */
+  menuBar?: ReactNode
   toolbar: ReactNode
   editor: ReactNode
   statusBar?: ReactNode
@@ -11,9 +13,10 @@ export interface AppShellProps {
  * plane, the desk the page lies on (`desk`, from the paper surface). Nothing here assumes a desktop width: the toolbar
  * wraps, the editor region scrolls, and the status bar truncates.
  */
-export function AppShell({ toolbar, editor, statusBar }: AppShellProps) {
+export function AppShell({ menuBar, toolbar, editor, statusBar }: AppShellProps) {
   return (
     <div className="flex h-full flex-col bg-bg text-text">
+      {menuBar}
       <header
         role="banner"
         aria-label="App controls"
