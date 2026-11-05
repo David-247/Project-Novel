@@ -186,7 +186,8 @@ function replaceText(tr: Transaction, schema: Schema, range: MatchRange, replace
 /**
  * Replace every range in ONE transaction (one undo step). Ranges must be in document order and
  * non-overlapping; they are applied from last to first so earlier positions never shift. Ranges
- * that are all deleted text are skipped; `replaceable` (from countReplaceable) saves checking again.
+ * that are all deleted text are skipped; `replaceable` (one flag per range, from the caller's
+ * count) saves checking again.
  */
 export function replaceAllRanges(
   tr: Transaction,
