@@ -12,26 +12,29 @@ import {
   markDirty,
   NovelEditor,
   onDocChange,
+  registerEditorCommands,
   setDocJSON,
   Toolbar,
   ToolbarItem,
 } from '@/features/editor'
-import { TrimSizePicker } from '@/features/book-settings'
-import { HeaderFooter, HeaderFooterButton } from '@/features/header-footer'
+import { registerBookSettingsCommands, TrimSizePicker } from '@/features/book-settings'
+import { HeaderFooter, HeaderFooterButton, registerHeaderFooterCommands } from '@/features/header-footer'
 import {
   NoProjectActions,
   RecoveryDialog,
   RecoveryStatus,
+  registerStorageCommands,
   SaveStatusIndicator,
   useStorageIntegration,
 } from '@/features/storage'
-import { PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
-import { FootnoteOptionsButton, useFootnotePagination } from '@/features/footnotes'
+import { PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
+import { FootnoteOptionsButton, registerFootnoteCommands, useFootnotePagination } from '@/features/footnotes'
+import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
 import { SettingsButton, SettingsDialog, useSettingsIntegration } from '@/features/settings'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
-import { SurfacePicker, useSurfaceFollow, useThemeFollow } from '@/shared/theme'
+import { registerSurfaceCommands, SurfacePicker, useSurfaceFollow, useThemeFollow } from '@/shared/theme'
 
 /** The editor slice, seen by storage through the shared DocumentProvider contract. */
 export const editorDocumentProvider: DocumentProvider = {
@@ -57,10 +60,25 @@ export function App() {
   useSettingsIntegration()
   // Footnotes at the bottom of their page (bottom reservations + the footnote area page slot).
   useFootnotePagination()
+  // Every slice's menu commands (shared registry), then the menus and shortcuts that render them.
+  useEffect(() => {
+    const offs = [
+      registerStorageCommands(),
+      registerEditorCommands(),
+      registerPaginationCommands(),
+      registerSurfaceCommands(),
+      registerBookSettingsCommands(),
+      registerHeaderFooterCommands(),
+      registerFootnoteCommands(),
+    ]
+    return () => offs.forEach((off) => off())
+  }, [])
+  useAppMenus()
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
       <AppShell
+        menuBar={<AppMenuBar />}
         toolbar={
           <>
             <span className="px-1 text-ui font-semibold">Novel</span>
@@ -142,6 +160,8 @@ export function App() {
       <SettingsDialog />
       {/* Crash-recovery prompts (portal). */}
       <RecoveryDialog />
+      {/* Help and Go to Page dialogs (portal). */}
+      <MenuDialogs />
     </TooltipProvider>
   )
 }

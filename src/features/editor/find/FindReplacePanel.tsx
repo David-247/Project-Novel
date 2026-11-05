@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useStore } from '@/shared/store'
-import { Button, Checkbox, IconButton, Panel, StatusText, TextInput, Tooltip, cn, detectPlatform } from '@/shared/ui'
+import { Button, Checkbox, IconButton, Panel, StatusText, TextInput, Tooltip, cn } from '@/shared/ui'
 import { FIND_CONTROLS } from './controls'
-import { closeFind, findNext, findPrevious, openFind, replaceAll, replaceCurrent, startFindEngine } from './engine'
+import { closeFind, findNext, findPrevious, replaceAll, replaceCurrent, startFindEngine } from './engine'
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from './icons'
 import './find.css'
 
@@ -13,36 +13,16 @@ export interface FindReplacePanelProps {
   className?: string
 }
 
-const IS_MAC = detectPlatform() === 'mac'
-
-function isModF(e: KeyboardEvent): boolean {
-  const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-  return mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f'
-}
-
 /**
- * Find & replace panel. Renders nothing while closed (and nothing is scanned), but always
- * listens for Mod-f at window level so the shortcut works with focus anywhere in the app
- * (inside the editor, the editor's own Mod-f keymap handles it first).
+ * Find & replace panel. Renders nothing while closed (and nothing is scanned). Mod-f works with
+ * focus anywhere in the app: inside the editor its own keymap handles it, elsewhere the `find.open`
+ * command (editor commands, bound by the shared command registry).
  *
  * Keys: Enter = next, Shift+Enter = previous (find field); Enter = replace (replace field);
  * Escape = close and return focus to the editor.
  */
 export function FindReplacePanel({ className }: FindReplacePanelProps) {
   const open = useStore((s) => s.find.open)
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || !isModF(e)) return
-      e.preventDefault()
-      // Already in the panel: just re-focus/select the query, never re-prefill from the selection.
-      const inPanel = e.target instanceof Element && e.target.closest(`#${FIND_PANEL_ID}`) !== null
-      openFind({ prefill: !inPanel })
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
   return open ? <OpenPanel className={className} /> : null
 }
 

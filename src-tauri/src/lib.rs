@@ -1,20 +1,26 @@
 mod fonts;
 mod preferences;
+mod menu;
 mod storage;
 
 use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
-        .manage(storage::RecentMenuState::default())
         .manage(storage::ProjectRoot::default())
-        .menu(|app| storage::build_menu(app, &[]))
-        .on_menu_event(|app, event| storage::handle_menu_event(app, event.id().as_ref()))
+        .manage(menu::MenuState::<tauri::Wry>::default());
+    // macOS: the native menu bar, replaced by the command registry's snapshot (menu_set) once the
+    // frontend is up. Windows has no native menu: the frontend draws its own menu bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(menu::initial_menu);
+    builder
+        .on_menu_event(|app, event| menu::handle_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
             fonts::list_system_fonts,
+            menu::menu_set,
             storage::storage_pick_project_folder,
             storage::storage_open_recent_root,
             storage::storage_restore_project_root,
@@ -26,13 +32,13 @@ pub fn run() {
             storage::storage_remove_file,
             storage::storage_read_recent,
             storage::storage_remember_recent,
-            storage::storage_set_recent_menu,
             storage::storage_exit_app,
             storage::storage_probe_recent_recovery,
             storage::storage_list_dir,
             preferences::preferences_read,
             preferences::preferences_write,
             preferences::preferences_default_author,
+            storage::storage_list_subdirs,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Novel")

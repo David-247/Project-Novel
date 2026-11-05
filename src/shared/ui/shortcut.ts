@@ -19,7 +19,7 @@ export function detectPlatform(): Platform {
   return /mac|iphone|ipad|ipod/i.test(ua) ? 'mac' : 'other'
 }
 
-type Modifier = 'mod' | 'ctrl' | 'alt' | 'shift' | 'meta'
+export type Modifier = 'mod' | 'ctrl' | 'alt' | 'shift' | 'meta'
 
 const MODIFIERS: Record<string, Modifier> = {
   mod: 'mod',
@@ -131,6 +131,12 @@ export function matchesShortcut(spec: ShortcutSpec, e: ShortcutEvent, platform: 
     return false
   }
   return e.key.length === 1 && key.length === 1 ? e.key.toLowerCase() === key.toLowerCase() : e.key === key
+}
+
+/** A spec's modifiers (`mod` unresolved) and key: "Mod-Shift-z" -> { modifiers: ['mod', 'shift'], key: 'z' }. */
+export function shortcutParts(spec: ShortcutSpec): { modifiers: Modifier[]; key: string } {
+  const { modifiers, key } = parse(spec)
+  return { modifiers: [...modifiers], key }
 }
 
 /** Normalizes one-or-many specs to an array. */

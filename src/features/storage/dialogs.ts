@@ -16,6 +16,15 @@ export async function showError(title: string, err: unknown): Promise<void> {
   }
 }
 
+/** An information message (e.g. what Save a Copy left out). Never throws. */
+export async function showNotice(title: string, text: string): Promise<void> {
+  try {
+    await message(text, { title, kind: 'info' })
+  } catch (e) {
+    console.warn(title, text, e)
+  }
+}
+
 export type UnsavedChoice = 'save' | 'discard' | 'cancel'
 
 /** Three-way unsaved-changes prompt. */

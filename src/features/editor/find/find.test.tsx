@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { JSONContent } from '@tiptap/core'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { installCommandShortcuts } from '@/shared/commands'
 import { useStore } from '@/shared/store'
-import { FindButton, FindReplacePanel, getEditor, HISTORY_DEPTH, HistoryButtons, NovelEditor, setDocJSON } from '../index'
+import { FindButton, FindReplacePanel, getEditor, HISTORY_DEPTH, HistoryButtons, NovelEditor, registerEditorCommands, setDocJSON } from '../index'
 import { installLayoutPolyfills } from '../jsdom-polyfills.test-util'
 import { getMatches, HIGHLIGHT_WINDOW, replaceAll, scanNow } from './engine'
 import { CURRENT_CLASS, MATCH_CLASS } from './plugin'
@@ -12,7 +13,19 @@ beforeAll(installLayoutPolyfills)
 
 const INITIAL_FIND = useStore.getState().find
 
+// Mod-f outside the editor is the find.open command, bound by the shared command registry.
+let uninstall = () => {}
+beforeEach(() => {
+  const offCommands = registerEditorCommands()
+  const offKeys = installCommandShortcuts({ manuscript: () => getEditor()?.view.dom })
+  uninstall = () => {
+    offKeys()
+    offCommands()
+  }
+})
+
 afterEach(() => {
+  uninstall()
   cleanup()
   useStore.setState({ find: { ...INITIAL_FIND } })
   setDocJSON({ type: 'doc', content: [{ type: 'paragraph' }] })

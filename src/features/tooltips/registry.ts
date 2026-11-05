@@ -17,6 +17,8 @@ import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
 import { SETTINGS_CONTROLS } from '@/features/settings'
+import { MENU_DIALOG_CONTROLS } from '@/features/menu'
+import { getCommand, getCommands, submenuControlId } from '@/shared/commands'
 import { SURFACE_CONTROLS } from '@/shared/theme'
 import { TRIM_SIZES } from '@/shared/book'
 import type { TooltipCopy } from '@/shared/ui'
@@ -278,6 +280,35 @@ const PAGINATION_DESCRIPTIONS: Record<keyof typeof PAGINATION_CONTROLS, string> 
   spreadView: 'Show facing pages side by side like an open book, or one page at a time.',
 }
 
+/** In-app menu bar titles and the menu slice's dialogs. (Menu items: see getTooltipCopy.) */
+const MENU_TOOLTIPS: Record<string, TooltipCopy> = {
+  'menu.file': { title: 'File', description: 'Projects: new, open, save, a copy, book details and page setup.' },
+  'menu.edit': { title: 'Edit', description: 'Undo, the clipboard, find and replace, and going to a page.' },
+  'menu.view': { title: 'View', description: 'How the pages look on screen: spread, zoom, paper and full screen.' },
+  'menu.insert': { title: 'Insert', description: 'Add chapter, page and scene breaks, and footnotes.' },
+  'menu.format': { title: 'Format', description: 'Text and paragraph formatting, styles, headers and footnote options.' },
+  'menu.review': { title: 'Review', description: 'Revision tools for the manuscript.' },
+  'menu.help': { title: 'Help', description: 'Keyboard shortcuts, the project folder format and the version.' },
+  [MENU_DIALOG_CONTROLS.shortcutsSearch.id]: {
+    title: MENU_DIALOG_CONTROLS.shortcutsSearch.label,
+    description: 'Show only the shortcuts whose name, description or keys contain this text.',
+  },
+  [MENU_DIALOG_CONTROLS.goToPageNumber.id]: {
+    title: MENU_DIALOG_CONTROLS.goToPageNumber.label,
+    description: 'The number of the page to go to, from 1 to the last page. Enter goes there.',
+  },
+  [MENU_DIALOG_CONTROLS.goToPageGo.id]: {
+    title: MENU_DIALOG_CONTROLS.goToPageGo.label,
+    description: 'Put the cursor at the start of that page.',
+  },
+  [MENU_DIALOG_CONTROLS.goToPageCancel.id]: {
+    title: MENU_DIALOG_CONTROLS.goToPageCancel.label,
+    description: 'Close without moving the cursor.',
+  },
+  [MENU_DIALOG_CONTROLS.aboutClose.id]: { title: MENU_DIALOG_CONTROLS.aboutClose.label, description: 'Close this dialog.' },
+  [MENU_DIALOG_CONTROLS.formatClose.id]: { title: MENU_DIALOG_CONTROLS.formatClose.label, description: 'Close the document.' },
+}
+
 export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.freeze({
   ...fromMeta(TOOLBAR_CONTROLS, TOOLBAR_DESCRIPTIONS),
   ...fromMeta(PAGINATION_CONTROLS, PAGINATION_DESCRIPTIONS),
@@ -293,9 +324,27 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...FOOTNOTE_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
+  ...MENU_TOOLTIPS,
 })
 
-/** Lookup for `<TooltipProvider lookup={getTooltipCopy}>`. */
+const SUBMENU_ID = /^menu\.(file|edit|view|insert|format|review|help|app)\.[a-z0-9-]+$/
+
+/**
+ * Copy for a menu item or submenu with no entry above: a registered command's own label, description
+ * and shortcut (src/shared/commands; one source for the menu, this tooltip and the shortcuts sheet),
+ * and for a submenu title (`menu.<menu>.<slug>`) a line naming it.
+ */
+function derivedCopy(controlId: string): TooltipCopy | undefined {
+  const cmd = getCommand(controlId)
+  if (cmd) return { title: cmd.label.replace(/…$/, ''), description: cmd.description, shortcut: cmd.shortcut }
+  if (SUBMENU_ID.test(controlId)) {
+    const sub = getCommands().find((c) => c.menu?.submenu && submenuControlId(c.menu.id, c.menu.submenu) === controlId)
+    if (sub?.menu?.submenu) return { title: sub.menu.submenu, description: `Show the ${sub.menu.submenu} choices.` }
+  }
+  return undefined
+}
+
+/** Lookup for `<TooltipProvider lookup={getTooltipCopy}>`: the registry above, then registered commands. */
 export function getTooltipCopy(controlId: string): TooltipCopy | undefined {
-  return Object.prototype.hasOwnProperty.call(TOOLTIP_REGISTRY, controlId) ? TOOLTIP_REGISTRY[controlId] : undefined
+  return Object.prototype.hasOwnProperty.call(TOOLTIP_REGISTRY, controlId) ? TOOLTIP_REGISTRY[controlId] : derivedCopy(controlId)
 }

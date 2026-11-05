@@ -11,7 +11,7 @@ import {
   serializeBook,
 } from './book-file'
 import { openProjectIndex, recordRevision, type ProjectIndex } from './db'
-import { askUnsavedChanges, showError } from './dialogs'
+import { askUnsavedChanges, showError, showNotice } from './dialogs'
 import {
   baseName,
   INDEX_FILE,
@@ -36,10 +36,11 @@ import {
   readTextFile,
   rememberRecentRaw,
   restoreProjectRoot,
-  setRecentMenu,
+  listDir,
+  listSubdirs,
   writeFileAtomic,
 } from './ipc'
-import { flagMissing, parseRecentFile } from './recent'
+import { flagMissing, parseRecentFile, samePath } from './recent'
 import {
   deleteRecoveryFile,
   judgeRecovery,
@@ -645,6 +646,120 @@ export async function closeProject(): Promise<void> {
   actions().projectClosed()
 }
 
+/**
+ * File > Close Project: the unsaved-changes prompt, then close and leave an empty untitled manuscript.
+ * Crash-recovery data is dropped only when nothing unsaved remains and no Restore/Discard answer is
+ * pending (as on quit). Resolves true when the project was closed.
+ */
+export function closeProjectInteractive(): Promise<boolean> {
+  return exclusiveFolderFlow(async () => {
+    if (!getCurrentProjectPath()) return false
+    if (!(await confirmUnsavedChanges('closing the project'))) return false
+    const p = provider()
+    if (!hasPendingRecovery() && !isProjectDirty(p)) await clearRecoveryData()
+    await closeProject()
+    loadDocument(p, emptyDoc())
+    return true
+  })
+}
+
+/** One file Save a Copy writes: its name at the top of the project folder, and its text. */
+export interface CopyDocument {
+  name: string
+  text: string
+}
+
+/**
+ * INTEGRATION HOOK (Save a Copy, side files): the documents the copy takes from memory, as they are
+ * in the window now (unsaved changes included). Disk copies of these names are never used. In-memory
+ * side files of other features (comments.json, rewrites.json: the storage side-files registry) are
+ * added HERE, so the copy gets their current state; project.json is written last, by the caller.
+ */
+function inMemoryCopyDocuments(p: DocumentProvider): CopyDocument[] {
+  return [
+    { name: MANUSCRIPT_FILE, text: serializeManuscript(p.getDocJSON()) },
+    { name: BOOK_FILE, text: serializeBook(currentBookSettings()) },
+  ]
+}
+
+/**
+ * File > Save a Copy…: write the open project, as it is now (unsaved changes included), to another
+ * folder chosen in the native dialog, and stay in the open project. Uses the confined storage
+ * commands only: the chosen folder is granted for the copy and the open project's root restored
+ * afterwards. The copy gets a new project id; other top-level text files of the project travel along.
+ * Resolves true when the copy was written.
+ */
+export function saveProjectCopy(): Promise<boolean> {
+  return exclusiveFolderFlow(saveProjectCopyUnguarded)
+}
+
+async function saveProjectCopyUnguarded(): Promise<boolean> {
+  const source = getCurrentProjectPath()
+  const meta = currentMeta
+  if (!source || !meta) return false
+  let skipped: string[] = []
+  let written: boolean
+  try {
+    const p = provider()
+    const docs = inMemoryCopyDocuments(p)
+    written = await withWriteLock(async () => {
+      // Read before the copy's folder is granted (file commands reach only the granted root).
+      const fromMemory = new Set(docs.map((d) => d.name))
+      const extras: CopyDocument[] = []
+      for (const name of await listDir(source)) {
+        // The index is secondary data (a new one is made on open); dot files are app internals.
+        if (fromMemory.has(name) || name === PROJECT_FILE || name === INDEX_FILE || name.startsWith('.')) continue
+        try {
+          extras.push({ name, text: await readTextFile(joinPath(source, name), name) })
+        } catch (e) {
+          console.warn(`Save a Copy: ${name} could not be read:`, e)
+          skipped.push(name)
+        }
+      }
+      // Folders are not copied (.recovery holds crash backups of this project only).
+      skipped = [...skipped, ...(await listSubdirs(source)).filter((d) => d !== RECOVERY_DIR).map((d) => `${d}/`)]
+      const target = await pickProjectFolder('Choose a folder for the copy')
+      if (!target) return false
+      try {
+        if (samePath(target, source)) {
+          throw new ProjectError('already-exists', 'This is the open project. Choose another folder for the copy.')
+        }
+        const toWrite = [...docs, ...extras]
+        // Nothing in the chosen folder is ever overwritten.
+        const taken: string[] = []
+        for (const name of [PROJECT_FILE, INDEX_FILE, ...toWrite.map((d) => d.name)]) {
+          if (await pathExists(joinPath(target, name))) taken.push(name)
+        }
+        if (taken.length) {
+          throw new ProjectError(
+            'already-exists',
+            `This folder already contains ${taken.join(', ')}, and Novel will not overwrite ${taken.length === 1 ? 'it' : 'them'}. ` +
+              'Choose an empty folder for the copy.',
+          )
+        }
+        for (const d of toWrite) await writeFileAtomic(joinPath(target, d.name), d.text, d.name)
+        const copy: ProjectMeta = { ...meta, id: newProjectMeta(meta.title).id, updatedAt: new Date().toISOString() }
+        await writeFileAtomic(joinPath(target, PROJECT_FILE), serializeProjectMeta(copy), PROJECT_FILE)
+        return true
+      } finally {
+        // Back to the open project, whatever happened.
+        await restoreProjectRoot()
+      }
+    })
+  } catch (e) {
+    await showError('Could not save a copy', e)
+    return false
+  }
+  if (written && skipped.length) {
+    await showNotice(
+      'Copy saved',
+      `The copy was saved, but these were not copied: ${skipped.join(', ')}. ` +
+        'Novel copies the files at the top of the project folder that it can read; copy the rest yourself if you need them.',
+    )
+  }
+  return written
+}
+
 // ---- Crash recovery ---------------------------------------------------------
 
 /** Status note after an unanswered backup was moved aside during this session. */
@@ -857,17 +972,9 @@ export async function offerReopenAfterCrash(recent: RecentProject[]): Promise<vo
 
 // ---- Recent projects (file written only by Rust) ---------------------------
 
-async function syncRecentMenu(list: RecentProject[]): Promise<void> {
-  try {
-    await setRecentMenu(list.map((r) => ({ path: r.path, label: `${r.name} (${r.path})`, missing: !!r.missing })))
-  } catch (e) {
-    console.warn('Updating the Open Recent menu failed:', e)
-  }
-}
-
+/** The store's list; File > Open Recent (storage commands) renders from it. */
 function setRecent(list: RecentProject[]): void {
   actions().setRecent(list)
-  void syncRecentMenu(list)
 }
 
 async function rememberRecent(name: string): Promise<void> {
@@ -878,7 +985,7 @@ async function rememberRecent(name: string): Promise<void> {
   }
 }
 
-/** Load recent-projects.json from the app config dir, flag missing folders, update store + menu. */
+/** Load recent-projects.json from the app config dir, flag missing folders, update the store (and so the menu). */
 export async function loadRecentProjects(): Promise<RecentProject[]> {
   let list: RecentProject[] = []
   try {
@@ -890,7 +997,6 @@ export async function loadRecentProjects(): Promise<RecentProject[]> {
     list.map(async (r) => ((await pathExists(joinPath(r.path, PROJECT_FILE))) ? r : { ...r, missing: true })),
   )
   actions().setRecent(checked)
-  await syncRecentMenu(checked)
   return checked
 }
 

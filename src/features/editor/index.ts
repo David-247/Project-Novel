@@ -88,4 +88,8 @@ export { SCENE_ORNAMENTS } from './breaks/nodes'
 export { FOOTNOTE_NODE, onFootnotesChange, collectFootnotes } from './footnote/numbering'
 export type { FootnoteRef, FootnotesListener } from './footnote/numbering'
 export { getFootnotes } from './footnote/api'
+// Menu commands (Phase 3, shared command registry): Edit (undo, clipboard, find), Insert and Format.
+// registerEditorCommands() -> unregister; call once from the composition root.
+export { registerEditorCommands } from './commands'
+export { openModifyStyle, setManagingStyles } from './styles/dialog-state'
 export { FOOTNOTE_EDITOR_CONTROLS } from './footnote/controls'

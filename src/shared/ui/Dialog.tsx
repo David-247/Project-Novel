@@ -18,6 +18,10 @@ export interface DialogProps {
   /** `data-control-id` of the close (X) button, the key of its tooltip copy. Default "dialog.close". */
   closeControlId?: string
   className?: string
+  /** Wider dialog (max 42rem) for lists and documents. */
+  wide?: boolean
+  /** Radix: runs when the dialog closed and is about to give focus back; preventDefault to place it yourself. */
+  onCloseAutoFocus?: (event: Event) => void
 }
 
 /**
@@ -34,14 +38,18 @@ export function Dialog({
   closeLabel = 'Close',
   closeControlId = 'dialog.close',
   className,
+  wide = false,
+  onCloseAutoFocus,
 }: DialogProps) {
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
         <RadixDialog.Overlay className="fixed inset-0 z-40 bg-scrim motion-safe:animate-[nv-fade_120ms_ease-out]" />
         <RadixDialog.Content
+          onCloseAutoFocus={onCloseAutoFocus}
           className={cn(
-            'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-md',
+            'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)]',
+            wide ? 'max-w-2xl' : 'max-w-md',
             '-translate-x-1/2 -translate-y-1/2 flex-col rounded-panel border border-border bg-surface-raised text-text shadow-raised',
             'outline-none motion-safe:animate-[nv-rise_140ms_ease-out]',
             className,

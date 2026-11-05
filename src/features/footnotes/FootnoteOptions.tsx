@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import type { Ref } from 'react'
 import { resolveFootnoteOptions, writeFootnoteOptions, type FootnoteFormat, type FootnoteNumbering } from '@/shared/book'
 import { useStore } from '@/shared/store'
@@ -20,27 +20,60 @@ const FORMATS: { value: FootnoteFormat; label: string }[] = [
   { value: 'symbols', label: '*, †, ‡' },
 ]
 
+// Open state shared by the toolbar button and the Format > Footnote Options… command.
+let dialogOpen = false
+/** Where focus was when the dialog opened (the button, or the manuscript): given back on close. */
+let returnFocusTo: HTMLElement | null = null
+const listeners = new Set<() => void>()
+
+function setDialogOpen(next: boolean, returnTo?: HTMLElement) {
+  if (next && !dialogOpen) returnFocusTo = returnTo ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+  dialogOpen = next
+  listeners.forEach((l) => l())
+  if (!next) {
+    // The dialog has no Radix trigger: give the focus back once it closed.
+    const target = returnFocusTo
+    returnFocusTo = null
+    requestAnimationFrame(() => {
+      if (target?.isConnected) target.focus()
+      else document.querySelector<HTMLElement>(`button[data-control-id="${C.open.id}"]`)?.focus()
+    })
+  }
+}
+
+/** Open the Footnote options dialog (Format > Footnote Options…). */
+export function openFootnoteOptions(): void {
+  setDialogOpen(true)
+}
+
+function useDialogOpen(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      listeners.add(cb)
+      return () => listeners.delete(cb)
+    },
+    () => dialogOpen,
+    () => dialogOpen,
+  )
+}
+
 /**
  * Toolbar button `footnote.options` and its "Footnote options" dialog: numbering scope, number
  * format and the separator rule. Changes apply at once (and persist in book.json through the book
- * slice); Done or Escape closes, focus returns to the button.
+ * slice); Done or Escape closes, focus returns to where it was (the button, or the manuscript).
  */
 export function FootnoteOptionsButton({ ref, ...forwarded }: FootnoteOptionsButtonProps) {
-  const [open, setOpen] = useState(false)
-  const change = (next: boolean) => {
-    setOpen(next)
-    // The dialog has no Radix trigger: give the focus back to the button once it closed.
-    if (!next)
-      requestAnimationFrame(() => document.querySelector<HTMLElement>(`button[data-control-id="${C.open.id}"]`)?.focus())
-  }
+  const open = useDialogOpen()
+  // The dialog lives here: closed with the button (no stale dialog when it mounts again).
+  useEffect(() => () => void (dialogOpen = false), [])
   return (
     <>
       <Tooltip controlId={C.open.id} {...forwarded} ref={ref as Ref<HTMLElement>}>
-        <Button variant="ghost" data-control-id={C.open.id} aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        <Button variant="ghost" data-control-id={C.open.id} aria-haspopup="dialog" onClick={(e) => setDialogOpen(true, e.currentTarget)}>
           {C.open.label}
         </Button>
       </Tooltip>
-      <FootnoteOptionsDialog open={open} onOpenChange={change} />
+      <FootnoteOptionsDialog open={open} onOpenChange={(next) => setDialogOpen(next)} />
     </>
   )
 }

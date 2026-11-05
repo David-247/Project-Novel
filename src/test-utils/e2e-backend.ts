@@ -23,6 +23,8 @@ import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
+import { getCommands } from '@/shared/commands'
+import { formatShortcut } from '@/shared/ui'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
 
@@ -142,7 +144,6 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     listFiles: () => [...state.files.keys()].sort(),
     /** Add a folder to the Rust-owned recent list (as if opened before). */
     addRecent: (path: string, name: string) => core.seedRecent(path, name),
-    recentMenu: () => state.menu,
     /** preferences.json as stored (null = no file); and replace it, even with damaged text. */
     preferencesFile: () => state.preferences,
     setPreferencesFile: (text: string | null) => core.seedPreferences(text),
@@ -150,6 +151,21 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     ensureAuthorName: () => ensureAuthorName(),
     /** The preferences slice as the app holds it. */
     preferences: () => useStore.getState().preferences,
+    /** Labels of File > Open Recent in the last native menu snapshot (menu_set). */
+    recentMenu: () => {
+      type Node = { kind: string; label?: string; items?: Node[] }
+      const file = state.menu?.menus.find((m) => m.id === 'file')
+      const recent = (file?.items as Node[] | undefined)?.find((n) => n.kind === 'submenu' && n.label === 'Open Recent')
+      return (recent?.items ?? []).map((n) => n.label ?? '')
+    },
+    /** The last native menu snapshot (menu_set), as Rust would build it. */
+    nativeMenu: () => state.menu,
+    /** Registered commands with a shortcut, and the keys as shown on this platform. */
+    shortcutRows: () =>
+      getCommands()
+        .filter((c) => c.shortcut)
+        .map((c) => ({ id: c.id, label: c.label, keys: formatShortcut(c.shortcut!) })),
+    fullscreen: () => state.fullscreen,
     exits: () => state.exits,
     /** auditTooltipCoverage over the whole page incl. portals (the fake native dialog excluded). */
     auditTooltips: () =>

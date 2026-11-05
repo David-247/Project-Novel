@@ -1,5 +1,5 @@
 import type { TooltipCopy } from '@/shared/ui'
-import { TOOLTIP_REGISTRY } from './registry'
+import { getTooltipCopy, TOOLTIP_REGISTRY } from './registry'
 
 /** Everything a user can operate: native controls plus ARIA widget roles. */
 export const CONTROL_SELECTOR = [
@@ -67,7 +67,13 @@ export function auditTooltipCoverage(
       problems.push({ element: el, controlId, reason: 'missing-id', label })
       continue
     }
-    const copy = Object.prototype.hasOwnProperty.call(registry, controlId) ? registry[controlId] : undefined
+    // The app's registry includes copy derived from registered commands (menu items).
+    const copy =
+      registry === TOOLTIP_REGISTRY
+        ? getTooltipCopy(controlId)
+        : Object.prototype.hasOwnProperty.call(registry, controlId)
+          ? registry[controlId]
+          : undefined
     if (!copy) {
       problems.push({ element: el, controlId, reason: 'unregistered', label })
       continue
