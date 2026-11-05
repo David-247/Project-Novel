@@ -9,7 +9,7 @@ import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedP
  * manuscript with 500 comment threads.
  *  - typing latency (keydown -> next frame painted), median < 50 ms;
  *  - margin panel re-layout after a reflow (a trim size change): from the new page model being published
- *    to the visible spread's cards rendered, positioned and painted, < 100 ms.
+ *    to the visible spread's cards rendered and positioned, < 100 ms (publish to painted is reported only).
  * Gating: e2e/budget.ts (decision f040009b). Numbers go to perf-results/comments-*.json.
  */
 
@@ -214,15 +214,17 @@ test('500 comment threads: margin panel re-layout after a reflow < 100 ms', asyn
     baselineWithoutPanel: baseline,
     panelAddedMs: added,
     maxPanelReadyMs: Math.max(...runs.map((r) => r.panelReadyMs)),
-    budgets: { panelReadyMs: 100 },
+    maxPanelCommitMs: Math.max(...runs.map((r) => r.panelCommitMs)),
+    budgets: { panelCommitMs: 100 },
   })
   for (const r of runs) {
     expect(r.cards, `${r.trim}: cards on the spread in view`).toBeGreaterThan(0)
     expect(r.misplaced, `${r.trim}: cards positioned for the new layout`).toBe(0)
     // The cards move in the same frame as the pages: positioned before the first paint of the new layout.
     expect(r.sameFrame, `${r.trim}: cards positioned before the reflowed pages are painted`).toBe(true)
-    // What the user sees: from the new page model being published to the visible spread's cards rendered,
-    // positioned and painted (the frame after the commit).
-    budget(testInfo, `${r.trim}: panel re-layout ms (publish to cards painted)`, r.panelReadyMs, 100)
+    // Gated: from the new page model being published to the visible spread's cards rendered and positioned.
+    // Publish to painted (panelReadyMs) and the panel-hidden delta are reported only: they include the
+    // reflowed pages' own paint, which the reflow budget covers (decision b4f37763).
+    budget(testInfo, `${r.trim}: panel re-layout ms (publish to cards rendered and positioned)`, r.panelCommitMs, 100)
   }
 })
