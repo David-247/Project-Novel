@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { detectPlatform, formatShortcut, shortcutParts, type Platform, type ShortcutSpec } from '@/shared/ui'
+import { detectPlatform, shortcutSignature, type Platform, type ShortcutSpec } from '@/shared/ui'
 
 /**
  * The command registry: every user-facing action of the app with its label, one-line description,
@@ -60,8 +60,7 @@ const DEV = import.meta.env.DEV
  * Screen) and "Mod-f" (Find) are different keys, while elsewhere both would be Ctrl+F.
  */
 export function shortcutKey(spec: ShortcutSpec, platform: Platform = detectPlatform()): string {
-  shortcutParts(spec) // throws on an unknown modifier
-  return formatShortcut(spec, platform).toLowerCase()
+  return shortcutSignature(spec, platform) // throws on an unknown modifier
 }
 
 /** Why `cmd` cannot be registered next to `existing`, or null. */

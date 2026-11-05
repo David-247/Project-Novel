@@ -61,6 +61,9 @@ describe('command registry', () => {
     expect(commandProblem(cmd('full', { shortcut: 'Ctrl-Mod-f' }), [find], 'other')).toMatch(/already bound to "find"/)
     expect(commandProblem(cmd('meta', { shortcut: 'Cmd-f' }), [find], 'mac')).toMatch(/already bound to "find"/)
     expect(shortcutKey('Shift-Mod-Z', 'mac')).toBe(shortcutKey('Mod-Shift-z', 'mac'))
+    // Both show as "⌘Delete" on macOS, but they are different keys.
+    expect(shortcutKey('Mod-Backspace', 'mac')).not.toBe(shortcutKey('Mod-Delete', 'mac'))
+    expect(shortcutKey('Esc', 'other')).toBe(shortcutKey('Escape', 'other'))
   })
 
   it('throws on a command without a description or label', () => {

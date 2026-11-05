@@ -133,6 +133,18 @@ export function matchesShortcut(spec: ShortcutSpec, e: ShortcutEvent, platform: 
   return e.key.length === 1 && key.length === 1 ? e.key.toLowerCase() === key.toLowerCase() : e.key === key
 }
 
+/**
+ * The keys a spec means on `platform`, independent of how they are written or shown: modifiers as
+ * pressed (Mod resolved) in a fixed order, then the key ("Mod-Shift-Z" on macOS: "meta+shift+z").
+ * Unlike the display string, Mod-Backspace and Mod-Delete stay distinct on macOS (both show "⌘Delete").
+ */
+export function shortcutSignature(spec: ShortcutSpec, platform: Platform = detectPlatform()): string {
+  const { modifiers, key } = parse(spec)
+  const mods = resolveMods(modifiers, platform)
+  const k = key.toLowerCase()
+  return [...OTHER_ORDER.filter((m) => mods.has(m)), k === 'esc' ? 'escape' : k].join('+')
+}
+
 /** A spec's modifiers (`mod` unresolved) and key: "Mod-Shift-z" -> { modifiers: ['mod', 'shift'], key: 'z' }. */
 export function shortcutParts(spec: ShortcutSpec): { modifiers: Modifier[]; key: string } {
   const { modifiers, key } = parse(spec)
