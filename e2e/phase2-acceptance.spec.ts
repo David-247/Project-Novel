@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { budget } from './budget'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, saveStatus, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, saveStatus, isBookMode, showPage, turnSettled, waitForLayout } from './helpers'
 
 /**
  * Phase 2 acceptance (Book Layout), end to end through the UI, in chromium and webkit:
@@ -134,12 +134,23 @@ async function pageOfRef(page: Page, k: number): Promise<number> {
 /** Footer page number shown on each rendered page frame (virtualised: the pages near the view). */
 async function footerNumbers(page: Page): Promise<Map<number, string>> {
   await waitForLayout(page)
-  const rows = await page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page')).map((f) => [
-      Number(f.dataset.pageIndex),
-      f.querySelector('[data-hf-region="footer"] [data-hf="number"]')?.textContent ?? '',
-    ]),
-  )
+  const read = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page')).map((f) => [
+        Number(f.dataset.pageIndex),
+        f.querySelector('[data-hf-region="footer"] [data-hf="number"]')?.textContent ?? '',
+      ]),
+    )
+  const rows = await read()
+  // Book mode renders the spread shown only: also read the next one, then turn back.
+  if (await isBookMode(page)) {
+    if (await page.evaluate(() => window.__nvE2E.turnSpread(1))) {
+      await turnSettled(page)
+      rows.push(...(await read()))
+      await page.evaluate(() => window.__nvE2E.turnSpread(-1))
+      await turnSettled(page)
+    }
+  }
   return new Map(rows as [number, string][])
 }
 
@@ -247,6 +258,8 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
   await expect(page.locator(`.nv-frames .nv-page[data-page-index="${refPage}"] .nv-fn-area`)).toHaveText('1 Acceptance note.')
   for (const other of [refPage - 1, refPage + 1]) {
     // The neighbour is rendered (so this looks at a real page); it may rightly have no footnote area.
+    // (Book mode: a neighbour on the other spread is turned to first.)
+    await showPage(page, other)
     await expect(page.locator(`.nv-frames .nv-page[data-page-index="${other}"]`)).toHaveCount(1)
     const areas = await page.locator(`.nv-frames .nv-page[data-page-index="${other}"] .nv-fn-area`).allTextContents()
     expect(areas.join(' '), `footnote area of page ${other}`).not.toContain('Acceptance note.')
@@ -285,6 +298,7 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
     }
     expect(checked, `numbered pages checked after chapter ${ch + 1} opens`).toBeGreaterThan(0)
     // The number sits in the outside corner: right on a recto, left on a verso.
+    await showPage(page, open + 1)
     const pos = await page.evaluate((i) => {
       const f = document.querySelector(`.nv-frames .nv-page[data-page-index="${i}"]`)!
       const n = f.querySelector('[data-hf-region="footer"] [data-hf="number"]')!
@@ -294,7 +308,9 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
     }, open + 1)
     expect(pos.side === 'recto' ? pos.centre > pos.width / 2 : pos.centre < pos.width / 2, JSON.stringify(pos)).toBe(true)
   }
-  // Navigation: PageDown moves to the next spread, and the indicator follows.
+  // Navigation: PageDown moves to the next spread, and the indicator follows. (Back to the caret's
+  // spread first: the checks above turned the view without moving the caret.)
+  await showPage(page, (await layout(page)).currentPage)
   const indicator = page.getByTestId('page-indicator')
   const before = await indicator.textContent()
   await page.keyboard.press('PageDown')

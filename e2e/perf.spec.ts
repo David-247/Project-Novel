@@ -235,7 +235,7 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
   const titles = page.locator('main [contenteditable="true"] h1[data-style="chapter-title"]')
   await expect(titles).toHaveCount(chapters)
 
-  await titles.nth(chapters - 1).click()
+  await clickBlockStart(page, titles.nth(chapters - 1))
   await page.locator('[data-control-id="styles.edit"]').click()
   const dialog = page.getByRole('dialog', { name: 'Modify style: Chapter Title' })
   await dialog.locator('[data-control-id="styles.field.fontSize"]').fill('28')
