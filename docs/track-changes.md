@@ -251,8 +251,10 @@ the full text) and "No changes" hides.
 main half is Accept / Reject Change; the arrow lists and Move to Next, All Changes and All by Author ▸).
 See docs/design.md, "Ribbon".
 
-**Page navigation.** The default reveal scrolls the pages (both the spread and the single-page view).
-`setChangeRevealer(fn)` swaps it, e.g. for the page-turn view's reveal.
+**Page navigation.** The default reveal is the pagination slice's `revealPosition`: in Book mode (the
+default navigation) it turns to the spread where the change is painted, in continuous scroll it centres
+the change in the window; with no paginated view mounted it scrolls the nearest scroller.
+`setChangeRevealer(fn)` swaps it.
 
 Perf (`e2e/perf.spec.ts`, 100k words, 2,000 changes, local Windows 11): Accept All 230 ms / Reject All
 218 ms in Chromium, 357 / 480 ms in WebKit, from the confirmation to the repaginated pages in view

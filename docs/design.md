@@ -324,7 +324,8 @@ The writing surface is now a desk with book pages on it (`src/features/paginatio
   top, so style sizes (`calc(N * var(--nv-pt))`) are exact at 100 % and line breaks never depend on zoom.
 - **Status bar page controls** sit at the trailing end, after the project actions: the page indicator
   ("Pages 12–13 of 384", tabular figures; since Phase 3 a ghost button that opens Go to Page, with
-  its tooltip and the Go to Page shortcut), the spread toggle (an open-book icon, pressed = two pages),
+  its tooltip and the Go to Page shortcut; the button keeps the status bar's container-query shortening),
+  the spread toggle (an open-book icon, pressed = two pages),
   zoom out, the zoom select (Fit spread / Fit width / 50–200 %) and zoom in. All are standard
   `IconButton` / `ToggleButton` / `Select` controls: 32 px targets, tooltips from the registry, keyboard
   reachable in the footer's tab order, existing contrast pairs.

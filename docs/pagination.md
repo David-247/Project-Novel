@@ -540,9 +540,15 @@ recto's last line turns synchronously before the hit test (the browser hit-tests
 **`revealPosition(pos)`** (public index) brings any document position into view in either mode. In Book
 mode it turns to the spread where the position is painted; in continuous scroll it centres the position
 in the window. It finishes a pending reflow first. The comments slice uses it for Next / Previous Comment
-and a card click. Track changes' Next / Previous Change should call it after moving the selection. The
+and a card click; track changes' Next / Previous Change (its default change revealer) and the re-write
+slice's go-to-passage call it after moving the selection. The
 find panel's reveal hook (`setFindRevealHook`, now `(el) => boolean`) turns to the current match's spread
 in Book mode and returns true, so the panel does not scroll.
+
+**While a re-write is open** (its view lies over the pages) nothing turns them: the re-write command gate
+disables View > Book / Continuous Scroll and the spread commands with page view and zoom, and
+`turnSpread` / `goToEdgeSpread` check the same gate (`commandGateAllows` on the spread command), so the
+wheel, a desk press, PageUp / PageDown outside the manuscript and the turn controls do nothing either.
 
 The comments margin panel already positions its cards from `pages[]`, `visibleSpread` and the painted
 anchor positions, never from the scroll position, so it shows the shown spread's comments in Book mode.
