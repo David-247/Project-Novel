@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, recoveryControl, saveStatus, seedProject, waitForLayout } from './helpers'
+import { acrossSpreads, clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, recoveryControl, saveStatus, seedPreferences, seedProject, showPage, waitForLayout } from './helpers'
 
 /**
  * Running headers, footers and page numbers (Phase 2, headers/footers ticket). They are drawn in the
@@ -22,7 +22,8 @@ interface Shown {
 /** What every rendered page frame shows in its margins. */
 async function shown(page: Page): Promise<Shown[]> {
   await waitForLayout(page)
-  return page.evaluate(() =>
+  // Book mode shows one spread at a time: read the first spreads in turn.
+  return acrossSpreads(page, () => page.evaluate(() =>
     Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page')).map((f) => {
       const text = (sel: string) => f.querySelector(sel)?.textContent ?? ''
       return {
@@ -32,7 +33,7 @@ async function shown(page: Page): Promise<Shown[]> {
         footerNumber: text('[data-hf-region="footer"] [data-hf="number"]'),
       }
     }),
-  )
+  ))
 }
 
 /** Doc: one front matter paragraph, then three chapters (level-1 headings start a page). */
@@ -209,6 +210,7 @@ test('headers and numbers do not change body pagination: identical page breaks a
   await ctl(page, 'book.headerFooter.recto').selectOption('custom')
   await ctl(page, 'book.headerFooter.rectoText').fill('An exceedingly long running head '.repeat(30))
   await ctl(page, 'book.headerFooter.done').click()
+  await showPage(page, 2)
   const clipped = await page.evaluate(() => {
     const f = document.querySelector<HTMLElement>('.nv-frames .nv-page[data-page-index="2"]')!
     const slot = f.querySelector<HTMLElement>('.nv-slot-header')!
@@ -216,12 +218,17 @@ test('headers and numbers do not change body pagination: identical page breaks a
     return { slot: slot.getBoundingClientRect().height, line: line ? line.getBoundingClientRect().height : 0, overflow: getComputedStyle(slot).overflow }
   })
   expect(clipped.line).toBeLessThanOrEqual(clipped.slot + 0.5)
+  await showPage(page, 0) // the first lines are compared where they were painted
   const long = await snapshot()
   expect(long.pages).toEqual(on.pages)
   expect(long.firstLines).toEqual(on.firstLines)
 })
 
 test('a chapter title edit updates only the heads that show it: other pages keep their DOM nodes, and nothing reflows', async ({ page }) => {
+  // Continuous scroll (Phase 2 behaviour): several rows rendered at once, so a page of chapter 2 stays
+  // mounted while chapter 1's title is edited. (Book mode renders one spread; its heads are covered by
+  // the other tests here and e2e/page-turn.spec.ts.)
+  await seedPreferences(page, { pageNavigation: 'scroll' })
   // Tall window: more rows are rendered (frames are virtualised), so chapter 2's pages sit next to chapter 1's title.
   await page.setViewportSize({ width: 1400, height: 2000 })
   // Short chapters, so chapter 2's pages are rendered (frames are virtualised) next to chapter 1's title.

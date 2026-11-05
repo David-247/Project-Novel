@@ -173,3 +173,77 @@ test('100k words paginated: typing latency (end of a line; inside a paragraph sp
     budget(testInfo, 'typing median ms', t.medianMs, 50)
   }
 })
+
+/**
+ * In the page: turn and resolve once the turned-to spread is painted, with how long it took and
+ * whether it was fully drawn in that first painted frame (every frame in the one-spread window, no
+ * hidden .nv-stale block in it, text painted near the top of each page's text block).
+ */
+async function timedTurn(page: Page, how: 'next' | 'last' | 'first') {
+  return page.evaluate(async (h) => {
+    const t0 = performance.now()
+    if (h === 'next') window.__nvE2E.turnSpread(1)
+    else window.__nvE2E.edgeSpread(h === 'last' ? 1 : -1)
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => {
+        const ch = new MessageChannel()
+        ch.port1.onmessage = () => resolve()
+        ch.port2.postMessage(null)
+      }),
+    )
+    const ms = performance.now() - t0
+    const root = document.querySelector('.novel-editor-content')
+    const sizer = document.querySelector('.nv-sizer')!.getBoundingClientRect()
+    const frames = Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page'))
+    const stale = Array.from(document.querySelectorAll('.novel-editor-content .nv-stale')).filter((el) => {
+      const r = el.getBoundingClientRect()
+      return r.bottom > sizer.top && r.top < sizer.bottom
+    }).length
+    const unpainted = frames.filter((f) => {
+      if (f.dataset.blank) return false
+      const r = f.getBoundingClientRect()
+      for (const fx of [0.3, 0.5, 0.7])
+        for (const fy of [0.15, 0.25, 0.35, 0.5]) {
+          const el = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy)
+          if (el && el !== root && el.closest('.novel-editor-content')) return false
+        }
+      return true
+    }).length
+    const inside = frames.every((f) => {
+      const r = f.getBoundingClientRect()
+      return r.top >= sizer.top - 1 && r.bottom <= sizer.bottom + 1
+    })
+    return { ms, stale, unpainted, inside, frames: frames.length, spread: window.__nvE2E.layout().visibleSpread.index }
+  }, how)
+}
+
+test('100k words, Book mode: a page turn shows a fully drawn spread < 100 ms (also during a progressive reflow)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const { fx } = await openFixture(page, '/projects/Turn')
+  expect(await page.evaluate(() => window.__nvE2E.pageNavigation())).toBe('book')
+  const turns: Awaited<ReturnType<typeof timedTurn>>[] = []
+  for (let i = 0; i < 12; i++) turns.push(await timedTurn(page, 'next'))
+  turns.push(await timedTurn(page, 'last'))
+  turns.push(await timedTurn(page, 'first'))
+  // A turn while a trim reflow is still drawing off-screen blocks: the far spread is drawn first.
+  const progressive: Awaited<ReturnType<typeof timedTurn>>[] = []
+  for (const [trim, how] of [['us-6x9', 'last'], ['us-5.5x8.5', 'next'], ['uk-a5', 'first'], ['us-5.5x8.5', 'last']] as const) {
+    await page.evaluate((id) => window.__nvE2E.setTrimSize(id), trim)
+    progressive.push(await timedTurn(page, how))
+    await waitForLayout(page)
+  }
+  const all = [...turns, ...progressive]
+  const sorted = turns.map((t) => t.ms).sort((a, b) => a - b)
+  await report(testInfo, 'pagination-turn', {
+    manuscript: { words: fx.words, chapters: fx.chapters, blocks: fx.doc.content.length },
+    pages: (await page.evaluate(() => window.__nvE2E.layout())).pageCount,
+    turnMedianMs: +pct(sorted, 50).toFixed(1),
+    turnMaxMs: +Math.max(...turns.map((t) => t.ms)).toFixed(1),
+    duringReflowMaxMs: +Math.max(...progressive.map((t) => t.ms)).toFixed(1),
+    turns: all.map((t) => ({ ...t, ms: +t.ms.toFixed(1) })),
+    budgets: { turnMs: 100 },
+  })
+  // Functional (always blocking): every turn painted a complete spread in its first frame.
+  for (const t of all) expect(t, JSON.stringify(t)).toMatchObject({ stale: 0, unpainted: 0, inside: true })
+  for (const t of all) budget(testInfo, 'page turn: fully drawn spread ms', t.ms, 100)
+})

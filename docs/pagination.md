@@ -10,6 +10,7 @@ directly on the pages: there is one ProseMirror view, and it stays the single so
 - [Page-break contract (`breakBefore`)](#page-break-contract)
 - [Extension points](#extension-points)
 - [View, zoom, keys](#view-zoom-and-keys)
+- [Navigation modes: Book and Continuous Scroll](#navigation-modes) (Phase 3)
 - [Tests and fixtures](#tests-and-fixtures)
 - Track changes and hidden text (Phase 3): [docs/track-changes.md](track-changes.md#pagination)
 
@@ -460,6 +461,87 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
 - **Geometry**: `resolvePageGeometry(trimSize, margins)` (`geometry.ts`) wraps the book settings
   catalog's `pageBox` (96 px per inch, margins in points x 96/72).
 
+## Navigation modes
+
+Ticket "Book page-turn view as the default; continuous scroll becomes an option" (Phase 3). The app
+preference `preferences.pageNavigation` (`'book'` default, or `'scroll'`; docs/project-format.md,
+preferences.json) picks how the writer moves between pages. It is independent of `book.view`
+(single / spread) and of the zoom.
+
+- **Continuous scroll** is the Phase 2 view, unchanged: every row of the canvas is laid out vertically in
+  the editor region's scroller, and `visibleSpread` is the row at the middle of the window.
+- **Book** shows exactly one row (a spread, or one page when `effectiveView` is `'single'`).
+
+### Book mode is a viewport layer, not a second engine
+
+The engine, the page model, the placement and the single ProseMirror view are the same in both modes.
+Book mode only changes what is on screen:
+
+- The sizer (`.nv-sizer`) is one row tall (`bookRowHeight`: page height plus the desk padding above and
+  below, × scale) and clips with `overflow: clip`. The canvas inside is translated up by
+  `(rowTop(row) − DESK_PAD) × scale`, so the row shown sits in that window. Clip, not hidden: nothing can
+  scroll the rest of the stream into the window, whether ProseMirror's `scrollIntoView`, the browser's own
+  caret reveal, or `Element.scrollIntoView`.
+- **`layout.visibleSpread` is set by navigation**, not by the scroll position. The row shown is derived
+  from `visibleSpread.first`, so it survives a single ↔ spread switch and a change of page count. Page
+  frames are virtualised to that one row.
+- **The engine draws the shown spread first.** `setViewWindowProvider` hands the engine the spread's pages
+  (±2) in place of the scroll viewport for the progressive draw. When a turn lands on a spread while a
+  progressive reflow is still catching up, the view runs one catch-up pass in the same task, before paint
+  (a layout effect). That pass draws every pending block on the new spread. So a turned-to spread is fully
+  drawn when it is first painted, and `.nv-stale` blocks are never visible (decision b4f37763).
+- The desk keeps a 48 px lane (`TURN_LANE`) on each side for the turn controls. Fit zooms and the narrow
+  fallback measure the width without the lanes. Fit spread still fits the one spread to the window.
+- Zoomed in, a spread can be taller than the window. Then the editor region scrolls *within* that spread,
+  and a wheel gesture that starts at its top or bottom edge turns the page.
+
+### Turning pages
+
+| Input | Effect |
+|---|---|
+| Click / tap on the blank desk left / right of the spread | previous / next spread (the press never takes the focus from the manuscript) |
+| Wheel or trackpad (vertical or horizontal) | one spread per gesture: events less than `WHEEL_GESTURE_GAP_MS` (220 ms) apart are one gesture, so a swipe with momentum turns once. Ctrl+wheel (pinch zoom) is left alone |
+| PageUp / PageDown in the manuscript | as in Phase 2: the caret moves to the first page of the previous / next spread, and the view turns there. On the last (first) spread it goes to the end (start) of the book |
+| Ctrl+Home / Ctrl+End (Cmd+Up / Cmd+Down) in the manuscript | caret to the start / end of the book; the view follows |
+| PageUp / PageDown, Ctrl+Home / Ctrl+End with the focus outside a text field, a dialog or the manuscript (the turn controls, nothing focused) | turn / first / last spread, view only |
+| Turn controls (`pagination.previousSpread` / `pagination.nextSpread`), Home / End on them | previous / next spread, first / last spread, view only |
+| View > Previous / Next / First / Last Spread | the same, view only (in continuous scroll they scroll to that row) |
+| Edit > Go to Page | caret to the page; the spread holding it is shown (the page indicator shows that spread) |
+
+At the first / last spread every path stops there. The turn controls show the disabled state
+(`aria-disabled`, still focusable for their tooltip), and the commands are disabled. The keys are not
+bound in the command registry: the view handles them (inside the manuscript through the pagination
+plugin, outside it with a window listener that skips text fields, dialogs and menus), so nothing is bound
+twice.
+
+### The caret drives the view
+
+When the selection head leaves the spread shown, the view turns to the spread holding it:
+
+- after a selection change without a document change (arrows, clicks, Find, Next Comment, a footnote
+  popover closing, Shift-extension), in a microtask;
+- after a transaction that asks to scroll the selection into view (typing, paste, undo). There Book mode
+  takes over ProseMirror's `handleScrollToSelection`, so the clipped stream is never scrolled. If the
+  document changed, the turn waits for the pass that lays it out (`onPass`), so typing that overflows onto
+  the next page turns once its line lands there.
+
+A head at the start of a page that begins mid-paragraph is also the end of the previous page's last line.
+There the painted caret decides which spread holds it: ProseMirror draws it at the line end, while
+PageDown and Go to Page draw it at the top of the next page. Turning by hand never moves the caret, and
+the next keystroke turns back to it. A header / footer double-click on a spread turned to by hand leaves
+the caret on that spread, so the page does not turn away from the header being edited. ArrowDown on a
+recto's last line turns synchronously before the hit test (the browser hit-tests only what is painted).
+
+**`revealPosition(pos)`** (public index) brings any document position into view in either mode. In Book
+mode it turns to the spread where the position is painted; in continuous scroll it centres the position
+in the window. It finishes a pending reflow first. The comments slice uses it for Next / Previous Comment
+and a card click. Track changes' Next / Previous Change should call it after moving the selection. The
+find panel's reveal hook (`setFindRevealHook`, now `(el) => boolean`) turns to the current match's spread
+in Book mode and returns true, so the panel does not scroll.
+
+The comments margin panel already positions its cards from `pages[]`, `visibleSpread` and the painted
+anchor positions, never from the scroll position, so it shows the shown spread's comments in Book mode.
+
 ## Tests and fixtures
 
 - Unit (Vitest): `breaker.test.ts` (fill, widows/orphans, keep-with-next, forced breaks, blank
@@ -479,7 +561,17 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
   reopen, recovery, copy / paste, options dialog); perf: the 200-footnote typing test in `e2e/perf.spec.ts`.
 - Guard (`pm-internals.test.ts`): fails if the prosemirror-view internals the engine uses disappear
   (prosemirror-view is pinned with `pnpm.overrides`).
-- Perf (`e2e/pagination-perf.spec.ts`, serial perf projects): trim reflow and typing latency.
+- Perf (`e2e/pagination-perf.spec.ts`, serial perf projects): trim reflow and typing latency, and the
+  Book mode page turn (turn → spread painted < 100 ms on the 100k-word fixture, also while a trim reflow is
+  still drawing off-screen blocks; every turn must paint a complete spread in its first frame, blocking).
+- Navigation modes (Phase 3): `e2e/page-turn.spec.ts` covers every turn path, the disabled edges, caret
+  follow (typing over the recto, arrows, Find, a footnote), comments, a header double-click, single page
+  and narrow windows, the View menu, persistence and the turn controls' tooltips. The Phase 2 suites
+  (pagination, footnotes, headers) run in Book mode, the default: `showPage` / `acrossSpreads`
+  (e2e/helpers.ts) turn to a page before its frame is read, and `clickBlockStart` turns to the block. The
+  tests that are about scrolling through the stream (progressive draw at scroll positions; DOM identity of
+  heads several rows apart) run in continuous scroll, seeded with `seedPreferences(page, { pageNavigation:
+  'scroll' })`. They keep the Phase 2 coverage.
 - Cross-engine fixture (`e2e/pagination-fixture.spec.ts`): the deterministic manuscript
   (`e2e/fixtures/pagination-manuscript.ts`) typeset in the bundled OFL test font (`e2e/fixtures/fonts`,
   Libre Baskerville, `OFL.txt`), with chapters breaking in `page` mode and in `recto` mode, for every
