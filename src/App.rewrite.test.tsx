@@ -104,7 +104,7 @@ describe('re-write view with the track changes review and the ribbon', () => {
 
   it('the ribbon follows the command gate while a re-write is open (enabled state and target editor)', async () => {
     await renderApp()
-    // Review > Re-write: Re-write Passage… (with an icon), Re-writes…, Previous / Next Re-write.
+    // Review > Re-write: Re-write Passage… (with an icon), Re-writes…, Previous / Next Re-write, Keep Original / Keep This Version.
     const group = document.querySelector('[data-ribbon-group="review.rewrite"]')!
     expect(Array.from(group.querySelectorAll('[data-control-id]'), (b) => b.getAttribute('data-control-id'))).toEqual([
       'ribbon.cmd.rewrite.open',
@@ -112,6 +112,8 @@ describe('re-write view with the track changes review and the ribbon', () => {
       'ribbon.cmd.rewrite.prev',
       'ribbon.cmd.rewrite.next',
     ])
+    // The choice shows only while a re-write is open.
+    expect(button('ribbon.cmd.rewrite.keepVersion')).toBeNull()
     expect(button('ribbon.cmd.rewrite.open')!.querySelector('svg')).not.toBeNull()
     expect(button('ribbon.cmd.rewrite.open')!.disabled).toBe(false)
     expect(button('ribbon.cmd.review.change.next')!.disabled).toBe(false)
@@ -120,8 +122,10 @@ describe('re-write view with the track changes review and the ribbon', () => {
     // Manuscript-wide controls are off: registry buttons and the slices' own controls alike.
     for (const id of ['ribbon.cmd.review.change.next', 'ribbon.cmd.review.accept', 'ribbon.cmd.edit.replace', 'ribbon.cmd.footnote.insert', 'find.open', 'comment.new', 'review.track'])
       expect(button(id)?.disabled, id).toBe(true)
-    // Re-writes… stays on (there is one now).
+    // Re-writes… stays on (there is one now), and the choice is on.
     expect(button('ribbon.cmd.rewrite.list')!.disabled).toBe(false)
+    await waitFor(() => expect(button('ribbon.cmd.rewrite.keepVersion')!.disabled).toBe(false))
+    expect(button('ribbon.cmd.rewrite.keepOriginal')!.disabled).toBe(false)
     // Formatting: the target is the active editor (the revision while it has the focus), never the
     // hidden manuscript; with no editor active the controls are off.
     const active = getActiveEditor()

@@ -138,6 +138,9 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
       'Go to Left Page',
       'Go to Right Page',
       'New Version',
+      'Keep Original',
+      'Keep This Version',
+      'Discard Re-write',
       'Close Re-write',
     ])
     expect(names(model[6].children)).toEqual(['Keyboard Shortcuts', 'Project Folder Format', '—', 'About Novel'])

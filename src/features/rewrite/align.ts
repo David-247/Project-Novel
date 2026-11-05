@@ -37,8 +37,8 @@ const textCache = new WeakMap<PMNode, BlockText>()
 
 /**
  * The comparable text of a top-level block. Textblocks: their inline content, an inline atom
- * (footnote reference, hard break) counting as one character. Other blocks (lists, breaks): their
- * text content, without positions (compared as a whole).
+ * (footnote reference, hard break) counting as one character. Other blocks (lists, breaks): the text of
+ * their paragraphs, one per line, without positions (compared as a whole).
  */
 export function blockText(block: PMNode): BlockText {
   let t = textCache.get(block)
@@ -63,7 +63,16 @@ export function blockText(block: PMNode): BlockText {
       }
     })
   } else {
-    text = block.isLeaf ? `\u0000${block.type.name}` : block.textContent
+    // A list: its paragraphs' text, one per line (the words of two items never run together).
+    if (block.isLeaf) text = `\u0000${block.type.name}`
+    else {
+      const lines: string[] = []
+      block.descendants((n) => {
+        if (n.isTextblock) lines.push(n.textContent)
+        return !n.isTextblock
+      })
+      text = lines.join('\n')
+    }
   }
   t = { text, pos, size }
   textCache.set(block, t)

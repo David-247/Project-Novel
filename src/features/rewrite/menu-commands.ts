@@ -14,6 +14,7 @@ import {
   toggleShowDiff,
   wireRewriteAnchors,
 } from './commands'
+import { canChoose, discardRewrite, keepOriginal, keepVersion } from './choice'
 import { REWRITE_CONTROLS as C } from './controls'
 
 // After the comment groups (10-30): the re-write's own commands, then the ones of the open view.
@@ -56,14 +57,37 @@ export function rewriteCommands(): Command[] {
     { id: C.focusLeft.id, label: C.focusLeft.label, description: C.focusLeft.description, shortcut: C.focusLeft.shortcut, menu: review(52), guard: 'none', isEnabled: inView, run: () => focusSide('left') },
     { id: C.focusRight.id, label: C.focusRight.label, description: C.focusRight.description, shortcut: C.focusRight.shortcut, menu: review(53), guard: 'none', isEnabled: inView, run: () => focusSide('right') },
     { id: C.newVersion.id, label: C.newVersion.label, description: C.newVersion.description, menu: review(54), guard: 'modal', isEnabled: inView, run: () => void newVersion() },
+    // The choice: large buttons under each page of the view, the ribbon's Re-write group, the Review menu. No
+    // default shortcut: a one-key-chord commit is too easy to fire by accident (AltGr is Ctrl+Alt on Windows).
+    {
+      id: C.keepOriginal.id,
+      label: C.keepOriginal.label,
+      description: C.keepOriginal.description,
+      menu: review(55),
+      ribbon: ribbon(50),
+      guard: 'modal',
+      isEnabled: canChoose,
+      run: () => void keepOriginal(),
+    },
+    {
+      id: C.keepVersion.id,
+      label: C.keepVersion.label,
+      description: C.keepVersion.description,
+      menu: review(56),
+      ribbon: ribbon(60),
+      guard: 'modal',
+      isEnabled: canChoose,
+      run: () => void keepVersion(),
+    },
+    { id: C.discard.id, label: C.discard.label, description: C.discard.description, menu: review(57), ribbon: ribbon(70), guard: 'modal', isEnabled: inView, run: () => void discardRewrite() },
     // Escape closes it inside the view (handled there, not a global shortcut).
-    { id: C.close.id, label: C.close.label, description: C.close.description, menu: review(55), guard: 'modal', isEnabled: inView, run: () => closeRewrite() },
+    { id: C.close.id, label: C.close.label, description: C.close.description, menu: review(59), guard: 'modal', isEnabled: inView, run: () => closeRewrite() },
   ]
 }
 
 const watched = (s: RootState) => {
   const r = s.rewrite
-  return [r.rewrites, r.openId, r.showDiff, s.project.opening] as const
+  return [r.rewrites, r.openId, r.showDiff, r.problems, s.project.opening] as const
 }
 
 /** Register the re-write commands, wire the manuscript's anchors, keep the menu state fresh. Returns unregister. */

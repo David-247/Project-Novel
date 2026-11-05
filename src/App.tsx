@@ -52,7 +52,7 @@ import {
   setTrackChangesAuthorSource,
   TrackChangesNotice,
 } from '@/features/track-changes'
-import { registerRewriteCommands, registerRewritesSideFile, RewriteHost } from '@/features/rewrite'
+import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -123,6 +123,11 @@ export function App() {
   useEffect(() => registerCommentsSideFile(), [])
   // rewrites.json likewise (re-write versions are saved, autosaved and recovered with the manuscript).
   useEffect(() => registerRewritesSideFile(), [])
+  // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.
+  useEffect(() => {
+    setRewriteConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
+    return () => setRewriteConfirm(null)
+  }, [])
   // Comments and tracked changes are by the Settings author. With no name known, New Comment first
   // asks once; switching Track Changes on asks before the first change is recorded (the recorder
   // cannot wait: changes made while the question is open carry "Unknown author").
