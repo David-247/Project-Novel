@@ -408,6 +408,8 @@ export function paragraphSpacingCommands(): Command[] {
         label: p.value ? label.charAt(0).toUpperCase() + label.slice(1) : 'Default',
         description: p.value ? describe(label) : 'Remove the value set by hand, so the paragraph style decides.',
         menu: { id: 'format', group: 'paragraph', order: order + i / 1000, submenu },
+        // Acts on the manuscript's paragraph at the caret (as Format's default): not from another field or a dialog.
+        guard: 'manuscript',
         isEnabled: can,
         isChecked: () => can() && read() === p.value,
         run: () => {

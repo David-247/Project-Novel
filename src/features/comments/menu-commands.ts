@@ -68,6 +68,8 @@ export function commentCommands(): Command[] {
       label: 'Show Resolved Comments',
       description: COMMENT_CONTROLS.showResolved.description,
       menu: review('show', 30),
+      // Word's Review > Comments has Show Comments; ours sits after Previous / Next.
+      ribbon: { group: 'review.comments', order: 40 },
       isChecked: () => comments().showResolved,
       run: () => void toggleShowResolved(),
     },

@@ -446,7 +446,7 @@ What Word does, and what we took from it:
 | Layout | Book | Book Details |
 | Review | Tracking | Track Changes, Markup |
 | Review | Changes | (T7: Accept / Reject) |
-| Review | Comments | New Comment, Previous Comment, Next Comment |
+| Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
 | Review | Re-write | (T8) |
 | View | Views | Single Page, Two-Page Spread (T5: Book page-turn / Continuous scroll) |
 | View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |

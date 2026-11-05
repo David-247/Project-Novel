@@ -85,6 +85,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'book.details',
           'comment.prev',
           'comment.next',
+          'comment.showResolved',
           'view.singlePage',
           'pagination.spreadView',
           'pagination.zoomOut',
