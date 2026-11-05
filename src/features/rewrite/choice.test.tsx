@@ -4,7 +4,7 @@ import type { Editor } from '@tiptap/core'
 import { redo, undo } from '@tiptap/pm/history'
 import { TextSelection } from '@tiptap/pm/state'
 import { getEditor, NovelEditor, setDocJSON, type JSONContent } from '@/features/editor'
-import { acceptAll, rejectAll, setTracking } from '@/features/track-changes'
+import { acceptAll, listChanges, rejectAll, setTracking } from '@/features/track-changes'
 import type { DocNodeJSON } from '@/shared/document'
 import { BULK_EDIT_META, REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { useStore, type RewriteRecord } from '@/shared/store'
@@ -180,10 +180,62 @@ describe('Keep This Version', () => {
     // Only the words that differ, not the whole paragraph.
     expect(del.join('|')).toBe('dusk')
     expect(ins.join('|')).toBe('night')
+    // Exactly as the recorder records the same replacement typed in the manuscript: the deleted word first, the
+    // new one after it, and the same grouping (marks, ids shared or not, review entries).
+    expect(texts(ed)[1]).toBe('The rain came at dusknight, soft at first.')
+    const shape = (state: typeof ed.state) => {
+      const runs: string[] = []
+      const ids = new Map<unknown, number>()
+      state.doc.child(1).forEach((n) => {
+        const m = n.marks.find((x) => x.type.name === 'insertion' || x.type.name === 'deletion')
+        if (!m) return void runs.push(`text:${n.text}`)
+        if (!ids.has(m.attrs.id)) ids.set(m.attrs.id, ids.size)
+        runs.push(`${m.type.name}#${ids.get(m.attrs.id)}:${n.text}`)
+      })
+      return { runs, changes: listChanges(state.doc).map((c) => c.kinds.join('+')) }
+    }
+    const kept = shape(ed.state)
+    expect(kept.runs).toEqual(['text:The rain came at ', 'deletion#0:dusk', 'insertion#1:night', 'text:, soft at first.'])
+    // The same edit typed: select "dusk", type "night".
+    const typedEd = ed
+    act(() => setTracking(false))
+    const keptState = ed.state
+    run(ed, undo)
+    // Undo reopened the re-write (its passage is locked): let it go, then type there.
+    act(() => void discardRewrite(id))
+    act(() => setTracking(true))
+    const at = blockPos(ed, 1) + 1 + 'The rain came at '.length
+    select(ed, at, at + 4)
+    act(() => typedEd.view.dispatch(typedEd.state.tr.insertText('night')))
+    expect(shape(ed.state)).toEqual(kept)
+    // Back to the Keep: accept gives the version, reject the original.
+    act(() => ed.view.updateState(keptState))
+    act(() => setTracking(false))
+    act(() => ed.view.dispatch(acceptAll(ed.state)!))
+    expect(texts(ed)[1]).toBe('The rain came at night, soft at first.')
+    act(() => ed.view.updateState(keptState))
+    act(() => ed.view.dispatch(rejectAll(ed.state)!))
+    expect(texts(ed)[1]).toBe('The rain came at dusk, soft at first.')
+  })
+
+  it('with Track Changes on, several replaced words: each deleted word before its new one, grouped like one typed edit', () => {
+    const ed = mount()
+    const [id, vid] = rewrite(ed, 1, 1, [para('The storm came at night, soft at first.')])
+    act(() => setTracking(true))
+    act(() => void keepVersionNow(vid, id))
+    const runs: { kind: string; text: string; id: unknown }[] = []
+    ed.state.doc.child(1).forEach((n) => {
+      const m = n.marks.find((x) => x.type.name === 'insertion' || x.type.name === 'deletion')
+      if (m) runs.push({ kind: m.type.name, text: n.text!, id: m.attrs.id })
+    })
+    expect(runs.map((r) => `${r.kind}:${r.text}`)).toEqual(['deletion:rain', 'insertion:storm', 'deletion:dusk', 'insertion:night'])
+    // One recorder pass: one deletion change and one insertion change for the Keep (as one typed edit).
+    expect(new Set(runs.filter((r) => r.kind === 'deletion').map((r) => r.id)).size).toBe(1)
+    expect(new Set(runs.filter((r) => r.kind === 'insertion').map((r) => r.id)).size).toBe(1)
     act(() => setTracking(false))
     const before = ed.state
     act(() => ed.view.dispatch(acceptAll(ed.state)!))
-    expect(texts(ed)[1]).toBe('The rain came at night, soft at first.')
+    expect(texts(ed)[1]).toBe('The storm came at night, soft at first.')
     act(() => ed.view.updateState(before))
     act(() => ed.view.dispatch(rejectAll(ed.state)!))
     expect(texts(ed)[1]).toBe('The rain came at dusk, soft at first.')
@@ -309,8 +361,11 @@ describe('Keep Original, Discard, Reopen', () => {
     act(() => void keepOriginal(id))
     // Five paragraphs in chapter 1, and a typo fixed in the paragraph after the passage.
     for (let k = 0; k < 5; k++) act(() => ed.view.dispatch(ed.state.tr.insert(blockPos(ed, 1), ed.schema.nodeFromJSON(para(`New ${k}.`)))))
-    act(() => ed.view.dispatch(ed.state.tr.insertText('A', blockPos(ed, 11) + 1, blockPos(ed, 11) + 2)))
-    expect(texts(ed)[11]).toBe('After it.'.replace('A', 'A'))
+    act(() => ed.view.dispatch(ed.state.tr.insertText('O', blockPos(ed, 11) + 1, blockPos(ed, 11) + 2)))
+    // The neighbour really changed, and the passage moved five blocks from its saved place.
+    expect(texts(ed)[11]).toBe('Ofter it.')
+    expect(texts(ed)[10]).toBe('The passage itself.')
+    expect(getRewrite(id)!.location).toMatchObject({ block: 5, after: 'After it.' })
     let ok = false
     act(() => void (ok = reopenRewrite(id)))
     expect(ok).toBe(true)

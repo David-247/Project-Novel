@@ -186,8 +186,7 @@ export function replacePassage(tr: Transaction, base: number, left: PMNode, righ
 /**
  * The edits of replacePassage, each one a function adding its steps to a transaction, in the order to
  * run them. Descending: every position is valid in the start document, and stays valid after the
- * edits before it in this order (they all change the document at or after their own position, tracked
- * or not), so they can also be recorded one by one (Track Changes: choice.ts). At one position, the op
+ * edits before it in this order (they all change the document at or after their own position). At one position, the op
  * over a range runs before an insertion there (the insertion goes before that range); several
  * insertions at one position run last first, so they end up in order.
  */

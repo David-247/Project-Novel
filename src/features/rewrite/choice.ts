@@ -1,5 +1,5 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
-import { EditorState, TextSelection, type Transaction } from '@tiptap/pm/state'
+import { TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
 import type { Editor } from '@tiptap/core'
 import { blockPlainText, chapterIndexAt, getChapters, getEditor } from '@/features/editor'
@@ -9,7 +9,7 @@ import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { useStore, type RewriteLocation, type RewriteRecord } from '@/shared/store'
 import { similarity } from './align'
 import { ANCHOR_TYPES, openAnchorsIn, passageProblem, passageRange, REWRITE_ALLOW_META } from './anchor'
-import { chapterChanges, passageOps, replacePassage } from './apply'
+import { chapterChanges, replacePassage } from './apply'
 import { closeRewrite, compact, currentPassageDoc, flushLiveVersions, getRewrite, nextSeq, openRewrite, versionDoc } from './commands'
 import { CHOICE_ORIGINAL, passageDoc } from './model'
 import { RewriteStateStep, type RewriteStepState } from './step'
@@ -218,31 +218,18 @@ export function keepVersionNow(versionId: string, id?: string): boolean {
 }
 
 /**
- * The replacement as tracked changes: each edit recorded on its own, as if made one after the other (the
- * recorder handles a block inserted next to one deleted in separate edits, not in one), on a bare state
- * of the document, and their steps gathered into one transaction of `state` (one undo step). When an
- * edit cannot be recorded, the whole replacement is applied untracked with the recorder's warning.
+ * The replacement as tracked changes: one recorder pass over the whole edit (`trackTransaction`), exactly
+ * as for an edit typed in the manuscript: each replaced word is its deleted text followed by the new text,
+ * and the Keep is one deletion change and one insertion change (the recorder's own grouping), one undo
+ * step. When it cannot be recorded, it is applied untracked with the recorder's warning.
  */
 function trackedReplacement(state: EditorState, base: number, left: PMNode, right: PMNode): Transaction {
-  const out = state.tr
-  const author = currentTrackAuthor()
-  const date = new Date().toISOString()
-  let bare = EditorState.create({ schema: state.schema, doc: state.doc })
-  for (const run of passageOps(out, base, left, right)) {
-    const sub = bare.tr
-    run(sub)
-    if (!sub.docChanged) continue
-    const tracked = trackTransaction(bare, sub, author, date)
-    if (tracked.getMeta(TRACK_FAILED_META)) {
-      useStore.getState().trackChangesActions.setNotice(TRACK_FAILED_NOTICE)
-      const plain = state.tr
-      replacePassage(plain, base, left, right)
-      return plain
-    }
-    for (const step of tracked.steps) out.step(step)
-    bare = EditorState.create({ schema: state.schema, doc: tracked.doc })
-  }
-  return out.docChanged ? out.setMeta(TRACKED_META, true) : out
+  const tr = state.tr
+  replacePassage(tr, base, left, right)
+  if (!tr.docChanged) return tr
+  const tracked = trackTransaction(state, tr, currentTrackAuthor())
+  if (tracked.getMeta(TRACK_FAILED_META)) useStore.getState().trackChangesActions.setNotice(TRACK_FAILED_NOTICE)
+  return tracked
 }
 
 /** Keep Original: the passage stays as it is; the re-write is resolved (its versions kept). */
