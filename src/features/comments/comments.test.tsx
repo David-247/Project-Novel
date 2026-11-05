@@ -4,7 +4,7 @@ import { Editor, Mark } from '@tiptap/core'
 import { redo, undo } from '@tiptap/pm/history'
 import { Fragment, Slice } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
-import { createEditorExtensions, getDocJSON, getEditor, isDirty, NovelEditor, setDocJSON, type JSONContent } from '@/features/editor'
+import { createEditorExtensions, getDocJSON, getEditor, isDirty, markClean, NovelEditor, onDocChange, setDocJSON, type JSONContent } from '@/features/editor'
 import { auditTooltipCoverage, formatCoverageProblems } from '@/features/tooltips'
 import { getTooltipCopy } from '@/features/tooltips'
 import { useStore } from '@/shared/store'
@@ -152,6 +152,22 @@ describe('every thread action undoes and redoes with the main history', () => {
     })
     doUndo(ed)
     expect(shown(ed)).toEqual([id])
+  })
+
+  it('a thread-only change (reply, resolve, their undo) is an unsaved change that arms autosave', () => {
+    const ed = mount()
+    const id = addComment(ed, 5, 10)
+    markClean()
+    let edits = 0
+    const off = onDocChange(() => edits++)
+    act(() => void replyToThread(id, 'later'))
+    expect(isDirty()).toBe(true)
+    expect(edits).toBe(1)
+    markClean()
+    doUndo(ed)
+    expect(isDirty()).toBe(true)
+    expect(edits).toBe(2)
+    off()
   })
 
   it('only the author edits a message', () => {

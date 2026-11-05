@@ -50,8 +50,9 @@ test('toolbar controls have 32px targets and wrap at narrow widths', async ({ pa
   const toolbar = page.getByRole('toolbar', { name: 'Formatting' })
   const controls = toolbar.locator('[data-control-id]')
   // 16 formatting controls + 4 in the Styles group + undo, redo, find.open + book.trimSize + book.headerFooter +
-  // insert.menu + footnote.options + the paper picker (group + 4 options), wired in App; waits for the app to boot.
-  await expect(controls).toHaveCount(32)
+  // insert.menu + footnote.options + the paper picker (group + 4 options) + comment.new + comment.panel, wired in
+  // App; waits for the app to boot.
+  await expect(controls).toHaveCount(34)
   const n = await controls.count()
   for (let i = 0; i < n; i++) {
     const box = await controls.nth(i).boundingBox()
