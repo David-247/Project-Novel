@@ -10,6 +10,7 @@ import {
   TRACKED_STYLE_ATTR,
   TRACKING_MARKS,
 } from '@/shared/track-changes'
+import { hasTrackedChanges } from './has-changes'
 import { TRACK_SKIP_META, type ChangeStamp, type StyleChangeStamp } from './record'
 
 /**
@@ -44,7 +45,7 @@ const ATTR_KIND: Record<string, ChangeKind> = {
 
 const isTrackingMark = (m: Mark) => TRACKING_MARKS.includes(m.type.name)
 
-/** Every tracked change in the document, in document order of first appearance. O(document). */
+/** Every tracked change in the document, in document order of first appearance. O(blocks holding changes). */
 export function listChanges(doc: PMNode): TrackedChange[] {
   const byId = new Map<string, TrackedChange>()
   const add = (id: unknown, kind: ChangeKind, author: unknown, date: unknown, from: number, to: number) => {
@@ -64,9 +65,48 @@ export function listChanges(doc: PMNode): TrackedChange[] {
       if (v) add(v.id, kind, v.author, v.date, pos, pos + node.nodeSize)
     }
     for (const m of node.marks) if (isTrackingMark(m)) add(m.attrs.id, MARK_KIND[m.type.name], m.attrs.author, m.attrs.date, pos, pos + node.nodeSize)
-    return true
+    // Skip what holds no change (cached per immutable node): O(changed blocks) on a big manuscript.
+    return !node.isLeaf && hasTrackedChanges(node)
   })
   return [...byId.values()]
+}
+
+/** The authors of the changes in the document, in order of first appearance (empty names left out). */
+export function listAuthors(changes: readonly TrackedChange[]): string[] {
+  return [...new Set(changes.map((c) => c.author).filter((a) => a !== ''))]
+}
+
+const changeIdsOf = (m: readonly Mark[]) => m.filter(isTrackingMark).map((x) => x.attrs.id as unknown).filter((x): x is string => typeof x === 'string' && !!x)
+const blockIdsOf = (node: PMNode) =>
+  Object.keys(ATTR_KIND)
+    .map((a) => (node.attrs[a] as ChangeStamp | null | undefined)?.id)
+    .filter((x): x is string => typeof x === 'string' && !!x)
+
+/**
+ * The change at a collapsed caret `pos` (the one Accept / Reject at the caret act on), or null.
+ * Inline changes first: the text after the caret, then the text before it (the innermost mark, i.e.
+ * the last one, when changes overlap: deleted text inside an insertion is the deletion). Then a
+ * selected or adjacent break (a leaf block with a change), then the change on the boundary or style of
+ * the textblock holding the caret.
+ */
+export function changeIdAt(doc: PMNode, pos: number): string | null {
+  const $pos = doc.resolve(Math.max(0, Math.min(doc.content.size, pos)))
+  for (const n of [$pos.nodeAfter, $pos.nodeBefore]) {
+    if (!n?.isInline) continue
+    const ids = changeIdsOf(n.marks)
+    if (ids.length) return ids[ids.length - 1]
+  }
+  for (const n of [$pos.nodeAfter, $pos.nodeBefore]) {
+    if (n?.isBlock && n.isLeaf) {
+      const ids = blockIdsOf(n)
+      if (ids.length) return ids[0]
+    }
+  }
+  for (let d = $pos.depth; d > 0; d--) {
+    const ids = blockIdsOf($pos.node(d))
+    if (ids.length) return ids[0]
+  }
+  return null
 }
 
 /** Number of tracked changes (distinct ids) in the document. */
@@ -203,3 +243,12 @@ export const rejectAll = (state: EditorState) => resolve(state, all, 'reject')
 export const acceptChangesInRange = (state: EditorState, from: number, to: number) => resolve(state, inRange(state, from, to), 'accept')
 /** Reject every change touching [from, to). */
 export const rejectChangesInRange = (state: EditorState, from: number, to: number) => resolve(state, inRange(state, from, to), 'reject')
+
+function byAuthor(state: EditorState, author: string): Filter {
+  const ids = new Set(listChanges(state.doc).filter((c) => c.author === author).map((c) => c.id))
+  return (x) => typeof x === 'string' && ids.has(x)
+}
+/** Accept every change by `author` (its marks and blocks; other authors' changes stay). */
+export const acceptAllByAuthor = (state: EditorState, author: string) => resolve(state, byAuthor(state, author), 'accept')
+/** Reject every change by `author`. */
+export const rejectAllByAuthor = (state: EditorState, author: string) => resolve(state, byAuthor(state, author), 'reject')
