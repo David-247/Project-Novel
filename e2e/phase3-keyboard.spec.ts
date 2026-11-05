@@ -86,6 +86,12 @@ test('keyboard only: track changes, comments, re-write, settings, page turns and
   await expect.poll(() => count(page)).toBe(0)
   await page.keyboard.press('ControlOrMeta+z')
   await expect.poll(() => count(page)).toBe(1)
+  await docStart(page)
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowDown')
+  await page.keyboard.press('ControlOrMeta+Alt+a') // Accept Change and move to the next
+  await expect.poll(() => count(page)).toBe(0)
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(() => count(page)).toBe(1)
   await menuKeys(page, 'review', 'review.acceptAll')
   await expect.poll(() => count(page)).toBe(0)
   await editor(page).focus()
@@ -101,6 +107,12 @@ test('keyboard only: track changes, comments, re-write, settings, page turns and
   await page.keyboard.type('From the keyboard.')
   await page.keyboard.press('ControlOrMeta+Enter')
   await expect(cards(page)).toHaveCount(1)
+  await expect(editor(page)).toBeFocused()
+  // Review > Next Comment (menu bar by keys) from the start of the book: the caret goes to its anchor.
+  await docStart(page)
+  await menuKeys(page, 'review', 'comment.next')
+  const threadId = (await page.evaluate(() => window.__nvE2E.comments())).threads[0].id
+  await expect.poll(async () => (await page.evaluate(() => window.__nvE2E.comments())).activeId).toBe(threadId) // the caret is in its anchor
   await expect(editor(page)).toBeFocused()
   // The panel follows the pages in the Tab order.
   await tabTo(page, 'comment.replyStart')
@@ -142,12 +154,48 @@ test('keyboard only: track changes, comments, re-write, settings, page turns and
   expect((await rw(page)).rewrites[0].versions).toHaveLength(2)
   await page.keyboard.press('ControlOrMeta+Shift+z')
   await expect.poll(async () => (await rw(page)).rewrites[0].status).toBe('resolved')
+  // Keep Original, by keys, on another paragraph.
+  for (let k = 0; k < 3; k++) await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ControlOrMeta+Alt+w')
+  await expect(page.getByRole('textbox', { name: 'Revised passage' })).toBeFocused()
+  await page.keyboard.type('Not this: ')
+  await tabTo(page, 'rewrite.keepOriginal', { shift: true }) // under the original, the left page: before the revision
+  await page.keyboard.press('Enter')
+  await expect(view(page)).toHaveCount(0)
+  await expect.poll(async () => (await rw(page)).rewrites.map((r) => [r.status, r.choice === 'original'])).toEqual([
+    ['resolved', false],
+    ['resolved', true],
+  ])
+  // Discard, by keys, on a third: the re-write is gone (its notice offers Undo).
+  await expect(editor(page)).toBeFocused()
+  for (let k = 0; k < 3; k++) await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ControlOrMeta+Alt+w')
+  await expect(page.getByRole('textbox', { name: 'Revised passage' })).toBeFocused()
+  await page.keyboard.type('Gone: ')
+  await expect.poll(async () => (await rw(page)).rewrites.length).toBe(3)
+  await tabTo(page, 'rewrite.discard', { shift: true }) // in the view's header bar
+  await page.keyboard.press('Enter')
+  await expect(view(page)).toHaveCount(0)
+  await expect(page.getByTestId('rewrite-notice')).toContainText('Re-write discarded')
+  await expect.poll(async () => (await rw(page)).rewrites.length).toBe(2)
 
   // ---- Settings: File > Settings…, Page navigation by keyboard, Done.
   await menuKeys(page, 'file', 'settings.open')
   const settings = page.getByRole('dialog', { name: 'Settings' })
   await expect(settings).toBeVisible()
   await tabTo(page, 'settings.pageNavigation')
+  // A closed select by type-ahead: "S" picks Scroll through the pages, "T" Turn pages like a book.
+  const nav = page.locator('[data-control-id="settings.pageNavigation"]')
+  await page.keyboard.press('s')
+  await expect(nav).toHaveValue('scroll')
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.pageNavigation())).toBe('scroll')
+  await expect(page.locator('.nv-desk[data-navigation="scroll"]')).toBeAttached()
+  // A select's type-ahead joins keys typed within about a second ("st" matches nothing): let it reset.
+  await page.waitForTimeout(1200)
+  await expect(nav).toBeFocused()
+  await page.keyboard.press('t')
+  await expect(nav).toHaveValue('book')
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.pageNavigation())).toBe('book')
   await tabTo(page, 'settings.done')
   await page.keyboard.press('Enter')
   await expect(settings).toHaveCount(0)
@@ -173,7 +221,18 @@ test('keyboard only: track changes, comments, re-write, settings, page turns and
   await expect.poll(async () => (await page.evaluate(() => window.__nvE2E.layout())).currentPage).toBe(4)
 
   // ---- The ribbon: its roving focus from the tab list into the Review tab's controls; Enter toggles recording.
-  await page.locator('[data-control-id="ribbon.tab.home"]').focus()
+  // From the manuscript, Shift+Tab goes back to the ribbon (the Formatting toolbar: one Tab stop, roving
+  // focus inside it); Home goes to its start, the arrows to the tabs.
+  await expect(editor(page)).toBeFocused()
+  const inRibbon = () => page.evaluate(() => !!document.activeElement?.closest('[role="toolbar"][aria-label="Formatting"]'))
+  for (let i = 0; i < 6 && !(await inRibbon()); i++) {
+    const before = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 200) ?? '')
+    await pressTab(page, { shift: true })
+    await expect.poll(() => page.evaluate(() => document.activeElement?.outerHTML.slice(0, 200) ?? '')).not.toBe(before)
+  }
+  expect(await inRibbon(), 'the ribbon reached with Shift+Tab from the manuscript').toBe(true)
+  await page.keyboard.press('Home')
+  await keyTo(page, 'ArrowRight', 'ribbon.tab.home', 6)
   await keyTo(page, 'ArrowRight', 'ribbon.tab.review', 6)
   await page.keyboard.press('Enter')
   await expect(page.locator('[data-control-id="ribbon.tab.review"]')).toHaveAttribute('aria-selected', 'true')
