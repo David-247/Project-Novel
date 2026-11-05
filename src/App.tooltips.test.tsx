@@ -97,6 +97,8 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'rewrite.next',
           'view.singlePage',
           'pagination.spreadView',
+          'view.bookNavigation',
+          'view.scrollNavigation',
           'pagination.zoomOut',
           'pagination.zoomIn',
           'view.fitSpread',

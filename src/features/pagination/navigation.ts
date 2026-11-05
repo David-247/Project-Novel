@@ -1,5 +1,7 @@
 // Navigation of the mounted paginated view (Book mode page turns, Go to Page, reveal), callable from
 // commands and other slices through the pagination index.
+import { commandGateAllows, getCommand } from '@/shared/commands'
+import { PAGINATION_CONTROLS as C } from './controls'
 
 /** The mounted view's navigation (set while a PaginatedView is mounted). */
 export interface Navigator {
@@ -21,6 +23,16 @@ export function setNavigator(n: Navigator | null): void {
 }
 
 /**
+ * May the reader turn the view now? False while the registry's command gate refuses the spread
+ * commands (a re-write is open over the pages): the wheel, desk presses, PageUp / PageDown outside
+ * the manuscript and the turn controls then do nothing, like View > Next Spread.
+ */
+function turnsAllowed(): boolean {
+  const cmd = getCommand(C.nextSpread.id)
+  return !cmd || commandGateAllows(cmd)
+}
+
+/**
  * Edit > Go to Page: caret to the start of page `index` (0-based; a blank page goes to the next
  * one), its spread shown (Book mode) or scrolled to the top, focus in the manuscript. False while no
  * pages are laid out.
@@ -32,9 +44,10 @@ export function goToPage(index: number): boolean {
 /**
  * Show the next (dir 1) or previous (-1) spread: in Book mode turn the page, in continuous scroll
  * scroll it to the top. The caret does not move (PageUp / PageDown in the manuscript move it).
- * False at the first / last spread or with nothing laid out.
+ * False at the first / last spread, with nothing laid out, or while the command gate refuses turns.
  */
 export function turnSpread(dir: 1 | -1): boolean {
+  if (!turnsAllowed()) return false
   return nav?.turn(dir) ?? false
 }
 
@@ -48,6 +61,7 @@ export function showPage(index: number): boolean {
 
 /** Show the first (dir -1) or last (dir 1) spread. The caret does not move. */
 export function goToEdgeSpread(dir: 1 | -1): boolean {
+  if (!turnsAllowed()) return false
   return nav?.edge(dir) ?? false
 }
 

@@ -473,7 +473,7 @@ What Word does, and what we took from it:
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
 | Review | Re-write | Re-write Passage…, Re-writes…, Previous Re-write, Next Re-write (the group's own buttons: an icon on the first, short labels Re-write / Re-writes / Previous / Next; tooltips and the dropdown keep the full names) |
-| View | Views | Single Page, Two-Page Spread (T5: Book page-turn / Continuous scroll) |
+| View | Views | Single Page, Two-Page Spread; Book, Continuous Scroll (two radio pairs: page view, then navigation mode; Previous / Next Spread are the turn controls on the canvas edges and View menu items, not ribbon buttons) |
 | View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |
 | View | Show | Comments panel |
 | View | Window | Full Screen |

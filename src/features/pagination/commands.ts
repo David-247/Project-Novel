@@ -44,6 +44,8 @@ export const PAGINATION_COMMANDS: readonly Command[] = [
     label: 'Book',
     description: 'Show one spread at a time and turn the pages like a book.',
     menu: { id: 'view', group: 'navigation', order: 1 },
+    // Beside Single Page / Two-Page Spread in View > Views: a second radio pair.
+    ribbon: { group: 'view.views', order: 30 },
     guard: 'none',
     isChecked: () => navigation() === 'book',
     run: () => setNavigation('book'),
@@ -53,6 +55,7 @@ export const PAGINATION_COMMANDS: readonly Command[] = [
     label: 'Continuous Scroll',
     description: 'Show every page in one long column and scroll through them.',
     menu: { id: 'view', group: 'navigation', order: 2 },
+    ribbon: { group: 'view.views', order: 40 },
     guard: 'none',
     isChecked: () => navigation() === 'scroll',
     run: () => setNavigation('scroll'),

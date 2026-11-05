@@ -1,11 +1,11 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { __resetCommandsForTests, getCommand, isCommandEnabled, runCommand } from '@/shared/commands'
+import { __resetCommandsForTests, getCommand, isCommandEnabled, runCommand, setCommandGate } from '@/shared/commands'
 import { useStore } from '@/shared/store'
 import { TooltipProvider } from '@/shared/ui'
 import { registerPaginationCommands } from './commands'
 import { PAGINATION_CONTROLS as C } from './controls'
-import { setNavigator, spreadEdges, type Navigator } from './navigation'
+import { goToEdgeSpread, setNavigator, spreadEdges, turnSpread, type Navigator } from './navigation'
 import { placePages, rowCountFor } from './placement'
 import { resolvePageGeometry } from './geometry'
 import { TurnControls } from './TurnControls'
@@ -105,6 +105,24 @@ describe('navigation commands', () => {
     expect(nav.edge).toHaveBeenCalledWith(-1)
     // No registry shortcut: the view's own PageUp / PageDown handling is the only binding.
     for (const id of [C.previousSpread.id, C.nextSpread.id, 'view.firstSpread', 'view.lastSpread']) expect(getCommand(id)!.shortcut).toBeUndefined()
+  })
+
+  it('a command gate that refuses the spread commands also stops direct turns (wheel, desk, keys)', () => {
+    registerPaginationCommands()
+    const nav = fakeNav()
+    setNavigator(nav)
+    expect(turnSpread(1)).toBe(true)
+    const off = setCommandGate((c) => c.id !== C.nextSpread.id)
+    try {
+      expect(turnSpread(1)).toBe(false)
+      expect(turnSpread(-1)).toBe(false)
+      expect(goToEdgeSpread(1)).toBe(false)
+      expect(nav.turn).toHaveBeenCalledTimes(1)
+      expect(nav.edge).not.toHaveBeenCalled()
+    } finally {
+      off()
+    }
+    expect(goToEdgeSpread(1)).toBe(true)
   })
 })
 
