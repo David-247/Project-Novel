@@ -167,7 +167,7 @@ test('every control has a tooltip, is reachable with Tab, and the audit finds no
   await expect(page.locator('[data-tooltip-body]')).toContainText('Reset to defaults')
 
   // Choosing a colour enables "Automatic colour", which then also has a tooltip.
-  await ctl(page, 'settings.authorColor').fill('#aa3366')
+  await page.getByTestId('settings-author-color-picker').fill('#aa3366')
   await expect(ctl(page, 'settings.authorColorAuto')).toBeEnabled()
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
 })
@@ -245,7 +245,7 @@ test('WCAG AA contrast in the Settings dialog: four paper surfaces x OS light an
           out.push({ what: `${el.tagName.toLowerCase()} "${(el.textContent || '').trim().slice(0, 24)}"`, ratio: +ratio(fg, bg).toFixed(2) })
         })
         // Control borders (non-text, 3:1) against the dialog background.
-        root.querySelectorAll('input[type="text"], select, input[type="color"]').forEach((el) => {
+        root.querySelectorAll('input[type="text"], select, [data-control-id="settings.authorColor"]').forEach((el) => {
           const border = parse(getComputedStyle(el).borderTopColor)
           const bg = bgOf(root)
           out.push({ what: `border of ${el.getAttribute('data-control-id')}`, ratio: -+ratio(over(border, bg), bg).toFixed(2) })

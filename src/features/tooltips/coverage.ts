@@ -52,7 +52,8 @@ function describedByText(el: Element): string {
 
 /**
  * Lists every interactive control under `root` that would show no tooltip. The manuscript itself
- * (the contenteditable writing surface) is the document, not a control, and is skipped.
+ * (the contenteditable writing surface) is the document, not a control, and is skipped, as is an
+ * element that is both aria-hidden and tabindex -1 (a proxy driven by a real control).
  */
 export function auditTooltipCoverage(
   root: ParentNode,
@@ -61,6 +62,9 @@ export function auditTooltipCoverage(
   const problems: CoverageProblem[] = []
   for (const el of Array.from(root.querySelectorAll(CONTROL_SELECTOR))) {
     if (el.getAttribute('contenteditable') === 'true') continue
+    // A proxy no one operates directly (out of the tab order and hidden from assistive tech), e.g.
+    // the colour input that the Author colour button opens: the button carries the tooltip.
+    if (el.getAttribute('aria-hidden') === 'true' && el.getAttribute('tabindex') === '-1') continue
     const controlId = el.getAttribute('data-control-id')
     const label = describe(el)
     if (!controlId) {

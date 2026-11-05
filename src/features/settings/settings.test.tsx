@@ -268,6 +268,27 @@ describe('Settings dialog', () => {
     expect(problems, formatCoverageProblems(problems)).toEqual([])
   })
 
+  it('the Author colour button (a tab stop on every engine) opens the hidden colour picker', async () => {
+    renderApp()
+    act(() => openSettings())
+    await screen.findByRole('dialog', { name: 'Settings' })
+    const picker = screen.getByTestId('settings-author-color-picker') as HTMLInputElement
+    expect(picker.tabIndex).toBe(-1)
+    const showPicker = vi.fn()
+    picker.showPicker = showPicker
+    const button = screen.getByRole('button', { name: 'Author colour' })
+    expect(button.tagName).toBe('BUTTON')
+    fireEvent.click(button)
+    expect(showPicker).toHaveBeenCalledTimes(1)
+    // Where showPicker refuses, a click opens the picker.
+    picker.showPicker = () => {
+      throw new Error('NotAllowedError')
+    }
+    const click = vi.spyOn(picker, 'click')
+    fireEvent.click(button)
+    expect(click).toHaveBeenCalledTimes(1)
+  })
+
   it('changes apply immediately, and Reset to defaults puts everything back', async () => {
     renderApp()
     act(() => openSettings())
@@ -277,7 +298,7 @@ describe('Settings dialog', () => {
     fireEvent.change(screen.getByLabelText('Motion'), { target: { value: 'on' } })
     fireEvent.change(screen.getByLabelText('Paper'), { target: { value: 'dark' } })
     fireEvent.change(screen.getByLabelText('Trim size'), { target: { value: 'uk-a5' } })
-    fireEvent.change(screen.getByLabelText('Author colour'), { target: { value: '#aa3366' } })
+    fireEvent.change(screen.getByTestId('settings-author-color-picker'), { target: { value: '#aa3366' } })
     expect(prefs()).toMatchObject({
       authorName: 'Ada',
       pageNavigation: 'scroll',

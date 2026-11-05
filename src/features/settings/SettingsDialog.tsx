@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { PAPER_SURFACES, MAX_AUTHOR_NAME, useStore } from '@/shared/store'
 import type { PreferenceValues } from '@/shared/store'
@@ -31,6 +31,17 @@ const TRIM_OPTIONS: SelectOption[] = TRIM_SIZES.map((t) => ({ value: t.id, label
 
 /** A colour shown when none is chosen yet (the picker needs a value to open on). */
 const PICKER_FALLBACK = '#2f6fed'
+
+/** Open the OS colour picker of a (visually hidden) colour input. */
+function openColorPicker(input: HTMLInputElement | null) {
+  if (!input) return
+  try {
+    if (typeof input.showPicker === 'function') return input.showPicker()
+  } catch {
+    // showPicker refuses in some states (e.g. no user activation); a click opens it there.
+  }
+  input.click()
+}
 
 /** Hosts the Settings dialog and the one-time author question (both portal). Render once in the app. */
 export function SettingsDialog() {
@@ -84,6 +95,7 @@ function SettingsForm() {
   const prefs = useStore((s) => s.preferences)
   const set = useStore((s) => s.preferencesActions.set)
   const formId = useId()
+  const colorInput = useRef<HTMLInputElement>(null)
 
   const section = (key: string, title: string, children: ReactNode) => (
     <section aria-labelledby={`${formId}-${key}`} className="flex flex-col gap-3 border-t border-border py-3 first:border-t-0 first:pt-0">
@@ -142,16 +154,34 @@ function SettingsForm() {
             </label>
             <div className="flex flex-wrap items-center gap-2">
               <Tooltip>
-                <TextInput
+                <Button
                   id={`${formId}-authorColor`}
-                  type="color"
                   data-control-id={C.authorColor.id}
                   aria-describedby={`${formId}-authorColor-hint`}
-                  className="w-14 cursor-pointer p-1"
-                  value={prefs.authorColor ?? PICKER_FALLBACK}
-                  onChange={(e) => set('authorColor', e.target.value.toLowerCase())}
-                />
+                  className="w-14 p-1"
+                  onClick={() => openColorPicker(colorInput.current)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="block h-5 w-full rounded-sm border border-border-control"
+                    style={{ backgroundColor: prefs.authorColor ?? PICKER_FALLBACK }}
+                  />
+                </Button>
               </Tooltip>
+              {/*
+                The OS colour picker. Not a tab stop itself: WebKit on macOS never moves keyboard focus to
+                an <input type="color"> (not even with Option+Tab), so the button above opens it.
+              */}
+              <input
+                ref={colorInput}
+                type="color"
+                tabIndex={-1}
+                aria-hidden="true"
+                data-testid="settings-author-color-picker"
+                className="sr-only"
+                value={prefs.authorColor ?? PICKER_FALLBACK}
+                onChange={(e) => set('authorColor', e.target.value.toLowerCase())}
+              />
               <Tooltip>
                 <Button
                   data-control-id={C.authorColorAuto.id}
