@@ -18,10 +18,10 @@ import { useStore } from '@/shared/store'
  * - The lock: while a re-write is open (status 'open'), its passage (the run of top-level blocks
  *   carrying its anchor) is read-only. A filterTransaction refuses edits inside it, a beforeinput
  *   handler stops the browser from typing there, and the refusal raises a notice that offers to open
- *   the re-write. Undo / redo that would change the passage is refused too (with its own notice).
- *   Programmatic edits pass: Replace All (BULK_EDIT_META), accept / reject (TRACK_SKIP_META) and the
- *   re-write's own writes (REWRITE_ALLOW_META); when one of the first two changes the passage, the
- *   re-write is marked "original changed". Comments pass (the comment mark and thread steps): a
+ *   the re-write. Programmatic edits pass: Replace All (BULK_EDIT_META), accept / reject
+ *   (TRACK_SKIP_META), undo / redo (never blocked), and the re-write's own writes
+ *   (REWRITE_ALLOW_META); when one of the first three changes the passage, the re-write is marked
+ *   "original changed" (an undo also shows a short notice). Comments pass (the comment mark and thread steps): a
  *   locked passage can be commented on, like protected text in Word.
  * - Decorations: a side bar and a faint tint on the locked blocks (no box change, so the pagination
  *   measurement is untouched).
@@ -201,12 +201,16 @@ export function setSideBarClickHandler(fn: ((anchor: string) => void) | null): v
   onSideBarClick = fn
 }
 
+/**
+ * Edits the lock lets through: Replace All, accept / reject, and undo / redo (never blocked: the
+ * history only undoes its top event, so refusing one would leave everything older stuck).
+ */
 function programmatic(tr: Transaction): boolean {
-  return tr.getMeta(BULK_EDIT_META) === true || tr.getMeta(TRACK_SKIP_META) === true
+  return tr.getMeta(BULK_EDIT_META) === true || tr.getMeta(TRACK_SKIP_META) === true || !!tr.getMeta('history$')
 }
 
-/** Undo / redo refused because it would change a passage in re-write. */
-function refusedUndo(id: string) {
+/** Undo / redo changed text in a passage in re-write: a short, non-blocking notice. */
+function undidInPassage(id: string) {
   useStore.getState().rewriteActions.setNotice({ kind: 'undo', id, seq: ++seq })
 }
 
@@ -248,11 +252,14 @@ function createAnchorPlugin(): Plugin<AnchorState> {
       if (!hit) return true
       if (programmatic(tr)) {
         const anchor = hit.id
-        queueMicrotask(() => onOriginalChanged?.(anchor))
+        const undo = !!tr.getMeta('history$')
+        queueMicrotask(() => {
+          onOriginalChanged?.(anchor)
+          if (undo) undidInPassage(anchor)
+        })
         return true
       }
-      if (tr.getMeta('history$')) refusedUndo(hit.id)
-      else refused(hit.id)
+      refused(hit.id)
       return false
     },
     // An open re-write's block that lost its anchor (a programmatic edit restored attributes from

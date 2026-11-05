@@ -66,7 +66,7 @@ export function RewriteHost({ children }: RewriteHostProps) {
  * The manuscript's re-write notice, floating over the top of the pages: shown while the caret is in a
  * passage that is being re-written (with the way back to its re-write), stronger after an edit there
  * was refused, and when a selection spans more than one chapter. `inView`: over the comparison view,
- * only what can happen while it is open (an undo refused because it would change the passage).
+ * only what can happen while it is open (an undo that changed the passage).
  */
 function RewriteNotice({ inView = false }: { inView?: boolean }) {
   const notice = useStore((s) => s.rewrite.notice)
@@ -83,7 +83,7 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
     if (notice?.kind === 'locked') dismissNotice()
   }, [caretIn, notice])
   let text: string | null = null
-  if (notice?.kind === 'undo') text = "Undo can't change a passage that is in re-write. Close or finish the re-write first."
+  if (notice?.kind === 'undo') text = 'Undo changed text in a passage that is in re-write.'
   else if (inView) text = null
   else if (notice?.kind === 'span') text = 'A re-write covers one chapter at most. Select paragraphs within one chapter and try again.'
   else if (notice?.kind === 'missing') text = 'The passage of this re-write is no longer in the manuscript.'
@@ -91,7 +91,9 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
   else if (notice?.kind === 'locked' && record) text = 'This passage is being re-written, so it cannot be changed here. Edit it in its re-write.'
   else if (record) text = 'This passage is being re-written. It is locked until you choose a version.'
   if (!text) return null
-  const alert = notice !== null
+  // Refusals and errors are alerts; the undo notice only informs (nothing was refused).
+  const alert = notice !== null && notice.kind !== 'undo'
+  const dismissable = notice !== null
   const offerOpen = record && !inView
   return (
     <div
@@ -113,7 +115,7 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
             </Button>
           </Tooltip>
         ) : null}
-        {alert ? (
+        {dismissable ? (
           <Tooltip controlId={C.noticeDismiss.id}>
             <Button data-control-id={C.noticeDismiss.id} variant="ghost" onClick={dismissNotice}>
               {C.noticeDismiss.label}

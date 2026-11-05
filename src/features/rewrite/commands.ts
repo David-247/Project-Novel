@@ -167,7 +167,11 @@ export function rewritePassage(): boolean {
     globalThis.getSelection?.()?.removeAllRanges()
   }
   ed.view.dispatch(closeHistory(setAnchor(state.tr, from, to, id)))
-  if (ed.state.doc.nodeAt(from)?.attrs[REWRITE_BLOCK_ATTR] !== id) return false
+  if (ed.state.doc.nodeAt(from)?.attrs[REWRITE_BLOCK_ATTR] !== id) {
+    // Refused: back to the manuscript, selection as it was.
+    ed.view.focus()
+    return false
+  }
   actions().changed([...store().rewrite.rewrites, record])
   sideFileChanged()
   return openRewrite(id)

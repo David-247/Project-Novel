@@ -464,7 +464,8 @@ The signature feature: a passage rewritten beside its original, compared like tw
 - **Menus while the view is open**: one mechanism for the menu bar (pointer and keyboard), the native menu and
   shortcuts. Text commands (formatting, styles, paragraph spacing, Edit history / clipboard, Insert breaks) act
   through the editor slice's active editor (`getActiveEditor()`), which the view points at the revision while it
-  has the focus; with the focus elsewhere in the view they are disabled. A registry command gate
+  has the focus; with the focus elsewhere in the view they are disabled (Edit history / clipboard in the
+  version-name field act on that field). A registry command gate
   (`setCommandGate`) disables what makes no sense on a revision: Insert Footnote, comments, Find / Replace, Track
   Changes, Go to Page, page view and zoom. Copy stays available on both pages. The pages behind the view do not
   scroll.
@@ -491,9 +492,11 @@ The signature feature: a passage rewritten beside its original, compared like tw
   version copies the version shown). Each version keeps its own undo history while the view is open (undo is local
   to the revision). Flip Pages (Mod-Alt-k) swaps the sides; Go to Left / Right Page (Mod-Alt-ArrowLeft / Right)
   moves the focus between them. Escape or Close returns to the manuscript; the re-write stays a draft.
-- **Undo** in the manuscript that would change an open re-write's passage is refused, with a notice ("Undo can't
-  change a passage that is in re-write. Close or finish the re-write first."), shown over the view too. Comments
-  can still be added to and removed from the passage.
+- **Undo** is never blocked. When an undo or redo in the manuscript changes text in an open re-write's passage,
+  the re-write is marked "original changed" (the view offers Show current text) and a short notice says so
+  ("Undo changed text in a passage that is in re-write."), over the view too. The history group is closed when a
+  re-write starts, so typing from before is never merged with later edits. Comments can be added to and removed
+  from the passage.
 - **In the manuscript** an open re-write's passage is read-only and marked by a faint `--page-rw-lock-bg` tint and
   a dashed "tacking stitch" bar in the left margin with a ring at its top (pseudo-elements: no box changes, so
   pagination is untouched). A click on the bar reopens the re-write; so do the notice that floats over the pages

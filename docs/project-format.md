@@ -397,8 +397,8 @@ A re-write:
   `id` or `anchor`, no `original`, no versions) is kept as it is and written back after the others; an unknown
   `status` is kept and treated as not locking. A `rewrites` value that is not a list makes the whole file damaged.
 - **The lock.** While a re-write is `open`, typing, pasting, dropping or deleting inside its passage is refused in the
-  manuscript, and so is an undo or redo that would change it. Replace All and accepting or rejecting tracked
-  changes still apply, and set `originalChanged`. Comments can be added to and removed from the passage. The
+  manuscript. Replace All, accepting or rejecting tracked changes, and undo / redo (never blocked) still apply,
+  and set `originalChanged`. Comments can be added to and removed from the passage. The
   anchor is not part of the undo history and never a tracked change; a block of an open re-write that loses it
   (rejecting a style change made before the re-write) gets it back.
 - **One run.** Pasted, dropped and drag-copied blocks never carry `rewriteId`. If the blocks carrying an anchor are

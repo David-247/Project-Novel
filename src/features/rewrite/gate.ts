@@ -8,7 +8,8 @@ import { commandGuard, type Command } from '@/shared/commands'
  * menus, the native menu, shortcuts and runCommand all follow it):
  * - text commands (guard 'manuscript': formatting, styles, Edit history / clipboard, Insert breaks) act
  *   on the revision while it has (or last had) the focus in the view, through the editor slice's
- *   active editor; with the focus elsewhere in the view they are disabled;
+ *   active editor; with the focus elsewhere in the view they are disabled, except Edit history /
+ *   clipboard in a text field (the version name), which act on the field;
  * - commands about the manuscript as a whole make no sense on a revision and are disabled: Insert
  *   Footnote, comments, Find / Replace, Track Changes, Go to Page, page view and zoom.
  */
@@ -27,6 +28,11 @@ const OFF = () =>
     'edit.go_to_page',
   ]))
 
+const focusedInput = () => {
+  const el = typeof document === 'undefined' ? null : document.activeElement
+  return el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color'].includes(el.type))
+}
+
 /** Copy works from either page (the original can be read and copied). */
 const ANY_PAGE = new Set<string>(['edit.copy'])
 
@@ -35,6 +41,9 @@ export function rewriteCommandGate(cmd: Command): boolean {
   const menu = cmd.menu
   if (menu?.id === 'view' && (menu.group === 'layout' || menu.group === 'zoom')) return false
   if (ANY_PAGE.has(cmd.id)) return true
+  // A text field of the view (the version name): Edit history / clipboard act on the field, as the
+  // registry's commands do for any text input.
+  if (menu?.id === 'edit' && (menu.group === 'history' || menu.group === 'clipboard') && focusedInput()) return true
   if (commandGuard(cmd) === 'manuscript') return getActiveEditor() !== null
   return true
 }

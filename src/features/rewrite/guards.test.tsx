@@ -7,7 +7,7 @@ import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { createEditorExtensions, getEditor, NovelEditor, setActiveEditorSource, setDocJSON, type JSONContent } from '@/features/editor'
 import { rejectAll, setTracking, TRACK_SKIP_META } from '@/features/track-changes'
 import type { Command } from '@/shared/commands'
-import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
+import { BULK_EDIT_META, REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { useStore } from '@/shared/store'
 import { alignBlocks } from './align'
 import { passageProblem, passageRange, stripAnchors } from './anchor'
@@ -88,25 +88,52 @@ describe('the anchor is never lost', () => {
 })
 
 describe('undo and the locked passage', () => {
-  it('refuses an undo that would change the passage (a format change made before), with a notice; undo outside still works', () => {
+  it('is never blocked: undoing a Replace All that touched the passage works, flags it, and older edits stay undoable', async () => {
     const ed = mount()
+    // An older edit, before the re-write: alignment of the passage's paragraph.
     select(ed, blockPos(ed, 1) + 2)
     act(() => void ed.commands.setTextAlign('center'))
     const id = rewrite(ed, 1, 1)
-    // An edit outside after the re-write began: undoable.
-    select(ed, blockPos(ed, 3) + 1)
-    act(() => ed.view.dispatch(ed.state.tr.insertText('Z')))
-    act(() => void undo(ed.state, ed.view.dispatch))
+    // A Replace All after the open, through the passage and the text after it.
+    const tr = ed.state.tr
+    for (const i of [3, 1]) tr.insertText('Omega', blockPos(ed, i) + 1, blockPos(ed, i) + 6)
+    act(() => ed.view.dispatch(tr.setMeta(BULK_EDIT_META, true)))
+    expect(ed.state.doc.child(1).textContent).toBe('Omega line.')
+    expect(ed.state.doc.child(3).textContent).toBe('Omega line.')
+    await act(async () => {
+      useStore.getState().rewriteActions.changed(rw().rewrites.map((r) => ({ ...r, originalChanged: false })))
+      await Promise.resolve()
+    })
+    // Undo the Replace All: both places come back; the re-write is flagged; a notice (not a refusal).
+    await act(async () => {
+      undo(ed.state, ed.view.dispatch)
+      await Promise.resolve()
+    })
+    expect(ed.state.doc.child(1).textContent).toBe('Alpha line.')
     expect(ed.state.doc.child(3).textContent).toBe('Gamma line.')
-    act(() => void redo(ed.state, ed.view.dispatch))
-    act(() => void undo(ed.state, ed.view.dispatch))
-    const before = ed.state.doc
-    // The format change inside the passage: refused, anchor and alignment kept.
-    act(() => void undo(ed.state, ed.view.dispatch))
-    expect(ed.state.doc.eq(before)).toBe(true)
-    expect(ed.state.doc.child(1).attrs.textAlign).toBe('center')
-    expect(anchorOf(ed, 1)).toBe(id)
+    expect(rw().rewrites[0].originalChanged).toBe(true)
     expect(rw().notice).toMatchObject({ kind: 'undo', id })
+    // The older edit inside the passage is undoable too; the anchor stays.
+    await act(async () => {
+      undo(ed.state, ed.view.dispatch)
+      await Promise.resolve()
+    })
+    expect(ed.state.doc.child(1).attrs.textAlign).toBeNull()
+    expect(anchorOf(ed, 1)).toBe(id)
+    // And redo.
+    act(() => void redo(ed.state, ed.view.dispatch))
+    expect(ed.state.doc.child(1).attrs.textAlign).toBe('center')
+  })
+
+  it('typing from before the re-write is not merged with later edits (the history group is closed)', () => {
+    const ed = mount()
+    select(ed, blockPos(ed, 3) + 1)
+    act(() => ed.view.dispatch(ed.state.tr.insertText('A')))
+    rewrite(ed, 1, 1)
+    select(ed, blockPos(ed, 3) + 2)
+    act(() => ed.view.dispatch(ed.state.tr.insertText('B')))
+    act(() => void undo(ed.state, ed.view.dispatch))
+    expect(ed.state.doc.child(3).textContent).toBe('AGamma line.')
   })
 })
 
@@ -206,6 +233,14 @@ describe('commands while the view is open (the gate)', () => {
     for (const id of ['find.open', 'edit.replace', 'review.track', 'comment.new', 'footnote.insert', 'edit.go_to_page']) expect(rewriteCommandGate(cmd(id)), id).toBe(false)
     expect(rewriteCommandGate(cmd('view.zoomIn', { id: 'view', group: 'zoom', order: 1 }))).toBe(false)
     expect(rewriteCommandGate(cmd('file.save', { id: 'file', group: 'save', order: 1 }))).toBe(true)
+    // A text field in the view (the version name): Edit history / clipboard act on it.
+    const input = document.createElement('input')
+    document.body.append(input)
+    input.focus()
+    expect(rewriteCommandGate(cmd('history.undo', { id: 'edit', group: 'history', order: 1 }))).toBe(true)
+    expect(rewriteCommandGate(cmd('edit.paste', { id: 'edit', group: 'clipboard', order: 1 }))).toBe(true)
+    expect(rewriteCommandGate(bold)).toBe(false)
+    input.remove()
     off()
   })
 })
