@@ -73,6 +73,12 @@ export function commentAuthor(): { name: string; color: string | null } {
   return { name: a.name || UNKNOWN_AUTHOR, color: a.color }
 }
 
+/**
+ * After the author question closed: its dialog gives the focus back (Radix, a task after unmount), so
+ * the comment composer, which takes the focus when it opens, must open after that.
+ */
+const afterDialogFocus = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+
 export function App() {
   useThemeFollow()
   useSurfaceFollow()
@@ -106,7 +112,7 @@ export function App() {
   // Comments are by the Settings author; with no name known, New Comment first asks once.
   useEffect(() => {
     setCommentAuthorSource(commentAuthor)
-    setBeforeNewComment(() => (getAuthor().name ? null : ensureAuthorName()))
+    setBeforeNewComment(() => (getAuthor().name ? null : ensureAuthorName().then(afterDialogFocus)))
     return () => {
       setCommentAuthorSource(null)
       setBeforeNewComment(null)

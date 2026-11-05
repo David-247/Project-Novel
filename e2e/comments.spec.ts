@@ -103,7 +103,7 @@ test('add, reply, edit, resolve, reopen and delete a comment; every step undoes 
   // The panel stays while every comment is resolved: Show Resolved brings the card back.
   await ctl(page, 'comment.showResolved').click()
   await expect(card).toHaveCount(1)
-  await expect(card).toContainText('Resolved by Author')
+  await expect(card).toContainText('Resolved by Test Writer')
 
   // Reopen
   await ctl(card, 'comment.reopen').click()
@@ -144,7 +144,7 @@ test('comments survive save and reopen, and crash recovery', async ({ page, cont
   await editor(page).press('ControlOrMeta+s')
   await expect(saveStatus(page)).toHaveText('Kept: Saved')
   const saved = JSON.parse((await page.evaluate(() => window.__nvE2E.readFile('/projects/Kept/comments.json')))!)
-  expect(saved).toMatchObject({ version: 1, threads: [{ author: 'Author', resolved: false, messages: [{ text: 'Saved comment' }] }] })
+  expect(saved).toMatchObject({ version: 1, threads: [{ author: 'Test Writer', resolved: false, messages: [{ text: 'Saved comment' }] }] })
   const manuscript = (await page.evaluate(() => window.__nvE2E.readFile('/projects/Kept/manuscript.json')))!
   expect(manuscript).toContain(`"type":"comment","attrs":{"id":"${saved.threads[0].id}"}`)
 
@@ -400,4 +400,39 @@ test('comment controls have tooltips, work from the keyboard, and pass AA contra
     }
   }
   expect(failures).toEqual([])
+})
+
+test('Review > New Comment asks for the author name first when none is known; View > Comments Panel toggles', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.addInitScript(() => {
+    window.__nvE2EConfig = { ...(window.__nvE2EConfig ?? {}), defaultAuthor: '' }
+  })
+  await freshProject(page, 'Menus')
+  await page.evaluate(() => window.__nvE2E.selectText(5, 10))
+  const menuBar = page.getByRole('menubar', { name: 'Menu bar' })
+  await menuBar.locator('[data-control-id="menu.review"]').click()
+  await page.locator('[role="menu"] [data-control-id="comment.new"]').click()
+  // The one-time question comes before the composer.
+  const prompt = page.getByRole('dialog', { name: 'Who is writing?' })
+  await expect(prompt).toBeVisible()
+  await expect(ctl(page, 'comment.composeField')).toHaveCount(0)
+  await ctl(page, 'settings.prompt.name').fill('Menu Writer')
+  await ctl(page, 'settings.prompt.save').click()
+  await expect(prompt).toBeHidden()
+  const field = ctl(page, 'comment.composeField')
+  await expect(field).toBeFocused()
+  await field.fill('From the menu')
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect(cards(page)).toHaveCount(1)
+  await expect(cards(page).first()).toContainText('Menu Writer')
+
+  // View > Comments Panel is a check item mirroring the panel.
+  const panelItem = page.locator('[role="menu"] [data-control-id="comment.panel"]')
+  await menuBar.locator('[data-control-id="menu.view"]').click()
+  await expect(panelItem).toHaveAttribute('aria-checked', 'true')
+  await panelItem.click()
+  await expect(cards(page)).toHaveCount(0)
+  await menuBar.locator('[data-control-id="menu.view"]').click()
+  await expect(panelItem).toHaveAttribute('aria-checked', 'false')
+  await page.keyboard.press('Escape')
 })
