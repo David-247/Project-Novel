@@ -420,7 +420,8 @@ What Word does, and what we took from it:
   one) → collapsed group button, ordered by group priority, and collapsing counts as a bigger loss than compacting.
 - **Simplified ribbon overflow.** Word's single-line ribbon puts what does not fit behind a "…" button at the end
   of the row. Ours: below the minimum width the collapsed group buttons move into **More** at the end of the row
-  (sections per group). At 480px and up nothing needs More today; it is there for narrow tablets.
+  (one flat menu, a titled section per group; submenus per group were tried and fell off the screen on narrow
+  windows). At 480px and up nothing needs More today; it is there for narrow tablets.
 - **Settings** is not on Word's ribbon (it is File > Options). Ours is File > Settings… (macOS: Novel > Settings…)
   and Mod-, only; the gear left the toolbar.
 - Google Docs (one row, a "⋮" overflow on the right) and Pages (a small fixed toolbar with an inspector) show the
@@ -433,7 +434,7 @@ What Word does, and what we took from it:
 | Home | Paragraph | Bulleted / numbered list; align left / center / right / justify; Line spacing, Space after, First-line indent; decrease / increase indent. Compact: the three fields move into a "Spacing" dropdown (registry submenus) |
 | Home | Styles | Paragraph style picker, Modify style, Manage styles, Clear direct formatting |
 | Home | Editing | Find, Replace |
-| Insert | Breaks | Chapter Break, Page Break, Scene Break; Break Options (the Insert menu: also "Chapters start on" and the scene-break ornament) |
+| Insert | Breaks | Chapter Break, Page Break, Scene Break; Break Options (the Insert menu: also "Chapters start on" and the scene-break ornament). Compact: Break Options only (it holds the three breaks); never collapses, since a registry dropdown could not offer the two book settings |
 | Insert | Footnotes | Footnote, Footnote options |
 | Insert | Comments | Comment |
 | Layout | Page Setup | Book size (trim size picker) |
@@ -456,14 +457,16 @@ whose own controls are no wider than its group button (one icon) never collapses
 
 **Model** (`src/shared/ribbon`, data only; any slice may use it):
 - `RIBBON_TABS` (fixed), `registerRibbonGroups([{ id: '<tab>.<name>', tab, label, order, priority, icon, Content?,
-  hasCompact?, compactMenu?, menu?, collapsible?, buttons? }])`. `Content` is the slice's own controls (each focusable
+  hasCompact?, compactMenu?, compactButtons?, menu?, collapsible?, buttons? }])`. `Content` is the slice's own controls (each focusable
   one a Radix toolbar item, `ToolbarItem`), rendered with `size` 'full' or 'compact'. `menu` lists what the collapsed
   group / More shows: registry commands (`{ cmd }`) and registry submenus (`{ submenu: { menu, label } }`), so labels,
   shortcuts, enabled and checked state are the menu bar's. The app's groups are in `src/ribbon-groups.tsx`.
 - **A command joins a group by its `ribbon` field** (`@/shared/commands`):
   `ribbon: { group: 'review.changes', order: 10 }` adds a labelled button for it to the group (and an item to the
   group's dropdown); `display: 'menu'` adds only the dropdown item (when the group's `Content` already has a control
-  for it). The button's id is `ribbon.cmd.<command id>` (no clash with the menu item or another control for the same
+  for it). Enabled and checked are read from the command on every render; renders follow the registry's
+  debounced state signal, so a change made elsewhere (a shortcut, the menu) shows on the button up to
+  `COMMAND_STATE_DEBOUNCE_MS` (120 ms) later, and a click on the button itself shows at once. The button's id is `ribbon.cmd.<command id>` (no clash with the menu item or another control for the same
   command); its tooltip is the command's label, description and shortcut. **T5, T7 and T8 add their buttons this
   way**: Review > Changes (Accept / Reject), Review > Re-write, View > Views (page-turn). A group with nothing to
   show is hidden, so those groups are registered already. A new group with custom controls is one entry in
@@ -485,14 +488,23 @@ focus to the button.
 
 **Selected tab**: kept for the session (`sessionStorage`); a new app start opens on Home.
 
-**Status bar**: one row as well (`h-statusbar`, no wrap). The project name, the save status and warnings truncate
-(full text in the title); the page indicator and the zoom controls keep their size.
+**Status bar**: one row as well (`h-statusbar`, no wrap, never clipped). The footer is a named container
+(`@container/statusbar`) and its items shrink with container queries, lowest priority first: below 800px the
+no-project buttons (Save as project…, New project…, Open project…) show icons (their names stay); below 760px the
+page indicator shortens to "12 / 384" and below 560px it hides; below 640px zoom keeps only its menu (every level and
+the fit modes; spread is on the View tab) and "Backup available — Restore…" becomes "Restore…". The save status
+and warnings truncate (full text in the title). Hidden items are `display: none`, so they are out of the Tab order.
 
-**Tests**: `src/features/ribbon/layout.test.ts` (step order, hysteresis, stability), `e2e/ribbon.spec.ts` (resizing in
-20px steps from 1400 to 480 and back on three tabs: one row, constant height, no canvas jump, monotone and stable
-placement, ±2px jitter at each boundary; every Home command reachable at 1100/800/600/480; keyboard access to
-collapsed groups and More; formatting from a dropdown keeps the selection; tab kept for the session; AA contrast on
-the four papers in light and dark at 1280 and 480), `e2e/toolbar.spec.ts` (control count, 32px targets).
+**Tests**: `src/features/ribbon/layout.test.ts` (step order, hysteresis, stability),
+`src/features/editor/toolbar/use-toolbar-state.test.tsx` (one shared reading per transaction, detach / re-attach,
+editor swap), `src/features/editor/paragraph-spacing-commands.test.tsx`, `e2e/ribbon.spec.ts` (resizing in 20px steps
+from 1400 to 480 and back on all five tabs: one row, constant height, no canvas jump, monotone and stable placement,
+±2px jitter at each boundary; each group's commands reachable at 1100/800/600/480 on all five tabs, in the bar or
+through the group's menu, its collapsed button or More; keyboard access to collapsed groups and More; formatting from
+a dropdown keeps the selection; tab kept for the session; AA contrast on the four papers in light and dark at 1280,
+480 and 360, collapsed-group icons at 3:1, open group and More menus), `e2e/statusbar.spec.ts` (480/600/800 with and
+without a project: every visible control inside the footer, nothing hidden focusable), `e2e/toolbar.spec.ts`
+(control count, 32px targets).
 Screenshots: `scripts/capture-ribbon.mjs`.
 
 ## Comments (Phase 3)

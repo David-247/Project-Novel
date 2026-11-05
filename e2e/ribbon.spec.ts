@@ -31,7 +31,7 @@ async function resize(page: Page, width: number) {
   await settle(page)
 }
 
-for (const tab of ['home', 'review', 'view'] as const) {
+for (const tab of ['home', 'insert', 'layout', 'review', 'view'] as const) {
   test(`${tab} tab: resizing step by step keeps one row, a constant height and a stable placement`, async ({ page }) => {
     test.setTimeout(120_000) // about 100 resizes
     await page.setViewportSize({ width: 1400, height: 700 })
@@ -83,36 +83,97 @@ for (const tab of ['home', 'review', 'view'] as const) {
   })
 }
 
-test('every Home command is reachable at 1100, 800, 600 and 480 px', async ({ page }) => {
-  await launch(page)
-  for (const w of [1100, 800, 600, 480]) {
-    await resize(page, w)
-    const { groups } = await snapshot(page, 'home')
-    expect(Object.keys(groups).sort()).toEqual(['home.editing', 'home.font', 'home.paragraph', 'home.styles'])
-    for (const [id, state] of Object.entries(groups)) {
-      if (state === 'full' || state === 'compact') {
-        await expect(page.locator(`[data-ribbon-group="${id}"] [data-control-id]:visible`).first()).toBeVisible()
-      } else if (state === 'collapsed') {
-        await expect(page.locator(`[data-control-id="ribbon.group.${id}"]`)).toBeVisible()
-      } else {
-        // In the overflow: More lists the group with its commands.
-        await page.locator('[data-control-id="ribbon.more"]').click()
-        const menu = page.getByRole('menu')
-        await expect(menu).toBeVisible()
-        expect(await menu.locator('[data-control-id]').count()).toBeGreaterThan(0)
-        await page.keyboard.press('Escape')
-        await expect(menu).toBeHidden()
+/**
+ * Per group, commands that must stay reachable: [control in the bar, item in a dropdown]. The dropdown
+ * item is the registry command (or registry submenu, `menu.<menu>.<label>`) that a collapsed group, the
+ * compact group's own menu or More shows when the bar control is not visible.
+ */
+const REACH: Record<RibbonTab, Record<string, [string, string][]>> = {
+  home: {
+    'home.font': [['toolbar.fontFamily', 'menu.format.font'], ['toolbar.fontSize', 'menu.format.font-size'], ['toolbar.bold', 'toolbar.bold'], ['toolbar.underline', 'toolbar.underline']],
+    'home.paragraph': [
+      ['toolbar.bulletList', 'toolbar.bulletList'],
+      ['toolbar.alignJustify', 'toolbar.alignJustify'],
+      ['toolbar.lineSpacing', 'menu.format.line-spacing'],
+      ['toolbar.paragraphSpacing', 'menu.format.space-after'],
+      ['toolbar.firstLineIndent', 'menu.format.first-line-indent'],
+      ['toolbar.indentIncrease', 'toolbar.indentIncrease'],
+    ],
+    'home.styles': [['styles.picker', 'menu.format.paragraph-style'], ['styles.manage', 'styles.manage'], ['styles.clearFormatting', 'styles.clearFormatting']],
+    'home.editing': [['find.open', 'find.open'], ['ribbon.cmd.edit.replace', 'edit.replace']],
+  },
+  insert: {
+    'insert.breaks': [['ribbon.cmd.insert.pageBreak', 'insert.pageBreak'], ['ribbon.cmd.insert.newChapter', 'insert.newChapter'], ['insert.menu', 'insert.chapterStart.recto']],
+    'insert.footnotes': [['ribbon.cmd.footnote.insert', 'footnote.insert'], ['footnote.options', 'footnote.options']],
+    'insert.comments': [['ribbon.cmd.insert.comment', 'insert.comment']],
+  },
+  layout: {
+    'layout.pageSetup': [['book.trimSize', 'menu.file.page-setup']],
+    'layout.headers': [['book.headerFooter', 'book.headerFooter']],
+    'layout.paper': [['book.surface.dark', 'menu.view.paper']],
+    'layout.book': [['ribbon.cmd.book.details', 'book.details']],
+  },
+  review: {
+    'review.tracking': [['review.track', 'review.track'], ['review.markup', 'menu.view.markup']],
+    'review.comments': [['comment.new', 'comment.new'], ['ribbon.cmd.comment.prev', 'comment.prev'], ['ribbon.cmd.comment.next', 'comment.next']],
+  },
+  view: {
+    'view.views': [['ribbon.cmd.view.singlePage', 'view.singlePage'], ['ribbon.cmd.pagination.spreadView', 'pagination.spreadView']],
+    'view.zoom': [['ribbon.cmd.pagination.zoomIn', 'pagination.zoomIn'], ['ribbon.cmd.view.fitWidth', 'view.fitWidth'], ['ribbon.cmd.view.actualSize', 'view.actualSize']],
+    'view.show': [['comment.panel', 'comment.panel']],
+    'view.window': [['ribbon.cmd.view.fullScreen', 'view.fullScreen']],
+  },
+}
+
+/** How `barId` of `group` is reached right now: 'bar', or the dropdown that lists `menuId`; null if not at all. */
+async function reach(page: Page, tab: RibbonTab, group: string, barId: string, menuId: string): Promise<string | null> {
+  const row = panel(page, tab)
+  if (await row.locator(`[data-control-id="${barId}"]`).isVisible()) return 'bar'
+  // The group's own menus (compact "Spacing", Break Options…), then its collapsed button, then More.
+  const own = await row
+    .locator(`[data-ribbon-group="${group}"] [aria-haspopup="menu"][data-control-id]`)
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-control-id')!))
+  for (const trigger of [...own, `ribbon.group.${group}`, 'ribbon.more']) {
+    const t = row.locator(`[data-control-id="${trigger}"]`)
+    if (!(await t.isVisible())) continue
+    await t.click()
+    const menu = page.getByRole('menu').first()
+    await expect(menu).toBeVisible()
+    const found = await menu.locator(`[data-control-id="${menuId}"]`).isVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    if (found) return trigger
+  }
+  return null
+}
+
+for (const tab of ['home', 'insert', 'layout', 'review', 'view'] as const) {
+  test(`every ${tab} command is reachable at 1100, 800, 600 and 480 px`, async ({ page }) => {
+    test.setTimeout(90_000)
+    await launch(page)
+    await ribbonTab(page, tab)
+    for (const w of [1100, 800, 600, 480]) {
+      await resize(page, w)
+      const { groups } = await snapshot(page, tab)
+      expect(Object.keys(groups).sort(), `${tab} groups`).toEqual(Object.keys(REACH[tab]).sort())
+      for (const [group, pairs] of Object.entries(REACH[tab])) {
+        for (const [barId, menuId] of pairs) {
+          const how = await reach(page, tab, group, barId, menuId)
+          expect(how, `${barId} (${group}, ${groups[group]}) at ${w}px`).not.toBeNull()
+        }
       }
     }
-    // At 480 Paragraph is a dropdown; its items keep labels, shortcuts and checked state.
-    if (w === 480) {
-      await page.locator('[data-control-id="ribbon.group.home.paragraph"]').click()
-      const align = page.getByRole('menuitemcheckbox', { name: /^Left/ })
-      await expect(align).toHaveAttribute('aria-checked', 'true')
-      await expect(page.getByRole('menu')).toContainText(/Ctrl\+Shift\+L|⇧⌘L/)
-      await page.keyboard.press('Escape')
-    }
-  }
+  })
+}
+
+test('dropdown items keep their labels, shortcuts and checked state', async ({ page }) => {
+  await launch(page)
+  await resize(page, 480)
+  await page.locator('[data-control-id="ribbon.group.home.paragraph"]').click()
+  const align = page.getByRole('menuitemcheckbox', { name: /^Left/ })
+  await expect(align).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByRole('menu')).toContainText(/Ctrl\+Shift\+L|⇧⌘L/)
+  await page.keyboard.press('Escape')
 })
 
 test('below the minimum width, groups move into More; it lists them with their commands', async ({ page }) => {
@@ -191,58 +252,100 @@ test('the selected tab is kept for the session', async ({ page }) => {
   await expect(page.locator('[data-control-id="review.track"]')).toBeVisible()
 })
 
-test('ribbon text and icons meet WCAG AA on the four papers in OS light and dark, wide and narrow', async ({ page }) => {
-  test.setTimeout(120_000)
+/**
+ * Contrast problems under `root` (a CSS selector): text of every visible, enabled control (and of its
+ * spans: menu shortcuts) below 4.5:1, and icons (`icons` selector, non-text) below 3:1, on the effective
+ * background.
+ */
+const contrast = (page: Page, root: string, icons: string) =>
+  page.evaluate(
+    ([rootSel, iconSel]) => {
+      const parse = (c: string) => {
+        const p = (c.match(/rgba?\(([^)]+)\)/)?.[1] ?? '0,0,0,0').split(/[ ,/]+/).filter(Boolean).map(Number)
+        return [p[0], p[1], p[2], p[3] ?? 1]
+      }
+      const bgOf = (el: Element) => {
+        const layers: number[][] = []
+        for (let n: Element | null = el; n; n = n.parentElement) {
+          const c = parse(getComputedStyle(n).backgroundColor)
+          if (c[3] > 0) {
+            layers.push(c)
+            if (c[3] >= 1) break
+          }
+        }
+        let out = [255, 255, 255]
+        for (const l of layers.reverse()) out = [0, 1, 2].map((i) => l[i] * l[3] + out[i] * (1 - l[3]))
+        return out
+      }
+      const lum = (rgb: number[]) => {
+        const [r, g, b] = rgb.map((v) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+      }
+      const ratio = (el: Element) => {
+        const bg = bgOf(el)
+        const fg = parse(getComputedStyle(el).color)
+        const mixed = [0, 1, 2].map((i) => fg[i] * fg[3] + bg[i] * (1 - fg[3]))
+        const [x, y] = [lum(mixed), lum(bg)].sort((p, q) => q - p)
+        return (x + 0.05) / (y + 0.05)
+      }
+      const out: string[] = []
+      for (const r of document.querySelectorAll(rootSel)) {
+        for (const el of r.querySelectorAll<HTMLElement>('[data-control-id]')) {
+          if (!el.checkVisibility() || el.matches(':disabled, [aria-disabled="true"], [data-disabled]')) continue
+          // The paper swatches show the paper itself; their labels and rings are checked in surface.spec.
+          if (el.getAttribute('data-control-id')?.startsWith('book.surface.')) continue
+          for (const t of [el, ...el.querySelectorAll('span')]) {
+            if (!t.checkVisibility() || !t.textContent?.trim() || t.getAttribute('aria-hidden') === 'true') continue
+            const v = ratio(t)
+            if (v < 4.5) out.push(`${el.getAttribute('data-control-id')} text "${t.textContent.trim().slice(0, 20)}" ${v.toFixed(2)}`)
+          }
+        }
+        for (const icon of r.querySelectorAll(iconSel)) {
+          if (!icon.checkVisibility()) continue
+          const v = ratio(icon)
+          if (v < 3) out.push(`${icon.closest('[data-control-id]')?.getAttribute('data-control-id')} icon ${v.toFixed(2)}`)
+        }
+      }
+      return out
+    },
+    [root, icons] as const,
+  )
+
+const BAR = '[role="toolbar"][aria-label="Formatting"]'
+const MENU = '[data-nv-menu-content]'
+const GROUP_ICONS = '[data-control-id^="ribbon.group."] > span[aria-hidden="true"], [data-control-id="ribbon.more"] > svg'
+
+test('ribbon text and icons meet WCAG AA on the four papers in OS light and dark, wide and narrow, menus open', async ({ page }) => {
+  test.setTimeout(180_000)
   await launch(page)
   const low: string[] = []
+  const add = (where: string, found: string[]) => low.push(...found.map((f) => `${where}: ${f}`))
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme })
     for (const surface of ['auto', 'book', 'white', 'dark'] as const) {
       await resize(page, 1280) // the paper swatches are a dropdown at narrow widths
       await (await reveal(page, `book.surface.${surface}`)).click()
+      await page.mouse.move(700, 600)
       for (const width of [1280, 480]) {
         await resize(page, width)
         for (const tab of ['home', 'insert', 'layout', 'review', 'view'] as const) {
           await ribbonTab(page, tab)
-          const found = await page.getByRole('toolbar', { name: 'Formatting' }).evaluate((bar) => {
-            const parse = (c: string) => {
-              const p = (c.match(/rgba?\(([^)]+)\)/)?.[1] ?? '0,0,0,0').split(/[ ,/]+/).filter(Boolean).map(Number)
-              return [p[0], p[1], p[2], p[3] ?? 1]
-            }
-            const bgOf = (el: Element) => {
-              const layers: number[][] = []
-              for (let n: Element | null = el; n; n = n.parentElement) {
-                const c = parse(getComputedStyle(n).backgroundColor)
-                if (c[3] > 0) {
-                  layers.push(c)
-                  if (c[3] >= 1) break
-                }
-              }
-              let out = [255, 255, 255]
-              for (const l of layers.reverse()) out = [0, 1, 2].map((i) => l[i] * l[3] + out[i] * (1 - l[3]))
-              return out
-            }
-            const lum = (rgb: number[]) => {
-              const [r, g, b] = rgb.map((v) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4))
-              return 0.2126 * r + 0.7152 * g + 0.0722 * b
-            }
-            const ratio = (a: number[], b: number[]) => {
-              const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
-              return (x + 0.05) / (y + 0.05)
-            }
-            const out: string[] = []
-            for (const el of bar.querySelectorAll<HTMLElement>('[data-control-id]')) {
-              if (!el.checkVisibility() || el.matches(':disabled, [aria-disabled="true"]')) continue
-              // The paper swatches show the paper itself; their labels and rings are checked in surface.spec.
-              if (el.getAttribute('data-control-id')?.startsWith('book.surface.')) continue
-              const r = ratio(parse(getComputedStyle(el).color), bgOf(el))
-              if (r < 4.5) out.push(`${el.getAttribute('data-control-id')} ${r.toFixed(2)}`)
-            }
-            return out
-          })
-          low.push(...found.map((f) => `${scheme}/${surface}/${width}/${tab}: ${f}`))
+          add(`${scheme}/${surface}/${width}/${tab}`, await contrast(page, BAR, GROUP_ICONS))
         }
       }
+      // An open collapsed group (with a check mark, shortcuts and a submenu) and the More menu.
+      await ribbonTab(page, 'home')
+      await page.locator('[data-control-id="ribbon.group.home.paragraph"]').click()
+      await expect(page.getByRole('menu')).toBeVisible()
+      await page.keyboard.press('ArrowDown') // a highlighted item too
+      add(`${scheme}/${surface}/paragraph menu`, await contrast(page, MENU, `${MENU} svg`))
+      await page.keyboard.press('Escape')
+      await resize(page, 360)
+      await page.locator('[data-control-id="ribbon.more"]').click()
+      await expect(page.getByRole('menu')).toBeVisible()
+      add(`${scheme}/${surface}/More`, await contrast(page, MENU, `${MENU} svg`))
+      await page.keyboard.press('Escape')
+      add(`${scheme}/${surface}/360`, await contrast(page, BAR, GROUP_ICONS))
     }
   }
   expect(low).toEqual([])

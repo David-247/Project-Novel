@@ -7,8 +7,8 @@
  *
  * Builds the e2e web app (fake Tauri backend), serves it with `vite preview`, seeds a small
  * manuscript through window.__nvE2E and writes `ribbon-<width>-<scheme>.png`,
- * `ribbon-1100-light-<tab>.png` and `ribbon-<width>-light-open.png` (the More menu or a collapsed
- * group open).
+ * `ribbon-1100-light-<tab>.png`, `ribbon-<width>-light-open.png` (the More menu or a collapsed
+ * group open) and `statusbar-480-<scheme>[-noproject].png` (the bottom of the window).
  */
 /* global window */
 import { spawn, spawnSync } from 'node:child_process'
@@ -76,6 +76,16 @@ async function shoot(browser, variant, width, scheme, extra) {
   await page.goto(`${base}/`)
   await page.locator('main [contenteditable="true"]').waitFor()
   await page.waitForFunction(() => !!window.__nvE2E)
+  if (variant === 'statusbar' && extra === 'noproject') {
+    // No project, some unsaved text: the New / Open / Save as project buttons are in the status bar.
+    await page.locator('main [contenteditable="true"]').click()
+    await page.keyboard.type('Some unsaved words.')
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: resolve(outDir, `statusbar-${width}-${scheme}-noproject.png`), clip: { x: 0, y: HEIGHT - 120, width, height: 120 } })
+    console.log(`statusbar-${width}-${scheme}-noproject`)
+    await ctx.close()
+    return
+  }
   await page.evaluate(async (doc) => {
     const e2e = window.__nvE2E
     const now = new Date(Date.now() - 60_000).toISOString()
@@ -91,6 +101,12 @@ async function shoot(browser, variant, width, scheme, extra) {
   await page.locator('main strong').first().click()
   await page.waitForTimeout(500)
   let suffix = ''
+  if (variant === 'statusbar') {
+    await page.screenshot({ path: resolve(outDir, `statusbar-${width}-${scheme}.png`), clip: { x: 0, y: HEIGHT - 120, width, height: 120 } })
+    console.log(`statusbar-${width}-${scheme}`)
+    await ctx.close()
+    return
+  }
   if (extra === 'open') {
     suffix = '-open'
     const more = page.locator('[data-control-id="ribbon.more"]:visible')
@@ -119,6 +135,10 @@ try {
   for (const variant of VARIANTS) for (const scheme of SCHEMES) for (const w of WIDTHS) await shoot(browser, variant, w, scheme)
   for (const tab of ['home', 'insert', 'layout', 'review', 'view']) await shoot(browser, 'ribbon', 1100, 'light', tab)
   for (const w of [800, 480]) await shoot(browser, 'ribbon', w, 'light', 'open')
+  for (const scheme of SCHEMES) {
+    await shoot(browser, 'statusbar', 480, scheme)
+    await shoot(browser, 'statusbar', 480, scheme, 'noproject')
+  }
   await browser.close()
 } finally {
   server.kill()
