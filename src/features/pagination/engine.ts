@@ -169,6 +169,26 @@ export function getEngine(): PaginationEngine | null {
   return currentEngine
 }
 
+/**
+ * Pages shown on screen when the view decides them itself (Book mode: the one spread on the canvas),
+ * instead of the scroll viewport. The progressive draw draws these (±2) first. Null: use the scroller.
+ */
+let viewWindowProvider: (() => [number, number] | null) | null = null
+
+/**
+ * Pass listeners that outlive an engine: ProseMirror recreates plugin views (and so the engine)
+ * whenever a plugin is registered or unregistered. Returns unsubscribe.
+ */
+const anyPassListeners = new Set<SnapshotListener>()
+export function onAnyPass(cb: SnapshotListener): () => void {
+  anyPassListeners.add(cb)
+  return () => anyPassListeners.delete(cb)
+}
+
+export function setViewWindowProvider(fn: (() => [number, number] | null) | null): void {
+  viewWindowProvider = fn
+}
+
 export class PaginationEngine {
   private cache = new WeakMap<PMNode, BlockMetrics>()
   private epoch = 0
@@ -330,6 +350,8 @@ export class PaginationEngine {
 
   /** Pages to draw first: those in the scroll viewport (new placement), ±2. */
   private viewWindow(root: HTMLElement, scale: number, placement: Placement): [number, number] {
+    const fixed = viewWindowProvider?.()
+    if (fixed) return [fixed[0] - 2, fixed[1] + 2]
     let lo = 0
     let hi = 3
     let scroller: HTMLElement | null = root.parentElement
@@ -690,6 +712,7 @@ export class PaginationEngine {
     if (!samePages(store.layout.pages, pages)) store.layoutActions.setPages(pages)
     store.layoutActions.setCurrentPage(pageAt(pages, view.state.selection.head))
     this.listeners.forEach((l) => l(this.snapshot!))
+    anyPassListeners.forEach((l) => l(this.snapshot!))
     const t6 = performance.now()
     this.timings = {
       measuredBlocks: measured,
@@ -867,12 +890,27 @@ export function selectionForPage(state: EditorState, page: PageInfo) {
 export function createPaginationPlugin(handlers: {
   keyDown?: (view: EditorView, e: KeyboardEvent) => boolean
   mouseDown?: (view: EditorView, e: MouseEvent) => boolean
+  /**
+   * ProseMirror is about to scroll the selection into view. True: the host handles it (Book mode
+   * turns to the spread holding the caret instead of scrolling).
+   */
+  scrollToSelection?: (view: EditorView) => boolean
+  /**
+   * The selection moved: without a document change (native caret moves, clicks, programmatic), or
+   * set by a transaction that also changed the document (typing, an insertion). The engine may still
+   * have that change's pass pending.
+   */
+  selectionMoved?: (view: EditorView) => void
 }) {
+  // A document change that also put the selection somewhere (typing, inserting a footnote): the
+  // host's caret follow runs for it once the change is laid out.
+  let caretMovedWithDoc = false
   return new Plugin<PaginationState>({
     key: paginationKey,
     state: {
       init: () => ({ set: DecorationSet.empty, unmapped: false }),
       apply: (tr, value) => {
+        if (tr.docChanged && tr.selectionSet) caretMovedWithDoc = true
         const next = tr.getMeta(paginationKey) as DecorationSet | undefined
         if (next) return { set: next, unmapped: false }
         if (!tr.docChanged) return value
@@ -886,6 +924,7 @@ export function createPaginationPlugin(handlers: {
       // Scrolling to the selection while off-screen blocks are still being redrawn would use a stale
       // (hidden) position: finish the reflow first, then scroll.
       handleScrollToSelection: (view) => {
+        if (handlers.scrollToSelection?.(view)) return true
         const engine = getEngine()
         if (!engine?.catchingUp) return false
         queueMicrotask(() => {
@@ -903,9 +942,13 @@ export function createPaginationPlugin(handlers: {
       const engine = new PaginationEngine(view)
       return {
         update: (v, prev) => {
-          if (v.state.doc !== prev.doc) engine.schedule(true)
-          else if (!v.state.selection.eq(prev.selection)) {
+          if (v.state.doc !== prev.doc) {
+            engine.schedule(true)
+            if (caretMovedWithDoc) handlers.selectionMoved?.(v)
+            caretMovedWithDoc = false
+          } else if (!v.state.selection.eq(prev.selection)) {
             engine.selectionChanged(v.state)
+            handlers.selectionMoved?.(v)
             // A caret moved natively (Mod-End, arrows) while off-screen blocks are still hidden at
             // their old place: the browser scrolled to that stale place. Finish and scroll again.
             if (engine.catchingUp && v.hasFocus())

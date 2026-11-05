@@ -1,15 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { Selection, TextSelection } from '@tiptap/pm/state'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import type { EditorView } from '@tiptap/pm/view'
 import { setFindRevealHook, useMountedEditor } from '@/features/editor'
-import { useStore } from '@/shared/store'
-import { createPaginationPlugin, getEngine, pageAt, paginationKey, selectionForPage } from './engine'
+import { prefersReducedMotion } from '@/features/settings'
+import { useStore, type PageInfo } from '@/shared/store'
+import { createPaginationPlugin, getEngine, onAnyPass, pageAt, paginationKey, selectionForPage, setViewWindowProvider } from './engine'
 import { resolvePageGeometry } from './geometry'
-import { effectiveView, placePages, resolveScale, type Placement } from './placement'
+import { bookRowHeight, DESK_PAD, effectiveView, placePages, resolveScale, TURN_LANE, type Placement } from './placement'
 import { doubleClickSlots } from './extension-points'
 import { PageFrames } from './PageFrames'
+import { TurnControls } from './TurnControls'
+import { goToEdgeSpread, setNavigator, turnSpread } from './navigation'
 import './pagination.css'
 
 export interface PaginatedViewProps {
@@ -39,19 +43,20 @@ function canvasTopIn(scroller: HTMLElement, sizer: HTMLElement | null): number {
   return sizer.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
 }
 
-let goToPageImpl: ((index: number) => boolean) | null = null
+/** Wheel / trackpad events closer together than this belong to one gesture (one page turn). */
+export const WHEEL_GESTURE_GAP_MS = 220
 
-/**
- * Edit > Go to Page: caret to the start of page `index` (0-based; a blank page goes to the next
- * one), its spread scrolled to the top, focus in the manuscript. False while no pages are laid out.
- */
-export function goToPage(index: number): boolean {
-  return goToPageImpl?.(index) ?? false
-}
+/** Duration of the page-turn transition (skipped when motion is reduced). */
+const TURN_MS = 160
 
 /**
  * The paginated writing surface: pages on a desk, as a two-page spread (or single pages), at the
  * zoom chosen in the status bar. Hosts the editor's one view; see docs/pagination.md.
+ *
+ * Two navigation modes (app preference `pageNavigation`): **Book** (default) shows exactly one spread,
+ * clipped from the same canvas (the canvas is translated so the spread's row sits in a one-row
+ * window), and the writer turns pages; **continuous scroll** stacks every spread vertically (Phase 2).
+ * Either way the engine, the page model and the single ProseMirror view are the same.
  */
 export function PaginatedView({ children }: PaginatedViewProps) {
   const editor = useMountedEditor()
@@ -63,6 +68,8 @@ export function PaginatedView({ children }: PaginatedViewProps) {
   const view = useStore((s) => s.layout.effectiveView)
   const zoom = useStore((s) => s.layout.zoom)
   const scale = useStore((s) => s.layout.scale)
+  const spreadFirst = useStore((s) => s.layout.visibleSpread.first)
+  const book = useStore((s) => s.preferences.pageNavigation) !== 'scroll'
   const actions = useStore((s) => s.layoutActions)
 
   const geometry = useMemo(() => resolvePageGeometry(trimSize, margins), [trimSize, margins])
@@ -74,11 +81,15 @@ export function PaginatedView({ children }: PaginatedViewProps) {
   const scrollerRef = useRef<HTMLElement | null>(null)
   const [viewport, setViewport] = useState<Viewport>({ width: 0, height: 0, top: 0, canvasTop: 0 })
 
+  // Book mode: the row shown, from the first page of the visible spread (so it survives a change of
+  // view, single <-> spread, and of page count).
+  const bookRow = placement.rowOf(Math.max(0, Math.min(spreadFirst, Math.max(0, pageCount - 1))))
+
   // Latest values for the (stable) plugin handlers.
-  const live = useRef({ placement, scale })
+  const live = useRef({ placement, scale, book, bookRow })
   useLayoutEffect(() => {
-    live.current = { placement, scale }
-  }, [placement, scale])
+    live.current = { placement, scale, book, bookRow }
+  }, [placement, scale, book, bookRow])
 
   // ---- Scroll container: its size drives the narrow fallback and fit zooms; its scroll the visible spread.
   useLayoutEffect(() => {
@@ -115,71 +126,327 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     }
   }, [])
 
-  // ---- Effective view and scale.
+  // ---- Effective view and scale. Book mode keeps a lane on each side for the turn controls.
+  const roomWidth = book ? Math.max(0, viewport.width - 2 * TURN_LANE) : viewport.width
   useEffect(() => {
-    actions.setEffectiveView(effectiveView(requestedView, viewport.width, geometry))
-  }, [actions, requestedView, viewport.width, geometry])
+    actions.setEffectiveView(effectiveView(requestedView, roomWidth, geometry))
+  }, [actions, requestedView, roomWidth, geometry])
 
   useEffect(() => {
-    actions.setScale(resolveScale(zoom, viewport, placement, geometry))
-  }, [actions, zoom, viewport, placement, geometry])
+    actions.setScale(resolveScale(zoom, { width: roomWidth, height: viewport.height }, placement, geometry))
+  }, [actions, zoom, roomWidth, viewport.height, placement, geometry])
 
-  // ---- Visible spread (the row at the middle of the viewport) and the rows worth rendering.
+  // ---- Visible spread. Scroll: the row at the middle of the viewport. Book: set by navigation.
   const offsetTop = viewport.canvasTop
   const centerY = (viewport.top + viewport.height / 2 - offsetTop) / scale
   const centerRow = placement.rowAtY(centerY)
-  const firstRow = placement.rowAtY((viewport.top - viewport.height - offsetTop) / scale)
-  const lastRow = placement.rowAtY((viewport.top + 2 * viewport.height - offsetTop) / scale)
+  const firstRow = book ? bookRow : placement.rowAtY((viewport.top - viewport.height - offsetTop) / scale)
+  const lastRow = book ? bookRow : placement.rowAtY((viewport.top + 2 * viewport.height - offsetTop) / scale)
   useEffect(() => {
+    if (book) return
     const [first, last] = placement.pagesInRow(centerRow)
     actions.setVisibleSpread({ index: centerRow, first, last: Math.min(last, Math.max(0, pageCount - 1)) })
-  }, [actions, placement, centerRow, pageCount])
+  }, [actions, placement, centerRow, pageCount, book])
 
-  // ---- Plugin: decorations + engine, page keys, clicks on the desk and margins.
+  // Book: keep the store's spread equal to the row shown (a view or page count change can move it).
+  useLayoutEffect(() => {
+    if (!book) return
+    const [first, last] = placement.pagesInRow(bookRow)
+    actions.setVisibleSpread({ index: bookRow, first, last: Math.min(last, Math.max(0, pageCount - 1)) })
+  }, [actions, placement, bookRow, pageCount, book])
+
+  // The engine draws the pages shown first: in Book mode the spread on the canvas, not the scroll viewport.
+  useEffect(() => {
+    if (!book) return
+    setViewWindowProvider(() => {
+      const s = useStore.getState().layout.visibleSpread
+      return [s.first, s.last]
+    })
+    return () => setViewWindowProvider(null)
+  }, [book])
+
+  // ---- Book: a turned-to spread is fully drawn before it is painted, then (optionally) eased in.
+  const shownRow = useRef<number | null>(null)
+  const caretScrollPending = useRef(false)
+  useLayoutEffect(() => {
+    const prev = shownRow.current
+    shownRow.current = book ? bookRow : null
+    if (!book) return
+    // Blocks still waiting for their offsets after a reflow are hidden (.nv-stale): draw the ones on
+    // this spread now, in this task, so the spread is never shown half drawn.
+    const engine = getEngine()
+    if (prev !== bookRow && engine?.catchingUp) engine.flush()
+    if (prev !== null && prev !== bookRow) {
+      const sizer = sizerRef.current
+      if (sizer && typeof sizer.animate === 'function' && !prefersReducedMotion()) {
+        const dx = bookRow > prev ? 14 : -14
+        sizer.animate([{ opacity: 0.55, transform: `translateX(${dx}px)` }, { opacity: 1, transform: 'none' }], {
+          duration: TURN_MS,
+          easing: 'cubic-bezier(0.2, 0.7, 0.3, 1)',
+        })
+      }
+    }
+    if (caretScrollPending.current) {
+      caretScrollPending.current = false
+      if (editor && !editor.isDestroyed) keepCaretInScroller(editor.view, scrollerRef.current)
+    }
+  }, [book, bookRow, editor])
+
+  // Switching modes: continuous scroll starts at the spread Book mode showed, Book mode at the top.
+  const lastMode = useRef(book)
+  useLayoutEffect(() => {
+    if (lastMode.current === book) return
+    lastMode.current = book
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    if (book) scroller.scrollTop = 0
+    else {
+      const row = live.current.placement.rowOf(useStore.getState().layout.visibleSpread.first)
+      scroller.scrollTop = Math.max(0, canvasTopIn(scroller, sizerRef.current) + (live.current.placement.rowTop(row) - 12) * live.current.scale)
+    }
+  }, [book])
+
+  // ---- Plugin: decorations + engine, page keys, clicks on the desk and margins, caret follow.
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
+    const rowCount = () => live.current.placement.rowCount
+    /** Book mode: show `row` (clamped). `sync` renders it before returning (hit tests right after). */
+    const showRow = (row: number, sync = false) => {
+      const p = live.current.placement
+      const r = Math.max(0, Math.min(p.rowCount - 1, row))
+      const [first, last] = p.pagesInRow(r)
+      const count = Math.max(1, useStore.getState().layout.pageCount)
+      const apply = () => actions.setVisibleSpread({ index: r, first, last: Math.min(last, count - 1) })
+      if (r !== live.current.bookRow) {
+        const scroller = scrollerRef.current
+        if (scroller) scroller.scrollTop = 0
+      }
+      if (sync) flushSync(apply)
+      else apply()
+    }
     const scrollToRow = (row: number) => {
+      // Rendered before returning: the caret-follow that a selection change queues compares with it.
+      if (live.current.book) return showRow(row, true)
       const scroller = scrollerRef.current
       if (!scroller) return
       const top = canvasTopIn(scroller, sizerRef.current)
       scroller.scrollTop = Math.max(0, top + (live.current.placement.rowTop(row) - 12) * live.current.scale)
     }
+    /** Book: the page `page` is on the canvas (turning to it now if not), for hit tests on it. */
+    const ensurePageShown = (page: number) => {
+      if (!live.current.book) return
+      const row = live.current.placement.rowOf(page)
+      if (row !== live.current.bookRow) showRow(row, true)
+    }
+
+    // Caret follow (Book): when the selection head leaves the spread, turn to the spread holding it.
+    let followQueued = false
+    let followAfterPass = false
+    let followScroll = false
+    const follow = () => {
+      followQueued = false
+      if (!live.current.book || editor.isDestroyed) return
+      const engine = getEngine()
+      if (engine?.pending && !engine.catchingUp) {
+        // A document change not laid out yet: its page is known after the pass.
+        followAfterPass = true
+        return
+      }
+      const snap = engine?.getSnapshot()
+      if (!snap || !snap.pages.length) return
+      const row = caretRow(editor.view, snap.pages, live.current.placement)
+      const scroll = followScroll
+      followScroll = false
+      if (row !== live.current.bookRow) {
+        caretScrollPending.current = scroll
+        showRow(row)
+      } else if (scroll) keepCaretInScroller(editor.view, scrollerRef.current)
+    }
+    const queueFollow = (scroll: boolean) => {
+      if (!live.current.book) return
+      if (scroll) followScroll = true
+      if (followQueued) return
+      followQueued = true
+      queueMicrotask(follow)
+    }
+
     const plugin = createPaginationPlugin({
       keyDown: (v, e) => {
         const docKey = documentEdgeKey(e)
         if (docKey) return moveToDocumentEdge(v, docKey, e.shiftKey)
         if (e.altKey || e.ctrlKey || e.metaKey) return false
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') return moveLineAcrossPages(v, e.key === 'ArrowDown' ? 1 : -1, e.shiftKey)
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp')
+          return moveLineAcrossPages(v, e.key === 'ArrowDown' ? 1 : -1, e.shiftKey, ensurePageShown)
         if (e.key !== 'PageDown' && e.key !== 'PageUp') return false
         return moveBySpread(v, e.key === 'PageDown' ? 1 : -1, e.shiftKey, live.current.placement, scrollToRow)
       },
       mouseDown: (v, e) => placeCaretFromDesk(v, e),
+      // Book: never scroll the clipped stream; turn to the caret's spread (and keep it in the window
+      // when the zoom makes the spread taller than the window).
+      scrollToSelection: () => {
+        if (!live.current.book) return false
+        queueFollow(true)
+        return true
+      },
+      selectionMoved: () => queueFollow(false),
     })
     editor.registerPlugin(plugin)
+    const offPass = onAnyPass(() => {
+      if (!followAfterPass) return
+      followAfterPass = false
+      queueFollow(false)
+    })
     // The find panel scrolls the current match by its DOM position: finish a reflow in progress first.
-    setFindRevealHook(() => getEngine()?.drain())
-    goToPageImpl = (index) => {
-      if (editor.isDestroyed) return false
-      const v = editor.view
-      freshSnapshot()
-      const pages = useStore.getState().layout.pages
-      if (!pages.length) return false
-      let i = Math.max(0, Math.min(pages.length - 1, Math.trunc(index)))
-      while (i < pages.length - 1 && pages[i].isBlank) i++
-      const page = pages[i]
-      v.dispatch(v.state.tr.setSelection(selectionForPage(v.state, page)))
-      v.focus()
-      caretToPageStart(v, page.from)
-      scrollToRow(live.current.placement.rowOf(i))
+    // In Book mode turn to the match's spread instead (the stream outside the spread is clipped).
+    setFindRevealHook((el) => {
+      getEngine()?.drain()
+      if (!live.current.book || !el) return false
+      const row = rowOfElement(editor.view, el, live.current.placement)
+      if (row !== null && row !== live.current.bookRow) showRow(row, true)
+      keepRectInScroller(el.getBoundingClientRect(), scrollerRef.current)
       return true
-    }
+    })
+    setNavigator({
+      goToPage: (index) => {
+        if (editor.isDestroyed) return false
+        const v = editor.view
+        freshSnapshot()
+        const pages = useStore.getState().layout.pages
+        if (!pages.length) return false
+        let i = Math.max(0, Math.min(pages.length - 1, Math.trunc(index)))
+        while (i < pages.length - 1 && pages[i].isBlank) i++
+        const page = pages[i]
+        v.dispatch(v.state.tr.setSelection(selectionForPage(v.state, page)))
+        v.focus()
+        caretToPageStart(v, page.from)
+        scrollToRow(live.current.placement.rowOf(i))
+        return true
+      },
+      turn: (dir) => {
+        if (!useStore.getState().layout.pageCount) return false
+        const current = live.current.book ? live.current.bookRow : useStore.getState().layout.visibleSpread.index
+        const row = current + dir
+        if (row < 0 || row >= rowCount()) return false
+        scrollToRow(row)
+        return true
+      },
+      edge: (dir) => {
+        if (!useStore.getState().layout.pageCount) return false
+        scrollToRow(dir > 0 ? rowCount() - 1 : 0)
+        return true
+      },
+      reveal: (pos) => {
+        if (editor.isDestroyed) return false
+        const v = editor.view
+        getEngine()?.drain()
+        const p = Math.max(0, Math.min(pos, v.state.doc.content.size))
+        let c: { top: number; bottom: number; left: number; right: number }
+        try {
+          c = v.coordsAtPos(p, 1)
+        } catch {
+          return false
+        }
+        const scroller = scrollerRef.current
+        if (live.current.book) {
+          const row = rowOfClientY(v, (c.top + c.bottom) / 2, live.current.placement)
+          if (row !== null && row !== live.current.bookRow) {
+            showRow(row, true)
+            try {
+              c = v.coordsAtPos(p, 1)
+            } catch {
+              return true
+            }
+          }
+          keepRectInScroller(c, scroller)
+          return true
+        }
+        // Continuous scroll: to the middle of the window, so its spread is the visible one.
+        if (!scroller) return false
+        const r = scroller.getBoundingClientRect()
+        scroller.scrollTop += (c.top + c.bottom) / 2 - (r.top + r.height / 2)
+        return true
+      },
+    })
     return () => {
-      goToPageImpl = null
+      setNavigator(null)
+      offPass()
       setFindRevealHook(null)
       if (!editor.isDestroyed) editor.unregisterPlugin(paginationKey)
       actions.resetLayout()
     }
   }, [editor, actions])
+
+  // ---- Book: wheel / trackpad turns one spread per gesture; keys outside the manuscript turn too.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!book || !host) return
+    // One gesture: wheel events less than WHEEL_GESTURE_GAP_MS apart (a trackpad swipe and its
+    // momentum, a fast spin of the wheel). It turns at most one spread.
+    let lastAt = -Infinity
+    let turned = false
+    let scrolls = false
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.defaultPrevented) return // pinch zoom / handled
+      const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY)
+      const d = horizontal ? e.deltaX : e.deltaY
+      if (Math.abs(d) < 0.5) return
+      const dir: 1 | -1 = d > 0 ? 1 : -1
+      const start = e.timeStamp - lastAt > WHEEL_GESTURE_GAP_MS
+      lastAt = e.timeStamp
+      if (start) {
+        turned = false
+        // A spread taller than the window (zoomed in) scrolls within itself; a gesture that starts
+        // at its edge turns the page.
+        const scroller = scrollerRef.current
+        const room = !scroller || horizontal ? 0 : dir > 0 ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop : scroller.scrollTop
+        scrolls = room > 1
+      }
+      if (scrolls) return
+      e.preventDefault()
+      if (turned) return
+      turned = true
+      turnSpread(dir)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.isComposing) return
+      const t = e.target
+      if (t instanceof Element && t !== document.body && !host.contains(t)) return
+      if (t instanceof Element && editor && !editor.isDestroyed && editor.view.dom.contains(t)) return
+      const docKey = documentEdgeKey(e)
+      if (docKey) {
+        e.preventDefault()
+        goToEdgeSpread(docKey)
+        return
+      }
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (e.key === 'PageDown' || e.key === 'PageUp') {
+        e.preventDefault()
+        turnSpread(e.key === 'PageDown' ? 1 : -1)
+      }
+    }
+    host.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('keydown', onKey)
+    return () => {
+      host.removeEventListener('wheel', onWheel)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [book, editor])
+
+  // ---- Book: a press on the blank desk beside the spread turns the page (left: back, right: on).
+  const blankSide = (e: ReactMouseEvent): 1 | -1 | 0 => {
+    if (!book || e.button !== 0 || e.target !== e.currentTarget) return 0
+    const r = sizerRef.current?.getBoundingClientRect()
+    if (!r) return 0
+    return e.clientX < r.left ? -1 : e.clientX > r.right ? 1 : 0
+  }
+  const onDeskMouseDown = (e: ReactMouseEvent) => {
+    // Keep the focus (and the caret) in the manuscript: the next keystroke turns back to it.
+    if (blankSide(e)) e.preventDefault()
+  }
+  const onDeskClick = (e: ReactMouseEvent) => {
+    const side = blankSide(e)
+    if (side) turnSpread(side)
+  }
 
   // The selection before the first press of a click sequence: a press in a margin moves the caret to
   // the nearest line, which a double-click on a header / footer should not leave behind.
@@ -209,7 +476,10 @@ export function PaginatedView({ children }: PaginatedViewProps) {
       if (!slot) return
       e.preventDefault()
       const before = selectionBeforePress.current
-      if (before && editor && !editor.isDestroyed) {
+      // Book: a caret left on another spread stays where the press put it (on this one); restoring
+      // it would turn the page away from the header being edited.
+      const offSpread = book && before && pageRow(before.head, placement) !== bookRow
+      if (before && !offSpread && editor && !editor.isDestroyed) {
         const { doc } = editor.state
         const size = doc.content.size
         const at = (n: number) => Math.min(Math.max(0, n), size)
@@ -225,21 +495,34 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     }
   }
 
+  const rowH = bookRowHeight(geometry)
+  // Book: the canvas moves up so the row shown sits in the one-row window (the sizer clips the rest).
+  const shift = book ? (placement.rowTop(bookRow) - DESK_PAD) * scale : 0
+  const transform = [shift ? `translateY(${-shift}px)` : '', scale === 1 ? '' : `scale(${scale})`].filter(Boolean).join(' ')
   const canvasStyle = {
     width: placement.canvasWidth,
     height: placement.canvasHeight,
-    transform: scale === 1 ? undefined : `scale(${scale})`,
+    transform: transform || undefined,
     '--nv-canvas-w': `${placement.canvasWidth}px`,
     '--nv-canvas-h': `${placement.canvasHeight}px`,
     '--nv-text-w': `${geometry.contentWidth}px`,
   } as CSSProperties
 
   return (
-    <div ref={hostRef} className="nv-desk" data-view={view} data-testid="paginated-view">
+    <div
+      ref={hostRef}
+      className="nv-desk"
+      data-view={view}
+      data-navigation={book ? 'book' : 'scroll'}
+      data-testid="paginated-view"
+      onMouseDown={onDeskMouseDown}
+      onClick={onDeskClick}
+    >
       <div
         ref={sizerRef}
         className="nv-sizer"
-        style={{ width: placement.canvasWidth * scale, height: placement.canvasHeight * scale }}
+        data-row={book ? bookRow : undefined}
+        style={{ width: placement.canvasWidth * scale, height: (book ? rowH : placement.canvasHeight) * scale }}
       >
         <div ref={canvasRef} className="nv-canvas" style={canvasStyle} onMouseDownCapture={onMouseDownCapture} onDoubleClick={onDoubleClick}>
           <PageFrames
@@ -252,8 +535,84 @@ export function PaginatedView({ children }: PaginatedViewProps) {
           <div className="nv-text-layer">{children}</div>
         </div>
       </div>
+      {book ? <TurnControls row={bookRow} rowCount={placement.rowCount} /> : null}
     </div>
   )
+}
+
+/** Row of the page holding `pos` (from the published model). */
+function pageRow(pos: number, placement: Placement): number {
+  return placement.rowOf(pageAt(useStore.getState().layout.pages, pos))
+}
+
+/** Canvas row painted at client y (the editor root is the canvas-sized text layer). */
+function rowOfClientY(view: EditorView, clientY: number, placement: Placement): number | null {
+  const root = view.dom as HTMLElement
+  const rect = root.getBoundingClientRect()
+  const s = root.offsetHeight ? rect.height / root.offsetHeight : 1
+  if (!Number.isFinite(clientY) || !s) return null
+  return placement.rowAtY((clientY - rect.top) / s)
+}
+
+function rowOfElement(view: EditorView, el: Element, placement: Placement): number | null {
+  const r = el.getBoundingClientRect()
+  if (!r.width && !r.height) return null
+  return rowOfClientY(view, (r.top + r.bottom) / 2, placement)
+}
+
+/**
+ * Row of the spread holding the selection head. A head exactly at the start of a page that begins
+ * mid-paragraph is also the end of the previous page's last line: there the painted caret decides
+ * (ProseMirror draws it at the line end, PageDown and Go to Page at the top of the next page).
+ */
+function caretRow(view: EditorView, pages: readonly PageInfo[], placement: Placement): number {
+  const head = view.state.selection.head
+  const page = pageAt(pages, head)
+  const p = pages[page]
+  if (page > 0 && p && p.from === head && p.startsBlockType === null) {
+    const sel = view.dom.ownerDocument.getSelection()
+    if (sel?.focusNode && view.dom.contains(sel.focusNode)) {
+      try {
+        const r = view.dom.ownerDocument.createRange()
+        r.setStart(sel.focusNode, sel.focusOffset)
+        r.collapse(true)
+        const rc = Array.from(r.getClientRects()).find((x) => x.height > 0)
+        const row = rc ? rowOfClientY(view, (rc.top + rc.bottom) / 2, placement) : null
+        if (row !== null) return row
+      } catch {
+        // fall through
+      }
+    }
+    // No painted caret to read (focus elsewhere, or between two elements): the caret sits on the line
+    // of the content just before it (a line end, or a footnote reference starting the page).
+    try {
+      const c = view.coordsAtPos(head, -1)
+      const row = rowOfClientY(view, (c.top + c.bottom) / 2, placement)
+      if (row !== null) return row
+    } catch {
+      // fall through
+    }
+    return placement.rowOf(page - 1)
+  }
+  return placement.rowOf(page)
+}
+
+/** Zoomed in, the spread can be taller than the window: scroll the caret into it (Book mode). */
+function keepCaretInScroller(view: EditorView, scroller: HTMLElement | null) {
+  if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 1) return
+  try {
+    keepRectInScroller(view.coordsAtPos(view.state.selection.head), scroller)
+  } catch {
+    // No layout: nothing to scroll.
+  }
+}
+
+function keepRectInScroller(c: { top: number; bottom: number }, scroller: HTMLElement | null) {
+  if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 1) return
+  const r = scroller.getBoundingClientRect()
+  const margin = 24
+  if (c.top < r.top + margin) scroller.scrollTop -= r.top + margin - c.top
+  else if (c.bottom > r.bottom - margin) scroller.scrollTop += c.bottom - (r.bottom - margin)
 }
 
 /** PageUp / PageDown: caret to the first page of the previous / next spread, scrolled to the top. */
@@ -307,17 +666,42 @@ function posAtPaintedPoint(view: EditorView, x: number, y: number): number | nul
     caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
     caretRangeFromPoint?: (x: number, y: number) => Range | null
   }
-  let node: Node | null = null
-  let offset = 0
-  const p = doc.caretPositionFromPoint?.(x, y)
-  if (p) {
-    node = p.offsetNode
-    offset = p.offset
-  } else {
-    const r = doc.caretRangeFromPoint?.(x, y)
-    if (r) {
-      node = r.startContainer
-      offset = r.startOffset
+  const caretAt = (px: number): [Node | null, number] => {
+    const p = doc.caretPositionFromPoint?.(px, y)
+    if (p) return [p.offsetNode, p.offset]
+    const r = doc.caretRangeFromPoint?.(px, y)
+    return r ? [r.startContainer, r.startOffset] : [null, 0]
+  }
+  let [node, offset] = caretAt(x)
+  // Past the end of a short line the browser can answer from the block's layout box rather than its
+  // painted lines (a paragraph's continued lines are moved to a later page; with Book mode's clip the
+  // rest of the paragraph is not even on screen): a position on another line, or the block element.
+  // Then clamp x to the text painted on that line and ask again.
+  const onTargetLine = (n: Node, o: number) => {
+    if (n.nodeType !== Node.TEXT_NODE) return false
+    try {
+      const r = doc.createRange()
+      r.setStart(n, o)
+      r.collapse(true)
+      const rc = Array.from(r.getClientRects()).find((q) => q.height > 0)
+      return !rc || (rc.top - 1 <= y && rc.bottom + 1 >= y)
+    } catch {
+      return true
+    }
+  }
+  if (node && node !== view.dom && view.dom.contains(node) && !onTargetLine(node, offset)) {
+    let block: Element | null = node instanceof Element ? node : node.parentElement
+    while (block && block.parentElement && block.parentElement !== view.dom) block = block.parentElement
+    if (block) {
+      const range = doc.createRange()
+      range.selectNodeContents(block)
+      const onLine = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.top <= y && r.bottom >= y)
+      if (onLine.length) {
+        const left = Math.min(...onLine.map((r) => r.left))
+        const right = Math.max(...onLine.map((r) => r.right))
+        const cx = Math.min(right - 1, Math.max(left + 1, x))
+        if (cx !== x) [node, offset] = caretAt(cx)
+      }
     }
   }
   if (node && view.dom.contains(node) && node !== view.dom) {
@@ -370,7 +754,7 @@ function moveToDocumentEdge(view: EditorView, dir: 1 | -1, extend: boolean): boo
  * instead: same x relative to the text block, on the first (last) line of the next (previous) page.
  * Everywhere else the browser handles the key.
  */
-function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean): boolean {
+function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean, ensurePageShown: (page: number) => void): boolean {
   if (!view.state.selection.empty && !extend) return false
   ;(view as unknown as { domObserver?: { flush(): void } }).domObserver?.flush()
   const snap = freshSnapshot()
@@ -402,6 +786,10 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean): bo
   const target = dir > 0 ? ranges[q].startLine : ranges[q].endLine - 1
   const ty = (lines[target].top + lines[target].bottom) / 2 + offsets[q].dy
   const x = (caret.left - rect.left) / s - placement.content(p).x + placement.content(q).x
+  // Book mode: the browser hit-tests only what is painted, and only one spread is. Turn to the
+  // target page's spread first (the caret goes there anyway).
+  ensurePageShown(q)
+  rect = root.getBoundingClientRect()
   // The browser only hit-tests inside the viewport: at fit-spread zoom the next row's verso is often
   // below it. Scroll the target line into view first (the caret goes there anyway).
   const scroller = scrollParent(root)
@@ -417,13 +805,60 @@ function moveLineAcrossPages(view: EditorView, dir: 1 | -1, extend: boolean): bo
       rect = root.getBoundingClientRect()
     }
   }
-  const hit = posAtPaintedPoint(view, rect.left + x * s, rect.top + ty * s)
+  const px = rect.left + x * s
+  const py = rect.top + ty * s
+  let hit = posAtPaintedPoint(view, px, py)
+  // The browser's answer past the end of a short line can be on another line (a paragraph continued
+  // from the page before: its layout box is not where the line is painted). Then walk the target line
+  // itself, from the page edge, for the position painted nearest to x.
+  if (hit === null || !paintedOnLine(view, hit, py)) hit = nearestOnLine(view, dir > 0 ? pages[q].from : pages[q].to, dir, px, py) ?? hit
   if (hit === null) return false
   const $pos = view.state.doc.resolve(hit)
   const sel = extend ? extendTo(view.state.doc, view.state.selection.anchor, $pos.pos, dir) : TextSelection.near($pos)
   view.dispatch(view.state.tr.setSelection(sel).scrollIntoView())
   if (!extend && dir > 0) caretToPageStart(view, pages[q].from)
   return true
+}
+
+/** The caret at `pos` is painted on the line through client y. */
+function paintedOnLine(view: EditorView, pos: number, y: number): boolean {
+  try {
+    const c = view.coordsAtPos(pos, 1)
+    return c.top - 1 <= y && c.bottom + 1 >= y
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The position on the painted line through client y nearest to x, walking from `edge` (a page's
+ * first position going forward, or its last going back) while the positions stay on that line.
+ */
+function nearestOnLine(view: EditorView, edge: number, dir: 1 | -1, x: number, y: number): number | null {
+  const size = view.state.doc.content.size
+  let best: number | null = null
+  let bestD = Infinity
+  let seen = false
+  for (let i = 0, pos = Math.max(0, Math.min(size, edge)); i < 400 && pos >= 0 && pos <= size; i++, pos += dir) {
+    let c: { left: number; top: number; bottom: number }
+    try {
+      c = view.coordsAtPos(pos, dir > 0 ? 1 : -1)
+    } catch {
+      continue
+    }
+    const on = c.top - 1 <= y && c.bottom + 1 >= y
+    if (!on) {
+      if (seen) break
+      continue
+    }
+    seen = true
+    const d = Math.abs(c.left - x)
+    if (d < bestD) {
+      bestD = d
+      best = pos
+    }
+  }
+  return best === null ? null : TextSelection.near(view.state.doc.resolve(best)).head
 }
 
 /**

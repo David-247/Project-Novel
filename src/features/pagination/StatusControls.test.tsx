@@ -45,7 +45,11 @@ describe('zoom controls', () => {
 
   it('every control has its id and an accessible name', () => {
     renderControls()
-    for (const meta of Object.values(PAGINATION_CONTROLS)) {
+    // (The page-turn controls are Book mode's, on the desk: TurnControls.test.tsx.)
+    const { previousSpread, nextSpread, ...status } = PAGINATION_CONTROLS
+    void previousSpread
+    void nextSpread
+    for (const meta of Object.values(status)) {
       const el = document.querySelector(`[data-control-id="${meta.id}"]`)!
       expect(el).not.toBeNull()
       expect(el.getAttribute('aria-label')).toMatch(new RegExp(`^${meta.label}`))
