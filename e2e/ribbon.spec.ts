@@ -124,6 +124,12 @@ const REACH: Record<RibbonTab, Record<string, [string, string][]>> = {
       ['review.reject.options', 'menu.review.reject-all-by-author'],
     ],
     'review.comments': [['comment.new', 'comment.new'], ['ribbon.cmd.comment.prev', 'comment.prev'], ['ribbon.cmd.comment.next', 'comment.next']],
+    'review.rewrite': [
+      ['ribbon.cmd.rewrite.open', 'rewrite.open'],
+      ['ribbon.cmd.rewrite.list', 'rewrite.list'],
+      ['ribbon.cmd.rewrite.prev', 'rewrite.prev'],
+      ['ribbon.cmd.rewrite.next', 'rewrite.next'],
+    ],
   },
   view: {
     'view.views': [['ribbon.cmd.view.singlePage', 'view.singlePage'], ['ribbon.cmd.pagination.spreadView', 'pagination.spreadView']],

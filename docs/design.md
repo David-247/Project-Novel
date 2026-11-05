@@ -447,7 +447,7 @@ What Word does, and what we took from it:
 | Review | Tracking | Track Changes, Markup |
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
-| Review | Re-write | (T8) |
+| Review | Re-write | Re-write Passage… (with an icon; the group's own button), Re-writes…, Previous Re-write, Next Re-write |
 | View | Views | Single Page, Two-Page Spread (T5: Book page-turn / Continuous scroll) |
 | View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |
 | View | Show | Comments panel |
@@ -621,5 +621,14 @@ The signature feature: a passage rewritten beside its original, compared like tw
   Previous Re-write.
 - **Narrow windows** (two pages do not fit): one page at a time, with an Original / Revised toggle in the header;
   the focus keys switch pages too.
-- **Ribbon** (placed at integration): Review ▸ Re-write group: Re-write Passage… (`rewrite.open`), Re-writes…
-  (`rewrite.list`), Previous / Next Re-write (`rewrite.prev`, `rewrite.next`).
+- **Ribbon**: Review ▸ Re-write group: Re-write Passage… (`rewrite.open`, the group's `Content`: a command
+  button with the re-write icon; its `ribbon` placement is `display: 'menu'`), then Re-writes… (`rewrite.list`),
+  Previous / Next Re-write (`rewrite.prev`, `rewrite.next`), placed by their commands.
+- **While the view is open the ribbon follows the command gate**, like the menus: registry buttons read
+  `isCommandEnabled` (gate included); the slices' own controls for gated commands (Find, New Comment, Track
+  Changes) are disabled with their command (`GatedItem` in src/ribbon-groups.tsx); the formatting controls, Undo /
+  Redo and Break Options act on the active editor (`useActiveEditor`, the revision while it has the focus, else
+  off). The track changes review (Previous / Next Change, Show Change Details, Accept / Reject and their All / by
+  Author variants) is off while the view is open: it acts on the hidden manuscript. The re-write's editors are
+  `TrackChanges.configure({ detached: true, review: false })` (`detached` implies no review side), so the review
+  commands, popover and count always act on the manuscript.
