@@ -54,7 +54,7 @@ const revision = (page: Page) => page.getByRole('textbox', { name: 'Revised pass
 const indicator = (page: Page) => page.getByTestId('page-indicator')
 const blockEl = (page: Page, i: number) => editor(page).locator(':scope > :is(p, h1)').nth(i)
 
-type Json = { type: string; text?: string; attrs?: Record<string, unknown>; content?: Json[]; marks?: { type: string }[] }
+type Json = { type: string; text?: string; attrs?: Record<string, unknown>; content?: Json[]; marks?: { type: string; attrs?: Record<string, unknown> }[] }
 
 /** The fixture, and the indices of a chapter's heading and its paragraphs. */
 function fixture() {
@@ -434,7 +434,7 @@ test('navigation and caret follow on the 100k-word book with changes and comment
   const [t1] = paragraphsOf(7)
   const [k1] = paragraphsOf(21)
   const stamp = { id: 'acc-i', author: 'Ann', date: '2026-11-01T10:00:00.000Z', authorColor: null }
-  content[t1] = { ...content[t1], content: [...(content[t1].content ?? []), { type: 'text', text: ' Tracked words.', marks: [{ type: 'insertion', attrs: stamp }] } as Json] }
+  content[t1] = { ...content[t1], content: [...(content[t1].content ?? []), { type: 'text', text: ' Tracked words.', marks: [{ type: 'insertion', attrs: stamp }] }] }
   const kText = text(k1)
   const cut = kText.indexOf(' ')
   content[k1] = { type: 'paragraph', content: [{ type: 'text', text: kText.slice(0, cut), marks: [{ type: 'comment', attrs: { id: 'acc-c' } }] }, { type: 'text', text: kText.slice(cut) }] }
