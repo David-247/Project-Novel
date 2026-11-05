@@ -190,7 +190,7 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     // Blocks still waiting for their offsets after a reflow are hidden (.nv-stale): draw the ones on
     // this spread now, in this task, so the spread is never shown half drawn.
     const engine = getEngine()
-    if (prev !== bookRow && engine?.catchingUp) engine.flush()
+    if (prev !== bookRow) engine?.drawWindowNow()
     if (prev !== null && prev !== bookRow) {
       const sizer = sizerRef.current
       if (sizer && typeof sizer.animate === 'function' && !prefersReducedMotion()) {

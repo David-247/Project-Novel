@@ -11,6 +11,10 @@ const pct = () => Math.round(layout().scale * 100)
 const navigation = () => useStore.getState().preferences.pageNavigation
 const setNavigation = (v: 'book' | 'scroll') => useStore.getState().preferencesActions.set('pageNavigation', v)
 const hasPages = () => layout().pageCount > 0
+const edgeKey = (l: ReturnType<typeof layout>) => {
+  const last = rowCountFor(l.pageCount, l.effectiveView) - 1
+  return `${l.visibleSpread.index <= 0}|${l.visibleSpread.index >= last}`
+}
 const atFirstSpread = () => layout().visibleSpread.index <= 0
 const atLastSpread = () => layout().visibleSpread.index >= rowCountFor(layout().pageCount, layout().effectiveView) - 1
 
@@ -145,7 +149,9 @@ export function registerPaginationCommands(): () => void {
       s.layout.scale !== p.layout.scale ||
       s.layout.pageCount !== p.layout.pageCount ||
       s.layout.effectiveView !== p.layout.effectiveView ||
-      s.layout.visibleSpread.index !== p.layout.visibleSpread.index ||
+      // Only the spread commands' enabled state depends on the spread: notify when it reaches or
+      // leaves an end, not on every turn (each notification re-renders the menus).
+      edgeKey(s.layout) !== edgeKey(p.layout) ||
       s.preferences.pageNavigation !== p.preferences.pageNavigation
     )
       notifyCommandStateChanged()

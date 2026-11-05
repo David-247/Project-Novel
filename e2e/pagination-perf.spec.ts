@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { budget } from './budget'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, showPage, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedPreferences, seedProject, showPage, waitForLayout } from './helpers'
 
 /**
  * Pagination performance budget on a 100,000-word manuscript (serial perf projects, like
@@ -95,9 +95,8 @@ async function typeAndMeasure(page: Page) {
   }
 }
 
-test('100k words paginated: trim size reflow < 1 s', async ({ page }, testInfo) => {
-  test.setTimeout(180_000)
-  const { fx, openMs } = await openFixture(page, '/projects/Trim')
+async function trimScenario(page: Page, testInfo: TestInfo, name: string, folder: string) {
+  const { fx, openMs } = await openFixture(page, folder)
   const initialPages = (await page.evaluate(() => window.__nvE2E.layout())).pageCount
   const reflows: { trim: string; ms: number; allDrawnMs: number; syncMs: number; firstPass: unknown; pages: number }[] = []
   for (const trim of TRIMS) {
@@ -125,7 +124,7 @@ test('100k words paginated: trim size reflow < 1 s', async ({ page }, testInfo) 
     }, trim)
     reflows.push({ trim, ms: +r.ms.toFixed(1), allDrawnMs: +r.allDrawnMs.toFixed(1), syncMs: +r.syncMs.toFixed(1), firstPass: r.firstPass, pages: (await page.evaluate(() => window.__nvE2E.layout())).pageCount })
   }
-  await report(testInfo, 'pagination-trim', {
+  await report(testInfo, name, {
     manuscript: { words: fx.words, chapters: fx.chapters, blocks: fx.doc.content.length },
     openMs,
     initialPages,
@@ -137,6 +136,21 @@ test('100k words paginated: trim size reflow < 1 s', async ({ page }, testInfo) 
   expect(reflows.at(-1)!.pages).toBe(initialPages)
   for (const r of reflows) budget(testInfo, `${r.trim}: all blocks drawn ms`, r.allDrawnMs, 3000)
   for (const r of reflows) budget(testInfo, `${r.trim}: reflow complete ms`, r.ms, 1000)
+}
+
+test('100k words paginated: trim size reflow < 1 s', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await trimScenario(page, testInfo, 'pagination-trim', '/projects/Trim')
+})
+
+// Settings > Motion 'Reduce motion' (macOS users get it from the OS setting by default): the same
+// budgets. (A 0.01 ms transition-duration on every element once made every moved block start a
+// transition: ~4 s trim reflows in WebKit.)
+test('100k words paginated, Reduce motion on: trim size reflow < 1 s', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await seedPreferences(page, { reduceMotion: 'on' })
+  await trimScenario(page, testInfo, 'pagination-trim-reduced-motion', '/projects/TrimRM')
+  await expect(page.locator('html')).toHaveAttribute('data-reduce-motion', 'on')
 })
 
 test('100k words paginated: typing latency (end of a line; inside a paragraph split across pages)', async ({ page }, testInfo) => {
@@ -220,9 +234,8 @@ async function timedTurn(page: Page, how: 'next' | 'last' | 'first') {
   }, how)
 }
 
-test('100k words, Book mode: a page turn shows a fully drawn spread < 100 ms (also during a progressive reflow)', async ({ page }, testInfo) => {
-  test.setTimeout(180_000)
-  const { fx } = await openFixture(page, '/projects/Turn')
+async function turnScenario(page: Page, testInfo: TestInfo, name: string, folder: string) {
+  const { fx } = await openFixture(page, folder)
   expect(await page.evaluate(() => window.__nvE2E.pageNavigation())).toBe('book')
   const turns: Awaited<ReturnType<typeof timedTurn>>[] = []
   for (let i = 0; i < 12; i++) turns.push(await timedTurn(page, 'next'))
@@ -237,7 +250,7 @@ test('100k words, Book mode: a page turn shows a fully drawn spread < 100 ms (al
   }
   const all = [...turns, ...progressive]
   const sorted = turns.map((t) => t.ms).sort((a, b) => a - b)
-  await report(testInfo, 'pagination-turn', {
+  await report(testInfo, name, {
     manuscript: { words: fx.words, chapters: fx.chapters, blocks: fx.doc.content.length },
     pages: (await page.evaluate(() => window.__nvE2E.layout())).pageCount,
     turnMedianMs: +pct(sorted, 50).toFixed(1),
@@ -249,4 +262,16 @@ test('100k words, Book mode: a page turn shows a fully drawn spread < 100 ms (al
   // Functional (always blocking): every turn painted a complete spread in its first frame.
   for (const t of all) expect(t, JSON.stringify(t)).toMatchObject({ stale: 0, unpainted: 0, inside: true })
   for (const t of all) budget(testInfo, 'page turn: fully drawn spread ms', t.ms, 100)
+}
+
+test('100k words, Book mode: a page turn shows a fully drawn spread < 100 ms (also during a progressive reflow)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await turnScenario(page, testInfo, 'pagination-turn', '/projects/Turn')
+})
+
+test('100k words, Book mode, Reduce motion on: a page turn shows a fully drawn spread < 100 ms', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await seedPreferences(page, { reduceMotion: 'on' })
+  await turnScenario(page, testInfo, 'pagination-turn-reduced-motion', '/projects/TurnRM')
+  await expect(page.locator('html')).toHaveAttribute('data-reduce-motion', 'on')
 })

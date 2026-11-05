@@ -319,6 +319,24 @@ export class PaginationEngine {
   }
 
   /** Run a pending pass now (tests, and callers that need the model synchronously). */
+  private windowOnly = false
+
+  /**
+   * A pending catch-up pass now, drawing only the blocks on the pages in view (Book mode: the spread
+   * just turned to), so they are drawn before the frame is painted. No-op unless catching up.
+   */
+  drawWindowNow() {
+    if (!this.catchingUp) return
+    this.windowOnly = true
+    try {
+      this.flush()
+    } finally {
+      this.windowOnly = false
+    }
+    // flush() cleared the frame; the remaining blocks follow in the next frames.
+    if (this.pendingNodes.size) this.schedule(false, true)
+  }
+
   flush() {
     if (this.frame) cancelAnimationFrame(this.frame)
     this.frame = 0
@@ -590,7 +608,9 @@ export class PaginationEngine {
         candidates.push(bi)
       })
       candidates.sort((x, y) => Math.abs(spans[x][0] - centre) - Math.abs(spans[y][0] - centre))
-      chosen = new Set(candidates.slice(0, CHUNK))
+      // A catch-up pass for a page turn (drawWindowNow) draws only the pages shown: the turned-to
+      // spread is painted sooner; the rest keeps following in the next frames.
+      chosen = new Set(this.windowOnly && pureCatchUp ? [] : candidates.slice(0, CHUNK))
     }
 
     // Blocks whose decorations differ from what is drawn.
