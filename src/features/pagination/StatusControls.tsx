@@ -11,15 +11,24 @@ export function pageIndicatorText(first: number, last: number, count: number): s
   return a === b ? `Page ${a} of ${count}` : `Pages ${a}–${b} of ${count}`
 }
 
-/** Status-bar page indicator. Plain text (not a control), polite live region off: it changes on scroll. */
+/**
+ * Status-bar page indicator. Plain text (not a control), polite live region off: it changes on scroll.
+ * In a narrow status bar (`statusbar` container) it shortens to "12 / 384", then hides.
+ */
 export function PageIndicator() {
   const count = useStore((s) => s.layout.pageCount)
   const first = useStore((s) => s.layout.visibleSpread.first)
   const last = useStore((s) => s.layout.visibleSpread.last)
   if (count <= 0) return null
+  const full = pageIndicatorText(first, last, count)
   return (
-    <span className="tabular-nums whitespace-nowrap" data-testid="page-indicator">
-      {pageIndicatorText(first, last, count)}
+    <span className="shrink-0 tabular-nums whitespace-nowrap @max-[560px]/statusbar:hidden" title={full}>
+      <span className="@max-[760px]/statusbar:hidden" data-testid="page-indicator">
+        {full}
+      </span>
+      <span className="@min-[760px]/statusbar:hidden" aria-hidden="true">
+        {`${Math.min(first, count - 1) + 1} / ${count}`}
+      </span>
     </span>
   )
 }
@@ -64,12 +73,15 @@ export function ZoomControls() {
   const pct = Math.round(scale * 100)
 
   return (
-    <span className="inline-flex items-center gap-1" role="group" aria-label="Page view">
+    // Narrow status bar (`statusbar` container): only the zoom menu stays (it has every zoom level and the
+    // fit modes; the spread toggle is also in the View tab and menu).
+    <span className="inline-flex shrink-0 items-center gap-1" role="group" aria-label="Page view">
       <Tooltip>
         <ToggleButton
           label={C.spreadView.label}
           data-control-id={C.spreadView.id}
           pressed={view === 'spread'}
+          className="@max-[640px]/statusbar:hidden"
           onPressedChange={(on) => setView(on ? 'spread' : 'single')}
           data-fallback={effective !== view || undefined}
         >
@@ -80,6 +92,7 @@ export function ZoomControls() {
         <IconButton
           label={C.zoomOut.label}
           data-control-id={C.zoomOut.id}
+          className="@max-[640px]/statusbar:hidden"
           disabled={scale <= MIN_SCALE + 0.001 || pct <= ZOOM_STEPS[0]}
           onClick={() => setZoom({ mode: 'percent', percent: stepZoom(scale, -1) })}
         >
@@ -105,6 +118,7 @@ export function ZoomControls() {
         <IconButton
           label={C.zoomIn.label}
           data-control-id={C.zoomIn.id}
+          className="@max-[640px]/statusbar:hidden"
           disabled={scale >= MAX_SCALE - 0.001 || pct >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
           onClick={() => setZoom({ mode: 'percent', percent: stepZoom(scale, 1) })}
         >
