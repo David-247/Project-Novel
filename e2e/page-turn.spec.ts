@@ -524,8 +524,9 @@ test('the page indicator is a button that opens Go to Page (pointer and keyboard
   await field.fill('9')
   await page.keyboard.press('Enter')
   await expect(indicator(page)).toHaveText(`Pages 8–9 of ${pageCount}`)
-  // Keyboard: focus it and press Enter.
-  await indicator(page).focus()
+  // Keyboard: focus it and press Enter. (The full text is a span inside the button, which also holds
+  // the short "12 / 384" form for a narrow status bar.)
+  await page.locator('footer [data-control-id="pagination.pageIndicator"]').focus()
   await page.keyboard.press('Enter')
   await expect(field).toBeVisible()
   await page.keyboard.press('Escape')
