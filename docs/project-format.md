@@ -403,7 +403,8 @@ A re-write:
   (rejecting a style change made before the re-write) gets it back.
 - **Removed by undo.** The anchor is not in the undo history. If an undo removes the passage's blocks, the re-write
   stays (with `originalChanged`) and the app says the passage is gone; a redo or undo that puts equal blocks back at
-  the same place anchors them again. Otherwise the versions stay readable in the re-write view.
+  the same place anchors them again (only blocks that undo or redo itself inserted, and only while the re-write is
+  open; a block typed or pasted there is never anchored). Otherwise the versions stay readable in the re-write view.
 - **One run.** Pasted, dropped and drag-copied blocks never carry `rewriteId`. If the blocks carrying an anchor are
   not one contiguous run (a file edited by hand), the passage counts as damaged: it is not shown or replaced.
 - **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the

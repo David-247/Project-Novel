@@ -50,7 +50,7 @@ interface LostPassage {
 }
 
 /** What an applied transaction did to open passages (reported by the plugin view, after every filter). */
-type AnchorEvent = { kind: 'changed' | 'undo' | 'missing' | 'split'; id: string }
+type AnchorEvent = { kind: 'changed' | 'undo' | 'missing' | 'split' | 'restored'; id: string }
 
 interface AnchorState {
   ranges: readonly LockedRange[]
@@ -251,7 +251,7 @@ function programmatic(tr: Transaction): boolean {
 
 /** Report one dispatch's events: "original changed", and the notice (a lost passage outranks an undo). */
 function report(events: readonly AnchorEvent[]) {
-  const ids = [...new Set(events.map((e) => e.id))]
+  const ids = [...new Set(events.filter((e) => e.kind !== 'restored').map((e) => e.id))]
   for (const id of ids) onOriginalChanged?.(id)
   const pick = (k: AnchorEvent['kind']) => events.find((e) => e.kind === k)
   const lost = pick('missing') ?? pick('split')
@@ -259,6 +259,44 @@ function report(events: readonly AnchorEvent[]) {
   const actions = useStore.getState().rewriteActions
   if (lost) actions.setNotice({ kind: lost.kind as 'missing' | 'split', id: lost.id, seq: ++seq })
   else if (undo) actions.setNotice({ kind: 'undo', id: undo.id, seq: ++seq })
+  // A passage anchored again: its "removed" notice is out of date.
+  const notice = useStore.getState().rewrite.notice
+  if (!lost && notice && (notice.kind === 'missing' || notice.kind === 'split') && events.some((e) => e.kind === 'restored' && e.id === notice.id)) {
+    actions.setNotice(null)
+  }
+}
+
+/** Some step of `tr` replaced or inserted at document position `pos` (in the doc before `tr`). */
+function touchesPos(tr: Transaction, pos: number): boolean {
+  let p = pos
+  for (const step of tr.steps) {
+    let hit = false
+    step.getMap().forEach((oldStart, oldEnd) => {
+      if (oldStart <= p && p <= oldEnd) hit = true
+    })
+    if (hit) return true
+    p = step.getMap().map(p, -1)
+  }
+  return false
+}
+
+/**
+ * Ranges (in the final document) that the undo / redo transactions among `trs` inserted with their own
+ * steps. A lost passage is re-anchored only inside such a range: never on a block the user typed.
+ */
+function historyInsertions(trs: readonly Transaction[]): [number, number][] {
+  const maps: { map: ReturnType<Step['getMap']>; history: boolean }[] = []
+  for (const t of trs) for (const m of t.mapping.maps) maps.push({ map: m, history: !!t.getMeta('history$') })
+  const all = new Mapping(maps.map((m) => m.map))
+  const out: [number, number][] = []
+  maps.forEach(({ map, history }, i) => {
+    if (!history) return
+    const rest = all.slice(i + 1)
+    map.forEach((_os, _oe, ns, ne) => {
+      if (ne > ns) out.push([rest.map(ns, -1), rest.map(ne, 1)])
+    })
+  })
+  return out
 }
 
 /** Open anchors whose passage is missing or split now (the view and the list show it). */
@@ -302,12 +340,22 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         const ranges = computeRanges(state.doc, openAnchors())
         const events: AnchorEvent[] = [...carried]
         let lost = value.lost
-        if (tr.docChanged) {
+        const open = openAnchors()
+        if (tr.docChanged || lost.size) {
           if (lost.size) {
+            // Mapped through the edit. Dropped when the re-write is no longer open, or when another edit
+            // (typing, paste, Replace All) changed that very spot: only the history may bring it back.
+            const history = !!tr.getMeta('history$')
             const next = new Map<string, LostPassage>()
-            lost.forEach((l, id) => next.set(id, { ...l, at: tr.mapping.map(l.at, -1) }))
-            lost = next
+            lost.forEach((l, id) => {
+              if (!open.has(id)) return
+              if (tr.docChanged && !history && touchesPos(tr, l.at)) return
+              next.set(id, tr.docChanged ? { ...l, at: tr.mapping.map(l.at, -1) } : l)
+            })
+            lost = next.size === lost.size && [...next].every(([id, l]) => value.lost.get(id) === l) ? value.lost : next
           }
+        }
+        if (tr.docChanged) {
           if (!tr.getMeta(REWRITE_ALLOW_META) && programmatic(tr)) {
             const kind = tr.getMeta('history$') ? 'undo' : 'changed'
             for (const r of touchedRanges(tr, value.ranges)) events.push({ kind, id: r.id })
@@ -330,6 +378,7 @@ function createAnchorPlugin(): Plugin<AnchorState> {
             if (lost.has(id)) {
               if (lost === value.lost) lost = new Map(lost)
               ;(lost as Map<string, LostPassage>).delete(id)
+              events.push({ kind: 'restored', id })
             }
           }
         }
@@ -360,6 +409,7 @@ function createAnchorPlugin(): Plugin<AnchorState> {
       const out = newState.tr
       const lost = rewriteAnchorKey.getState(newState)?.lost
       if (lost?.size && trs.some((t) => t.getMeta('history$'))) {
+        const inserted = historyInsertions(trs)
         lost.forEach((l, id) => {
           const $at = newState.doc.resolve(Math.min(l.at, newState.doc.content.size))
           if ($at.depth !== 0) return
@@ -371,6 +421,8 @@ function createAnchorPlugin(): Plugin<AnchorState> {
             index++
             pos += have.nodeSize
           }
+          // Only blocks this undo / redo itself put there.
+          if (!inserted.some(([a, b]) => a <= l.at && pos <= b)) return
           setAnchor(out, l.at, pos, id)
         })
       }
@@ -431,6 +483,8 @@ function createAnchorPlugin(): Plugin<AnchorState> {
         if (next === signature) return
         signature = next
         view.dispatch(view.state.tr.setMeta(REFRESH_META, {}).setMeta('addToHistory', false))
+        // Which open re-writes lack their passage changes with the set of open re-writes too.
+        syncProblems(view.state)
       })
       const syncProblems = (state: EditorState) => {
         const p = problems(rewriteAnchorKey.getState(state)?.ranges ?? [])

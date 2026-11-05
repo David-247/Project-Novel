@@ -498,7 +498,7 @@ The signature feature: a passage rewritten beside its original, compared like tw
   caret moves. An edit that removes the whole passage (undoing the paragraphs' insertion) or leaves it in pieces
   says so instead ("The passage for this re-write was removed. Its versions are kept; reopen it to copy text
   out."); the view shows the same in its banner and the Re-writes list marks it. When a redo or undo puts the same
-  blocks back where the passage was, they are anchored again and the passage is locked as before. The history
+  blocks back where the passage was, they are anchored again (only blocks the undo or redo inserted itself) and the notice goes. The history
   group is closed when a re-write starts, so typing from before is never merged with later edits. Comments can be added to and removed
   from the passage.
 - **In the manuscript** an open re-write's passage is read-only and marked by a faint `--page-rw-lock-bg` tint and

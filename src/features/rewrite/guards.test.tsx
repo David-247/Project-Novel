@@ -140,8 +140,9 @@ describe('undo and the locked passage', () => {
     expect(rw().notice).toMatchObject({ kind: 'missing', id })
     expect(rw().problems).toEqual({ [id]: 'missing' })
     expect(rw().rewrites[0].originalChanged).toBe(true)
-    // Redo: the blocks come back, the anchor with them (only on the passage's block).
+    // Redo: the blocks come back, the anchor with them (only on the passage's block); the notice goes.
     act(() => void redo(ed.state, ed.view.dispatch))
+    expect(rw().notice).toBeNull()
     expect(anchorOf(ed, 4)).toBeNull()
     expect(anchorOf(ed, 5)).toBe(id)
     expect(passageRange(ed.state.doc, id)).not.toBeNull()
@@ -151,6 +152,43 @@ describe('undo and the locked passage', () => {
     select(ed, blockPos(ed, 5) + 2)
     act(() => ed.view.dispatch(ed.state.tr.insertText('X')))
     expect(ed.state.doc.eq(before)).toBe(true)
+  })
+
+  it('a block the user puts where a removed passage was is never anchored by a later undo', () => {
+    const ed = mount()
+    const emptyAtEnd = () => act(() => ed.view.dispatch(ed.state.tr.insert(ed.state.doc.content.size, ed.schema.nodes.paragraph.create())))
+    // An older event inserts an empty paragraph; the re-write is on it; undo removes it.
+    emptyAtEnd()
+    const id = rewrite(ed, 4, 4)
+    act(() => void undo(ed.state, ed.view.dispatch))
+    expect(passageProblem(ed.state.doc, id)).toBe('missing')
+    // The user puts an equal block (an empty paragraph) at that very spot, then edits elsewhere.
+    emptyAtEnd()
+    select(ed, blockPos(ed, 1) + 1)
+    act(() => ed.view.dispatch(ed.state.tr.insertText('Q')))
+    // Undo the unrelated edit: the user's block stays theirs.
+    act(() => void undo(ed.state, ed.view.dispatch))
+    expect(ed.state.doc.child(1).textContent).toBe('Alpha line.')
+    expect(ed.state.doc.childCount).toBe(5)
+    expect(anchorOf(ed, 4)).toBeNull()
+    expect(rw().problems).toEqual({ [id]: 'missing' })
+  })
+
+  it('a removed passage of a re-write that is no longer open is forgotten: a redo brings back no lock', () => {
+    const ed = mount()
+    act(() => ed.view.dispatch(ed.state.tr.insert(ed.state.doc.content.size, ed.schema.nodes.paragraph.create(null, ed.schema.text('Delta line.')))))
+    rewrite(ed, 4, 4)
+    act(() => void undo(ed.state, ed.view.dispatch))
+    act(() => useStore.getState().rewriteActions.changed(rw().rewrites.map((r) => ({ ...r, status: 'resolved' as const }))))
+    expect(rw().problems).toEqual({})
+    act(() => useStore.getState().rewriteActions.setNotice(null))
+    act(() => void redo(ed.state, ed.view.dispatch))
+    expect(ed.state.doc.child(4).textContent).toBe('Delta line.')
+    expect(rw().notice).toBeNull()
+    // Not locked: the re-write is resolved.
+    select(ed, blockPos(ed, 4) + 1)
+    act(() => ed.view.dispatch(ed.state.tr.insertText('Z')))
+    expect(ed.state.doc.child(4).textContent).toBe('ZDelta line.')
   })
 
   it('the undo notice goes when the caret moves to or from a passage', () => {
