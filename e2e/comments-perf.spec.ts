@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { budget } from './budget'
+import { installLatencyProbe, report } from './perf-helpers'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
 import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, waitForLayout, writeFile, reveal } from './helpers'
 
@@ -66,34 +66,6 @@ async function openFixture(page: Page, folder: string) {
   expect((await page.evaluate(() => window.__nvE2E.comments())).threads).toHaveLength(threads.length)
   await expect(page.locator('[data-testid="comments-panel"] article[data-thread-id]').first()).toBeVisible()
   return { fx, threads: threads.length }
-}
-
-async function report(testInfo: TestInfo, name: string, result: Record<string, unknown>) {
-  const full = { scenario: name, browser: testInfo.project.name, platform: process.platform, ...result, measuredAt: new Date().toISOString() }
-  console.info(`[perf] ${JSON.stringify(full)}`)
-  mkdirSync('perf-results', { recursive: true })
-  writeFileSync(`perf-results/${name}-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(full, null, 2))
-  await testInfo.attach(`${name}.json`, { body: JSON.stringify(full, null, 2), contentType: 'application/json' })
-}
-
-async function installLatencyProbe(page: Page) {
-  await page.evaluate(() => {
-    const w = window as unknown as { __perf: number[] }
-    w.__perf = []
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        const now = performance.now()
-        const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 1000 ? e.timeStamp : now
-        requestAnimationFrame(() => {
-          const ch = new MessageChannel()
-          ch.port1.onmessage = () => w.__perf.push(performance.now() - t0)
-          ch.port2.postMessage(null)
-        })
-      },
-      true,
-    )
-  })
 }
 
 test('500 comment threads at 100k words: typing median < 50 ms', async ({ page }, testInfo) => {

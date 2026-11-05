@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { budget } from './budget'
+import { installLatencyProbe, report } from './perf-helpers'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
 import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
 
@@ -83,35 +83,6 @@ function loadedFixture() {
   // The typing target: a paragraph mid-book, outside the passage, with a change and no comment.
   const typingAt = eligible.map(([, i]) => i).find((i) => i > content.length / 3 && (content[i].content ?? []).some((r) => JSON.stringify(r.marks ?? []).includes('insertion')))!
   return { fx, doc: { type: 'doc', content }, threads, changes, passage, typingAt }
-}
-
-async function report(testInfo: TestInfo, name: string, result: Record<string, unknown>) {
-  const full = { scenario: name, browser: testInfo.project.name, platform: process.platform, ...result, measuredAt: new Date().toISOString() }
-  console.info(`[perf] ${JSON.stringify(full)}`)
-  mkdirSync('perf-results', { recursive: true })
-  writeFileSync(`perf-results/${name}-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(full, null, 2))
-  await testInfo.attach(`${name}.json`, { body: JSON.stringify(full, null, 2), contentType: 'application/json' })
-}
-
-/** Record keydown -> next frame painted for every key press (window.__perf). */
-async function installLatencyProbe(page: Page) {
-  await page.evaluate(() => {
-    const w = window as unknown as { __perf: number[] }
-    w.__perf = []
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        const now = performance.now()
-        const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 1000 ? e.timeStamp : now
-        requestAnimationFrame(() => {
-          const ch = new MessageChannel()
-          ch.port1.onmessage = () => w.__perf.push(performance.now() - t0)
-          ch.port2.postMessage(null)
-        })
-      },
-      true,
-    )
-  })
 }
 
 /** Type TYPED one key at a time (each waits for its own frame); the latencies after the warm-up. */

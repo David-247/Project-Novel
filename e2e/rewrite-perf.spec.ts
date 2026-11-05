@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { budget } from './budget'
+import { installLatencyProbe, report } from './perf-helpers'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
 import { editor, launch, lineEnd, lineStart, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
 
@@ -63,14 +63,6 @@ async function openFixture(page: Page, folder: string, make: () => ReturnType<ty
   return { fx, first }
 }
 
-async function report(testInfo: TestInfo, name: string, result: Record<string, unknown>) {
-  const full = { scenario: name, browser: testInfo.project.name, platform: process.platform, ...result, measuredAt: new Date().toISOString() }
-  console.info(`[perf] ${JSON.stringify(full)}`)
-  mkdirSync('perf-results', { recursive: true })
-  writeFileSync(`perf-results/${name}-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(full, null, 2))
-  await testInfo.attach(`${name}.json`, { body: JSON.stringify(full, null, 2), contentType: 'application/json' })
-}
-
 /** Re-write Passage… on blocks first..first+count-1: ms to the view aligned and painted. */
 async function timeOpen(page: Page, first: number, count = PARAGRAPHS): Promise<{ openMs: number; readyMs: number; rows: number }> {
   return page.evaluate(
@@ -100,27 +92,6 @@ async function timeOpen(page: Page, first: number, count = PARAGRAPHS): Promise<
     },
     [first, count] as const,
   )
-}
-
-/** Record keydown -> next frame painted for every key press (window.__perf). */
-async function installLatencyProbe(page: Page) {
-  await page.evaluate(() => {
-    const w = window as unknown as { __perf: number[] }
-    w.__perf = []
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        const now = performance.now()
-        const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 1000 ? e.timeStamp : now
-        requestAnimationFrame(() => {
-          const ch = new MessageChannel()
-          ch.port1.onmessage = () => w.__perf.push(performance.now() - t0)
-          ch.port2.postMessage(null)
-        })
-      },
-      true,
-    )
-  })
 }
 
 /** Press each key, waiting for its frame; the latencies after the warm-up. */
