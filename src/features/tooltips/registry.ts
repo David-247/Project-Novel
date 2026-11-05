@@ -314,6 +314,9 @@ const PAGINATION_DESCRIPTIONS: Record<keyof typeof PAGINATION_CONTROLS, string> 
   zoom: 'Fit the whole spread, fit the page width, or pick a size. Only changes how the pages look on screen.',
   zoomIn: 'Make the pages larger on screen. The book itself does not change.',
   spreadView: 'Show facing pages side by side like an open book, or one page at a time.',
+  previousSpread: 'Turn back to the pages before these. Page Up or a press left of the pages does the same.',
+  nextSpread: 'Turn to the pages after these. Page Down or a press right of the pages does the same.',
+  pageIndicator: 'The pages in view. Choose to go to another page by its number.',
 }
 
 /** In-app menu bar titles and the menu slice's dialogs. (Menu items: see getTooltipCopy.) */

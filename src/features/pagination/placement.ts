@@ -71,6 +71,23 @@ export function placePages(pageCount: number, g: PageGeometry, view: BookView): 
   }
 }
 
+/** Number of rows (spreads, or pages in single view) for `pageCount` pages: same as placePages(...).rowCount. */
+export function rowCountFor(pageCount: number, view: BookView): number {
+  const count = Math.max(1, pageCount)
+  return view === 'spread' ? Math.floor(count / 2) + 1 : count
+}
+
+/**
+ * Book mode (page-turn navigation): the canvas shows one row only, clipped to it. Its height on the
+ * canvas, desk padding above and below included (the gap between rows equals the padding).
+ */
+export function bookRowHeight(g: PageGeometry): number {
+  return g.pageHeight + 2 * DESK_PAD
+}
+
+/** Width kept free on each side of the spread in Book mode for the page-turn controls (px, unscaled by zoom). */
+export const TURN_LANE = 48
+
 /** Width the spread needs at `scale` before the view falls back to single pages. */
 export const MIN_READABLE_SPREAD_SCALE = 0.75
 

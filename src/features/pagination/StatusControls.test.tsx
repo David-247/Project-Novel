@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { registerCommand } from '@/shared/commands'
 import { useStore } from '@/shared/store'
 import { TooltipProvider } from '@/shared/ui'
 import { PAGINATION_CONTROLS } from './controls'
@@ -23,8 +24,14 @@ describe('page indicator', () => {
     expect(pageIndicatorText(0, 0, 0)).toBe('')
   })
 
-  it('follows the visible spread in the store', () => {
-    render(<PageIndicator />)
+  it('follows the visible spread in the store, and opens Go to Page', () => {
+    const run = vi.fn()
+    const off = registerCommand({ id: 'edit.go_to_page', label: 'Go to Page…', description: 'Jump to a page by its number.', run })
+    render(
+      <TooltipProvider>
+        <PageIndicator />
+      </TooltipProvider>,
+    )
     expect(screen.queryByTestId('page-indicator')).toBeNull()
     act(() => {
       const a = useStore.getState().layoutActions
@@ -32,6 +39,12 @@ describe('page indicator', () => {
       a.setVisibleSpread({ index: 1, first: 1, last: 2 })
     })
     expect(screen.getByTestId('page-indicator')).toHaveTextContent('Pages 2–3 of 5')
+    const btn = screen.getByTestId('page-indicator').closest('button')!
+    expect(btn.tagName).toBe('BUTTON')
+    expect(btn.getAttribute('data-control-id')).toBe(PAGINATION_CONTROLS.pageIndicator.id)
+    fireEvent.click(btn)
+    expect(run).toHaveBeenCalledTimes(1)
+    off()
   })
 })
 
@@ -45,7 +58,13 @@ describe('zoom controls', () => {
 
   it('every control has its id and an accessible name', () => {
     renderControls()
-    for (const meta of Object.values(PAGINATION_CONTROLS)) {
+    // (The page-turn controls are Book mode's, on the desk: TurnControls.test.tsx.)
+    // (The page indicator: its own test above.)
+    const { previousSpread, nextSpread, pageIndicator, ...status } = PAGINATION_CONTROLS
+    void previousSpread
+    void nextSpread
+    void pageIndicator
+    for (const meta of Object.values(status)) {
       const el = document.querySelector(`[data-control-id="${meta.id}"]`)!
       expect(el).not.toBeNull()
       expect(el.getAttribute('aria-label')).toMatch(new RegExp(`^${meta.label}`))

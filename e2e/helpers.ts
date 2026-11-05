@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, type Locator, type Page, type TestInfo } from '@playwright/test'
 
 /**
  * Helpers for driving the app through the e2e fake Tauri backend
@@ -96,6 +96,11 @@ export async function clickBlockStart(page: Page, block: Locator): Promise<void>
       return { x: rc.left + Math.min(2, rc.width / 2), y: rc.top + rc.height / 2 }
     })
   const main = page.getByRole('main', { name: 'Editor' })
+  // Book mode (the default) shows one spread: turn to the block's spread first.
+  if (await isBookMode(page)) {
+    await block.evaluate((el) => window.__nvE2E.revealElement(el))
+    await turnSettled(page)
+  }
   const box = (await main.boundingBox())!
   let p = await point()
   if (p.y < box.y + 40 || p.y > box.y + box.height - 40) {
@@ -105,6 +110,83 @@ export async function clickBlockStart(page: Page, block: Locator): Promise<void>
   }
   await page.mouse.click(p.x, p.y)
   await page.evaluate(() => window.__nvE2E?.syncSelection())
+}
+
+/** The writing view is in Book mode (page turns; the default): one spread shown, no scrolling between spreads. */
+export async function isBookMode(page: Page): Promise<boolean> {
+  return page.evaluate(() => !!document.querySelector('.nv-desk[data-navigation="book"]'))
+}
+
+/**
+ * Show page `index` in either navigation mode: Book mode turns to its spread, continuous scroll
+ * scrolls its row to the top. The caret does not move. Resolves once that spread is painted.
+ */
+export async function showPage(page: Page, index: number): Promise<void> {
+  await page.evaluate((i) => window.__nvE2E.showPage(i), index)
+  await turnSettled(page)
+  await expect(page.locator(`.nv-frames .nv-page[data-page-index="${index}"]`)).toBeAttached()
+}
+
+/**
+ * Run `read` on the rendered page frames of the first `rows` spreads and concatenate the results. In
+ * continuous scroll the frames near the viewport are rendered at once (read once); in Book mode one
+ * spread is, so turn through them (then back to the spread shown before).
+ */
+export async function acrossSpreads<T>(page: Page, read: () => Promise<T[]>, rows = 4): Promise<T[]> {
+  if (!(await isBookMode(page))) return read()
+  const start = await page.evaluate(() => window.__nvE2E.layout().visibleSpread.first)
+  const out: T[] = []
+  await page.evaluate(() => window.__nvE2E.edgeSpread(-1))
+  for (let r = 0; r < rows; r++) {
+    await turnSettled(page)
+    out.push(...(await read()))
+    if (!(await page.evaluate(() => window.__nvE2E.turnSpread(1)))) break
+  }
+  await page.evaluate((i) => window.__nvE2E.showPage(i), start)
+  await turnSettled(page)
+  return out
+}
+
+/** After a page turn: painted, and the turn transition (a short ease-in of the spread) finished. */
+export async function turnSettled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))
+  })
+}
+
+/**
+ * Continuous scroll (the Phase 2 view) for a spec that scrolls through the pages: set the app
+ * preference, as Settings > Page navigation would.
+ */
+export async function chooseScrollNavigation(page: Page): Promise<void> {
+  await page.evaluate(() => window.__nvE2E.setPageNavigation('scroll'))
+  await expect(page.locator('.nv-desk[data-navigation="scroll"]')).toBeAttached()
+}
+
+/**
+ * Seed preferences.json for every launch of this page (before the app boots; a file the app wrote
+ * since wins). Specs written for continuous scroll, the Phase 2 view, call
+ * `seedPreferences(page, { pageNavigation: 'scroll' })` in a beforeEach.
+ */
+export async function seedPreferences(page: Page, values: Record<string, unknown>): Promise<void> {
+  const text = JSON.stringify({ version: 1, ...values })
+  await page.addInitScript((t) => {
+    ;(window as unknown as { __nvE2EPreferences?: string }).__nvE2EPreferences = t
+  }, text)
+}
+
+/** The page navigation a Playwright project runs in: 'scroll' for the *-scroll projects, else 'book' (the default). */
+export function projectNavigation(testInfo: TestInfo): 'book' | 'scroll' {
+  return (testInfo.project.metadata as { pageNavigation?: string } | undefined)?.pageNavigation === 'scroll' ? 'scroll' : 'book'
+}
+
+/**
+ * For specs that run in both navigation modes (playwright.config.ts BOTH_MODES): call in a
+ * beforeEach; the *-scroll projects seed continuous scroll before the app boots.
+ */
+export async function seedProjectNavigation(page: Page, testInfo: TestInfo): Promise<void> {
+  if (projectNavigation(testInfo) === 'scroll') await seedPreferences(page, { pageNavigation: 'scroll' })
 }
 
 /** Wait until the pagination engine has laid out the current document (no reflow pending) and painted. */

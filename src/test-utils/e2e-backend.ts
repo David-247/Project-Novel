@@ -20,7 +20,7 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getDocJSON, getEditor, getFootnotes, setDocJSON } from '@/features/editor'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
-import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
+import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition, turnSpread, goToEdgeSpread, showPage } from '@/features/pagination'
 import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
 import { commentsDebug } from '@/features/comments'
@@ -215,6 +215,24 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     /** Book settings without the settings UI (owned by the book settings ticket). */
     setTrimSize: (id: string) => useStore.getState().bookActions.setTrimSize(id),
     setBookView: (view: 'spread' | 'single') => useStore.getState().bookActions.setView(view),
+    /** Page navigation (app preference): Book (page turns, the default) or continuous scroll. */
+    setPageNavigation: (mode: 'book' | 'scroll') => useStore.getState().preferencesActions.set('pageNavigation', mode),
+    pageNavigation: () => useStore.getState().preferences.pageNavigation,
+    /** View > Next / Previous Spread (dir 1 / -1) and First / Last Spread. */
+    turnSpread: (dir: 1 | -1) => turnSpread(dir),
+    edgeSpread: (dir: 1 | -1) => goToEdgeSpread(dir),
+    /** Show the spread holding page `index` (view only; Book mode turns to it). */
+    showPage: (index: number) => showPage(index),
+    /** Bring an editor element's start into view (Book mode turns to its spread). */
+    revealElement: (el: Element) => {
+      const ed = getEditor()
+      if (!ed) return false
+      try {
+        return revealPosition(ed.view.posAtDOM(el, 0))
+      } catch {
+        return false
+      }
+    },
     /**
      * Emit `data-break-before` on top-level blocks, as style definitions will: `match` selects
      * blocks by node type (and heading level). Call with `null` to remove.
@@ -335,6 +353,13 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       if (!view) return
       view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)))
     },
+    /** Where the caret at `pos` is painted (ProseMirror coordsAtPos; side -1: the end of the line before). */
+    coordsAt: (pos: number, side: 1 | -1 = 1) => {
+      const view = getEditor()?.view
+      if (!view) return null
+      const c = view.coordsAtPos(pos, side)
+      return { left: c.left, top: c.top, bottom: c.bottom }
+    },
     /** Selection of the manuscript. */
     selection: () => {
       const s = getEditor()?.state.selection
@@ -405,6 +430,10 @@ export async function installE2EBackend(): Promise<void> {
   core.state.failFonts = !!config.failFonts
   if (config.fonts) core.state.fonts = config.fonts
   if (config.defaultAuthor !== undefined) core.state.defaultAuthor = config.defaultAuthor
+  // A preferences.json seed for this launch, when there is no file yet (e2e/helpers.ts
+  // seedPreferences: specs that need continuous scroll navigation).
+  const seed = (window as unknown as { __nvE2EPreferences?: string }).__nvE2EPreferences
+  if (seed !== undefined && core.state.preferences === null) core.state.preferences = seed
   mockWindows('main')
   mockIPC(
     async (cmd, args) => {

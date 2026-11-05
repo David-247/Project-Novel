@@ -7,7 +7,11 @@
 // predicate, invalidatePagination() (re-measure) and relayoutPagination() (re-break only).
 // Break contract: block attr `breakBefore: 'page' | 'recto'`, or DOM attr `data-break-before` on
 // the block's top-level element.
-export { PaginatedView, goToPage } from './PaginatedView'
+export { PaginatedView } from './PaginatedView'
+// Navigation (both modes, docs/pagination.md "Navigation modes"): Go to Page; turn / jump spreads
+// (view only, the caret stays); revealPosition(pos) brings a position into view (Book mode turns to
+// its spread): use it after moving the selection to something (Next Comment, Next Change).
+export { goToPage, turnSpread, goToEdgeSpread, showPage, revealPosition } from './navigation'
 // View menu: Single Page / Two-Page Spread, zoom (shared command registry). Returns unregister.
 export { registerPaginationCommands } from './commands'
 export type { PaginatedViewProps } from './PaginatedView'

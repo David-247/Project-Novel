@@ -1,5 +1,6 @@
 import { useStore } from '@/shared/store'
-import { IconButton, Select, ToggleButton, Tooltip } from '@/shared/ui'
+import { runCommand } from '@/shared/commands'
+import { Button, IconButton, Select, ToggleButton, Tooltip } from '@/shared/ui'
 import { PAGINATION_CONTROLS as C } from './controls'
 import { MAX_SCALE, MIN_SCALE, stepZoom, ZOOM_STEPS } from './placement'
 
@@ -12,7 +13,9 @@ export function pageIndicatorText(first: number, last: number, count: number): s
 }
 
 /**
- * Status-bar page indicator. Plain text (not a control), polite live region off: it changes on scroll.
+ * Status-bar page indicator: the spread in view ("Pages 12–13 of 384"). It is also a button that
+ * opens Edit > Go to Page (the command registry's `edit.go_to_page`), which jumps to the spread
+ * holding the page asked for. No live region: it changes on every turn or scroll.
  * In a narrow status bar (`statusbar` container) it shortens to "12 / 384", then hides.
  */
 export function PageIndicator() {
@@ -22,14 +25,22 @@ export function PageIndicator() {
   if (count <= 0) return null
   const full = pageIndicatorText(first, last, count)
   return (
-    <span className="shrink-0 tabular-nums whitespace-nowrap @max-[560px]/statusbar:hidden" title={full}>
-      <span className="@max-[760px]/statusbar:hidden" data-testid="page-indicator">
-        {full}
-      </span>
-      <span className="@min-[760px]/statusbar:hidden" aria-hidden="true">
-        {`${Math.min(first, count - 1) + 1} / ${count}`}
-      </span>
-    </span>
+    <Tooltip>
+      <Button
+        variant="ghost"
+        className="shrink-0 tabular-nums whitespace-nowrap px-2 text-ui-xs font-normal @max-[560px]/statusbar:hidden"
+        data-control-id={C.pageIndicator.id}
+        aria-label={`${full}. ${C.pageIndicator.label}`}
+        onClick={() => runCommand('edit.go_to_page')}
+      >
+        <span className="@max-[760px]/statusbar:hidden" data-testid="page-indicator">
+          {full}
+        </span>
+        <span className="@min-[760px]/statusbar:hidden" aria-hidden="true">
+          {`${Math.min(first, count - 1) + 1} / ${count}`}
+        </span>
+      </Button>
+    </Tooltip>
   )
 }
 

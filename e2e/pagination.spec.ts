@@ -1,11 +1,19 @@
 import { expect, test, type Page } from '@playwright/test'
-import { clickBlockStart, docEnd, docStart, lineEnd, waitForLayout, reveal } from './helpers'
+import { clickBlockStart, projectNavigation, docEnd, docStart, isBookMode, lineEnd, seedPreferences, seedProjectNavigation, showPage, turnSettled, waitForLayout, reveal } from './helpers'
 import { logFocusOnRetry } from './focus-log'
+
+// Book mode (default) and, in the *-scroll projects, continuous scroll (playwright.config.ts BOTH_MODES).
+test.beforeEach(async ({ page }, testInfo) => seedProjectNavigation(page, testInfo))
 
 /**
  * Paginated view (Phase 2, docs/pagination.md): one editor view laid out as book pages, in a
  * two-page spread by default. Book settings without their UI (the book settings ticket) are driven
  * through window.__nvE2E.
+ *
+ * Phase 3: these run in Book mode, the default page navigation (one spread shown; `showPage` turns
+ * to a page before its frame is inspected). The tests that are about scrolling through the pages
+ * (progressive draw at scroll positions) run in continuous scroll, the Phase 2 view, seeded through
+ * preferences.json. Book mode's own flows: e2e/page-turn.spec.ts.
  */
 
 declare global {
@@ -80,14 +88,39 @@ test('a pasted 100k-word manuscript flows across a two-page spread, splitting pa
   await expect(indicator(page)).toHaveText(`Page 1 of ${l.pageCount}`)
 
   // Page 1 is a recto on its own; pages 2 and 3 face each other and touch at the spine.
-  const [p0, p1, p2] = [await frame(page, 0).boundingBox(), await frame(page, 1).boundingBox(), await frame(page, 2).boundingBox()]
+  const p0 = await frame(page, 0).boundingBox()
+  if (await isBookMode(page)) await showPage(page, 1) // (continuous scroll: all three in view)
+  const [p1, p2] = [await frame(page, 1).boundingBox(), await frame(page, 2).boundingBox()]
   expect(p0!.x).toBeGreaterThan(p1!.x + p1!.width / 2)
   expect(p1!.y).toBeCloseTo(p2!.y, 0)
   expect(p2!.x).toBeCloseTo(p1!.x + p1!.width, 0)
 
-  // The first paragraph that continues on the next page: its lines sit inside the two page frames,
-  // with at least two lines on each (widows / orphans), and nothing in between.
-  const pagesOfLines = await linesByPage(page, 'p:has(> span.nv-shift)')
+  const bookSplitLines = async () => {
+    // The first paragraph that continues on the facing page: its lines sit inside the two page frames,
+    // with at least two lines on each (widows / orphans), and nothing in between. (A verso -> recto
+    // split, so both pages are on the spread shown in Book mode.)
+    const l1 = await layout(page)
+    const verso = l1.pages.findIndex((p, i) => i % 2 === 1 && l1.pages[i + 1]?.startsBlockType === null && !p.isBlank)
+    expect(verso).toBeGreaterThan(0)
+    await showPage(page, verso)
+    // (Found by index: ProseMirror would undo an attribute set on its DOM.)
+    const splitIndex = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('.novel-editor-content > p')).findIndex((el) => {
+        const r = document.createRange()
+        r.selectNodeContents(el)
+        const frames = Array.from(document.querySelectorAll('.nv-frames .nv-page')).map((f) => f.getBoundingClientRect())
+        const rects = Array.from(r.getClientRects()).filter((x) => x.width > 0)
+        const on = new Set(rects.map((rc) => frames.findIndex((f) => rc.top >= f.top - 1 && rc.bottom <= f.bottom + 1 && rc.left >= f.left - 1 && rc.right <= f.right + 1)))
+        return on.size === 2 && !on.has(-1)
+      }),
+    )
+    expect(splitIndex).toBeGreaterThanOrEqual(0)
+    return linesByPage(page, `.novel-editor-content > p:nth-of-type(${splitIndex + 1})`)
+  }
+  // Continuous scroll (Phase 2): the first paragraph that continues on the next page, whichever page
+  // it starts on (a recto -> next-row verso split included): its lines sit inside the two page frames.
+  // Book mode: the first verso -> recto split, so both pages are on the spread shown.
+  const pagesOfLines = (await isBookMode(page)) ? await bookSplitLines() : await linesByPage(page, 'p:has(> span.nv-shift)')
   expect(pagesOfLines).not.toContain(-1)
   const distinct = [...new Set(pagesOfLines)]
   expect(distinct.length).toBeGreaterThanOrEqual(2)
@@ -204,6 +237,7 @@ test("breakBefore 'page' and 'recto' (data-break-before contract) start chapters
     'recto:2',
   ])
   // The heading is painted on its page.
+  await showPage(page, 4)
   const h = await editor(page).locator('h1').nth(2).boundingBox()
   const f = await frame(page, 4).boundingBox()
   expect(h!.x).toBeGreaterThan(f!.x)
@@ -227,12 +261,18 @@ test('a narrow window or book.view single shows one page at a time', async ({ pa
   await expect(page.locator('.nv-frames .nv-page').first()).toHaveAttribute('data-view', 'single')
   await docStart(page)
   await expect(indicator(page)).toHaveText(`Page 1 of ${pageCount}`)
-  // Single pages stack vertically; text stays on its page.
-  const [a, b] = [await frame(page, 0).boundingBox(), await frame(page, 1).boundingBox()]
-  expect(b!.x).toBeCloseTo(a!.x, 0)
-  expect(b!.y).toBeGreaterThan(a!.y + a!.height)
+  // Single pages: one per row (continuous scroll stacks them; Book mode shows one at a time).
+  const a = await frame(page, 0).boundingBox()
+  if (await isBookMode(page)) await expect(frame(page, 1)).toHaveCount(0)
+  else {
+    const b = await frame(page, 1).boundingBox()
+    expect(b!.x).toBeCloseTo(a!.x, 0)
+    expect(b!.y).toBeGreaterThan(a!.y + a!.height)
+  }
   await page.keyboard.press('PageDown')
   await expect(indicator(page)).toHaveText(`Page 2 of ${pageCount}`)
+  await turnSettled(page)
+  expect((await frame(page, 1).boundingBox())!.x).toBeCloseTo(a!.x, 0)
 
   await page.setViewportSize({ width: 1400, height: 900 })
   await expect.poll(async () => (await layout(page)).effectiveView).toBe('spread')
@@ -311,6 +351,7 @@ test('trim size reflows; margins mirror on verso and recto; bottom reservations 
   await docStart(page)
   await page.keyboard.press('PageDown')
   await waitForLayout(page)
+  await turnSettled(page) // Book mode: the turn's ease-in slides the spread a few px
   expect(await leftOfText(1)).toBe(60)
   expect(await leftOfText(2)).toBe(84)
 
@@ -334,6 +375,7 @@ test('a press on a margin or the desk puts the caret on the nearest line of that
   await page.locator('[data-control-id="pagination.zoom"]').selectOption('100')
   await waitForLayout(page)
   // The page's bottom edge in view (a 100% page is about as tall as the editor area).
+  await showPage(page, 2)
   await frame(page, 2).evaluate((el) => el.scrollIntoView({ block: 'end' }))
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
   const f = (await frame(page, 2).boundingBox())!
@@ -479,6 +521,7 @@ test('at fit-spread, ArrowDown on a recto last line reaches the next row verso b
   await page.setViewportSize({ width: 1400, height: 800 })
   await paste(page, paragraphs(30, 100))
   await expect(page.locator('[data-control-id="pagination.zoom"]')).toHaveValue('fit-spread')
+  if (await isBookMode(page)) await showPage(page, 2)
   await frame(page, 2).scrollIntoViewIfNeeded()
   // The last painted line of page 3 (index 2, a recto).
   const point = await page.evaluate(() => {
@@ -496,12 +539,15 @@ test('at fit-spread, ArrowDown on a recto last line reaches the next row verso b
   await page.mouse.click(point.x, point.y)
   await waitForLayout(page)
   expect((await layout(page)).currentPage).toBe(2)
-  // The next page (index 3, verso of the next row) starts below the viewport.
+  // The next page (index 3, verso of the next row) starts below the viewport (continuous scroll), or
+  // is on the next spread, not shown (Book mode).
   const main = (await page.getByRole('main', { name: 'Editor' }).boundingBox())!
-  expect((await frame(page, 3).boundingBox())!.y + 100).toBeGreaterThan(main.y + main.height)
+  if (await isBookMode(page)) await expect(frame(page, 3)).toHaveCount(0)
+  else expect((await frame(page, 3).boundingBox())!.y + 100).toBeGreaterThan(main.y + main.height)
 
   await page.keyboard.press('ArrowDown')
   await expect.poll(async () => (await layout(page)).currentPage).toBe(3)
+  await turnSettled(page)
   // The caret is on page 4's first line, scrolled into view.
   const caret = await page.evaluate(() => {
     const s = getSelection()!
@@ -655,11 +701,23 @@ for (const [trim, at] of [
 ] as const) {
   test(`progressive reflow never paints a block at a stale place (${trim}, scrolled to ${at * 100}%)`, async ({ page }) => {
     test.setTimeout(90_000)
+    // Scroll positions: continuous scroll (Book mode's turn during a reflow: the next test).
+    await seedPreferences(page, { pageNavigation: 'scroll' })
     await page.setViewportSize({ width: 1400, height: 900 })
     await paste(page, paragraphs(1000, 60))
     await expectNoStalePaint(page, () => page.evaluate((id) => (window.__nvArm!(), window.__nvE2E.setTrimSize(id)), trim), at)
   })
 }
+
+test('Book mode: a progressive reflow never paints a block at a stale place, on a spread mid-book', async ({ page }, testInfo) => {
+  test.skip(projectNavigation(testInfo) === 'scroll', 'Book mode only')
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(1000, 60))
+  expect(await isBookMode(page)).toBe(true)
+  await showPage(page, Math.floor((await layout(page)).pageCount / 2))
+  await expectNoStalePaint(page, () => page.evaluate(() => (window.__nvArm!(), window.__nvE2E.setTrimSize('us-6x9'))))
+})
 
 test('progressive restyle never paints a block at a stale place (Body font size)', async ({ page }) => {
   test.setTimeout(90_000)
@@ -667,7 +725,7 @@ test('progressive restyle never paints a block at a stale place (Body font size)
   await paste(page, paragraphs(1000, 60))
   await expectNoStalePaint(page, async () => {
     // Every paragraph changes height: more blocks than the progressive threshold are re-measured.
-    await editor(page).locator('p').nth(500).click()
+    await clickBlockStart(page, editor(page).locator('p').nth(500))
     await waitForLayout(page)
     await (await reveal(page, 'styles.edit')).click()
     const dialog = page.getByRole('dialog', { name: /^Modify style:/ })
@@ -790,3 +848,351 @@ test('PageDown on the last spread goes to the end of the book, PageUp on the fir
   await expect.poll(() => page.evaluate(() => getSelection()!.focusOffset)).toBe(0)
   await expect.poll(async () => (await layout(page)).currentPage).toBe(0)
 })
+
+/** The painted caret (collapsed DOM selection) in client coordinates, and the page frame it lies in. */
+async function paintedCaret(page: Page) {
+  return page.evaluate(() => {
+    const s = getSelection()!
+    const r = document.createRange()
+    r.setStart(s.focusNode!, s.focusOffset)
+    r.collapse(true)
+    const rc = Array.from(r.getClientRects()).find((x) => x.height > 0) ?? r.getBoundingClientRect()
+    const cy = (rc.top + rc.bottom) / 2
+    const frame = Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page')).find((f) => {
+      const b = f.getBoundingClientRect()
+      return rc.left >= b.left - 1 && rc.left <= b.right + 1 && cy >= b.top && cy <= b.bottom
+    })
+    const fb = frame?.getBoundingClientRect()
+    return { x: rc.left, y: cy, page: frame ? Number(frame.dataset.pageIndex) : -1, xInFrame: fb ? rc.left - fb.left : NaN, yInFrame: fb ? cy - fb.top : NaN }
+  })
+}
+
+/**
+ * A paragraph continued from page 3 onto page 4, after typing near the end of page 3. In this layout
+ * the browser's hit test past the end of a line there answered from the paragraph's layout box (a
+ * line on another page). Runs in both navigation modes and both engines.
+ */
+async function continuedParagraphSetup(page: Page) {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(40))
+  await page.waitForTimeout(600)
+  const l = await layout(page)
+  await page.evaluate((pos) => window.__nvE2E.selectText(pos, pos), l.pages[2].to - 1)
+  await page.keyboard.type(' lantern'.repeat(14))
+  await waitForLayout(page)
+  const l2 = await layout(page)
+  expect(l2.pages[3].startsBlockType).toBeNull() // page 4 starts mid-paragraph
+  return l2
+}
+
+/** Top and right end of the first painted text line in page frame `index` (frame coordinates). */
+async function firstLineOf(page: Page, index: number) {
+  return page.evaluate((i) => {
+    const f = document.querySelector(`.nv-frames .nv-page[data-page-index="${i}"]`)!.getBoundingClientRect()
+    const r = document.createRange()
+    let top = Infinity
+    let right = -Infinity
+    for (const p of Array.from(document.querySelectorAll('.novel-editor-content > p'))) {
+      r.selectNodeContents(p)
+      for (const rc of Array.from(r.getClientRects())) {
+        if (rc.width === 0 || rc.left < f.left - 1 || rc.right > f.right + 1 || rc.top < f.top || rc.bottom > f.bottom) continue
+        if (rc.top < top - 1) {
+          top = rc.top
+          right = rc.right
+        } else if (Math.abs(rc.top - top) <= 1) right = Math.max(right, rc.right)
+      }
+    }
+    return { top: top - f.top, right: right - f.left }
+  }, index)
+}
+
+/** Left edge of the text painted in page frame `index` (frame coordinates): margins mirror on verso and recto. */
+async function textLeftOf(page: Page, index: number) {
+  return page.evaluate((i) => {
+    const f = document.querySelector(`.nv-frames .nv-page[data-page-index="${i}"]`)!.getBoundingClientRect()
+    const r = document.createRange()
+    let left = Infinity
+    for (const p of Array.from(document.querySelectorAll('.novel-editor-content > p'))) {
+      r.selectNodeContents(p)
+      for (const rc of Array.from(r.getClientRects()))
+        if (rc.width > 0 && rc.left >= f.left - 1 && rc.right <= f.right + 1 && rc.top >= f.top && rc.bottom <= f.bottom) left = Math.min(left, rc.left)
+    }
+    return left - f.left
+  }, index)
+}
+
+test('ArrowDown from the last line of a page onto a continued paragraph keeps the caret column', async ({ page }) => {
+  const l = await continuedParagraphSetup(page)
+  // The caret near the end of page 3's last line (a recto).
+  await page.evaluate((pos) => window.__nvE2E.selectText(pos, pos), l.pages[2].to - 2)
+  await turnSettled(page)
+  const before = await paintedCaret(page)
+  expect(before.page).toBe(2)
+  const l2 = await textLeftOf(page, 2) // (page 3 is not on the next spread, which Book mode turns to)
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(async () => (await layout(page)).currentPage).toBe(3)
+  await turnSettled(page)
+  const after = await paintedCaret(page)
+  // On page 4's first line, in the same column (or at the end of a shorter line).
+  expect(after.page).toBe(3)
+  const line = await firstLineOf(page, 3)
+  expect(after.yInFrame - line.top).toBeLessThan(24)
+  // Columns relative to each page's text block (mirrored margins).
+  const l3 = await textLeftOf(page, 3)
+  const want = Math.min(before.xInFrame - l2, line.right - l3)
+  expect(Math.abs(after.xInFrame - l3 - want), JSON.stringify({ before, after, line, l2, l3 })).toBeLessThan(16)
+})
+
+test("ArrowUp from the end of a page's first line ends on the last line of the page before, drawn there", async ({ page }) => {
+  const l = await continuedParagraphSetup(page)
+  await page.evaluate((pos) => window.__nvE2E.selectText(pos, pos), l.pages[3].from + 3)
+  await turnSettled(page)
+  // A press at the end of page 4's first line.
+  const line = await firstLineOf(page, 3)
+  const f4 = (await page.locator('.nv-frames .nv-page[data-page-index="3"]').boundingBox())!
+  const k = f4.width / (await page.locator('.nv-frames .nv-page[data-page-index="3"]').evaluate((el) => (el as HTMLElement).offsetWidth))
+  await page.mouse.click(f4.x + line.right * k - 2, f4.y + (line.top + 8) * k)
+  await page.evaluate(() => window.__nvE2E.syncSelection())
+  const before = await paintedCaret(page)
+  expect(before.page).toBe(3)
+  const t4 = await textLeftOf(page, 3)
+  await page.keyboard.press('ArrowUp')
+  await turnSettled(page)
+  // The end of page 3's last line is the very position page 4 starts at: the caret must be drawn on
+  // page 3, in the same column (or at the end of a shorter line), not left at the top of page 4.
+  const after = await paintedCaret(page)
+  expect(after.page, JSON.stringify({ before, after })).toBe(2)
+  expect((await page.evaluate(() => window.__nvE2E.editorDiag()!.selection)).head).toBeLessThanOrEqual(l.pages[3].from)
+  const last = await page.evaluate(() => {
+    const f = document.querySelector('.nv-frames .nv-page[data-page-index="2"]')!.getBoundingClientRect()
+    const r = document.createRange()
+    let bottom = -Infinity
+    let right = -Infinity
+    for (const p of Array.from(document.querySelectorAll('.novel-editor-content > p'))) {
+      r.selectNodeContents(p)
+      for (const rc of Array.from(r.getClientRects())) {
+        if (rc.width === 0 || rc.left < f.left - 1 || rc.right > f.right + 1 || rc.top < f.top || rc.bottom > f.bottom) continue
+        if (rc.bottom > bottom + 1) {
+          bottom = rc.bottom
+          right = rc.right
+        } else if (Math.abs(rc.bottom - bottom) <= 1) right = Math.max(right, rc.right)
+      }
+    }
+    return { bottom: bottom - f.top, right: right - f.left }
+  })
+  expect(Math.abs(after.yInFrame - last.bottom)).toBeLessThan(24)
+  // Columns relative to each page's text block (mirrored margins). The caret on page 3 is read after
+  // the turn back, so page 4's text left is the one measured before the turn (frames are virtualised).
+  const t2 = await textLeftOf(page, 2)
+  const want = Math.min(before.xInFrame - t4, last.right - t2)
+  expect(Math.abs(after.xInFrame - t2 - want), JSON.stringify({ before, after, last, t2, t4 })).toBeLessThan(16)
+  // Book mode shows the spread holding it.
+  if (await isBookMode(page)) await expect(indicator(page)).toHaveText(`Pages 2–3 of ${l.pageCount}`)
+})
+
+test('ArrowUp onto the end of the line above, where the next page starts, draws the caret on that page (not at the top of the next)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(80))
+  const l = await layout(page)
+  // A verso -> recto split (one spread): the end of the verso's last line is the position the recto
+  // starts at. Press on the recto's first line in the column of that line end (a little right of
+  // it), then ArrowUp: the nearest position on the verso's last line is that ambiguous end.
+  let k = -1
+  let target = { x: 0, y: 0 }
+  for (let i = 1; i < l.pages.length - 1 && k < 0; i += 2) {
+    if (l.pages[i].isBlank || l.pages[i + 1].startsBlockType !== null) continue
+    await showPage(page, i)
+    const end = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), l.pages[i + 1].from))!
+    const start = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, 1), l.pages[i + 1].from))!
+    const [tv, tr] = [await textLeftOf(page, i), await textLeftOf(page, i + 1)]
+    const fv = (await page.locator(`.nv-frames .nv-page[data-page-index="${i}"]`).boundingBox())!
+    const fr = (await page.locator(`.nv-frames .nv-page[data-page-index="${i + 1}"]`).boundingBox())!
+    const x = fr.x + tr + (end.left - fv.x - tv) + 3
+    const line = await firstLineOf(page, i + 1)
+    if (x < fr.x + line.right - 2) {
+      k = i
+      target = { x, y: (start.top + start.bottom) / 2 }
+    }
+  }
+  expect(k, 'a verso whose last line ends left of the end of the next first line').toBeGreaterThan(0)
+  await page.mouse.click(target.x, target.y)
+  await page.evaluate(() => window.__nvE2E.syncSelection())
+  expect((await paintedCaret(page)).page).toBe(k + 1)
+  await page.keyboard.press('ArrowUp')
+  await turnSettled(page)
+  const head = (await page.evaluate(() => window.__nvE2E.editorDiag()!.selection)).head
+  expect(head, 'the caret is at the end of the verso line').toBe(l.pages[k + 1].from)
+  const after = await paintedCaret(page)
+  expect(after.page, `caret drawn on page ${k} (head ${head})`).toBe(k)
+  await expect(indicator(page)).toHaveText(`Pages ${k + 1}–${k + 2} of ${l.pageCount}`)
+})
+
+// ---- Arrow keys onto a short line that holds a footnote reference (the off-column walk steps over
+// the reference: positions inside it are the note's text, and its raised number's box can miss the
+// line's middle). Both modes, both engines.
+
+const NOTE = 'A note.'
+/** Size of a footnote node holding NOTE (open + text + close). */
+const NOTE_SIZE = NOTE.length + 2
+
+/** Press on page `index`'s painted line through client y, at a column relative to its text block. */
+async function pressAtColumn(page: Page, index: number, column: number, y: number) {
+  const f = (await page.locator(`.nv-frames .nv-page[data-page-index="${index}"]`).boundingBox())!
+  await page.mouse.click(f.x + (await textLeftOf(page, index)) + column, y)
+  await page.evaluate(() => window.__nvE2E.syncSelection())
+}
+
+/** Painted column (relative to the page's text block) of the right edge of the footnote reference's number. */
+async function refColumn(page: Page, index: number) {
+  const f = (await page.locator(`.nv-frames .nv-page[data-page-index="${index}"]`).boundingBox())!
+  const r = (await editor(page).locator('[data-footnote-ref]').first().evaluate((el) => {
+    const b = el.getBoundingClientRect()
+    return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }
+  }))!
+  return { right: r.right - f.x - (await textLeftOf(page, index)), mid: (r.top + r.bottom) / 2 }
+}
+
+const headNow = async (page: Page) => {
+  const sel = (await page.evaluate(() => window.__nvE2E.editorDiag()!.selection)) as { type: string; head?: number; anchor: number }
+  expect(sel.type, JSON.stringify(sel)).toBe('text')
+  return sel.head!
+}
+
+test('ArrowUp onto a short last line holding a footnote reference: next to the reference, and past the line end', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(80))
+  let l = await layout(page)
+  // A verso that ends with a paragraph's short last line, facing a recto that starts a paragraph.
+  let k = -1
+  for (let i = 1; i < l.pages.length - 1 && k < 0; i += 2) {
+    if (l.pages[i].isBlank || l.pages[i + 1].startsBlockType !== 'paragraph') continue
+    await showPage(page, i)
+    const end = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), l.pages[i].to - 1))!
+    const f = (await page.locator(`.nv-frames .nv-page[data-page-index="${i}"]`).boundingBox())!
+    if (end.left - f.x - (await textLeftOf(page, i)) < 200) k = i
+  }
+  expect(k, 'a verso ending on a short paragraph line').toBeGreaterThan(0)
+  const end0 = l.pages[k].to - 1
+  const refPos = end0 - 3
+  await page.evaluate(([pos, t]) => window.__nvE2E.insertFootnoteAt(pos as number, t as string), [refPos, NOTE] as const)
+  await waitForLayout(page)
+  l = await layout(page)
+  await showPage(page, k)
+  const ref = await refColumn(page, k)
+  expect(await pageOfPaintedY(page, ref.mid)).toBe(k)
+  const paraEnd = end0 + NOTE_SIZE
+  const lineEnd = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), paraEnd))!
+  const fk = (await page.locator(`.nv-frames .nv-page[data-page-index="${k}"]`).boundingBox())!
+  const endColumn = lineEnd.left - fk.x - (await textLeftOf(page, k))
+  const rectoTop = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, 1), l.pages[k + 1].from + 1))!
+  const y = (rectoTop.top + rectoTop.bottom) / 2
+
+  // Just right of the reference: the caret lands right after it.
+  await pressAtColumn(page, k + 1, ref.right + 2, y)
+  expect((await paintedCaret(page)).page).toBe(k + 1)
+  await page.keyboard.press('ArrowUp')
+  await turnSettled(page)
+  expect(await pageOfHead(page)).toBe(k)
+  const near = await headNow(page)
+  expect(near, `head ${near}, reference ${refPos}..${refPos + NOTE_SIZE}`).toBeGreaterThanOrEqual(refPos + NOTE_SIZE)
+  expect(near).toBeLessThanOrEqual(refPos + NOTE_SIZE + 1)
+
+  // Past the end of the short line: the caret goes to the line end, after the reference.
+  await showPage(page, k)
+  await pressAtColumn(page, k + 1, endColumn + 60, y)
+  expect((await paintedCaret(page)).page).toBe(k + 1)
+  await page.keyboard.press('ArrowUp')
+  await turnSettled(page)
+  expect(await pageOfHead(page)).toBe(k)
+  expect(await headNow(page)).toBe(paraEnd)
+})
+
+test('ArrowDown onto a short first line holding a footnote reference: next to the reference, and past the line end', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(80))
+  await page.waitForTimeout(600)
+  let l = await layout(page)
+  // A page break right after a long line (so the line above the next page reaches far right), then a
+  // short paragraph ("Ab cd") at the top of the new page, holding a reference.
+  const p0 = 6
+  await showPage(page, p0)
+  const f0 = (await page.locator(`.nv-frames .nv-page[data-page-index="${p0}"]`).boundingBox())!
+  const left0 = f0.x + (await textLeftOf(page, p0))
+  let cut = -1
+  for (let pos = l.pages[p0].from + 40; pos < l.pages[p0].to - 40 && cut < 0; pos++) {
+    const c = (await page.evaluate((x) => window.__nvE2E.coordsAt(x, 1), pos))!
+    if (c.left - left0 > 270) cut = pos
+  }
+  expect(cut, 'a position far right on a line').toBeGreaterThan(0)
+  await page.evaluate((pos) => window.__nvE2E.selectText(pos, pos), cut)
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await waitForLayout(page)
+  l = await layout(page)
+  const h = l.pages.findIndex((p) => p.from > cut)
+  expect(h).toBeGreaterThan(0)
+  const start = l.pages[h].from + 1
+  await page.evaluate((pos) => window.__nvE2E.selectText(pos, pos), start)
+  await page.keyboard.type('Ab cd')
+  await page.keyboard.press('Enter')
+  await waitForLayout(page)
+  const refPos = start + 3 // "Ab " | ref | "cd"
+  await page.evaluate(([pos, t]) => window.__nvE2E.insertFootnoteAt(pos as number, t as string), [refPos, NOTE] as const)
+  await waitForLayout(page)
+  l = await layout(page)
+  expect(l.pages[h].from + 1, 'the short paragraph opens the page').toBe(start)
+  const shortEnd = start + 5 + NOTE_SIZE // after "Ab " + ref + "cd"
+  await showPage(page, h)
+  const ref = await refColumn(page, h)
+  expect(await pageOfPaintedY(page, ref.mid)).toBe(h)
+  await showPage(page, h - 1)
+  const prevEnd = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), cut))!
+  const fp = (await page.locator(`.nv-frames .nv-page[data-page-index="${h - 1}"]`).boundingBox())!
+  const prevEndColumn = prevEnd.left - fp.x - (await textLeftOf(page, h - 1))
+  const y = (prevEnd.top + prevEnd.bottom) / 2
+  expect(prevEndColumn, 'the line above reaches past the short line').toBeGreaterThan(ref.right + 60)
+
+  // Just right of the reference.
+  await pressAtColumn(page, h - 1, ref.right + 2, y)
+  expect(await pageOfHead(page)).toBe(h - 1)
+  await page.keyboard.press('ArrowDown')
+  await turnSettled(page)
+  expect(await pageOfHead(page)).toBe(h)
+  const near = await headNow(page)
+  expect(near, `head ${near}, reference ${refPos}..${refPos + NOTE_SIZE}`).toBeGreaterThanOrEqual(refPos + NOTE_SIZE)
+  expect(near).toBeLessThanOrEqual(refPos + NOTE_SIZE + 1)
+
+  // From further right than the short line reaches: the caret goes to its end, after the reference.
+  await showPage(page, h - 1)
+  await pressAtColumn(page, h - 1, prevEndColumn - 4, y)
+  expect(await pageOfHead(page)).toBe(h - 1)
+  await page.keyboard.press('ArrowDown')
+  await turnSettled(page)
+  expect(await pageOfHead(page)).toBe(h)
+  expect(await headNow(page)).toBe(shortEnd)
+})
+
+/** Page frame index (among the frames rendered) where the caret at the selection head is painted. */
+async function pageOfHead(page: Page) {
+  const head = await headNow(page)
+  const c = (await page.evaluate((pos) => window.__nvE2E.coordsAt(pos, -1), head))!
+  return page.evaluate(([x, y]) => {
+    for (const f of Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page'))) {
+      const b = f.getBoundingClientRect()
+      if (x >= b.left - 1 && x <= b.right + 1 && y >= b.top && y <= b.bottom) return Number(f.dataset.pageIndex)
+    }
+    return -1
+  }, [c.left, (c.top + c.bottom) / 2] as const)
+}
+
+/** Page frame index whose box holds client y (in the frames rendered), or -1. */
+async function pageOfPaintedY(page: Page, y: number) {
+  return page.evaluate((cy) => {
+    const ref = document.querySelector('[data-footnote-ref]')!.getBoundingClientRect()
+    const cx = (ref.left + ref.right) / 2
+    for (const f of Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page'))) {
+      const b = f.getBoundingClientRect()
+      if (cx >= b.left && cx <= b.right && cy >= b.top && cy <= b.bottom) return Number(f.dataset.pageIndex)
+    }
+    return -1
+  }, y)
+}

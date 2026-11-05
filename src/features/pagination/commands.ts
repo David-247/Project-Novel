@@ -1,12 +1,22 @@
 import { notifyCommandStateChanged, registerCommands, type Command } from '@/shared/commands'
 import { useStore } from '@/shared/store'
 import { PAGINATION_CONTROLS as C } from './controls'
-import { MAX_SCALE, MIN_SCALE, stepZoom, ZOOM_STEPS } from './placement'
+import { goToEdgeSpread, turnSpread } from './navigation'
+import { MAX_SCALE, MIN_SCALE, rowCountFor, stepZoom, ZOOM_STEPS } from './placement'
 
 const layout = () => useStore.getState().layout
 const setZoom = (z: Parameters<ReturnType<typeof useStore.getState>['layoutActions']['setZoom']>[0]) =>
   useStore.getState().layoutActions.setZoom(z)
 const pct = () => Math.round(layout().scale * 100)
+const navigation = () => useStore.getState().preferences.pageNavigation
+const setNavigation = (v: 'book' | 'scroll') => useStore.getState().preferencesActions.set('pageNavigation', v)
+const hasPages = () => layout().pageCount > 0
+const edgeKey = (l: ReturnType<typeof layout>) => {
+  const last = rowCountFor(l.pageCount, l.effectiveView) - 1
+  return `${l.visibleSpread.index <= 0}|${l.visibleSpread.index >= last}`
+}
+const atFirstSpread = () => layout().visibleSpread.index <= 0
+const atLastSpread = () => layout().visibleSpread.index >= rowCountFor(layout().pageCount, layout().effectiveView) - 1
 
 /** View menu: single page / spread, zoom (the status bar's controls, by the same ids where they exist). */
 export const PAGINATION_COMMANDS: readonly Command[] = [
@@ -27,6 +37,64 @@ export const PAGINATION_COMMANDS: readonly Command[] = [
     ribbon: { group: 'view.views', order: 20 },
     isChecked: () => useStore.getState().book.view === 'spread',
     run: () => useStore.getState().bookActions.setView('spread'),
+  },
+  // Navigation mode: an app preference (Settings > Page navigation), not per book.
+  {
+    id: 'view.bookNavigation',
+    label: 'Book',
+    description: 'Show one spread at a time and turn the pages like a book.',
+    menu: { id: 'view', group: 'navigation', order: 1 },
+    guard: 'none',
+    isChecked: () => navigation() === 'book',
+    run: () => setNavigation('book'),
+  },
+  {
+    id: 'view.scrollNavigation',
+    label: 'Continuous Scroll',
+    description: 'Show every page in one long column and scroll through them.',
+    menu: { id: 'view', group: 'navigation', order: 2 },
+    guard: 'none',
+    isChecked: () => navigation() === 'scroll',
+    run: () => setNavigation('scroll'),
+  },
+  // Spread navigation. No registry shortcut: PageUp / PageDown and Ctrl+Home / Ctrl+End (Cmd+Up /
+  // Cmd+Down on macOS) are the pagination view's own keys (they move the caret in the manuscript and
+  // turn the view from anywhere else), so a second binding here would run twice.
+  {
+    id: C.previousSpread.id,
+    label: 'Previous Spread',
+    description: 'Show the pages before these (Page Up in the manuscript).',
+    menu: { id: 'view', group: 'spreads', order: 5 },
+    guard: 'none',
+    isEnabled: () => hasPages() && !atFirstSpread(),
+    run: () => void turnSpread(-1),
+  },
+  {
+    id: C.nextSpread.id,
+    label: 'Next Spread',
+    description: 'Show the pages after these (Page Down in the manuscript).',
+    menu: { id: 'view', group: 'spreads', order: 6 },
+    guard: 'none',
+    isEnabled: () => hasPages() && !atLastSpread(),
+    run: () => void turnSpread(1),
+  },
+  {
+    id: 'view.firstSpread',
+    label: 'First Spread',
+    description: 'Show the first pages of the book.',
+    menu: { id: 'view', group: 'spreads', order: 7 },
+    guard: 'none',
+    isEnabled: () => hasPages() && !atFirstSpread(),
+    run: () => void goToEdgeSpread(-1),
+  },
+  {
+    id: 'view.lastSpread',
+    label: 'Last Spread',
+    description: 'Show the last pages of the book.',
+    menu: { id: 'view', group: 'spreads', order: 8 },
+    guard: 'none',
+    isEnabled: () => hasPages() && !atLastSpread(),
+    run: () => void goToEdgeSpread(1),
   },
   {
     id: C.zoomIn.id,
@@ -82,7 +150,17 @@ export const PAGINATION_COMMANDS: readonly Command[] = [
 export function registerPaginationCommands(): () => void {
   const off = registerCommands(PAGINATION_COMMANDS)
   const unsubscribe = useStore.subscribe((s, p) => {
-    if (s.book.view !== p.book.view || s.layout.zoom !== p.layout.zoom || s.layout.scale !== p.layout.scale || s.layout.pageCount !== p.layout.pageCount)
+    if (
+      s.book.view !== p.book.view ||
+      s.layout.zoom !== p.layout.zoom ||
+      s.layout.scale !== p.layout.scale ||
+      s.layout.pageCount !== p.layout.pageCount ||
+      s.layout.effectiveView !== p.layout.effectiveView ||
+      // Only the spread commands' enabled state depends on the spread: notify when it reaches or
+      // leaves an end, not on every turn (each notification re-renders the menus).
+      edgeKey(s.layout) !== edgeKey(p.layout) ||
+      s.preferences.pageNavigation !== p.preferences.pageNavigation
+    )
       notifyCommandStateChanged()
   })
   return () => {

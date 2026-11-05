@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { launch, openRecent, saveStatus, seedProject, waitForLayout, reveal } from './helpers'
+import { isBookMode, launch, openRecent, saveStatus, seedProject, showPage, waitForLayout, reveal } from './helpers'
 
 /**
  * Phase 2 acceptance, accessibility: WCAG 2.1 AA contrast measured on the rendered spread (computed
@@ -74,7 +74,8 @@ async function samples(page: Page): Promise<Sample[]> {
     const note = document.querySelector('.nv-frames .nv-fn-area')
     add('footnote text', note, note?.closest('.nv-page'))
     // Phase 2 controls on the toolbar and the status bar.
-    for (const id of ['book.trimSize', 'insert.menu', 'footnote.options', 'book.headerFooter', 'pagination.zoom', 'pagination.zoomIn'])
+    // Phase 3: Book mode's page-turn control, a paper tab on the desk (the enabled one; a disabled control is exempt).
+    for (const id of ['book.trimSize', 'insert.menu', 'footnote.options', 'book.headerFooter', 'pagination.zoom', 'pagination.zoomIn', 'pagination.nextSpread'])
       add(`control ${id}`, document.querySelector(`[data-control-id="${id}"]`))
     add('page indicator', document.querySelector('[data-testid="page-indicator"]'))
     return out
@@ -108,7 +109,15 @@ test('WCAG AA contrast on the rendered spread: four paper surfaces x OS light an
       await expect(page.locator('html')).toHaveAttribute('data-surface', resolved)
       // Let the colour transitions (if any) finish before reading computed colours.
       await page.evaluate(() => new Promise((r) => setTimeout(r, 350)))
+      // Book mode (the default) shows one spread: the first page is front matter (no running head),
+      // so also sample the next spread.
+      await showPage(page, 0)
       const got = await samples(page)
+      if (await isBookMode(page)) {
+        await showPage(page, 2)
+        got.push(...(await samples(page)))
+        await showPage(page, 0)
+      }
       const names = got.map((s) => s.what)
       for (const must of ['body text', 'chapter title', 'running head', 'page number', 'footnote text', 'page indicator', 'control book.trimSize'])
         expect(names, `${scheme}/${surface}: sampled ${must}`).toContain(must)

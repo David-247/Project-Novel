@@ -20,6 +20,10 @@ const baseURL = `http://127.0.0.1:${port}`
 // Serial (perf) projects: the perf specs, and the Phase 2 acceptance scenario, whose reflow budgets
 // (blocking on the shipping pairs) need a quiet CPU, not one shared with parallel functional tests.
 const PERF = /(perf|phase2-acceptance)\.spec\.ts$/
+// Page navigation modes (Phase 3): the default is Book (one spread, page turns). The suites about the
+// pages also run in continuous scroll (the Phase 2 view): projects *-scroll seed preferences.json with
+// pageNavigation 'scroll' (metadata, read by seedProjectNavigation in e2e/helpers.ts).
+const BOTH_MODES = /(pagination|footnotes|headers|page-turn)\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',
@@ -29,6 +33,8 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: desktop('Desktop Chrome'), testIgnore: PERF },
     { name: 'webkit', use: desktop('Desktop Safari'), testIgnore: PERF },
+    { name: 'chromium-scroll', use: desktop('Desktop Chrome'), testMatch: BOTH_MODES, testIgnore: PERF, metadata: { pageNavigation: 'scroll' } },
+    { name: 'webkit-scroll', use: desktop('Desktop Safari'), testMatch: BOTH_MODES, testIgnore: PERF, metadata: { pageNavigation: 'scroll' } },
     // Perf runs alone: only after both functional projects finished, and one browser at a time,
     // so no other test competes for the CPU while latency is measured. (If a functional test
     // fails, the perf projects are skipped; CI therefore runs them in a separate job with
@@ -39,7 +45,7 @@ export default defineConfig({
       // A budget miss must fail: no retry for perf.
       retries: 0,
       testMatch: PERF,
-      dependencies: ['chromium', 'webkit'],
+      dependencies: ['chromium', 'webkit', 'chromium-scroll', 'webkit-scroll'],
     },
     {
       name: 'perf-webkit',
