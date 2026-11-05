@@ -323,6 +323,59 @@ describe('footnote editor with Track Changes on (real inner / outer round trip)'
     expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
   })
 
+  /** Make the note view report an IME composition (as ProseMirror does between compositionstart / end). */
+  function composingFlag(view: View) {
+    let on = false
+    Object.defineProperty(view, 'composing', { configurable: true, get: () => on })
+    return (v: boolean) => (on = v)
+  }
+  const insertedText = (ed: Editor) => {
+    let s = ''
+    noteOf(ed).forEach((c) => {
+      if (c.marks.some((m) => m.type.name === 'insertion')) s += c.text ?? ''
+    })
+    return s
+  }
+  const innerMarked = (inner: View) => inner.dom.querySelector('.nv-ins') !== null
+
+  it('IME in the note: unmarked (no re-wrap) while composing; marked on compositionend; one undo step', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    act(() => void inner.dispatch(inner.state.tr.setSelection(TextSelection.atEnd(inner.state.doc))))
+    const composing = composingFlag(inner)
+    composing(true)
+    act(() => void inner.dispatch(inner.state.tr.insertText('k', 4).setMeta('composition', 7)))
+    act(() => void inner.dispatch(inner.state.tr.insertText('か', 4, 5).setMeta('composition', 7)))
+    expect(noteOf(ed).textContent).toBe('noteか')
+    expect(insertedText(ed)).toBe('') // deferred: nothing re-wraps the composing text
+    expect(innerMarked(inner)).toBe(false)
+    expect(getFootnoteEditing()).not.toBeNull()
+    composing(false)
+    act(() => void inner.dom.dispatchEvent(new CompositionEvent('compositionend', { data: 'か', bubbles: true })))
+    await act(() => new Promise((r) => setTimeout(r, 80)))
+    expect(insertedText(ed)).toBe('か')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true) // mirrored after the composition
+    expect(innerMarked(inner)).toBe(true)
+    act(() => void ed.commands.undo())
+    expect(noteOf(ed).textContent).toBe('note')
+  })
+
+  it("IME in the note: the composition's last change carries the mark", async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    const composing = composingFlag(inner)
+    composing(true)
+    act(() => void inner.dispatch(inner.state.tr.insertText('k', 4).setMeta('composition', 3)))
+    composing(false)
+    act(() => void inner.dispatch(inner.state.tr.insertText('漢字', 4, 5).setMeta('composition', 3)))
+    expect(insertedText(ed)).toBe('漢字')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+    act(() => void ed.commands.undo())
+    expect(noteOf(ed).textContent).toBe('note')
+  })
+
   it('Delete past deleted text acts on the character after it', async () => {
     act(() => useStore.getState().bookActions.setTrackChanges(true))
     const ed = mount([p(text('a'), fn('note'), text('b'))])

@@ -7,6 +7,7 @@ import {
   currentMarkupView,
   DELETION_MARK,
   isBlockHidden,
+  COMPOSING_META,
   MARKUP_VIEW_META,
   TRACKED_DELETE_ATTR,
   TRACKING_BLOCK_ATTRS,
@@ -52,6 +53,18 @@ interface TrackChangesStorage {
 /** `<html data-nv-markup>`: the CSS of every view (the manuscript, the footnote area and editor). */
 export function applyMarkupViewAttribute(view: MarkupView, root: HTMLElement = document.documentElement): void {
   if (root.dataset.nvMarkup !== view) root.dataset.nvMarkup = view
+}
+
+/** After compositionend, before marking what was composed (ProseMirror reads the last DOM change first). */
+export const COMPOSITION_FLUSH_MS = 30
+const flushers = new WeakMap<EditorView, () => void>()
+/**
+ * Marks text composed with an IME (left unmarked while composing) as inserted, in a transaction
+ * carrying the composition's id (one undo step with it). Call after compositionend, for the
+ * manuscript view; the footnote editor calls it for compositions in a note. No-op when nothing is pending.
+ */
+export function flushComposedText(view: EditorView): void {
+  flushers.get(view)?.()
 }
 
 let repaginate: ((positions: number[]) => void) | null = null
@@ -217,7 +230,8 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
   dispatchTransaction({ transaction, next }) {
     const storage = this.storage
     const view = this.editor.view
-    const composing = !!view && view.composing
+    // A composition in this view, or in a nested editor forwarding its steps (the footnote editor).
+    const composing = (!!view && view.composing) || transaction.getMeta(COMPOSING_META) === true
     let out = transaction
     if (shouldTrack(transaction) && this.options.isEnabled()) {
       out = trackTransaction(this.editor.state, transaction, this.options.getAuthor(), undefined, { composing, pending: storage.pending })
@@ -230,10 +244,14 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
       storage.pending = [...storage.pending, ...deferred]
       storage.composition = out.getMeta('composition')
     }
-    // The composition is over: the composed text gets its insertion mark in this same transaction.
-    if (!composing && storage.pending.length && !out.getMeta(TRACK_SKIP_META) && !out.getMeta('history$') && this.options.isEnabled()) {
+    // The composition is over and this is its last transaction (same composition id): the composed
+    // text gets its insertion mark here, in the composition's undo step. Any other transaction leaves
+    // it for flushComposedText (compositionend), which keeps the same id.
+    const last = storage.composition !== undefined && out.getMeta('composition') === storage.composition
+    if (!composing && last && storage.pending.length && !out.getMeta('history$') && this.options.isEnabled()) {
       markComposed(out, storage.pending, this.options.getAuthor())
       storage.pending = []
+      storage.composition = undefined
     }
     next(out)
   },
@@ -270,16 +288,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
             // has none, mark what was composed in a transaction of its own (merged into the same undo
             // step: adjacent and within the history's group delay).
             compositionend: (view) => {
-              setTimeout(() => {
-                const storage = this.storage
-                if (view.isDestroyed || view.composing || storage.pending.length === 0) return
-                const tr = view.state.tr
-                markComposed(tr, storage.pending, this.options.getAuthor())
-                storage.pending = []
-                // Same composition id: the history keeps it in the composition's undo step.
-                if (storage.composition !== undefined) tr.setMeta('composition', storage.composition)
-                if (tr.docChanged) view.dispatch(tr.setMeta(TRACK_SKIP_META, true))
-              }, 30)
+              setTimeout(() => flushComposedText(view), COMPOSITION_FLUSH_MS)
               return false
             },
           },
@@ -287,6 +296,17 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
           transformPasted: (slice) => cleanSlice(slice),
         },
         view: (view: EditorView) => {
+          flushers.set(view, () => {
+            const storage = this.storage
+            if (view.isDestroyed || view.composing || storage.pending.length === 0) return
+            const tr = view.state.tr
+            markComposed(tr, storage.pending, this.options.getAuthor())
+            // The composition's id: the history keeps the marking in the composition's undo step.
+            if (storage.composition !== undefined) tr.setMeta('composition', storage.composition)
+            storage.pending = []
+            storage.composition = undefined
+            if (tr.docChanged) view.dispatch(tr.setMeta(TRACK_SKIP_META, true))
+          })
           applyMarkupViewAttribute(currentMarkupView())
           const unsub = useStore.subscribe((s, prev) => {
             const v = s.trackChanges.markupView
@@ -296,7 +316,12 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
             view.dispatch(view.state.tr.setMeta(MARKUP_VIEW_META, v).setMeta('addToHistory', false))
             repaginate?.(changedBlockPositions(view.state.doc))
           })
-          return { destroy: unsub }
+          return {
+            destroy: () => {
+              unsub()
+              flushers.delete(view)
+            },
+          }
         },
       }),
     ]

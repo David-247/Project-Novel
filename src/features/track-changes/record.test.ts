@@ -301,6 +301,30 @@ describe('IME composition', () => {
     expect(show(ed.state.doc)).toBe('ab')
   })
 
+  it('an unrelated transaction before compositionend gets no mark; the flush keeps one undo step', async () => {
+    const ed = make([p(t('ab'))])
+    at(ed, 3)
+    const composing = composingFlag(ed)
+    composing(true)
+    ed.view.dispatch(ed.state.tr.insertText('漢字').setMeta('composition', 4))
+    composing(false)
+    // A click lands first (no composition meta): it must not carry the composition's mark.
+    at(ed, 1)
+    expect(show(ed.state.doc)).toBe('ab漢字')
+    ed.view.dom.dispatchEvent(new CompositionEvent('compositionend', { data: '漢字', bubbles: true }))
+    await new Promise((r) => setTimeout(r, 60))
+    expect(show(ed.state.doc)).toBe('ab{+漢字}')
+    undo(ed.state, ed.view.dispatch)
+    expect(show(ed.state.doc)).toBe('ab')
+    // The next composition is a fresh one (the id was cleared).
+    at(ed, 3)
+    composing(true)
+    ed.view.dispatch(ed.state.tr.insertText('か').setMeta('composition', 5))
+    composing(false)
+    ed.view.dispatch(ed.state.tr.insertText('かな', 3, 4).setMeta('composition', 5))
+    expect(show(ed.state.doc)).toBe('ab{+かな}')
+  })
+
   it('composing over untracked text deletes it and inserts after it', () => {
     const ed = make([p(t('ab'))])
     ed.view.dispatch(ed.state.tr.insertText('ア', 2, 3).setMeta('composition', 2))

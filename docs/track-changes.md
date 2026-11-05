@@ -101,8 +101,13 @@ insertion mark: wrapping the composing text node in a mark span mid-composition 
 composition in Safari. The extension keeps the unmarked ranges (mapped through every transaction) and
 counts them as your own insertion, so each composition update really replaces the previous one. When
 the composition ends, the ranges get their insertion mark: in ProseMirror's last transaction of the
-composition, or (when there is none) in a transaction on `compositionend` carrying the same
-`composition` meta, so the history keeps it in the composition's undo step.
+composition (only a transaction carrying the same `composition` meta; an unrelated one, such as a
+click, never takes the mark), or else in a transaction of its own after `compositionend`
+(`flushComposedText`) carrying that meta, so the history keeps it in the composition's undo step. The
+footnote editor forwards its compositions the same way: its steps carry `COMPOSING_META` while the note
+is composing and the note's composition id; it calls `flushComposedText` on the note's
+`compositionend`, and while composing it mirrors the manuscript back only for text differences, never
+for marks alone.
 
 **Footnote text.** The footnote editor forwards its steps into the manuscript transaction
 (`StepMap.offset`), so they go through the same dispatch hook: edits inside a note are recorded like

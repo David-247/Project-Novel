@@ -31,6 +31,13 @@ export const TRACKING_BLOCK_ATTRS: readonly string[] = [TRACKED_INSERT_ATTR, TRA
  */
 export const MARKUP_VIEW_META = 'nvMarkupView'
 
+/**
+ * Transaction meta `true`: the edit comes from an IME composition still in progress in another view
+ * (the footnote editor forwards its steps); the recorder then leaves inserted text unmarked, as for
+ * a composition in the manuscript view itself.
+ */
+export const COMPOSING_META = 'nvComposing'
+
 /** Deleted text is hidden (the final text is shown). */
 export const hidesDeletions = (view: MarkupView): boolean => view === 'simple' || view === 'none'
 /** Inserted text is hidden (the original text is shown). */

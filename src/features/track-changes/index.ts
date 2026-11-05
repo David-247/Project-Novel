@@ -12,7 +12,7 @@
 // rejectAll, acceptChangesInRange, rejectChangesInRange.
 // Pagination: setMarkupViewRepaginate(invalidatePaginationAt) in the composition root.
 // UI: TrackChangesButton (`review.track`) and MarkupViewMenu (`review.markup`), wrap in ToolbarItem.
-export { TrackChanges, trackChangesKey, setMarkupViewRepaginate, applyMarkupViewAttribute, changedBlockPositions, skipDeleted, TRACK_FAILED_NOTICE } from './extension'
+export { TrackChanges, trackChangesKey, setMarkupViewRepaginate, applyMarkupViewAttribute, changedBlockPositions, skipDeleted, TRACK_FAILED_NOTICE, flushComposedText, COMPOSITION_FLUSH_MS } from './extension'
 export type { TrackChangesOptions } from './extension'
 export { trackTransaction, cleanSlice, newChangeId, markComposed, TRACK_SKIP_META, TRACKED_META, TRACK_FAILED_META, DEFERRED_INSERT_META } from './record'
 export type { TrackOptions } from './record'

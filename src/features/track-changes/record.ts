@@ -316,7 +316,8 @@ export function markComposed(tr: Transaction, ranges: readonly (readonly [number
     tr.doc.nodesBetween(from, to, (n, pos) => {
       if (n.isInline && (n.isText || n.isLeaf) && !markOf(n, INSERTION_MARK) && !markOf(n, DELETION_MARK))
         marks.push([Math.max(from, pos), Math.min(to, pos + n.nodeSize)])
-      return !n.isInline
+      // Into blocks and into inline nodes with content (a footnote's text).
+      return !n.isText && !n.isLeaf
     })
     if (marks.length === 0) continue
     const mark = insertionMarkFor(tr.doc, from, to, ctx)
