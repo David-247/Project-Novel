@@ -66,7 +66,7 @@ book settings together with the text.
 - Pages are laid out with the fonts installed on your computer, so the same manuscript can paginate slightly
   differently on macOS and Windows. The automated cross-engine check uses a bundled test font to separate engine
   differences from font differences (see "End-to-end tests").
-- Export (PDF, DOCX), track changes, comments and the AI tutor are later phases.
+- Export (PDF, DOCX) and the AI tutor are later phases (track changes and comments came in Phase 3, below).
 
 ## Development
 
@@ -161,6 +161,36 @@ root.
 `<AppShell toolbar={...} editor={...} statusBar={...} />` from `@/features/app-shell` is a slot-based layout; other slices plug in via props.
 
 ### Project storage
+
+### Revision tools (Phase 3)
+
+Version 0.3.0 adds the tools for revising a draft: track changes, comments and re-writes, plus a Word-style menu bar
+and ribbon, Settings, and a Book view that turns pages like a book. Every control has a tooltip (hover, or focus it
+with the keyboard), and everything below works from the keyboard. Below, "Mod" is ⌘ on macOS and Ctrl on Windows.
+
+| Try | How | What to look for |
+| --- | --- | --- |
+| Menu bar and ribbon | macOS: the system menu bar. Windows: the menu bar in the window (Alt or F10 to reach it with the keyboard). The ribbon tabs are Home, Insert, Layout, Review and View. | Every command is in a menu, with its shortcut. In a narrow window, ribbon groups collapse into buttons and then into More. |
+| Settings | File > Settings… (macOS: Novel > Settings…), Mod+, | Author name and colour (used for changes and comments), page navigation (Book or Continuous Scroll), Reduce motion, and the paper and trim size for new projects. |
+| Book view (page turns) | The default. PageDown / PageUp, the arrows at the edges of the desk, a click or tap on the blank desk, a wheel or trackpad flick; View > Next / Previous / First / Last Spread | One spread at a time, turned like a book. When the caret moves off the spread (typing, arrow keys, Find, Next Change), the view turns with it. To use the Phase 2 continuous scroll instead, choose View > Continuous Scroll or change it in Settings. |
+| Go to page | Click the page indicator in the status bar ("Pages 12–13 of 384"), or Mod+Alt+G | Type a page number and press Enter. |
+| Track changes | Review > Track Changes (pen button), Mod+Shift+E, then edit | Inserted text is underlined, deleted text struck through, formatting changes get a dotted rule, and changed paragraphs a bar in the margin. The status bar counts the changes. Review > Markup switches between All Markup, Simple Markup, No Markup and Original. |
+| Accept and reject | Click a change (or Alt+Enter) for its popover with Accept / Reject. Or use the Review tab: Accept / Reject (with Accept / Reject All and All by an author in their menus), Previous / Next Change (Mod+Alt+↑ / ↓), Accept and next (Mod+Alt+A), Reject and next (Mod+Alt+R) | Each accept or reject is one undo step. Accept All and Reject All ask first when there are more than 50 changes. |
+| Comments | Select some text, then Review > New Comment, Mod+Alt+M. Mod+Enter adds it. | The text is highlighted and a card appears in the margin, level with its line. A card has Reply, Resolve / Reopen, Go to text and Delete, and each of these can be undone. Use Previous / Next Comment to move between comments, and Show Resolved to see resolved ones again. In a narrow window, the comments open in a drawer. |
+| Re-write a passage | Select one or more paragraphs (at most one chapter), then Review > Re-write Passage…, Mod+Alt+W | The original and your revision appear side by side like facing pages, with removed words tinted on the left and added words on the right. New Version starts another version. The tabs switch between versions, and Mod+Alt+K flips the sides. Close keeps the draft, and the passage stays locked (a stitched bar in the margin). |
+| Keep or discard | In the re-write: Keep This Version, Keep Original, or Discard | Keep This Version puts that version into the manuscript (as tracked changes while tracking is on). One Undo goes back to the original text with the re-write open again and every version kept. Review > Re-writes… lists open and resolved re-writes, and a resolved one can be reopened. |
+
+**Save and reopen.** Changes, comments (`comments.json`) and re-writes (`rewrites.json`) survive Save and reopening
+the project. Crash recovery restores the ones that were not saved yet, together with the text.
+
+**Known limitations (Phase 3).**
+
+- A pending paragraph join or split, while it is still tracked, shows as two paragraphs in No Markup and Original
+  until the change is accepted or rejected (decision 5a4f5103; see [docs/track-changes.md](docs/track-changes.md)).
+- There are no context menus (right-click). Every action is in the menu bar, the ribbon or a shortcut.
+- Accepting or rejecting a tracked list item (an inserted or deleted bullet) can leave an empty list item behind.
+  Delete it by hand.
+- Revision marks are not exported, and there are no AI suggestions or collaboration. These are later phases.
 
 Projects are plain folders (`project.json`, `manuscript.json`, `index.sqlite`); see [docs/project-format.md](docs/project-format.md).
 The storage slice talks to the editor only through the `DocumentProvider` contract in `src/shared/document.ts`.
