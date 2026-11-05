@@ -1,7 +1,7 @@
 import * as DM from '@radix-ui/react-dropdown-menu'
 import * as RToolbar from '@radix-ui/react-toolbar'
 import { useMemo, useRef } from 'react'
-import type { ComponentType, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { getEditor } from '@/features/editor'
 import {
   buildMenuModel,
@@ -26,11 +26,9 @@ import { cn, detectPlatform, focusRing, formatShortcut, Tooltip } from '@/shared
  * returns focus to the trigger.
  */
 
+/** One group's entries, under the group's name when the menu holds several (the overflow). */
 export interface MenuSection {
   title: string
-  icon?: ComponentType
-  /** Id of the section's submenu item (layout 'submenus'). */
-  controlId?: string
   entries: RibbonMenuEntry[]
 }
 
@@ -110,14 +108,12 @@ export interface RegistryMenuProps {
   label: string
   trigger: ReactNode
   sections: MenuSection[]
-  /** 'submenus': one submenu per section (the overflow); 'flat': sections one after another. */
-  layout?: 'flat' | 'submenus'
   align?: 'start' | 'end'
   className?: string
 }
 
 /** A toolbar item (Radix roving focus) that opens a registry dropdown. */
-export function RegistryMenu({ controlId, label, trigger, sections, layout = 'flat', align = 'start', className }: RegistryMenuProps) {
+export function RegistryMenu({ controlId, label, trigger, sections, align = 'start', className }: RegistryMenuProps) {
   const commands = useCommands()
   useCommandStateVersion()
   const byId = useMemo(() => new Map(commands.map((c) => [c.id, c])), [commands])
@@ -228,37 +224,13 @@ export function RegistryMenu({ controlId, label, trigger, sections, layout = 'fl
             if (isCommandEnabled(c)) c.run()
           }}
         >
-          {layout === 'submenus'
-            ? sections.map((s) => {
-                const Icon = s.icon
-                return (
-                  <DM.Sub key={s.title}>
-                    <Tooltip side="right" controlId={s.controlId}>
-                    <DM.SubTrigger className={menuItemClass} data-control-id={s.controlId}>
-                      {Icon ? (
-                        <span className="absolute left-1.5 inline-flex size-4 items-center text-text-muted" aria-hidden="true">
-                          <Icon />
-                        </span>
-                      ) : null}
-                      <span className="truncate">{s.title}</span>
-                      <SubChevron />
-                    </DM.SubTrigger>
-                    </Tooltip>
-                    <DM.Portal>
-                      <DM.SubContent className={contentClass} data-nv-menu-content="" sideOffset={2} collisionPadding={8}>
-                        {entries(s)}
-                      </DM.SubContent>
-                    </DM.Portal>
-                  </DM.Sub>
-                )
-              })
-            : sections.map((s, si) => (
-                <DM.Group key={s.title} aria-label={s.title}>
-                  {si > 0 ? <DM.Separator className="my-1 h-px bg-border" /> : null}
-                  {sections.length > 1 ? <DM.Label className="px-2.5 pb-0.5 pt-1.5 text-ui-xs font-semibold text-text-muted">{s.title}</DM.Label> : null}
-                  {entries(s)}
-                </DM.Group>
-              ))}
+          {sections.map((s, si) => (
+            <DM.Group key={s.title} aria-label={s.title}>
+              {si > 0 ? <DM.Separator className="my-1 h-px bg-border" /> : null}
+              {sections.length > 1 ? <DM.Label className="px-2.5 pb-0.5 pt-1.5 text-ui-xs font-semibold text-text-muted">{s.title}</DM.Label> : null}
+              {entries(s)}
+            </DM.Group>
+          ))}
         </DM.Content>
       </DM.Portal>
     </DM.Root>

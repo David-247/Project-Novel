@@ -206,7 +206,21 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     menu: [cmd('find.open')],
   },
   // ---- Insert ----
-  { id: 'insert.breaks', tab: 'insert', buttons: 'before', label: 'Breaks', order: 10, priority: 90, icon: icons.breaks, Content: () => item(<InsertMenu label="Break Options" />) },
+  {
+    id: 'insert.breaks',
+    tab: 'insert',
+    label: 'Breaks',
+    order: 10,
+    priority: 90,
+    icon: icons.breaks,
+    buttons: 'before',
+    // Compact: only the Break Options menu, which also holds the three breaks, plus "Chapters start on"
+    // and the ornament, which a dropdown of registry commands could not offer. So it never collapses.
+    hasCompact: true,
+    compactButtons: false,
+    collapsible: false,
+    Content: () => item(<InsertMenu label="Break Options" />),
+  },
   { id: 'insert.footnotes', tab: 'insert', buttons: 'before', label: 'Footnotes', order: 20, priority: 80, icon: icons.footnote, Content: () => item(<FootnoteOptionsButton />), menu: [cmd('footnote.options')] },
   { id: 'insert.comments', tab: 'insert', label: 'Comments', order: 30, priority: 70, icon: icons.comment },
   // ---- Layout ----

@@ -44,6 +44,8 @@ export interface RibbonGroupSpec {
   /** The slice's own controls. Each focusable control must be a Radix toolbar item (`ToolbarItem`). */
   Content?: ComponentType<{ size: RibbonGroupSize }>
   hasCompact?: boolean
+  /** false: in compact size the group shows only its `Content` (which offers the placed commands too). */
+  compactButtons?: boolean
   /** Where the commands placed in the group go: after `Content` (default) or before it. */
   buttons?: 'before' | 'after'
   /** false: never shown as a dropdown (only moved into "More" at the narrowest widths). Default true. */

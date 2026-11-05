@@ -1,5 +1,5 @@
 import * as RToolbar from '@radix-ui/react-toolbar'
-import { Fragment, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { getEditor } from '@/features/editor'
 import { isCommandEnabled, useCommands, useCommandStateVersion, type Command } from '@/shared/commands'
@@ -52,9 +52,15 @@ function groupEntries(g: RibbonGroupSpec, placed: Placed): RibbonMenuEntry[] {
 
 const buttons = (g: RibbonGroupSpec, placed: Placed) => (placed.get(g.id) ?? []).filter((c) => c.ribbon?.display !== 'menu')
 
-/** A registry command as a labelled ribbon button (pressed when the command is checked). */
+/**
+ * A registry command as a labelled ribbon button (pressed when the command is checked). Enabled and
+ * checked are read on every render; renders follow the registry's debounced state signal (at most
+ * COMMAND_STATE_DEBOUNCE_MS late after a change made elsewhere, e.g. a shortcut), and the button
+ * re-renders at once after its own click.
+ */
 function CommandButton({ command }: { command: Command }) {
   useCommandStateVersion()
+  const [, clicked] = useReducer((n: number) => n + 1, 0)
   const enabled = isCommandEnabled(command)
   let checked: boolean | undefined
   try {
@@ -76,6 +82,7 @@ function CommandButton({ command }: { command: Command }) {
           }}
           onClick={() => {
             if (isCommandEnabled(command)) command.run()
+            clicked()
           }}
           className={cn(
             controlBase,
@@ -94,7 +101,9 @@ function GroupView({ group, state, placed }: { group: RibbonGroupSpec; state: Gr
   const shown = state === 'full' || state === 'compact'
   const Content = group.Content
   const Icon = group.icon
-  const ownButtons = buttons(group, placed).map((c) => <CommandButton key={c.id} command={c} />)
+  // In compact size a group may leave its command buttons out (its own control then offers them).
+  const ownButtons =
+    state === 'compact' && group.compactButtons === false ? [] : buttons(group, placed).map((c) => <CommandButton key={c.id} command={c} />)
   return (
     <div
       role="group"
@@ -142,10 +151,10 @@ function GroupView({ group, state, placed }: { group: RibbonGroupSpec; state: Gr
   )
 }
 
-/** Width of a collapsed group button: icon, label and chevron (close enough to decide what to collapse). */
 /** Narrower gaps between groups than the shared toolbar separator (room for one more group). */
 const SEPARATOR = { marginInline: 4 }
 
+/** Width of a collapsed group button: icon, label and chevron (close enough to decide what to collapse). */
 const collapsedWidthEstimate = (label: string) => 52 + label.length * 7.5
 
 /** Groups of a tab that have something to show. */
@@ -219,12 +228,7 @@ function TabPanel({ tab, active, groups, placed }: { tab: RibbonTabId; active: b
   const state = steps[Math.min(step, steps.length - 1)] ?? {}
   const visible = groups.filter((g) => state[g.id] !== 'overflow')
   const overflowed = groups.filter((g) => state[g.id] === 'overflow')
-  const more: MenuSection[] = overflowed.map((g) => ({
-    title: g.label,
-    icon: g.icon,
-    controlId: ribbonGroupControlId(g.id),
-    entries: groupEntries(g, placed),
-  }))
+  const more: MenuSection[] = overflowed.map((g) => ({ title: g.label, entries: groupEntries(g, placed) }))
 
   return (
     <div
