@@ -11,7 +11,7 @@ import {
   serializeBook,
 } from './book-file'
 import { openProjectIndex, recordRevision, type ProjectIndex } from './db'
-import { askUnsavedChanges, showError } from './dialogs'
+import { askUnsavedChanges, showError, showNotice } from './dialogs'
 import {
   baseName,
   INDEX_FILE,
@@ -37,6 +37,7 @@ import {
   rememberRecentRaw,
   restoreProjectRoot,
   listDir,
+  listSubdirs,
   writeFileAtomic,
 } from './ipc'
 import { flagMissing, parseRecentFile, samePath } from './recent'
@@ -661,8 +662,24 @@ export function closeProjectInteractive(): Promise<boolean> {
   })
 }
 
-/** Files Save a Copy writes from memory (the index is secondary data and is rebuilt on open). */
-const COPY_SKIPPED = new Set([PROJECT_FILE, MANUSCRIPT_FILE, BOOK_FILE, INDEX_FILE])
+/** One file Save a Copy writes: its name at the top of the project folder, and its text. */
+export interface CopyDocument {
+  name: string
+  text: string
+}
+
+/**
+ * INTEGRATION HOOK (Save a Copy, side files): the documents the copy takes from memory, as they are
+ * in the window now (unsaved changes included). Disk copies of these names are never used. In-memory
+ * side files of other features (comments.json, rewrites.json: the storage side-files registry) are
+ * added HERE, so the copy gets their current state; project.json is written last, by the caller.
+ */
+function inMemoryCopyDocuments(p: DocumentProvider): CopyDocument[] {
+  return [
+    { name: MANUSCRIPT_FILE, text: serializeManuscript(p.getDocJSON()) },
+    { name: BOOK_FILE, text: serializeBook(currentBookSettings()) },
+  ]
+}
 
 /**
  * File > Save a Copy…: write the open project, as it is now (unsaved changes included), to another
@@ -679,40 +696,48 @@ async function saveProjectCopyUnguarded(): Promise<boolean> {
   const source = getCurrentProjectPath()
   const meta = currentMeta
   if (!source || !meta) return false
+  let skipped: string[] = []
+  let written = false
   try {
     const p = provider()
-    const manuscript = serializeManuscript(p.getDocJSON())
-    const book = serializeBook(currentBookSettings())
-    return await withWriteLock(async () => {
+    const docs = inMemoryCopyDocuments(p)
+    written = await withWriteLock(async () => {
       // Read before the copy's folder is granted (file commands reach only the granted root).
-      const extras: [string, string][] = []
+      const fromMemory = new Set(docs.map((d) => d.name))
+      const extras: CopyDocument[] = []
       for (const name of await listDir(source)) {
-        if (COPY_SKIPPED.has(name) || name.startsWith('.')) continue
+        // The index is secondary data (a new one is made on open); dot files are app internals.
+        if (fromMemory.has(name) || name === PROJECT_FILE || name === INDEX_FILE || name.startsWith('.')) continue
         try {
-          extras.push([name, await readTextFile(joinPath(source, name), name)])
+          extras.push({ name, text: await readTextFile(joinPath(source, name), name) })
         } catch (e) {
-          console.warn(`Save a Copy: ${name} was not copied:`, e)
+          console.warn(`Save a Copy: ${name} could not be read:`, e)
+          skipped.push(name)
         }
       }
+      // Folders are not copied (.recovery holds crash backups of this project only).
+      skipped = [...skipped, ...(await listSubdirs(source)).filter((d) => d !== RECOVERY_DIR).map((d) => `${d}/`)]
       const target = await pickProjectFolder('Choose a folder for the copy')
       if (!target) return false
       try {
         if (samePath(target, source)) {
           throw new ProjectError('already-exists', 'This is the open project. Choose another folder for the copy.')
         }
-        for (const file of [PROJECT_FILE, MANUSCRIPT_FILE, BOOK_FILE, INDEX_FILE]) {
-          if (await pathExists(joinPath(target, file))) {
-            throw new ProjectError(
-              'already-exists',
-              `This folder already contains ${file}, and Novel will not overwrite it. Choose an empty folder for the copy.`,
-            )
-          }
+        const toWrite = [...docs, ...extras]
+        // Nothing in the chosen folder is ever overwritten.
+        const taken: string[] = []
+        for (const name of [PROJECT_FILE, INDEX_FILE, ...toWrite.map((d) => d.name)]) {
+          if (await pathExists(joinPath(target, name))) taken.push(name)
         }
-        await writeFileAtomic(joinPath(target, MANUSCRIPT_FILE), manuscript, MANUSCRIPT_FILE)
-        await writeFileAtomic(joinPath(target, BOOK_FILE), book, BOOK_FILE)
-        for (const [name, text] of extras) await writeFileAtomic(joinPath(target, name), text, name)
-        const now = new Date().toISOString()
-        const copy: ProjectMeta = { ...meta, id: newProjectMeta(meta.title).id, updatedAt: now }
+        if (taken.length) {
+          throw new ProjectError(
+            'already-exists',
+            `This folder already contains ${taken.join(', ')}, and Novel will not overwrite ${taken.length === 1 ? 'it' : 'them'}. ` +
+              'Choose an empty folder for the copy.',
+          )
+        }
+        for (const d of toWrite) await writeFileAtomic(joinPath(target, d.name), d.text, d.name)
+        const copy: ProjectMeta = { ...meta, id: newProjectMeta(meta.title).id, updatedAt: new Date().toISOString() }
         await writeFileAtomic(joinPath(target, PROJECT_FILE), serializeProjectMeta(copy), PROJECT_FILE)
         return true
       } finally {
@@ -724,6 +749,14 @@ async function saveProjectCopyUnguarded(): Promise<boolean> {
     await showError('Could not save a copy', e)
     return false
   }
+  if (written && skipped.length) {
+    await showNotice(
+      'Copy saved',
+      `The copy was saved, but these were not copied: ${skipped.join(', ')}. ` +
+        'Novel copies the files at the top of the project folder that it can read; copy the rest yourself if you need them.',
+    )
+  }
+  return written
 }
 
 // ---- Crash recovery ---------------------------------------------------------

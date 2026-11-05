@@ -17,6 +17,7 @@ export const COMMANDS = {
   exitApp: 'storage_exit_app',
   probeRecentRecovery: 'storage_probe_recent_recovery',
   listDir: 'storage_list_dir',
+  listSubdirs: 'storage_list_subdirs',
 } as const
 
 /**
@@ -165,6 +166,15 @@ export async function removeFile(path: string, fileLabel = path): Promise<boolea
 export async function listDir(path: string, fileLabel = path): Promise<string[]> {
   try {
     return await invoke<string[]>(COMMANDS.listDir, { path })
+  } catch (e) {
+    throw toProjectError(e, fileLabel)
+  }
+}
+
+/** Names of the folders directly inside a folder of the project root (none if it does not exist). */
+export async function listSubdirs(path: string, fileLabel = path): Promise<string[]> {
+  try {
+    return await invoke<string[]>(COMMANDS.listSubdirs, { path })
   } catch (e) {
     throw toProjectError(e, fileLabel)
   }

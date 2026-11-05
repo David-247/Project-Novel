@@ -1,13 +1,13 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getEditor } from '@/features/editor'
 import {
   getCommands,
   menuBarKind,
   nativeMenuSnapshot,
-  runCommand,
+  runFromNativeMenu,
   subscribeCommands,
   subscribeCommandState,
-  wasJustPressed,
 } from '@/shared/commands'
 
 /** Event Rust sends with the id of the chosen native menu item (src-tauri/src/menu.rs). */
@@ -46,7 +46,7 @@ export function startNativeMenu(opts: { force?: boolean } = {}): () => void {
   const offState = subscribeCommandState(send)
   let unlisten: (() => void) | null = null
   listen<string>(MENU_COMMAND_EVENT, (e) => {
-    if (!wasJustPressed(e.payload)) runCommand(e.payload)
+    runFromNativeMenu(e.payload, getEditor()?.view.dom)
   })
     .then((un) => (stopped ? un() : (unlisten = un)))
     .catch((e) => console.warn('Native menu events unavailable:', e))

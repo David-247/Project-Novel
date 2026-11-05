@@ -127,6 +127,9 @@ fn predefined<R: Runtime>(app: &AppHandle<R>, name: &str) -> tauri::Result<Optio
         "copy" => PredefinedMenuItem::copy(app, None)?,
         "paste" => PredefinedMenuItem::paste(app, None)?,
         "selectAll" => PredefinedMenuItem::select_all(app, None)?,
+        "minimize" => PredefinedMenuItem::minimize(app, None)?,
+        // performClose: emits CloseRequested, so the frontend's unsaved-changes guard runs.
+        "closeWindow" => PredefinedMenuItem::close_window(app, None)?,
         _ => return Ok(None),
     }))
 }
@@ -182,7 +185,7 @@ fn build<R: Runtime>(app: &AppHandle<R>, s: &Snapshot, handles: &mut HashMap<Str
 }
 
 /// The macOS menu before the frontend sent its first snapshot: the app menu with Quit (so the
-/// unsaved-changes flow is reachable at once) and the OS Edit items.
+/// unsaved-changes flow is reachable at once), the OS Edit items and the Window menu.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn initial_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit Novel", true, Some("CmdOrCtrl+Q"))?;
@@ -211,7 +214,17 @@ pub fn initial_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::select_all(app, None)?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit])
+    let window = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+    Menu::with_items(app, &[&app_menu, &edit, &window])
 }
 
 /// Set the native menu from the registry snapshot. Same structure as last time: only enabled /
@@ -292,6 +305,16 @@ mod tests {
         assert_eq!(shape_key(&a), shape_key(&toggled));
         let relabelled: Snapshot = serde_json::from_str(&SNAPSHOT.replace(r#""label":"Book""#, r#""label":"Other""#)).unwrap();
         assert_ne!(shape_key(&a), shape_key(&relabelled));
+    }
+
+    #[test]
+    fn parses_the_window_menu_items() {
+        let s: Snapshot = serde_json::from_str(
+            r#"{"menus":[{"id":"window","label":"Window","items":[{"kind":"predefined","name":"minimize"},{"kind":"separator"},{"kind":"predefined","name":"closeWindow"}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(s.menus[0].items[2], Node::Predefined { name: "closeWindow".into() });
+        assert!(item_states(&s).is_empty());
     }
 
     #[test]

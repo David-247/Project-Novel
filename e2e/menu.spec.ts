@@ -191,7 +191,7 @@ test('the native menu is the same registry: snapshot, and menu://command runs th
   await page.keyboard.press('ControlOrMeta+a')
   type Node = { kind: string; id?: string; label?: string; accelerator?: string; checked?: boolean; items?: Node[] }
   const snapshot = async () => (await page.evaluate(() => window.__nvE2E.nativeMenu())) as { menus: { id: string; items: Node[] }[] } | null
-  await expect.poll(async () => (await snapshot())?.menus.map((m) => m.id)).toEqual(['app', 'file', 'edit', 'view', 'insert', 'format', 'help'])
+  await expect.poll(async () => (await snapshot())?.menus.map((m) => m.id)).toEqual(['app', 'file', 'edit', 'view', 'insert', 'format', 'window', 'help'])
   const flat = (nodes: Node[]): Node[] => nodes.flatMap((n) => (n.items ? flat(n.items) : [n]))
   const format = (await snapshot())!.menus.find((m) => m.id === 'format')!
   expect(flat(format.items).find((n) => n.id === 'toolbar.bold')).toMatchObject({ accelerator: 'CmdOrCtrl+B', checked: false })

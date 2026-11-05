@@ -93,6 +93,7 @@ export const HANDLED_COMMANDS = [
   'storage_exit_app',
   'storage_probe_recent_recovery',
   'storage_list_dir',
+  'storage_list_subdirs',
   'list_system_fonts',
   'plugin:dialog|message',
   'plugin:sql|load',
@@ -364,6 +365,15 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
         return [...state.files.keys()]
           .filter((f) => parentOf(f) === c)
           .map((f) => f.slice(c.length + 1))
+          .sort()
+      }
+
+      case 'storage_list_subdirs': {
+        const c = confined(path, false)
+        if (state.files.has(c)) throw { kind: 'invalid_path', message: `Not a folder: ${path}` }
+        return [...state.dirs]
+          .filter((d) => d !== c && parentOf(d) === c)
+          .map((d) => d.slice(c.length + 1))
           .sort()
       }
 

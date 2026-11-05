@@ -395,6 +395,15 @@ pub fn remove_file_in(root: &Path, path: &str) -> Result<bool> {
 /// (sorted; subfolders and symlinks are skipped). A folder that does not exist
 /// has no files.
 pub fn list_dir_in(root: &Path, path: &str) -> Result<Vec<String>> {
+    list_entries_in(root, path, false)
+}
+
+/// Names of the folders directly inside `path` (none if it does not exist); same rules as list_dir_in.
+pub fn list_subdirs_in(root: &Path, path: &str) -> Result<Vec<String>> {
+    list_entries_in(root, path, true)
+}
+
+fn list_entries_in(root: &Path, path: &str, dirs: bool) -> Result<Vec<String>> {
     let dir = match resolve_for_read(root, path) {
         Ok(d) => d,
         Err(e) if e.kind == "not_found" => return Ok(Vec::new()),
@@ -406,8 +415,9 @@ pub fn list_dir_in(root: &Path, path: &str) -> Result<Vec<String>> {
     let mut names = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|e| StorageError::io(&dir, e))? {
         let entry = entry.map_err(|e| StorageError::io(&dir, e))?;
-        let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
-        if let (true, Some(name)) = (is_file, entry.file_name().to_str()) {
+        // Symlinks are neither (file_type does not follow them).
+        let wanted = entry.file_type().map(|t| if dirs { t.is_dir() } else { t.is_file() }).unwrap_or(false);
+        if let (true, Some(name)) = (wanted, entry.file_name().to_str()) {
             names.push(name.to_string());
         }
     }
@@ -421,6 +431,13 @@ pub fn list_dir_in(root: &Path, path: &str) -> Result<Vec<String>> {
 pub fn storage_list_dir(state: State<'_, ProjectRoot>, path: String) -> Result<Vec<String>> {
     let root = current_root(&state)?;
     list_dir_in(&root, &path)
+}
+
+/// List the folders directly inside a folder of the open project (Save a Copy reports them).
+#[tauri::command]
+pub fn storage_list_subdirs(state: State<'_, ProjectRoot>, path: String) -> Result<Vec<String>> {
+    let root = current_root(&state)?;
+    list_subdirs_in(&root, &path)
 }
 
 /// Create a subfolder (e.g. `.recovery`) inside the open project folder if needed.
@@ -989,6 +1006,9 @@ mod tests {
             vec!["manuscript.json", "unrestored-a.json", "unrestored-b.json"]
         );
         assert!(list_dir_in(&root, &s(root.join("missing"))).unwrap().is_empty());
+        assert_eq!(list_subdirs_in(&root, &s(root.join(".recovery"))).unwrap(), vec!["sub"]);
+        assert_eq!(list_subdirs_in(&root, &s(root.clone())).unwrap(), vec![".recovery"]);
+        assert_eq!(list_subdirs_in(&root, &s(base.clone())).unwrap_err().kind, "outside_project");
         assert_eq!(list_dir_in(&root, &s(base.clone())).unwrap_err().kind, "outside_project");
         assert_eq!(
             list_dir_in(&root, &s(root.join("..").join("project").join(".."))).unwrap_err().kind,

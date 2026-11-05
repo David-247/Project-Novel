@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/core'
 import { STYLE_IDS } from '@/shared/book'
 import { notifyCommandStateChanged, registerCommands, type Command } from '@/shared/commands'
 import { useStore } from '@/shared/store'
+import { detectPlatform, type Platform } from '@/shared/ui'
 import { getEditor, subscribeDocLoad, subscribeEditor } from './controller'
 import { INSERT_ITEMS } from './breaks/controls'
 import { FIND_CONTROLS } from './find/controls'
@@ -37,6 +38,23 @@ function focusedTextField(): HTMLInputElement | HTMLTextAreaElement | HTMLElemen
   if (el instanceof HTMLTextAreaElement) return el
   if (el instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color'].includes(el.type)) return el
   return el.isContentEditable ? el : null
+}
+
+/** A nested ProseMirror editor (the footnote popover): its Undo is the book's history, as in its keymap. */
+const isNestedEditor = (el: HTMLElement) => el.isContentEditable && !!el.closest('.ProseMirror')
+
+function historyEnabled(cmd: 'undo' | 'redo'): boolean {
+  const field = focusedTextField()
+  if (field && !isNestedEditor(field)) return true
+  return can() && getEditor()!.can()[cmd]()
+}
+
+/** Undo / Redo: the focused text field's own history, else the manuscript's (footnote notes included). */
+function runHistory(cmd: 'undo' | 'redo'): void {
+  const field = focusedTextField()
+  if (field && !isNestedEditor(field)) document.execCommand(cmd)
+  else if (field) getEditor()?.commands[cmd]() // focus stays in the note
+  else ready()?.chain().focus()[cmd]().run()
 }
 
 /** Insert text from the system clipboard into the manuscript (Paste / Paste as Plain Text from a menu). */
@@ -106,7 +124,7 @@ const ALIGN: { key: ToolbarControlKey; value: 'left' | 'center' | 'right' | 'jus
 ]
 
 /** The fixed editor commands (style and font-size lists are added by registerEditorCommands). */
-export function editorCommands(): Command[] {
+export function editorCommands(platform: Platform = detectPlatform()): Command[] {
   const edit = (group: string, order: number): Command['menu'] => ({ id: 'edit', group, order })
   const insert = INSERT_ITEMS.map((item, i): Command => {
     const labels: Record<string, string> = {
@@ -136,11 +154,8 @@ export function editorCommands(): Command[] {
       description: 'Take back your last change.',
       shortcut: HISTORY_CONTROLS.undo.shortcut,
       menu: edit('history', 10),
-      isEnabled: () => !!focusedTextField() || (can() && getEditor()!.can().undo()),
-      run: () => {
-        if (focusedTextField()) document.execCommand('undo')
-        else ready()?.chain().focus().undo().run()
-      },
+      isEnabled: () => historyEnabled('undo'),
+      run: () => runHistory('undo'),
     },
     {
       id: HISTORY_CONTROLS.redo.id,
@@ -148,11 +163,8 @@ export function editorCommands(): Command[] {
       description: 'Put back the change you just undid.',
       shortcut: HISTORY_CONTROLS.redo.shortcut[0],
       menu: edit('history', 20),
-      isEnabled: () => !!focusedTextField() || (can() && getEditor()!.can().redo()),
-      run: () => {
-        if (focusedTextField()) document.execCommand('redo')
-        else ready()?.chain().focus().redo().run()
-      },
+      isEnabled: () => historyEnabled('redo'),
+      run: () => runHistory('redo'),
     },
     {
       id: 'edit.cut',
@@ -190,7 +202,9 @@ export function editorCommands(): Command[] {
       label: 'Paste as Plain Text',
       description: 'Insert the clipboard text at the cursor without its formatting.',
       shortcut: 'Mod-Shift-v',
-      nativeShortcut: true,
+      // Chromium/WebView2 paste plain text on Ctrl+Shift+V themselves; WebKit has no such key, so on
+      // macOS the registry runs it (and the native menu item, when the webview declined the press).
+      nativeShortcut: platform !== 'mac',
       menu: edit('clipboard', 40),
       isEnabled: can,
       run: () => void pasteFromClipboard(true),

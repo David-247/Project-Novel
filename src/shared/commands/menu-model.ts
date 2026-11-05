@@ -12,7 +12,17 @@ export type MenuNode =
   /** An OS-provided item of the native macOS menu (Services, Hide, the clipboard items). */
   | { kind: 'predefined'; name: PredefinedItem }
 
-export type PredefinedItem = 'services' | 'hide' | 'hideOthers' | 'showAll' | 'cut' | 'copy' | 'paste' | 'selectAll'
+export type PredefinedItem =
+  | 'services'
+  | 'hide'
+  | 'hideOthers'
+  | 'showAll'
+  | 'cut'
+  | 'copy'
+  | 'paste'
+  | 'selectAll'
+  | 'minimize'
+  | 'closeWindow'
 
 export interface MenuModel {
   id: MenuId
@@ -147,7 +157,21 @@ export type NativeMenuNode =
   | { kind: 'predefined'; name: PredefinedItem }
 
 export interface NativeMenuSnapshot {
-  menus: { id: MenuId; label: string; items: NativeMenuNode[] }[]
+  menus: { id: MenuId | 'window'; label: string; items: NativeMenuNode[] }[]
+}
+
+/**
+ * The macOS Window menu (platform convention): Minimize (Cmd+M) and Close Window (Cmd+W). Close
+ * Window asks the window to close, which runs the app's close-requested unsaved-changes guard.
+ */
+const MAC_WINDOW_MENU: NativeMenuSnapshot['menus'][number] = {
+  id: 'window',
+  label: 'Window',
+  items: [
+    { kind: 'predefined', name: 'minimize' },
+    { kind: 'separator' },
+    { kind: 'predefined', name: 'closeWindow' },
+  ],
 }
 
 const ACCEL_KEYS: Record<string, string> = {
@@ -203,7 +227,13 @@ function safe(f: () => boolean): boolean {
 
 /** The macOS menu as plain data with the current enabled/checked state. */
 export function nativeMenuSnapshot(commands: readonly Command[]): NativeMenuSnapshot {
-  return {
-    menus: buildMenuModel(commands, 'mac-native').map((m) => ({ id: m.id, label: m.label, items: nativeNodes(m.children) })),
-  }
+  const menus: NativeMenuSnapshot['menus'] = buildMenuModel(commands, 'mac-native').map((m) => ({
+    id: m.id,
+    label: m.label,
+    items: nativeNodes(m.children),
+  }))
+  // Window sits just before Help (or last).
+  const help = menus.findIndex((m) => m.id === 'help')
+  menus.splice(help < 0 ? menus.length : help, 0, MAC_WINDOW_MENU)
+  return { menus }
 }

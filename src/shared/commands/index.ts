@@ -38,7 +38,14 @@ export {
   NATIVE_ROLES,
 } from './menu-model'
 export type { MenuModel, MenuNode, MenuLayout, NativeMenuNode, NativeMenuSnapshot, PredefinedItem } from './menu-model'
-export { installCommandShortcuts, wasJustPressed, commandForKey, SAME_PRESS_MS } from './keyboard'
+export {
+  installCommandShortcuts,
+  runFromNativeMenu,
+  wasJustPressed,
+  commandForKey,
+  SAME_PRESS_MS,
+  __resetKeyboardForTests,
+} from './keyboard'
 export type { CommandShortcutOptions } from './keyboard'
 export { menuBarKind } from './platform'
 export type { MenuBarKind } from './platform'

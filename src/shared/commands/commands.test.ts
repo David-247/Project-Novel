@@ -145,6 +145,12 @@ describe('menu model builder', () => {
     expect(menus.slice(1)).toEqual([
       { id: 'edit', label: 'Edit', items: [{ kind: 'item', id: 'undo', label: 'undo', enabled: false }] },
       { id: 'format', label: 'Format', items: [{ kind: 'item', id: 'bold', label: 'bold', enabled: true, checked: true, accelerator: 'CmdOrCtrl+B' }] },
+      // The macOS Window menu: OS Minimize (Cmd+M) and Close Window (Cmd+W, through the close guard).
+      {
+        id: 'window',
+        label: 'Window',
+        items: [{ kind: 'predefined', name: 'minimize' }, { kind: 'separator' }, { kind: 'predefined', name: 'closeWindow' }],
+      },
     ])
     checked = false
     expect(snap().menus[2].items[0]).toMatchObject({ checked: false })

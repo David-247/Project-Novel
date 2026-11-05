@@ -473,12 +473,39 @@ describe('Save a Copy and Close Project (File menu)', () => {
     const original = json('/books/novel/project.json')
     expect(copy.title).toBe(original.title)
     expect(copy.id).not.toBe(original.id)
+    // Everything was copied: no notice.
+    expect(backend.messages).toEqual([])
     // Still in the original project, whose root is granted again; its unsaved state is untouched.
     expect(getCurrentProjectPath()).toBe('/books/novel')
     expect(backend.active).toBe('/books/novel')
     expect(editor.isDirty()).toBe(true)
     expect(await saveProject()).toBe(true)
     expect(json('/books/novel/manuscript.json')).toEqual(textDoc('Unsaved words.'))
+  })
+
+  it('Save a Copy never overwrites a file in the chosen folder, and names what it could not copy', async () => {
+    await createAt('/books/novel')
+    backend.files.set('/books/novel/notes.md', 'mine')
+    backend.files.set('/books/novel/broken.bin', 'x')
+    backend.dirs.add('/books/novel/images')
+    backend.failRead = (c) => (c.endsWith('broken.bin') ? { kind: 'io', message: 'not text' } : null)
+    // A notes.md already in the target: refused, nothing written there.
+    backend.dirs.add('/books/copy')
+    backend.files.set('/books/copy/notes.md', 'theirs')
+    backend.pick = '/books/copy'
+    expect(await saveProjectCopy()).toBe(false)
+    expect(backend.messages.at(-1)!.text).toMatch(/already contains notes\.md, and Novel will not overwrite it/)
+    expect(backend.files.get('/books/copy/notes.md')).toBe('theirs')
+    expect(backend.files.has('/books/copy/manuscript.json')).toBe(false)
+    // An empty folder: copied, with a notice naming the unreadable file and the subfolder.
+    backend.dirs.add('/books/copy2')
+    backend.pick = '/books/copy2'
+    expect(await saveProjectCopy()).toBe(true)
+    expect(backend.files.get('/books/copy2/notes.md')).toBe('mine')
+    const notice = backend.messages.at(-1)!
+    expect(notice.opts).toMatchObject({ kind: 'info', title: 'Copy saved' })
+    expect(notice.text).toMatch(/not copied: broken\.bin, images\//)
+    backend.failRead = null
   })
 
   it('Save a Copy refuses a folder that already holds a project, and the open project itself', async () => {
