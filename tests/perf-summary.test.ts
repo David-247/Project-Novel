@@ -41,6 +41,25 @@ describe('perf summary', () => {
     expect(md).toMatch(/\| pagination-turn \| chromium \/ win32 \(shipping\) \| 10 \| \*\*120\*\* \(MISS\) \| \*\*107\.5\*\* \(miss, CI-advisory: not blocking\) \|/)
   })
 
+  it('tracked typing (all three markup views) is CI-advisory; other typing still blocks (decision a187e880)', () => {
+    const md = toMarkdown([
+      {
+        scenario: 'perf-track-changes',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        typing: { medianMs: 51, p95Ms: 60, maxMs: 70 },
+        typingNoMarkup: { medianMs: 55, p95Ms: 60, maxMs: 70 },
+        typingSimpleMarkup: { medianMs: 52, p95Ms: 60, maxMs: 70 },
+        ciAdvisory: ['typing', 'typingNoMarkup', 'typingSimpleMarkup'],
+      },
+      { scenario: 'perf-hotpath', browser: 'perf-chromium', platform: 'win32', typing: { medianMs: 54, p95Ms: 60, maxMs: 70 } },
+    ])
+    expect(md).toMatch(/\| perf-track-changes \| chromium \/ win32 \(shipping\) \| \*\*51\*\* \(miss, CI-advisory: not blocking\) \|/)
+    expect(md).toMatch(/\| perf-track-changes: No Markup \| chromium \/ win32 \(shipping\) \| \*\*55\*\* \(miss, CI-advisory: not blocking\) \|/)
+    expect(md).toMatch(/\| perf-track-changes: Simple Markup \| chromium \/ win32 \(shipping\) \| \*\*52\*\* \(miss, CI-advisory: not blocking\) \|/)
+    expect(md).toMatch(/\| perf-hotpath \| chromium \/ win32 \(shipping\) \| \*\*54\*\* \(MISS\) \|/)
+  })
+
   it('tabulates typing, trim reflow, style edit and Replace All; marks misses by pair', () => {
     const md = toMarkdown([
       { scenario: 'perf-combined', browser: 'perf-webkit', platform: 'darwin', openMs: 900, typing: { medianMs: 12.5, p95Ms: 30, maxMs: 41 } },

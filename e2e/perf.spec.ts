@@ -515,12 +515,17 @@ test('100k-word manuscript with 2,000 tracked changes: typing with tracking on, 
       passes: [toNone, toOriginal, toAll].map((s) => ({ startMs: s.passStartMs, totalMs: s.passMs })),
     },
     budgets: { typingMedianMs: 50, markupSwitchMs: 1000, replaceAllMs: 2000 },
+    ciAdvisory: ['typing', 'typingNoMarkup', 'typingSimpleMarkup'],
   })
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
-  budget(testInfo, 'typing median ms (tracking on, 2,000 changes)', typing.medianMs, 50)
-  budget(testInfo, 'typing median ms (tracking on, No Markup)', typingNone.medianMs, 50)
-  budget(testInfo, 'typing median ms (tracking on, Simple Markup)', typingSimple.medianMs, 50)
+  // CI-advisory (decision a187e880, extending f040009b): on GitHub's free Windows runner tracked typing
+  // reads at or above 50 ms even on code without the change under test (T5 bisect: T8 base 56 ms
+  // there, 31 ms on a desktop). Reported in CI; blocking locally. Plain hot-path typing still blocks.
+  const advisory = { ciAdvisory: true }
+  budget(testInfo, 'typing median ms (tracking on, 2,000 changes)', typing.medianMs, 50, advisory)
+  budget(testInfo, 'typing median ms (tracking on, No Markup)', typingNone.medianMs, 50, advisory)
+  budget(testInfo, 'typing median ms (tracking on, Simple Markup)', typingSimple.medianMs, 50, advisory)
   budget(testInfo, 'markup view switch reflow complete ms', worst, 1000)
   budget(testInfo, 'Replace All ms (tracking on)', replaceAllMs, 2000)
 })

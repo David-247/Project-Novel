@@ -47,8 +47,10 @@ export function toMarkdown(results, dir = 'perf-results') {
 
   const typing = []
   for (const r of results) {
-    const add = (label, t) => t && typing.push(`| ${label} | ${pair(r)} | ${cell(r, t.medianMs, 50)} | ${v(t.p95Ms)} | ${v(t.maxMs)} | ${v(r.openMs)} |`)
-    add(r.scenario, r.typing)
+    const add = (label, t, key) => t && typing.push(`| ${label} | ${pair(r)} | ${cell(r, t.medianMs, 50, key)} | ${v(t.p95Ms)} | ${v(t.maxMs)} | ${v(r.openMs)} |`)
+    add(r.scenario, r.typing, 'typing')
+    add(`${r.scenario}: No Markup`, r.typingNoMarkup, 'typingNoMarkup')
+    add(`${r.scenario}: Simple Markup`, r.typingSimpleMarkup, 'typingSimpleMarkup')
     add(`${r.scenario}: end of line`, r.endOfLine)
     add(`${r.scenario}: split paragraph`, r.splitParagraph)
   }

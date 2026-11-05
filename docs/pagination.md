@@ -125,10 +125,13 @@ blocks. Outside CI (no `CI` env var) the macOS WebKit budgets block as before: r
 real Mac to enforce them. Any other CI check that keeps failing for runner rather than app reasons
 is demoted or cut the same way: a measure is made **CI-advisory** with `budget(..., { ciAdvisory: true })`
 (reported in CI on every pair, marked "CI-advisory: not blocking" in the perf summary through the
-result's `ciAdvisory` keys; blocking outside CI on the shipping pairs as usual). Only one is: Book
+result's `ciAdvisory` keys; blocking outside CI on the shipping pairs as usual). First, Book
 mode's **page turn during a trim reflow** (`e2e/pagination-perf.spec.ts`, `duringReflowMaxMs`), which
 GitHub's free Windows runner misses at 103-120 ms while a desktop measures about 58 ms; the ordinary
-page turns stay blocking. The gate is
+page turns stay blocking. **Decision a187e880** (extending f040009b) adds the tracked-changes typing
+medians (`e2e/perf.spec.ts`, scenario `perf-track-changes`: All Markup `typing`, `typingNoMarkup`,
+`typingSimpleMarkup`): on that runner they read 50-57 ms even on the T8 base (56 ms in the T5 bisect,
+31 ms on a desktop). Plain hot-path typing on 100k words and every other typing budget stay blocking. The gate is
 `budget(testInfo, name, value, limit)` in `e2e/budget.ts`, used by the perf specs and by the
 paste-keystroke check in `e2e/editor.spec.ts`. Functional assertions and the cross-engine
 pagination tolerance stay blocking everywhere.
