@@ -39,6 +39,16 @@ function canvasTopIn(scroller: HTMLElement, sizer: HTMLElement | null): number {
   return sizer.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
 }
 
+let goToPageImpl: ((index: number) => boolean) | null = null
+
+/**
+ * Edit > Go to Page: caret to the start of page `index` (0-based; a blank page goes to the next
+ * one), its spread scrolled to the top, focus in the manuscript. False while no pages are laid out.
+ */
+export function goToPage(index: number): boolean {
+  return goToPageImpl?.(index) ?? false
+}
+
 /**
  * The paginated writing surface: pages on a desk, as a two-page spread (or single pages), at the
  * zoom chosen in the status bar. Hosts the editor's one view; see docs/pagination.md.
@@ -146,7 +156,23 @@ export function PaginatedView({ children }: PaginatedViewProps) {
     editor.registerPlugin(plugin)
     // The find panel scrolls the current match by its DOM position: finish a reflow in progress first.
     setFindRevealHook(() => getEngine()?.drain())
+    goToPageImpl = (index) => {
+      if (editor.isDestroyed) return false
+      const v = editor.view
+      freshSnapshot()
+      const pages = useStore.getState().layout.pages
+      if (!pages.length) return false
+      let i = Math.max(0, Math.min(pages.length - 1, Math.trunc(index)))
+      while (i < pages.length - 1 && pages[i].isBlank) i++
+      const page = pages[i]
+      v.dispatch(v.state.tr.setSelection(selectionForPage(v.state, page)))
+      v.focus()
+      caretToPageStart(v, page.from)
+      scrollToRow(live.current.placement.rowOf(i))
+      return true
+    }
     return () => {
+      goToPageImpl = null
       setFindRevealHook(null)
       if (!editor.isDestroyed) editor.unregisterPlugin(paginationKey)
       actions.resetLayout()

@@ -28,19 +28,23 @@ export interface TrimSizePickerProps {
  * Keyboard: Enter/Space/ArrowDown opens, arrows move, Enter selects, Escape closes (focus returns to
  * the trigger). Items are 40px tall for touch.
  */
+/**
+ * Change the trim size. If the margins were still the previous size's defaults they follow the new
+ * size's defaults (one store update, so pagination reflows once). Used by the picker and File > Page Setup.
+ */
+export function chooseTrimSize(id: TrimSizeId): void {
+  const { book, bookActions } = useStore.getState()
+  if (id === book.trimSize) return
+  const previous = resolveTrimSize(book.trimSize)
+  const next = resolveTrimSize(id)
+  const followDefaults = marginsEqual(book.margins, previous.margins) && !marginsEqual(book.margins, next.margins)
+  bookActions.setTrimSize(id, followDefaults ? { ...next.margins } : undefined)
+}
+
 export function TrimSizePicker({ ref, ...forwarded }: TrimSizePickerProps) {
   const trimSize = useStore((s) => s.book.trimSize)
   const current = resolveTrimSize(trimSize)
-
-  const choose = (id: TrimSizeId) => {
-    const { book, bookActions } = useStore.getState()
-    if (id === book.trimSize) return
-    const previous = resolveTrimSize(book.trimSize)
-    const next = resolveTrimSize(id)
-    // Trim size and (default) margins in one store update: each geometry change is a full reflow.
-    const followDefaults = marginsEqual(book.margins, previous.margins) && !marginsEqual(book.margins, next.margins)
-    bookActions.setTrimSize(id, followDefaults ? { ...next.margins } : undefined)
-  }
+  const choose = chooseTrimSize
 
   return (
     <Menu.Root modal={false}>

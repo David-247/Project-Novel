@@ -60,7 +60,18 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     ]
     const surfaces = Object.values(SURFACE_CONTROLS).map((m) => m.id)
     expect(new Set(rendered)).toEqual(
-      new Set([...expected.map((m) => m.id), ...surfaces, 'book.trimSize', 'book.headerFooter', 'insert.menu', 'footnote.options', 'file.new_project', 'file.open_project']),
+      new Set([
+        ...expected.map((m) => m.id),
+        ...surfaces,
+        'book.trimSize',
+        'book.headerFooter',
+        'insert.menu',
+        'footnote.options',
+        'file.new_project',
+        'file.open_project',
+        // The in-app menu bar's titles (its items are covered in App.menus.test.tsx).
+        ...['file', 'edit', 'view', 'insert', 'format', 'help'].map((m) => `menu.${m}`),
+      ]),
     )
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
