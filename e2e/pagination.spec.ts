@@ -333,7 +333,9 @@ test('a press on a margin or the desk puts the caret on the nearest line of that
   await paste(page, paragraphs(12))
   await page.locator('[data-control-id="pagination.zoom"]').selectOption('100')
   await waitForLayout(page)
-  await frame(page, 2).scrollIntoViewIfNeeded()
+  // The page's bottom edge in view (a 100% page is about as tall as the editor area).
+  await frame(page, 2).evaluate((el) => el.scrollIntoView({ block: 'end' }))
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
   const f = (await frame(page, 2).boundingBox())!
   // Bottom margin of page 3 (a recto), then type.
   await page.mouse.click(f.x + f.width / 2, f.y + f.height - 20)
