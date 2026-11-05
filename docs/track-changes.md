@@ -88,7 +88,13 @@ Rules, per step of the transaction:
 
 Steps are processed in order. When every step is a replace below the previous one (one step, or Replace
 All, which works from the last match to the first) every position is valid as it stands; otherwise
-later steps are mapped over the deleted text kept so far. The selection is mapped onto the result:
+later steps are mapped over the deleted text kept so far. A Replace All of 16 or more matches
+(`BATCH_MIN_STEPS` in record.ts) is recorded in one pass over the original document, grouped by
+textblock: each match becomes one ReplaceStep covering only the match (its text, marked deleted, then
+the replacement, marked inserted), so positions outside the matches (a comment draft, decorations)
+map exactly. Matches that touch, a match over anything but text, or an IME composition fall back to
+the step-by-step rewrite, as does the whole edit if a batched step cannot be applied. The result is the
+same either way (record.test.ts compares them). The selection is mapped onto the result:
 **Backspace** leaves the caret before the text it marked, **Delete** and typing after it.
 **Backspace / Delete across a deletion:** when the character (or paragraph boundary) next to the caret
 is already deleted, the caret first moves over the deleted run and the key acts on the text beyond it.
@@ -212,10 +218,13 @@ not a shipping pair):
 |---|---|---|
 | Typing, tracking on, All / No / Simple Markup (< 50 ms median) | 18 / 20 / 20 ms | 43 / 48 / 51 ms |
 | View switch, reflow complete, worst of three (< 1 s) | 290–370 ms | 665–750 ms (up to 1.45 s) |
-| Replace All of 10,000 "the", tracking on (< 2 s) | 0.9–1.1 s | 1.5–2.4 s |
+| Replace All of 10,000 "the", tracking on (< 2 s) | 0.8–1.1 s (CI: 0.9–1.2 s) | 1.3–1.5 s (CI: 1.3–1.9 s) |
 
-A tracked replacement is two steps (the deletion mark, then the new text inserted with its insertion
-mark), so a tracked Replace All costs about twice an untracked one.
+A tracked replacement is one step per match (see above), built without resolving positions per match.
+It still costs about three times an untracked one: every match adds two mark elements (deleted and
+inserted text), which ProseMirror draws and the browser styles. Pagination measures with one shared
+Range: every Range a page creates stays live until garbage collected and is updated on each DOM
+change, so creating one per measured block made each later DOM change cost O(blocks).
 
 ## Other features
 

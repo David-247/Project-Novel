@@ -9,7 +9,7 @@ import { acceptAll, listChanges, rejectAll } from '@/features/track-changes'
 import { useStore } from '@/shared/store'
 import { collectAnchors } from './anchors'
 import { deleteThread, newComment, replyToThread, resolveThread, submitDraft } from './commands'
-import { filterPastedComments, setCommentAuthorSource } from './extension'
+import { filterPastedComments, getPluginState, setCommentAuthorSource } from './extension'
 import { __resetCommentsFileForTests } from './persistence'
 
 /**
@@ -71,6 +71,28 @@ afterEach(() => {
 })
 
 describe('comments while Track Changes records', () => {
+  it('an open comment draft between matches survives a tracked Replace All exactly', () => {
+    const ed = mount()
+    // 20 matches of "the" (enough for the one-pass recorder), the draft on "quick" between two of them.
+    act(() => setDocJSON({ type: 'doc', content: [{ type: 'paragraph', content: [text('the quick the fox the end. ' + 'the dog. '.repeat(18))] }] }))
+    const at = ed.state.doc.textContent.indexOf('quick') + 1
+    select(ed, at, at + 5)
+    act(() => void newComment())
+    expect(getPluginState(ed.state)?.draft).toEqual({ from: at, to: at + 5 })
+    const tr = ed.state.tr
+    const ranges: number[] = []
+    ed.state.doc.textContent.replace(/the/g, (_m, i: number) => (ranges.push(i + 1), ''))
+    expect(ranges.length).toBe(21)
+    for (let i = ranges.length - 1; i >= 0; i--) tr.replaceWith(ranges[i], ranges[i] + 3, ed.schema.text('a'))
+    act(() => ed.view.dispatch(tr))
+    expect(listChanges(ed.state.doc).length).toBe(2)
+    const draft = getPluginState(ed.state)?.draft
+    expect(draft).not.toBeNull()
+    // The deleted "the " stays before "quick": the draft moved by the inserted "a" only, still on "quick".
+    expect(ed.state.doc.textBetween(draft!.from, draft!.to)).toBe('quick')
+    expect(draft).toEqual({ from: at + 1, to: at + 6 })
+  })
+
   it('thread actions are not tracked changes, and each still undoes in one step', () => {
     const ed = mount()
     const id = addComment(ed, Q.from, Q.to)

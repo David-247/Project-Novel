@@ -436,9 +436,10 @@ function trackMarkStep(tr: Transaction, step: AddMarkStep | RemoveMarkStep, ctx:
 
 /**
  * From this many steps, a Replace All-shaped transaction (descending text replacements) is recorded
- * run by run: one ReplaceStep per stretch of text holding matches, instead of an AddMarkStep and an
- * insertion per match (Replace All of a common word: ~1,000 steps instead of ~20,000, and no
- * per-match position resolving). The result equals the per-match path (record.test.ts).
+ * in one pass: one ReplaceStep per match (its text, marked deleted, then the replacement, marked
+ * inserted) instead of an AddMarkStep plus an insertion, built from the original document grouped
+ * by textblock, without resolving positions per match. The result equals the per-match path
+ * (record.test.ts).
  */
 export const BATCH_MIN_STEPS = 16
 
@@ -545,67 +546,51 @@ function pushInline(out: PMNode[], node: PMNode) {
 }
 
 /**
- * Records a Replace All-shaped transaction in `out` run by run (see BATCH_MIN_STEPS), with the rules
- * of trackReplace: matched text is marked deleted (your own insertions are really removed) and the
- * replacement goes in after it as an insertion. Returns the retained size per step, or null (and
- * `out` untouched) when the transaction does not fit.
+ * Records a Replace All-shaped transaction in `out` (see BATCH_MIN_STEPS), with the rules of
+ * trackReplace: matched text is marked deleted (your own insertions are really removed) and the
+ * replacement goes in after it as an insertion. One ReplaceStep per match, covering only the match,
+ * so every position outside the matches (a comment draft, decorations, bookmarks) maps exactly.
+ * Returns the retained size per step, or null when the transaction does not fit or a step could not
+ * be applied (then `out` may hold some steps: the caller starts again from a fresh transaction).
  */
 function trackReplaceBatch(out: Transaction, steps: readonly ReplaceStep[], ctx: Ctx): number[] | null {
   const runs = planBatch(out.doc, steps, ctx)
   if (!runs) return null
   const retained = new Array<number>(steps.length).fill(0)
-  const built: { from: number; to: number; content: PMNode[] }[] = []
+  // Runs come in descending order, and matches are taken last first: each step's positions are
+  // still valid in `out` when it is applied.
   for (const run of runs) {
     const { parent, start, offsets } = run
     // The unchanged neighbours of a match: matches never touch, and earlier ones are not applied yet.
     const nodeBefore = (pos: number) => (pos - start <= 0 ? null : parent.child(childAt(offsets, pos - start - 1)))
     const nodeAfter = (pos: number) => (pos - start >= parent.content.size ? null : parent.child(childAt(offsets, pos - start)))
-    const content: PMNode[] = []
-    let mi = 0
-    for (let c = run.c0; c <= run.c1; c++) {
-      const child = parent.child(c)
-      const cs = start + offsets[c]
-      const ce = cs + child.nodeSize
-      let p = cs
-      while (p < ce) {
-        const m: BatchMatch | undefined = run.matches[mi]
-        if (!m || p < m.F) {
-          const q = m ? Math.min(ce, m.F) : ce
-          pushInline(content, child.cut(p - cs, q - cs))
-          p = q
-          continue
-        }
-        const q = Math.min(ce, m.T)
-        const piece = child.cut(p - cs, q - cs)
-        if (ownInsertion(child, ctx)) {
-          // Your own insertion: really removed.
-        } else if (markOf(child, DELETION_MARK)) {
-          pushInline(content, piece)
-          retained[m.step] += q - p
-        } else {
+    for (let mi = run.matches.length - 1; mi >= 0; mi--) {
+      const m = run.matches[mi]
+      const content: PMNode[] = []
+      for (let c = childAt(offsets, m.F - start); c < parent.childCount; c++) {
+        const cs = start + offsets[c]
+        if (cs >= m.T) break
+        const child = parent.child(c)
+        const a = Math.max(cs, m.F)
+        const b = Math.min(cs + child.nodeSize, m.T)
+        if (ownInsertion(child, ctx)) continue // your own insertion: really removed
+        const piece = child.cut(a - cs, b - cs)
+        if (markOf(child, DELETION_MARK)) pushInline(content, piece)
+        else {
           const adjacent = [markOf(nodeBefore(m.F), DELETION_MARK), markOf(nodeAfter(m.T), DELETION_MARK)].find((mk) => ownSession(mk, ctx))
           pushInline(content, withMark(piece, adjacent ?? (ctx.del ??= changeMark(ctx, DELETION_MARK)), parent))
-          retained[m.step] += q - p
         }
-        p = q
-        if (p === m.T) {
-          const slice = cleanSlice(m.slice)
-          if (slice.size > 0) {
-            // Next to the new text: the last piece kept of the match, else the text before the match.
-            const before = retained[m.step] > 0 ? content[content.length - 1] : nodeBefore(m.F)
-            const mark = insertionMarkBetween(before, nodeAfter(m.T), parent, ctx)
-            markInline(slice.content, mark, parent.type).forEach((n) => pushInline(content, n))
-          }
-          mi++
-        }
+        retained[m.step] += b - a
       }
+      const slice = cleanSlice(m.slice)
+      if (slice.size > 0) {
+        // Next to the new text: the last piece kept of the match, else the text before the match.
+        const before = retained[m.step] > 0 ? content[content.length - 1] : nodeBefore(m.F)
+        const mark = insertionMarkBetween(before, nodeAfter(m.T), parent, ctx)
+        markInline(slice.content, mark, parent.type).forEach((n) => pushInline(content, n))
+      }
+      if (out.maybeStep(new ReplaceStep(m.F, m.T, new Slice(Fragment.fromArray(content), 0, 0))).failed) return null
     }
-    built.push({ from: start + offsets[run.c0], to: start + offsets[run.c1] + parent.child(run.c1).nodeSize, content })
-  }
-  // Runs come in descending order: each one's positions are still valid when it is applied.
-  for (const b of built) {
-    const res = out.maybeStep(new ReplaceStep(b.from, b.to, new Slice(Fragment.fromArray(b.content), 0, 0)))
-    if (res.failed) throw new Error(`Replace All batch: ${res.failed}`)
   }
   return retained
 }
@@ -709,7 +694,7 @@ export function trackTransaction(
   options: TrackOptions = {},
 ): Transaction {
   if (!shouldTrack(tr) || tr.before !== state.doc) return tr
-  const out = state.tr
+  let out = state.tr
   try {
     const ctx = newCtx(state.schema, author, date, options.composing === true, options.pending ?? [])
     let runs: Run[] = []
@@ -717,6 +702,8 @@ export function trackTransaction(
       // Fast path (one step; Replace All): every step's positions are valid in `out` as it goes.
       const steps = tr.steps as ReplaceStep[]
       const batch = (options.batch ?? steps.length >= BATCH_MIN_STEPS) ? trackReplaceBatch(out, steps, ctx) : null
+      // The batch gave up part way: record per match, from the start.
+      if (!batch && out.steps.length) out = state.tr
       const retained: number[] = batch ?? steps.map((s) => trackReplace(out, s.from, s.to, s.slice, ctx).retained)
       let shift = 0
       for (let i = tr.steps.length - 1; i >= 0; i--) {

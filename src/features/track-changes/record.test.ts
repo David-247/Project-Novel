@@ -647,7 +647,27 @@ describe('Replace All recorded in one pass (batch)', () => {
     ])
     const { count, perMatch, batched } = compare(ed, 'the', 'a')
     expect(count).toBeGreaterThan(10)
-    expect(batched.steps.length).toBeLessThan(perMatch.steps.length / 2)
+    // One step per replaced match (the per-match path takes a mark step and an insertion each).
+    expect(batched.steps.length).toBeLessThan(perMatch.steps.length)
+    expect(batched.steps.length).toBeLessThanOrEqual(count)
+  })
+
+  it('positions between matches map exactly through the recorded Replace All', () => {
+    const ed = make([p(t(Array.from({ length: 20 }, (_, i) => `the w${i} `).join('')))])
+    const { tr, count } = replaceAllTr(ed, 'the', 'a')
+    expect(count).toBe(20)
+    const batched = trackTransaction(ed.state, tr, { name: author }, '2026-01-01T00:00:00.000Z', { batch: true })
+    expect(batched.steps.length).toBe(20)
+    const text = ed.state.doc.textContent
+    for (let i = 0; i < 20; i++) {
+      const word = `w${i}`
+      const pos = text.indexOf(`${word} `) + 1
+      const from = batched.mapping.map(pos, 1)
+      const to = batched.mapping.map(pos + word.length, -1)
+      expect(batched.doc.textBetween(from, to), word).toBe(word)
+      // Each earlier match kept its deleted "the" and gained "a": one character each, plus this word's own.
+      expect(from - pos, word).toBe(i + 1)
+    }
   })
 
   it("equals the per-match recording next to this session's own changes, and with an empty replacement", () => {
