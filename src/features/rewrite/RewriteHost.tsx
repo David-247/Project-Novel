@@ -1,0 +1,173 @@
+import { useEffect, useLayoutEffect, useRef } from 'react'
+import type { ReactNode } from 'react'
+import { getChapters, chapterIndexAt, getEditor, blockPlainText } from '@/features/editor'
+import { useStore, type RewriteRecord } from '@/shared/store'
+import { Button, Dialog, Tooltip } from '@/shared/ui'
+import { passageRange } from './anchor'
+import { dismissNotice, openList, openRewrite, setViewHooks } from './commands'
+import { REWRITE_CONTROLS as C } from './controls'
+import { RewriteView } from './RewriteView'
+
+export interface RewriteHostProps {
+  /** The manuscript's canvas (the paginated view). Kept mounted and laid out while a re-write is open. */
+  children: ReactNode
+}
+
+function scrollParent(el: HTMLElement | null): HTMLElement | null {
+  for (let n = el?.parentElement ?? null; n; n = n.parentElement) {
+    const o = getComputedStyle(n).overflowY
+    if (o === 'auto' || o === 'scroll') return n
+  }
+  return null
+}
+
+/**
+ * Composition-root wrapper around the manuscript's canvas: while a re-write is open the comparison
+ * view takes its place (the canvas stays mounted and laid out, collapsed and inert, so the
+ * manuscript's editor, its undo history and the page model are untouched). Closing gives the
+ * manuscript back where it was. Also shows the manuscript's re-write notice and the Re-writes list.
+ */
+export function RewriteHost({ children }: RewriteHostProps) {
+  const open = useStore((s) => s.rewrite.openId !== null)
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const saved = useRef<{ top: number; focus: boolean } | null>(null)
+  const restore = useRef(false)
+
+  useEffect(
+    () =>
+      setViewHooks({
+        beforeOpen: () => {
+          const scroller = scrollParent(canvasRef.current)
+          const ed = getEditor()
+          saved.current = { top: scroller?.scrollTop ?? 0, focus: !!ed && ed.view.hasFocus() }
+        },
+        afterClose: () => {
+          restore.current = true
+        },
+      }),
+    [],
+  )
+
+  // Back to the manuscript: same scroll position, focus in the text (selection kept).
+  useLayoutEffect(() => {
+    if (open || !restore.current) return
+    restore.current = false
+    const scroller = scrollParent(canvasRef.current)
+    if (scroller && saved.current) scroller.scrollTop = saved.current.top
+    const ed = getEditor()
+    if (ed && !ed.isDestroyed) ed.view.focus()
+  }, [open])
+
+  return (
+    <>
+      {open ? <RewriteView /> : <RewriteNotice />}
+      <div ref={canvasRef} className={open ? 'nv-rw-hidden' : undefined} inert={open} aria-hidden={open || undefined}>
+        {children}
+      </div>
+      <RewritesList />
+    </>
+  )
+}
+
+/**
+ * The manuscript's re-write notice, floating over the top of the pages: shown while the caret is in a
+ * passage that is being re-written (with the way back to its re-write), stronger after an edit there
+ * was refused, and when a selection spans more than one chapter.
+ */
+function RewriteNotice() {
+  const notice = useStore((s) => s.rewrite.notice)
+  const caretIn = useStore((s) => s.rewrite.caretIn)
+  const rewrites = useStore((s) => s.rewrite.rewrites)
+  const anchorId = notice?.kind === 'locked' ? notice.id : caretIn
+  const record = anchorId ? rewrites.find((r) => r.anchor === anchorId && r.status === 'open') : undefined
+  // A refused edit's notice goes away once the caret leaves the passage.
+  useEffect(() => {
+    if (notice?.kind === 'locked' && caretIn !== notice.id) dismissNotice()
+  }, [caretIn, notice])
+  let text: string | null = null
+  if (notice?.kind === 'span') text = 'A re-write covers one chapter at most. Select paragraphs within one chapter and try again.'
+  else if (notice?.kind === 'missing') text = 'The passage of this re-write is no longer in the manuscript.'
+  else if (notice?.kind === 'locked' && record) text = 'This passage is being re-written, so it cannot be changed here. Edit it in its re-write.'
+  else if (record) text = 'This passage is being re-written. It is locked until you choose a version.'
+  if (!text) return null
+  const alert = notice !== null
+  return (
+    <div className="pointer-events-none sticky top-0 z-10 flex h-0 items-start justify-center px-2 sm:px-4">
+      <div
+        role={alert ? 'alert' : 'status'}
+        data-testid="rewrite-notice"
+        className="pointer-events-auto mt-2 flex max-w-[min(40rem,100%)] flex-wrap items-center gap-x-3 gap-y-1 rounded-panel border border-border bg-surface-raised px-3 py-1.5 text-ui-sm text-text shadow-raised"
+      >
+        <span className="min-w-0 flex-1">{text}</span>
+        {record ? (
+          <Tooltip controlId={C.noticeOpen.id}>
+            <Button data-control-id={C.noticeOpen.id} variant={alert ? 'primary' : 'secondary'} onClick={() => openRewrite(record.id)}>
+              {C.noticeOpen.label}
+            </Button>
+          </Tooltip>
+        ) : null}
+        {alert ? (
+          <Tooltip controlId={C.noticeDismiss.id}>
+            <Button data-control-id={C.noticeDismiss.id} variant="ghost" onClick={dismissNotice}>
+              {C.noticeDismiss.label}
+            </Button>
+          </Tooltip>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/** "Chapter 2, The Storm: 'It was a dark…'" for the list. */
+function describe(r: RewriteRecord): { where: string; preview: string } {
+  const ed = getEditor()
+  const first = r.original.content?.[0]
+  const text = (n: typeof first): string => (n ? (n.text ?? '') + (n.content ?? []).map((c) => text(c)).join('') : '')
+  const preview = text(first).trim().slice(0, 80) || 'Empty paragraph'
+  if (!ed) return { where: '', preview }
+  const range = passageRange(ed.state.doc, r.anchor)
+  if (!range) return { where: 'Passage no longer in the manuscript', preview }
+  const chapters = getChapters(ed.state.doc)
+  const i = chapterIndexAt(chapters, range.from)
+  const chapter = i >= 0 ? chapters[i] : null
+  const title = chapter ? blockPlainText(ed.state.doc.nodeAt(chapter.from) ?? ed.state.doc.child(0)).trim() : ''
+  return { where: chapter ? `Chapter ${i + 1}${title ? `: ${title}` : ''}` : 'Before the first chapter', preview }
+}
+
+/** Review ▸ Re-writes…: every re-write in progress, in manuscript order; Open shows it. */
+function RewritesList() {
+  const isOpen = useStore((s) => s.rewrite.listOpen)
+  const rewrites = useStore((s) => s.rewrite.rewrites)
+  if (!isOpen) return null
+  const open = rewrites.filter((r) => r.status === 'open')
+  return (
+    <Dialog open onOpenChange={(o) => openList(o)} title="Re-writes" description="Passages you are re-writing. Each stays locked in the manuscript until you choose a version." closeControlId={C.listClose.id} wide>
+      {open.length === 0 ? (
+        <p className="text-text-muted">No re-writes in progress. Select paragraphs and choose Review, Re-write Passage.</p>
+      ) : (
+        <ul className="flex flex-col gap-1" data-testid="rewrite-list">
+          {open.map((r) => {
+            const d = describe(r)
+            return (
+              <li key={r.id} className="flex items-center gap-3 rounded-control px-1 py-1">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-ui">{d.preview}</div>
+                  <div className="truncate text-ui-sm text-text-muted">
+                    {d.where ? `${d.where}. ` : ''}
+                    {r.versions.length} {r.versions.length === 1 ? 'version' : 'versions'}
+                    {r.originalChanged ? '. The original changed since.' : ''}
+                  </div>
+                </div>
+                <Tooltip controlId={C.listItem.id}>
+                  <Button data-control-id={C.listItem.id} data-rewrite-id={r.id} onClick={() => openRewrite(r.id)}>
+                    {C.listItem.label}
+                  </Button>
+                </Tooltip>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </Dialog>
+  )
+}

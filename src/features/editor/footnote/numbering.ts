@@ -125,7 +125,7 @@ export function onFootnotesChange(cb: FootnotesListener): () => void {
  * a node decoration (`data-fn-num`, shown by CSS). Recomputed on document changes (unchanged blocks
  * are cached) and when `book.footnotes` changes.
  */
-export function footnoteNumberingPlugin(): Plugin<NumberingState> {
+export function footnoteNumberingPlugin({ notify = true }: { notify?: boolean } = {}): Plugin<NumberingState> {
   return new Plugin<NumberingState>({
     key: footnoteNumberingKey,
     state: {
@@ -173,12 +173,12 @@ export function footnoteNumberingPlugin(): Plugin<NumberingState> {
         update: (v, prevState) => {
           const a = footnoteNumberingKey.getState(prevState)?.refs ?? []
           const b = footnoteNumberingKey.getState(v.state)?.refs ?? []
-          if (a !== b) listeners.forEach((l) => l(b, a))
+          if (notify && a !== b) listeners.forEach((l) => l(b, a))
         },
         destroy: () => {
           unsub()
           const last = footnoteNumberingKey.getState(view.state)?.refs ?? []
-          if (last.length) listeners.forEach((l) => l([], last))
+          if (notify && last.length) listeners.forEach((l) => l([], last))
         },
       }
     },

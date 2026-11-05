@@ -18,6 +18,7 @@ import { BookBreaks } from './breaks/nodes'
 import { Footnotes } from './footnote/node'
 import { CommentsExtension } from '@/features/comments'
 import { TrackChanges } from '@/features/track-changes'
+import { RewriteAnchor } from '@/features/rewrite'
 
 /**
  * Phase 1 base schema.
@@ -28,7 +29,16 @@ import { TrackChanges } from '@/features/track-changes'
 /** Undo history depth: effectively unlimited (see the task 4 block below). */
 export const HISTORY_DEPTH = Number.MAX_SAFE_INTEGER
 
-export function createEditorExtensions(): Extensions {
+export interface EditorExtensionOptions {
+  /**
+   * The same schema for another view (the re-write comparison pages): nothing that belongs to the
+   * manuscript's one view runs there. No comment thread plugin, no tracked-change recording, no
+   * footnote editor or footnote-area notifications, no re-write lock.
+   */
+  detached?: boolean
+}
+
+export function createEditorExtensions({ detached = false }: EditorExtensionOptions = {}): Extensions {
   return [
     Document,
     Paragraph,
@@ -86,15 +96,18 @@ export function createEditorExtensions(): Extensions {
     // --- Footnotes (Phase 2): additive only. The inline `footnote` atom (its content is the note
     // text), derived numbering (book.footnotes), Insert Footnote (Mod-Alt-f), Enter edits a selected
     // reference.
-    Footnotes,
+    detached ? Footnotes.configure({ detached: true }) : Footnotes,
 
     // --- Comments (Phase 3): additive only. The inline `comment` mark (attr id; overlaps other
     // comments and every other mark), the thread plugin (threads change through undoable steps) and
     // Mod-Alt-m (New Comment).
-    CommentsExtension,
+    detached ? CommentsExtension.extend({ addProseMirrorPlugins: () => [], addKeyboardShortcuts: () => ({}) }) : CommentsExtension,
     // --- Track changes (Phase 3): additive only. insertion / deletion / formatChange marks, the
     // trackedInsert / trackedDelete / trackedStyleChange block attrs, the recorder (dispatch hook),
     // Mod-Shift-e and the markup view decorations (docs/track-changes.md).
-    TrackChanges,
+    detached ? TrackChanges.configure({ isEnabled: () => false }) : TrackChanges,
+    // --- Re-write (Phase 3): additive only. The `rewriteId` block attribute (passage anchor), the
+    // read-only lock on passages in re-write and their side bar, Mod-Alt-r (Re-write Passage…).
+    RewriteAnchor.configure({ detached }),
   ]
 }

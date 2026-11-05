@@ -56,6 +56,7 @@ import {
   TrackChangesButton,
   TrackChangesNotice,
 } from '@/features/track-changes'
+import { registerRewriteCommands, registerRewritesSideFile, RewriteHost } from '@/features/rewrite'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
@@ -113,12 +114,15 @@ export function App() {
       registerSettingsCommands(),
       registerCommentsCommands(),
       registerTrackChangesCommands(),
+      registerRewriteCommands(),
     ]
     return () => offs.forEach((off) => off())
   }, [])
   useAppMenus()
   // comments.json is saved, autosaved and recovered with the manuscript (storage side file).
   useEffect(() => registerCommentsSideFile(), [])
+  // rewrites.json likewise (re-write versions are saved, autosaved and recovered with the manuscript).
+  useEffect(() => registerRewritesSideFile(), [])
   // Comments and tracked changes are by the Settings author. With no name known, New Comment first
   // asks once; switching Track Changes on asks before the first change is recorded (the recorder
   // cannot wait: changes made while the question is open carry "Unknown author").
@@ -220,12 +224,15 @@ export function App() {
             <div className="pointer-events-none sticky top-0 z-10 flex h-0 items-start justify-end px-2 sm:px-4">
               <FindReplacePanel className="pointer-events-auto mt-2" />
             </div>
-            {/* The comments margin panel sits beside the pages (a drawer in a narrow window). */}
-            <CommentsLayout>
-              <PaginatedView>
-                <NovelEditor paged />
-              </PaginatedView>
-            </CommentsLayout>
+            {/* While a re-write is open its comparison view takes the place of the pages (kept mounted). */}
+            <RewriteHost>
+              {/* The comments margin panel sits beside the pages (a drawer in a narrow window). */}
+              <CommentsLayout>
+                <PaginatedView>
+                  <NovelEditor paged />
+                </PaginatedView>
+              </CommentsLayout>
+            </RewriteHost>
           </>
         }
         statusBar={

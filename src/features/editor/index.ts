@@ -29,6 +29,7 @@ export {
 } from './controller'
 export type { DocChangeListener } from './controller'
 export { createEditorExtensions } from './extensions'
+export type { EditorExtensionOptions } from './extensions'
 export { SYSTEM_FONT_STACK, listSystemFonts, fontFamilyCss, primaryFontFamily } from './fonts'
 // Find & replace + history (task 4)
 export { FindReplacePanel } from './find/FindReplacePanel'

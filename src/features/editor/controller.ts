@@ -3,6 +3,7 @@ import type { Node as PMNode, Schema } from '@tiptap/pm/model'
 import { EditorState, type Transaction } from '@tiptap/pm/state'
 import { useStore } from '@/shared/store'
 import { TRACKING_BLOCK_ATTRS } from '@/shared/track-changes'
+import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { createEditorExtensions } from './extensions'
 
 /**
@@ -150,6 +151,8 @@ const OPTIONAL_BLOCK_ATTRS = [
   'styleId',
   // Track changes (Phase 3): null unless the block carries a tracked change.
   ...TRACKING_BLOCK_ATTRS,
+  // Re-write (Phase 3): null unless the block is part of a passage in re-write.
+  REWRITE_BLOCK_ATTR,
 ] as const
 
 /**

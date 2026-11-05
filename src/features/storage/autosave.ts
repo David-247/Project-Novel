@@ -200,6 +200,16 @@ function watchBook(): () => void {
   })
 }
 
+/**
+ * A side file changed outside the manuscript's text (a re-write's revision being typed, which the
+ * manuscript's own undo history does not see): the project has unsaved changes and the next snapshot
+ * is due. O(1).
+ */
+export function sideFileChanged(): void {
+  getDocumentProvider()?.markDirty()
+  onEdit()
+}
+
 /** Per keystroke: O(1), no serialization. Recovery for a never-saved document is out of scope. */
 function onEdit(): void {
   if (getCurrentProjectPath()) arm()

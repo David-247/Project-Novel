@@ -1,0 +1,278 @@
+/*
+ * Re-write (docs/design.md, "Re-write"). Paper tokens, one block per paper surface like
+ * src/shared/theme/surfaces.css (same selectors). Plain 6-digit hex: rewrite.test.ts parses this
+ * file and checks page text on the tints (4.5:1) and the rules, markers and side bar against the
+ * paper and the tints (3:1), on all four papers.
+ *   --page-rw-del-bg / -del-line: words removed from the original (tint + strike-through)
+ *   --page-rw-ins-bg / -ins-line: words added in the version (tint + underline)
+ *   --page-rw-ink: the re-write's own mark: the passage side bar in the manuscript, changed-row stitches
+ *   --page-rw-lock-bg: the passage's faint tint in the manuscript
+ */
+:root,
+:is(:root, .nv-surface-preview)[data-surface='white'] {
+  --page-rw-del-bg: #fbdcd8;
+  --page-rw-del-line: #b3261e;
+  --page-rw-ins-bg: #d3efe2;
+  --page-rw-ins-line: #0b6e4f;
+  --page-rw-ink: #3b4fa8;
+  --page-rw-lock-bg: #f2f4fb;
+}
+
+:is(:root, .nv-surface-preview)[data-surface='dark'] {
+  --page-rw-del-bg: #55302e;
+  --page-rw-del-line: #ff8a80;
+  --page-rw-ins-bg: #22463a;
+  --page-rw-ins-line: #6fd3a8;
+  --page-rw-ink: #a3b3ff;
+  --page-rw-lock-bg: #262a35;
+}
+
+:is(:root, .nv-surface-preview)[data-surface='book'] {
+  --page-rw-del-bg: #efcbbd;
+  --page-rw-del-line: #9e2219;
+  --page-rw-ins-bg: #d2e3c4;
+  --page-rw-ins-line: #0b5e43;
+  --page-rw-ink: #34468f;
+  --page-rw-lock-bg: #ece4d7;
+}
+
+:is(:root, .nv-surface-preview)[data-surface='book'][data-theme='dark'] {
+  --page-rw-del-bg: #5a352b;
+  --page-rw-del-line: #ff9a8f;
+  --page-rw-ins-bg: #2d4a37;
+  --page-rw-ins-line: #7fd7b0;
+  --page-rw-ink: #a9b8ff;
+  --page-rw-lock-bg: #332d29;
+}
+
+/* ---- The passage in the manuscript: a stitched side bar in the left margin and a faint tint.
+   Colour and absolutely placed pseudo-elements only: no box changes, so pagination is untouched. */
+.novel-editor-content .nv-rw-locked {
+  position: relative;
+  background-color: var(--page-rw-lock-bg);
+  box-shadow: -6px 0 0 var(--page-rw-lock-bg), 6px 0 0 var(--page-rw-lock-bg);
+}
+.novel-editor-content .nv-rw-locked::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -18px;
+  width: 3px;
+  /* A dashed "tacking stitch": the passage is pinned while it is being re-written. */
+  background: repeating-linear-gradient(to bottom, var(--page-rw-ink) 0 6px, transparent 6px 9px);
+  cursor: pointer;
+}
+.novel-editor-content .nv-rw-locked-first::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -22px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--page-rw-ink);
+  background: var(--page-bg);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+/* ---- The canvas while the view is open: hidden, still laid out (pagination keeps its measurements). */
+.nv-rw-hidden {
+  height: 0;
+  overflow: hidden;
+}
+
+/* ---- The comparison view -------------------------------------------------------------------- */
+.nv-rw {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--desk-bg);
+  /* One book point in CSS px, as on the pages. */
+  --nv-pt: calc(96px / 72);
+}
+.nv-rw-scroller {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.nv-rw-spread {
+  display: grid;
+  grid-template-columns: auto var(--nv-rw-spine) auto;
+  justify-content: center;
+  align-items: stretch;
+  padding: 20px 16px 48px;
+  --nv-rw-spine: 44px;
+}
+.nv-rw-spread[data-narrow] {
+  grid-template-columns: auto;
+}
+.nv-rw-col[hidden] {
+  display: none;
+}
+.nv-rw-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.nv-rw-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px 6px;
+  color: var(--page-fg);
+  font: 600 0.8125rem/1.3 var(--nv-font-sans, system-ui, sans-serif);
+}
+.nv-rw-label-sub {
+  font-weight: 400;
+  opacity: 0.8;
+}
+.nv-rw-page.nv-page {
+  position: relative;
+  flex: 1;
+  box-sizing: border-box;
+}
+.nv-rw-page:focus-within {
+  outline: 2px solid var(--page-focus-ring);
+  outline-offset: 3px;
+}
+.nv-rw-text .novel-editor-content,
+.nv-rw-text.novel-editor-content {
+  box-sizing: content-box;
+  width: var(--nv-text-w);
+  min-height: 2em;
+  outline: none;
+  color: var(--page-fg);
+  caret-color: currentColor;
+  font-size: calc(11 * var(--nv-pt));
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.nv-rw-page ::selection {
+  background: var(--page-selection-bg);
+  color: var(--page-fg);
+}
+.nv-rw-text ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+.nv-rw-text ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+}
+.nv-rw-text [data-page-break] {
+  height: 1.25rem;
+  border-top: 1px dashed var(--page-muted-fg);
+  margin-top: 0.6rem;
+}
+.nv-rw-text [data-scene-break] {
+  white-space: pre;
+}
+
+/* ---- Differences: colour and lines only, never a box change (alignment stays exact). */
+.nv-rw-del {
+  background-color: var(--page-rw-del-bg);
+  text-decoration: line-through;
+  text-decoration-color: var(--page-rw-del-line);
+  text-decoration-thickness: 2px;
+  border-radius: 2px;
+}
+.nv-rw-ins {
+  background-color: var(--page-rw-ins-bg);
+  text-decoration: underline;
+  text-decoration-color: var(--page-rw-ins-line);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  border-radius: 2px;
+}
+.nv-rw-del-block,
+.nv-rw-ins-block,
+.nv-rw-chg-block {
+  position: relative;
+}
+.nv-rw-del-block {
+  background-color: var(--page-rw-del-bg);
+}
+.nv-rw-ins-block {
+  background-color: var(--page-rw-ins-bg);
+}
+.nv-rw-del-block::before,
+.nv-rw-ins-block::before,
+.nv-rw-chg-block::before {
+  content: '';
+  position: absolute;
+  top: var(--nv-rw-pad, 0px);
+  bottom: 0;
+  left: -12px;
+  width: 3px;
+  border-radius: 2px;
+}
+.nv-rw-del-block::before {
+  background: var(--page-rw-del-line);
+}
+.nv-rw-ins-block::before {
+  background: var(--page-rw-ins-line);
+}
+.nv-rw-chg-block::before {
+  background: var(--page-rw-ink);
+}
+
+/* ---- The spine between the pages: one stitch per aligned row. A filled stitch is a changed
+   paragraph, a ring an unchanged one; a half stitch points at the page that has a paragraph the
+   other lacks. Decorative (the differences are announced through the pages' text). */
+.nv-rw-spine {
+  position: relative;
+  margin-top: 34px;
+}
+.nv-rw-spine::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: color-mix(in srgb, var(--page-fg) 18%, transparent);
+}
+.nv-rw-stitch {
+  position: absolute;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  transition: top 120ms ease-out;
+}
+.nv-rw-stitch[data-kind='same'] {
+  border: 2px solid color-mix(in srgb, var(--page-fg) 45%, var(--desk-bg));
+  background: var(--desk-bg);
+}
+.nv-rw-stitch[data-kind='changed'] {
+  background: var(--page-rw-ink);
+  box-shadow: 0 0 0 3px var(--desk-bg);
+}
+.nv-rw-stitch[data-kind='removed'],
+.nv-rw-stitch[data-kind='added'] {
+  width: 14px;
+  margin-left: -7px;
+  height: 4px;
+  border-radius: 2px;
+  margin-top: 3px;
+}
+.nv-rw-stitch[data-kind='removed'] {
+  background: var(--page-rw-del-line);
+}
+.nv-rw-stitch[data-kind='added'] {
+  background: var(--page-rw-ins-line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nv-rw-stitch {
+    transition: none;
+  }
+}
