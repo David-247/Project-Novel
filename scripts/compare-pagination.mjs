@@ -5,6 +5,8 @@
 //   - total page count: |a - b| <= max(2 pages, 1 % of the larger count)  (decision c945d094)
 //   - chapter opening page index: ±1 when chapters start on the next page ('page'),
 //     ±2 when they start on a right-hand page ('recto')                  (decision 75522017)
+// A result may carry `markup` (Phase 3: the tracked-changes variant of the fixture in a markup view,
+// 'none' or 'all'): it is compared only with the same mode, markup and trim, within the same tolerance.
 // The shipping pair (WebKit on macOS ~ WKWebView, Chromium on Windows ~ WebView2) comes first.
 // Every pair is blocking (decision afbe3475: the tolerance is blocking on all pairs).
 //
@@ -30,7 +32,7 @@ const fmt = (n) => (n === null || n === undefined ? '–' : Number.isInteger(n) 
 
 /** Compare two fixture runs, row by row (mode x trim). */
 export function compareRuns(a, b) {
-  const key = (r) => `${r.mode}|${r.trim}`
+  const key = (r) => `${r.mode}|${r.markup ?? ''}|${r.trim}`
   const inB = new Map(b.results.map((r) => [key(r), r]))
   const seen = new Set()
   const rows = []
@@ -44,6 +46,7 @@ export function compareRuns(a, b) {
     const limitOpen = openingLimit(r.mode)
     const row = {
       mode: r.mode,
+      ...(r.markup ? { markup: r.markup } : {}),
       trim: r.trim,
       pagesA: ra?.pageCount ?? null,
       pagesB: rb?.pageCount ?? null,
@@ -139,7 +142,7 @@ export function toMarkdown(report) {
     lines.push('| --- | --- | --- | --- | --- | --- | --- |')
     for (const r of failing) {
       lines.push(
-        `| ${r.mode} | ${r.trim} | ${fmt(r.pagesA)} | ${fmt(r.pagesB)} | ${fmt(r.totalDiff)} / ${fmt(r.totalLimit)} | ` +
+        `| ${r.mode}${r.markup ? ` (tracked, ${r.markup} markup)` : ''} | ${r.trim} | ${fmt(r.pagesA)} | ${fmt(r.pagesB)} | ${fmt(r.totalDiff)} / ${fmt(r.totalLimit)} | ` +
           `${fmt(r.maxOpeningDrift)} / ${r.openingLimit} | FAIL: ${r.problems.join('; ')} |`,
       )
     }
