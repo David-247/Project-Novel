@@ -107,6 +107,56 @@ describe('perf summary', () => {
     expect(section).toMatch(/\| acceptance \| chromium \/ win32 \(shipping\) \| – \| \*\*1200\*\* \(MISS\) \| 1800 \| – \|/)
   })
 
+  it('Phase 3: every revision-tools number is in the summary, with its budget and miss marker', () => {
+    const md = toMarkdown([
+      {
+        scenario: 'perf-track-changes',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        markupSwitch: { toNoMarkupMs: 310, toOriginalMs: 1100, toAllMarkupMs: 290, allDrawnWorstMs: 900 },
+        replaceAll: { replaced: 10000, ms: 800 },
+      },
+      { scenario: 'perf-track-changes-review', browser: 'perf-webkit', platform: 'darwin', acceptAll: { ms: 2100 }, rejectAll: { ms: 700 } },
+      { scenario: 'comments-panel-layout', browser: 'perf-chromium', platform: 'win32', maxPanelCommitMs: 12.5 },
+      { scenario: 'rewrite', browser: 'perf-chromium', platform: 'win32', open: [{ openMs: 120 }, { openMs: 80 }], typing: { medianMs: 9, p95Ms: 20, maxMs: 30 } },
+      { scenario: 'rewrite-chapter', browser: 'perf-chromium', platform: 'win32', open: { openMs: 250 }, enterBackspace: { medianMs: 20, p95Ms: 30, maxMs: 40 } },
+      { scenario: 'rewrite-keep', browser: 'perf-chromium', platform: 'win32', keep: { reflowMs: 400, allDrawnMs: 500 } },
+      {
+        scenario: 'phase3-combined',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        typing: { medianMs: 52, p95Ms: 60, maxMs: 70 },
+        typingRevision: { medianMs: 5, p95Ms: 18, maxMs: 36 },
+        ciAdvisory: ['typing'],
+      },
+      {
+        scenario: 'phase3-mark-only',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        selectAllBold: { ms: 279, allDrawnMs: 280 },
+        selectAllBoldTracked: { ms: 1406.6, allDrawnMs: 1407 },
+        acceptAllFormatting: { ms: 296.5, allDrawnMs: 297 },
+      },
+    ])
+    const section = md.slice(md.indexOf('#### Revision tools'))
+    expect(section).toMatch(/\| perf-track-changes \| markup view switch to No Markup: reflow complete \| chromium \/ win32 \(shipping\) \| 310 \| 1000 \|/)
+    expect(section).toMatch(/markup view switch to Original: reflow complete \| chromium \/ win32 \(shipping\) \| \*\*1100\*\* \(MISS\) \| 1000 \|/)
+    expect(section).toMatch(/\| Replace All with recording on \| chromium \/ win32 \(shipping\) \| 800 \| 2000 \|/)
+    expect(section).toMatch(/\| Accept All of 2,000 changes \(incl\. repagination\) \| webkit \/ darwin \(shipping\) \| \*\*2100\*\* \(miss, warning\) \| 2000 \|/)
+    expect(section).toMatch(/\| Reject All of 2,000 changes \(incl\. repagination\) \| webkit \/ darwin \(shipping\) \| 700 \|/)
+    expect(section).toMatch(/\| comment panel re-layout after a reflow \(worst trim\) \| chromium \/ win32 \(shipping\) \| 12\.5 \| 100 \|/)
+    expect(section).toMatch(/\| open re-write #2 \| chromium \/ win32 \(shipping\) \| 80 \| 300 \|/)
+    expect(section).toMatch(/\| rewrite-chapter \| open re-write \| chromium \/ win32 \(shipping\) \| 250 \| 300 \|/)
+    expect(section).toMatch(/\| Keep This Version: reflow complete \| chromium \/ win32 \(shipping\) \| 400 \| 1000 \|/)
+    expect(section).toMatch(/\| Select All \+ Bold: reflow complete \| chromium \/ win32 \(shipping\) \| 279 \| 1000 \|/)
+    expect(section).toMatch(/\| Select All \+ Bold, recording on: reflow complete \| chromium \/ win32 \(shipping\) \| \*\*1406\.6\*\* \(MISS\) \| 1000 \|/)
+    expect(section).toMatch(/\| Accept All of the formatting changes: all blocks drawn \| chromium \/ win32 \(shipping\) \| 297 \| 3000 \|/)
+    // Typing: the combined scenario (CI-advisory, decision a187e880), the revision and Enter / Backspace.
+    expect(md).toMatch(/\| phase3-combined \| chromium \/ win32 \(shipping\) \| \*\*52\*\* \(miss, CI-advisory: not blocking\) \|/)
+    expect(md).toMatch(/\| phase3-combined: in the open re-write \| chromium \/ win32 \(shipping\) \| 5 \|/)
+    expect(md).toMatch(/\| rewrite-chapter: Enter \/ Backspace \| chromium \/ win32 \(shipping\) \| 20 \|/)
+  })
+
   it('says so when there are no results', () => {
     expect(toMarkdown([], 'nowhere')).toMatch(/No perf results found in nowhere/)
   })

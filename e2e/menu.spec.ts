@@ -252,7 +252,7 @@ test('Format > Font lists the picker fonts; Book Details needs a project; F10 st
   await choose(page, 'help', 'help.about')
   const about = page.getByRole('dialog', { name: 'About Novel' })
   await expect(about).toBeVisible()
-  await expect(about.getByTestId('about-version')).toHaveText('0.1.0')
+  await expect(about.getByTestId('about-version')).toHaveText('0.3.0')
   await page.keyboard.press('F10')
   await page.keyboard.press('Alt')
   // (CSS locator: the modal hides the menu bar from the accessibility tree.)

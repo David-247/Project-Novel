@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { budget } from './budget'
+import { installLatencyProbe, report } from './perf-helpers'
 import { clickBlockStart, editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
@@ -69,29 +69,6 @@ async function openEpic(page: Page, folder: string, doc: unknown, blocks = 'p, h
   return openMs
 }
 
-/** Input-to-paint probe: keydown -> next animation frame -> a task after that frame. */
-async function installLatencyProbe(page: Page) {
-  await page.evaluate(() => {
-    const w = window as unknown as { __perf: number[] }
-    w.__perf = []
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        const now = performance.now()
-        // Event creation time when it is in the same clock (includes input queueing), else handler time.
-        const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 1000 ? e.timeStamp : now
-        requestAnimationFrame(() => {
-          // A task queued from rAF runs after that frame's style/layout/paint.
-          const ch = new MessageChannel()
-          ch.port1.onmessage = () => w.__perf.push(performance.now() - t0)
-          ch.port2.postMessage(null)
-        })
-      },
-      true,
-    )
-  })
-}
-
 /**
  * Put the caret at the end of paragraph 500 (mid-manuscript), type WARMUP + MEASURED characters one
  * at a time (each waits for its own paint), and summarize the measured ones. `beforeKey(i)` runs just
@@ -119,14 +96,6 @@ async function measureTyping(page: Page, beforeKey?: (i: number) => Promise<void
     p95Ms: +pct(sorted, 95).toFixed(2),
     maxMs: +sorted[sorted.length - 1].toFixed(2),
   }
-}
-
-async function report(testInfo: TestInfo, name: string, result: Record<string, unknown>) {
-  const full = { scenario: name, browser: testInfo.project.name, platform: process.platform, ...result, measuredAt: new Date().toISOString() }
-  console.info(`[perf] ${JSON.stringify(full)}`)
-  mkdirSync('perf-results', { recursive: true })
-  writeFileSync(`perf-results/${name}-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(full, null, 2))
-  await testInfo.attach(`${name}.json`, { body: JSON.stringify(full, null, 2), contentType: 'application/json' })
 }
 
 const findPanel = (page: Page) => page.getByRole('region', { name: 'Find and replace' })

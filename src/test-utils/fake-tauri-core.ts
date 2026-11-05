@@ -112,7 +112,7 @@ export const HANDLED_COMMANDS = [
 ] as const
 
 /** What `plugin:app|version` answers (tauri.conf.json `version` in the real app). */
-export const FAKE_APP_VERSION = '0.1.0'
+export const FAKE_APP_VERSION = '0.3.0'
 
 const notFound = (p: string): FakeError => ({ kind: 'not_found', message: `${p}: not found` })
 const outside = (p: string): FakeError => ({ kind: 'outside_project', message: `${p} is outside the open project folder` })
