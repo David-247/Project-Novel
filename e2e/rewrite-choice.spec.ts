@@ -3,6 +3,7 @@ import {
   acrossSpreads,
   editor,
   launch,
+  lineEnd,
   nativeDialog,
   newProject,
   openRecent,
@@ -153,7 +154,7 @@ test('Keep Original (keyboard) records the choice; the Re-writes list shows it; 
 
   // The text changed since: Reopen still finds it, and shows it as the original.
   await editor(page).locator('p').nth(2).click()
-  await page.keyboard.press('End')
+  await lineEnd(page)
   await page.keyboard.type(' Ever.')
   await page.evaluate(() => window.__nvE2E.runCommand('rewrite.list'))
   const list = page.getByRole('dialog', { name: 'Re-writes' })
