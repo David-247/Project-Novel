@@ -18,9 +18,9 @@ import { REWRITE_CONTROLS as C } from './controls'
 
 // After the comment groups (10-30): the re-write's own commands, then the ones of the open view.
 const review = (order: number): Command['menu'] => ({ id: 'review', group: order < 50 ? 'rewrite' : 'rewrite-view', order })
-// Ribbon: Review > Re-write. Re-write Passage… is the group's own button (with an icon, src/ribbon-groups.tsx),
-// so it is listed in the group's dropdown only; the others are plain buttons after it.
-const ribbon = (order: number, display?: 'menu'): Command['ribbon'] => ({ group: 'review.rewrite', order, ...(display ? { display } : {}) })
+// Ribbon: Review > Re-write. The group's own buttons show these four (an icon, short labels: src/ribbon-groups.tsx),
+// so the placements only list them in the group's dropdown.
+const ribbon = (order: number): Command['ribbon'] => ({ group: 'review.rewrite', order, display: 'menu' })
 
 /** The re-write commands for the registry (Review menu, shortcuts, Keyboard Shortcuts sheet). */
 export function rewriteCommands(): Command[] {
@@ -32,7 +32,7 @@ export function rewriteCommands(): Command[] {
       description: C.open.description,
       shortcut: C.open.shortcut,
       menu: review(40),
-      ribbon: ribbon(10, 'menu'),
+      ribbon: ribbon(10),
       // Acts on the manuscript's selection: not from another field or behind a dialog.
       guard: 'manuscript',
       isEnabled: () => !inView() && !!getEditor() && !useStore.getState().project.opening,

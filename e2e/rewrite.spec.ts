@@ -177,7 +177,7 @@ test('menus act on the revision while it has the focus; manuscript-wide commands
   await expect(menuItem('edit.go_to_page')).toHaveAttribute('data-disabled', '')
   await page.keyboard.press('Escape')
   // With the focus on a version tab (not a page), text commands are disabled.
-  await page.getByRole('tab').first().focus()
+  await view(page).getByRole('tab').first().focus()
   expect(await page.evaluate(() => window.__nvE2E.runCommand('toolbar.bold'))).toBe(false)
   await revision(page).click()
   expect(await page.evaluate(() => window.__nvE2E.runCommand('toolbar.bold'))).toBe(true)
@@ -185,12 +185,44 @@ test('menus act on the revision while it has the focus; manuscript-wide commands
   expect(await page.getByRole('main', { name: 'Editor' }).evaluate((m) => getComputedStyle(m).overflowY)).toBe('hidden')
 })
 
+test('the ribbon: Review > Re-write opens it; in the view its buttons follow the menus (target and enabled state)', async ({ page }) => {
+  // Wide enough for Review's four groups at full size (at 1280px Re-write is a group dropdown).
+  await page.setViewportSize({ width: 1600, height: 800 })
+  await project(page, 'Ribbon')
+  const ribbon = page.getByRole('toolbar', { name: 'Formatting' })
+  await editor(page).click()
+  await page.evaluate(() => window.__nvE2E.selectText(window.__nvE2E.blockPos(2) + 3, window.__nvE2E.blockPos(2) + 3))
+  await ctl(ribbon, 'ribbon.tab.review').click()
+  await ctl(ribbon, 'ribbon.cmd.rewrite.open').click()
+  await expect(view(page)).toBeVisible()
+  await expect(revision(page)).toBeFocused()
+  await expect(ctl(ribbon, 'ribbon.cmd.rewrite.open')).toBeDisabled()
+  // Manuscript-wide controls are off, registry buttons and slice controls alike.
+  for (const id of ['comment.new', 'review.track', 'ribbon.cmd.review.change.next', 'find.open']) await expect(ctl(ribbon, id), id).toBeDisabled()
+  // Home > Bold with the pointer bolds the revision's selection, not the hidden manuscript.
+  await ctl(ribbon, 'ribbon.tab.home').click()
+  await revision(page).click()
+  await page.keyboard.press('ControlOrMeta+Home')
+  for (let i = 0; i < 8; i++) await page.keyboard.press('Shift+ArrowRight')
+  await ctl(ribbon, 'toolbar.bold').click()
+  await expect(revision(page).locator('strong')).toHaveCount(1)
+  expect(JSON.stringify(await page.evaluate(() => window.__nvE2E.docJSON()))).not.toContain('"bold"')
+  // Undo in the quick access bar undoes in the revision.
+  await ctl(ribbon, 'history.undo').click()
+  await expect(revision(page).locator('strong')).toHaveCount(0)
+  // Closed: the controls are back on the manuscript.
+  await page.keyboard.press('Escape')
+  await expect(view(page)).toBeHidden()
+  await expect(ctl(ribbon, 'find.open')).toBeEnabled()
+  await expect(ctl(ribbon, 'comment.new')).toBeEnabled()
+})
+
 test('several versions: create, rename, switch by keyboard and pointer; focus keys and Flip', async ({ page }) => {
   await project(page, 'Versions')
   await openOn(page, 2, 2)
   await page.keyboard.type('First take. ')
   await ctl(page, 'rewrite.newVersion').click()
-  const tabs = page.getByRole('tab')
+  const tabs = view(page).getByRole('tab')
   await expect(tabs).toHaveText(['Version 1', 'Version 2'])
   await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('region', { name: 'Revised version 2' })).toBeVisible()
@@ -286,7 +318,7 @@ test('drafts survive save and reopen, and crash recovery', async ({ page, contex
   expect(JSON.stringify(restored.rewrites[0].versions[1].doc)).toContain('Unsaved tail.')
   // Reopen it from Review ▸ Next Re-write: both versions, the last one viewed.
   await relaunched.evaluate(() => window.__nvE2E.runCommand('rewrite.next'))
-  await expect(relaunched.getByRole('tab')).toHaveText(['Version 1', 'Version 2'])
+  await expect(view(relaunched).getByRole('tab')).toHaveText(['Version 1', 'Version 2'])
   await expect(revision(relaunched)).toContainText('Unsaved tail.')
   await relaunched.keyboard.press('ControlOrMeta+s')
   await expect(saveStatus(relaunched)).toHaveText('Kept: Saved')

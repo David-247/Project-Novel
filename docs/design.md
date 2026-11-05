@@ -447,7 +447,7 @@ What Word does, and what we took from it:
 | Review | Tracking | Track Changes, Markup |
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
-| Review | Re-write | Re-write Passage… (with an icon; the group's own button), Re-writes…, Previous Re-write, Next Re-write |
+| Review | Re-write | Re-write Passage…, Re-writes…, Previous Re-write, Next Re-write (the group's own buttons: an icon on the first, short labels Re-write / Re-writes / Previous / Next; tooltips and the dropdown keep the full names) |
 | View | Views | Single Page, Two-Page Spread (T5: Book page-turn / Continuous scroll) |
 | View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |
 | View | Show | Comments panel |
@@ -621,9 +621,10 @@ The signature feature: a passage rewritten beside its original, compared like tw
   Previous Re-write.
 - **Narrow windows** (two pages do not fit): one page at a time, with an Original / Revised toggle in the header;
   the focus keys switch pages too.
-- **Ribbon**: Review ▸ Re-write group: Re-write Passage… (`rewrite.open`, the group's `Content`: a command
-  button with the re-write icon; its `ribbon` placement is `display: 'menu'`), then Re-writes… (`rewrite.list`),
-  Previous / Next Re-write (`rewrite.prev`, `rewrite.next`), placed by their commands.
+- **Ribbon**: Review ▸ Re-write group: Re-write Passage… (`rewrite.open`, with the re-write icon), Re-writes…
+  (`rewrite.list`), Previous / Next Re-write (`rewrite.prev`, `rewrite.next`). The group's `Content` shows them
+  as command buttons with short labels (Re-write, Re-writes, Previous, Next) so the group stays full at 1280px;
+  the commands' `ribbon` placements are `display: 'menu'` (the collapsed group and More list the full names).
 - **While the view is open the ribbon follows the command gate**, like the menus: registry buttons read
   `isCommandEnabled` (gate included); the slices' own controls for gated commands (Find, New Comment, Track
   Changes) are disabled with their command (`GatedItem` in src/ribbon-groups.tsx); the formatting controls, Undo /

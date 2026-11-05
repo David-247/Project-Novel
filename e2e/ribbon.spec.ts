@@ -355,7 +355,7 @@ test('ribbon text and icons meet WCAG AA on the four papers in OS light and dark
       add(`${scheme}/${surface}/paragraph menu`, await contrast(page, MENU, `${MENU} svg`))
       await page.keyboard.press('Escape')
       await resize(page, 360)
-      await page.locator('[data-control-id="ribbon.more"]').click()
+      await panel(page, 'home').locator('[data-control-id="ribbon.more"]').click() // each tab's panel has its own More
       await expect(page.getByRole('menu')).toBeVisible()
       add(`${scheme}/${surface}/More`, await contrast(page, MENU, `${MENU} svg`))
       await page.keyboard.press('Escape')

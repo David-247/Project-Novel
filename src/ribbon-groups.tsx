@@ -161,10 +161,13 @@ function GatedItem({ commandId, children }: { commandId: string; children: React
 }
 const gated = (commandId: string, node: ReactElement) => <GatedItem commandId={commandId}>{node}</GatedItem>
 
-/** A registry command's ribbon button with an icon (the command has `display: 'menu'`, so it shows once). */
-function IconCommandButton({ commandId, icon }: { commandId: string; icon: () => ReactElement }) {
+/**
+ * A registry command's ribbon button with an optional icon and a shorter visible label (the tooltip keeps
+ * the command's). The command has `display: 'menu'`, so it shows once.
+ */
+function RibbonCommand({ commandId, icon, label }: { commandId: string; icon?: () => ReactElement; label?: string }) {
   const command = useCommands().find((c) => c.id === commandId)
-  return command ? <CommandButton command={command} icon={icon} /> : null
+  return command ? <CommandButton command={command} icon={icon} label={label} /> : null
 }
 
 export const RIBBON_GROUPS: RibbonGroupSpec[] = [
@@ -329,8 +332,8 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     ],
   },
   { id: 'review.comments', tab: 'review', label: 'Comments', order: 30, priority: 80, icon: icons.comment, Content: () => gated(COMMENT_CONTROLS.new.id, <NewCommentButton />), menu: [cmd('comment.new')] },
-  // Re-write Passage… (icon) is the group's own button; Re-writes…, Previous / Next Re-write are placed by
-  // their commands (after it). The dropdown lists all four (their `ribbon` placements, in order).
+  // Re-write Passage… (icon), Re-writes…, Previous / Next Re-write: the group's own buttons; the commands'
+  // `ribbon` placements (display 'menu') list all four in the dropdown, in order.
   {
     id: 'review.rewrite',
     tab: 'review',
@@ -338,7 +341,16 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     order: 40,
     priority: 70,
     icon: icons.rewrite,
-    Content: () => <IconCommandButton commandId={RW.open.id} icon={icons.rewrite} />,
+    // Short visible labels (Word's "Previous" / "Next" in its Comments group), so the group stays open at
+    // a 1280px window; the tooltips and the dropdown keep the full names.
+    Content: () => (
+      <>
+        <RibbonCommand commandId={RW.open.id} icon={icons.rewrite} label="Re-write" />
+        <RibbonCommand commandId={RW.list.id} label="Re-writes" />
+        <RibbonCommand commandId={RW.prev.id} label="Previous" />
+        <RibbonCommand commandId={RW.next.id} label="Next" />
+      </>
+    ),
   },
   // ---- View ----
   // Page-turn / continuous scroll (T5) place their commands here.
