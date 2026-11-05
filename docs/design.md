@@ -564,3 +564,62 @@ rows). On the page, marks never recolour text, so text contrast is the page's ow
 2 px underline, deletions a 2 px strike-through, formatting changes a dotted rule, and changed blocks / lines a 3 px
 bar 12 px into the inside margin, all in per-surface `--page-tc-*` colours with at least 3:1 against the paper (or
 the author's colour when settings give one). Details: docs/track-changes.md.
+
+## Re-write (Phase 3)
+
+Slice `src/features/rewrite/` (public interface `index.ts`). Format: docs/project-format.md, "rewrites.json".
+The signature feature: a passage rewritten beside its original, compared like two facing pages of the book.
+
+- **Open**: Review ▸ Re-write Passage… (Mod-Alt-w) on the selection widened to whole paragraphs, or the paragraph
+  at the caret; at most one chapter (a wider selection is refused with a notice). A selection inside a passage
+  already in re-write opens that re-write. The spec's selection context menu entry is deferred out of Phase 3:
+  the app has no context menus anywhere.
+- **Menus while the view is open**: one mechanism for the menu bar (pointer and keyboard), the native menu and
+  shortcuts. Text commands (formatting, styles, paragraph spacing, Edit history / clipboard, Insert breaks) act
+  through the editor slice's active editor (`getActiveEditor()`), which the view points at the revision while it
+  has the focus; with the focus elsewhere in the view they are disabled (Edit history / clipboard in the
+  version-name field act on that field). A registry command gate
+  (`setCommandGate`) disables what makes no sense on a revision: Insert Footnote, comments, Find / Replace, Track
+  Changes, Go to Page, page view and zoom. Copy stays available on both pages. The pages behind the view do not
+  scroll.
+- **The spread**: the comparison view lies over the pages (they stay mounted, laid out and scrolled where they
+  were, so opening costs no reflow). Two pages on the desk at the book's trim width, margins and paper surface
+  (`.nv-page`, verso / recto spine shading), typeset by the book style sheet with the manuscript's base face: the
+  original on the left (read-only, focusable to read and select), the revision on the right (an editor with the
+  manuscript's schema: `createEditorExtensions({ detached: true })`, which leaves out what belongs to the
+  manuscript's one view: comment threads, tracked-change recording, the footnote editor, the re-write lock). The
+  labels above the pages are set on the desk; the regions are announced as "Original" and "Revised version N". One
+  scroller holds both pages, so they always scroll together.
+- **Alignment**: the blocks of both sides are aligned (word-similarity global alignment, `align.ts`): paired
+  paragraphs start level, an inserted or removed paragraph leaves a gap opposite it. Levelling is `padding-top` on
+  the higher block (a node decoration; padding never changes margin collapsing), measured per frame after a
+  change; the pairing itself is redone at once when a paragraph is added or removed, otherwise 150 ms after typing.
+- **The spine** (the one memorable element): the gutter between the pages carries one stitch per aligned row: a
+  ring for an unchanged paragraph, a filled ink stitch for a changed one, a short red or green dash for a paragraph
+  only the original or only the revision has. Decorative (aria-hidden); the differences themselves are in the text.
+- **Differences** (toggle, Mod-Shift-d, on by default): removed words on the original get a rose tint and a
+  strike-through, added words on the revision a green tint and an underline; whole unpaired paragraphs get the
+  tint and a bar in the margin. Word diff: jsdiff `diffWordsWithSpace` (BSD-3-Clause). Per-surface tokens
+  `--page-rw-*` (rewrite.css): page text keeps 4.5:1 on every tint, rules and stitches 3:1 (rewrite.test.tsx).
+- **Versions**: tabs above the pages (arrow keys move and select; double-click or the pen renames inline; New
+  version copies the version shown). Each version keeps its own undo history while the view is open (undo is local
+  to the revision). Flip Pages (Mod-Alt-k) swaps the sides; Go to Left / Right Page (Mod-Alt-ArrowLeft / Right)
+  moves the focus between them. Escape or Close returns to the manuscript; the re-write stays a draft.
+- **Undo** is never blocked. When an undo or redo in the manuscript changes text in an open re-write's passage,
+  the re-write is marked "original changed" (the view offers Show current text) and a short notice says so
+  ("Undo changed text in a passage that is in re-write."), over the view too; it goes after a few seconds or when the
+  caret moves. An edit that removes the whole passage (undoing the paragraphs' insertion) or leaves it in pieces
+  says so instead ("The passage for this re-write was removed. Its versions are kept; reopen it to copy text
+  out."); the view shows the same in its banner and the Re-writes list marks it. When a redo or undo puts the same
+  blocks back where the passage was, they are anchored again (only blocks the undo or redo inserted itself) and the notice goes. The history
+  group is closed when a re-write starts, so typing from before is never merged with later edits. Comments can be added to and removed
+  from the passage.
+- **In the manuscript** an open re-write's passage is read-only and marked by a faint `--page-rw-lock-bg` tint and
+  a dashed "tacking stitch" bar in the left margin with a ring at its top (pseudo-elements: no box changes, so
+  pagination is untouched). A click on the bar reopens the re-write; so do the notice that floats over the pages
+  while the caret is in the passage (stronger after an edit there was refused), Review ▸ Re-writes… and Next /
+  Previous Re-write.
+- **Narrow windows** (two pages do not fit): one page at a time, with an Original / Revised toggle in the header;
+  the focus keys switch pages too.
+- **Ribbon** (placed at integration): Review ▸ Re-write group: Re-write Passage… (`rewrite.open`), Re-writes…
+  (`rewrite.list`), Previous / Next Re-write (`rewrite.prev`, `rewrite.next`).

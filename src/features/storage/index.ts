@@ -51,6 +51,8 @@ export type { BatchFile } from './ipc'
 // saved in one batch with the manuscript, snapshotted for crash recovery, guarded when damaged or
 // newer (see side-files.ts and docs/project-format.md, "Side files").
 export { registerSideFile } from './side-files'
+// A side file changed without a manuscript edit (re-write revisions): unsaved changes + autosave due.
+export { sideFileChanged } from './autosave'
 export type { ProjectSideFile } from './side-files'
 
 // Book settings file (book.json; see docs/project-format.md)

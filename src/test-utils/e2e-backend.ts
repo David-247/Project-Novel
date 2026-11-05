@@ -24,9 +24,10 @@ import { getPaginationDebug, invalidatePagination, registerBottomReservation, re
 import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
 import { commentsDebug } from '@/features/comments'
+import { rewriteDebug } from '@/features/rewrite'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
-import { getCommands } from '@/shared/commands'
+import { getCommands, runCommand } from '@/shared/commands'
 import { formatShortcut } from '@/shared/ui'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
@@ -343,6 +344,28 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     comments: () => {
       const c = useStore.getState().comments
       return { threads: c.threads, activeId: c.activeId, showResolved: c.showResolved, layout: { ...commentsDebug } }
+    },
+    /** Re-writes in the store, the open one, and the comparison view's last open / layout timing. */
+    rewrite: () => {
+      const r = useStore.getState().rewrite
+      return {
+        rewrites: r.rewrites,
+        openId: r.openId,
+        activeVersionId: r.activeVersionId,
+        version: r.version,
+        caretIn: r.caretIn,
+        notice: r.notice,
+        debug: { mountedAt: rewriteDebug.mountedAt, readyAt: rewriteDebug.readyAt, layouts: rewriteDebug.layouts, rows: rewriteDebug.rows.map((x) => x.kind) },
+      }
+    },
+    /** Run a registered command as its menu item would (false when absent or disabled). */
+    runCommand: (id: string) => runCommand(id),
+    /** Start position of top-level block `index` of the manuscript. */
+    blockPos: (index: number) => {
+      const doc = getEditor()?.state.doc
+      let pos = 0
+      for (let k = 0; doc && k < index; k++) pos += doc.child(k).nodeSize
+      return pos
     },
     /** book.styles as stored (overrides only). */
     bookStyles: () => useStore.getState().book.styles,

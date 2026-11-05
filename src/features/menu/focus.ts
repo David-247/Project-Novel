@@ -1,4 +1,4 @@
-import { getEditor } from '@/features/editor'
+import { getActiveEditor } from '@/features/editor'
 
 /**
  * Where keyboard focus was before the menu bar (or a Help dialog) took it, so it can be given back:
@@ -29,7 +29,7 @@ export function trackFocusOutsideMenus(): () => void {
  * takes it, so the selection given back later is the one the user made.
  */
 export function syncEditorSelection(): void {
-  const view = getEditor()?.view as unknown as { domObserver?: { flush(): void }; hasFocus(): boolean } | undefined
+  const view = getActiveEditor()?.view as unknown as { domObserver?: { flush(): void }; hasFocus(): boolean } | undefined
   if (view?.hasFocus()) view.domObserver?.flush()
 }
 
@@ -38,7 +38,7 @@ export function syncEditorSelection(): void {
  * which puts its selection back exactly (a plain DOM focus could briefly put the caret elsewhere).
  */
 export function restoreFocus(): void {
-  const ed = getEditor()
+  const ed = getActiveEditor()
   const target = lastOutside
   if (target && target.isConnected && target !== document.body) {
     if (ed && (target === ed.view.dom || ed.view.dom.contains(target))) ed.view.focus()

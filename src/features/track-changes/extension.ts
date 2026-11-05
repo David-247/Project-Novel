@@ -39,9 +39,20 @@ export interface TrackChangesOptions {
   /**
    * The review side (click-to-review popover, Escape, Alt-Enter, the change count). Default true;
    * false for an editor that is not the manuscript (the re-write view). Even when true, it acts only in
-   * the view the composition root names (setReviewViewSource).
+   * the view the composition root names (setReviewViewSource). `detached: true` implies false.
    */
   review: boolean
+  /**
+   * Another view with the manuscript's schema (the re-write pages): no Mod-Shift-e, no review side
+   * (whatever `review` says), and a markup view change does not ask the manuscript's pagination to
+   * re-measure.
+   */
+  detached: boolean
+}
+
+/** Whether this editor gets the review side: the manuscript only (a detached editor never does). */
+function hasReviewSide(options: Pick<TrackChangesOptions, 'review' | 'detached'>): boolean {
+  return options.review && !options.detached
 }
 
 export const trackChangesKey = new PluginKey<DecorationSet>('nvTrackChanges')
@@ -244,6 +255,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
       getAuthor: () => currentTrackAuthor(),
       isEnabled: () => useStore.getState().book.trackChanges === true,
       review: true,
+      detached: false,
     }
   },
 
@@ -295,14 +307,18 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
       return false
     }
     return {
-      'Mod-Shift-e': () => {
-        toggleTrackChanges()
-        return true
-      },
+      ...(this.options.detached
+        ? {}
+        : {
+            'Mod-Shift-e': () => {
+              toggleTrackChanges()
+              return true
+            },
+          }),
       // Show Change Details (also a registry command): ProseMirror keeps Enter-with-modifiers from the
       // window's shortcut dispatcher (it prevents the default of every Enter), so it is bound here too.
       'Alt-Enter': () => {
-        if (!this.options.review || !isReviewView(this.editor.view)) return false
+        if (!hasReviewSide(this.options) || !isReviewView(this.editor.view)) return false
         showChangeAtCaret()
         return true
       },
@@ -313,7 +329,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
 
   addProseMirrorPlugins() {
     return [
-      ...(this.options.review ? [reviewPlugin()] : []),
+      ...(hasReviewSide(this.options) ? [reviewPlugin()] : []),
       new Plugin<DecorationSet>({
         key: trackChangesKey,
         state: {
@@ -359,7 +375,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
             applyMarkupViewAttribute(v)
             // Recompute what depends on the view (footnote numbers, breaks, find), then re-measure.
             view.dispatch(view.state.tr.setMeta(MARKUP_VIEW_META, v).setMeta('addToHistory', false))
-            repaginate?.(changedBlockPositions(view.state.doc))
+            if (!this.options.detached) repaginate?.(changedBlockPositions(view.state.doc))
           })
           return {
             destroy: () => {

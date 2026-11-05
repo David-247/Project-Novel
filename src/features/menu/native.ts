@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { getEditor } from '@/features/editor'
+import { getActiveEditor } from '@/features/editor'
 import {
   getCommands,
   menuBarKind,
@@ -46,7 +46,7 @@ export function startNativeMenu(opts: { force?: boolean } = {}): () => void {
   const offState = subscribeCommandState(send)
   let unlisten: (() => void) | null = null
   listen<string>(MENU_COMMAND_EVENT, (e) => {
-    runFromNativeMenu(e.payload, getEditor()?.view.dom)
+    runFromNativeMenu(e.payload, getActiveEditor()?.view.dom)
   })
     .then((un) => (stopped ? un() : (unlisten = un)))
     .catch((e) => console.warn('Native menu events unavailable:', e))

@@ -3,6 +3,7 @@ import type { Node as PMNode, Schema } from '@tiptap/pm/model'
 import { EditorState, type Transaction } from '@tiptap/pm/state'
 import { useStore } from '@/shared/store'
 import { TRACKING_BLOCK_ATTRS } from '@/shared/track-changes'
+import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { createEditorExtensions } from './extensions'
 
 /**
@@ -138,6 +139,43 @@ export function getEditor(): Editor | null {
 }
 
 /**
+ * Where text commands act (Edit history / clipboard, Insert, Format, styles: the menus, their
+ * shortcuts, native menu items). Normally the manuscript. Another view that edits text in place of
+ * the manuscript (the re-write view) registers a source while it is shown: its editor while that has
+ * the focus, else null (the commands are then disabled).
+ */
+let activeSource: (() => Editor | null) | null = null
+const activeListeners = new Set<() => void>()
+
+export function setActiveEditorSource(source: (() => Editor | null) | null): () => void {
+  activeSource = source
+  activeListeners.forEach((l) => l())
+  return () => {
+    if (activeSource !== source) return
+    activeSource = null
+    activeListeners.forEach((l) => l())
+  }
+}
+
+/** Notify command state readers that the active editor (or its focus) changed. */
+export function onActiveEditorChange(cb: () => void): () => void {
+  activeListeners.add(cb)
+  return () => activeListeners.delete(cb)
+}
+
+/** The editor text commands act on: the registered source's, else the manuscript. */
+export function getActiveEditor(): Editor | null {
+  if (!activeSource) return live()
+  const ed = activeSource()
+  return ed && !ed.isDestroyed ? ed : null
+}
+
+/** Tell command readers the active source's editor changed (focus moved into or out of it). */
+export function activeEditorChanged(): void {
+  activeListeners.forEach((l) => l())
+}
+
+/**
  * Optional block layout attributes (formatting toolbar). A block that does not use one gets no
  * entry in the saved JSON; loading a doc without them gives the same defaults.
  */
@@ -150,6 +188,8 @@ const OPTIONAL_BLOCK_ATTRS = [
   'styleId',
   // Track changes (Phase 3): null unless the block carries a tracked change.
   ...TRACKING_BLOCK_ATTRS,
+  // Re-write (Phase 3): null unless the block is part of a passage in re-write.
+  REWRITE_BLOCK_ATTR,
 ] as const
 
 /**
