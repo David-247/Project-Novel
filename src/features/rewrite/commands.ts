@@ -87,7 +87,7 @@ export function storeVersionDoc(rewriteId: string, versionId: string, doc: DocNo
 function compact(node: PMNode): DocNodeJSON {
   const walk = (j: DocNodeJSON, n: PMNode): DocNodeJSON => {
     if (j.attrs) {
-      const specs = n.type.attrs as Record<string, { default?: unknown }>
+      const specs = (n.type.spec.attrs ?? {}) as Record<string, { default?: unknown }>
       const attrs = Object.fromEntries(Object.entries(j.attrs).filter(([k, v]) => !(k in specs) || specs[k].default !== v))
       if (Object.keys(attrs).length) j.attrs = attrs
       else delete j.attrs
@@ -257,6 +257,11 @@ export const toggleShowCurrent = (): void => actions().setShowCurrent(!store().r
 /** Mod-Alt-Left / Right: focus the page on that side (original or revision, following Flip). */
 export function focusSide(side: 'left' | 'right'): void {
   live?.focus(side)
+}
+
+/** Focus the revision, whichever side it is on. */
+export function focusRevision(): void {
+  live?.focus(store().rewrite.flipped ? 'left' : 'right')
 }
 
 /** A programmatic edit (Replace All, accept / reject, undo) changed the passage of `anchor`. */

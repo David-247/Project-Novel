@@ -77,10 +77,14 @@
   cursor: pointer;
 }
 
-/* ---- The canvas while the view is open: hidden, still laid out (pagination keeps its measurements). */
-.nv-rw-hidden {
-  height: 0;
-  overflow: hidden;
+/* ---- While the view is open it lies over the canvas, which stays exactly as it was (same size,
+   same scroll position: nothing is re-laid out or re-rendered behind it). */
+.nv-rw-overlay {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: 100%;
+  margin-bottom: -100%;
 }
 
 /* ---- The comparison view -------------------------------------------------------------------- */
@@ -88,6 +92,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
   min-height: 0;
   background: var(--desk-bg);
   /* One book point in CSS px, as on the pages. */

@@ -4,7 +4,7 @@ import { getChapters, chapterIndexAt, getEditor, blockPlainText } from '@/featur
 import { useStore, type RewriteRecord } from '@/shared/store'
 import { Button, Dialog, Tooltip } from '@/shared/ui'
 import { passageRange } from './anchor'
-import { dismissNotice, openList, openRewrite, setViewHooks } from './commands'
+import { dismissNotice, focusRevision, openList, openRewrite, setViewHooks } from './commands'
 import { REWRITE_CONTROLS as C } from './controls'
 import { RewriteView } from './RewriteView'
 
@@ -23,7 +23,7 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
 
 /**
  * Composition-root wrapper around the manuscript's canvas: while a re-write is open the comparison
- * view takes its place (the canvas stays mounted and laid out, collapsed and inert, so the
+ * view lies over it (the canvas stays mounted, laid out and scrolled where it was, so the
  * manuscript's editor, its undo history and the page model are untouched). Closing gives the
  * manuscript back where it was. Also shows the manuscript's re-write notice and the Re-writes list.
  */
@@ -60,8 +60,25 @@ export function RewriteHost({ children }: RewriteHostProps) {
 
   return (
     <>
-      {open ? <RewriteView /> : <RewriteNotice />}
-      <div ref={canvasRef} className={open ? 'nv-rw-hidden' : undefined} inert={open} aria-hidden={open || undefined}>
+      {open ? (
+        <div className="nv-rw-overlay">
+          <RewriteView />
+        </div>
+      ) : (
+        <RewriteNotice />
+      )}
+      {/* Behind the view: hidden from screen readers, and the keyboard focus never stays there (Tab from
+          the view's last control lands in the manuscript's view otherwise). Not `inert`: that restyles
+          the whole manuscript on every open (over 200 ms at 100k words). */}
+      <div
+        ref={canvasRef}
+        aria-hidden={open || undefined}
+        onFocusCapture={(e) => {
+          if (!open) return
+          ;(e.target as HTMLElement).blur?.()
+          focusRevision()
+        }}
+      >
         {children}
       </div>
       <RewritesList />

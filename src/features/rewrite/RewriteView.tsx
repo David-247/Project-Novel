@@ -3,7 +3,7 @@ import type { Node as PMNode } from '@tiptap/pm/model'
 import { EditorState } from '@tiptap/pm/state'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { createEditorExtensions } from '@/features/editor'
+import { createEditorExtensions, SYSTEM_FONT_STACK } from '@/features/editor'
 import { sideFileChanged } from '@/features/storage'
 import { pageBox, ptToPx } from '@/shared/book'
 import type { DocNodeJSON } from '@/shared/document'
@@ -95,6 +95,8 @@ function Comparison({ record }: { record: RewriteRecord }) {
       minHeight: box.page.height,
       paddingTop: ptToPx(margins.top),
       paddingBottom: ptToPx(margins.bottom),
+      // The manuscript's base face (styles without a font of their own inherit it, as on the pages).
+      fontFamily: SYSTEM_FONT_STACK,
     }),
     [box, margins],
   )
@@ -188,7 +190,14 @@ function Comparison({ record }: { record: RewriteRecord }) {
     rewriteDebug.readyAt = 0
     const om = origMount.current!
     const rm = revMount.current!
-    const orig = makeEditor(om, record.original, false, { 'aria-label': 'Original passage', 'data-testid': 'rewrite-original', tabindex: '0' })
+    const orig = makeEditor(om, record.original, false, {
+      // Read-only text to read and select, not a field: a document (Tiptap would call it a textbox).
+      role: 'document',
+      'aria-readonly': 'true',
+      'aria-label': 'Original passage',
+      'data-testid': 'rewrite-original',
+      tabindex: '0',
+    })
     const rev = makeEditor(rm, version.doc, true, {
       role: 'textbox',
       'aria-multiline': 'true',
@@ -295,14 +304,16 @@ function Comparison({ record }: { record: RewriteRecord }) {
 
   // ---- Keys: Escape closes; the in-view shortcuts (by key code: Option changes letters on macOS) ---
   const onKeyDown = (e: ReactKeyboardEvent) => {
-    if (e.defaultPrevented) return
     const mac = detectPlatform() === 'mac'
     const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
-    if (e.key === 'Escape' && !e.altKey && !mod && !(e.target as Element).closest('input')) {
+    // Escape closes, from the pages too (an editor keymap may mark the key handled); the rename field
+    // keeps its own Escape (cancel).
+    if (e.key === 'Escape' && !e.altKey && !mod && !e.shiftKey && !(e.target as Element).closest('input')) {
       e.preventDefault()
       closeRewrite()
       return
     }
+    if (e.defaultPrevented) return
     if (mod && e.altKey && !e.shiftKey) {
       if (e.code === 'KeyK') toggleFlip()
       else if (e.key === 'ArrowLeft') focusSide('left')

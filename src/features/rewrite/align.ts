@@ -85,7 +85,8 @@ function wordCounts(block: PMNode): Map<string, number> {
 
 /** Word similarity of two blocks in [0, 1] (Dice coefficient over word multisets). */
 export function similarity(a: PMNode, b: PMNode): number {
-  if (a.type !== b.type && (a.isTextblock !== b.isTextblock || !a.isTextblock)) return 0
+  // By name: the two pages are separate editors, each with its own (identical) schema.
+  if (a.type.name !== b.type.name && (a.isTextblock !== b.isTextblock || !a.isTextblock)) return 0
   const ta = blockText(a).text
   const tb = blockText(b).text
   if (ta === tb) return 1
@@ -135,7 +136,7 @@ export function alignBlocks(left: PMNode, right: PMNode): AlignedRow[] {
       const s = sim[i * m + j]
       const here = score[i * W + j]
       if (s >= MIN_SIMILARITY && Math.abs(here - (s + score[(i + 1) * W + j + 1])) < EPS) {
-        rows.push({ left: i, right: j, kind: blockText(a[i]).text === blockText(b[j]).text && a[i].sameMarkup(b[j]) ? 'same' : 'changed' })
+        rows.push({ left: i, right: j, kind: sameBlock(a[i], b[j]) ? 'same' : 'changed' })
         i++
         j++
         continue
@@ -151,10 +152,13 @@ export function alignBlocks(left: PMNode, right: PMNode): AlignedRow[] {
     if (i < n) rows.push({ left: i++, right: null, kind: 'removed' })
     else rows.push({ left: null, right: j++, kind: 'added' })
   }
-  // Identical block content but different formatting counts as a change only when the text differs too.
-  return rows.map((r) =>
-    r.kind === 'changed' && r.left !== null && r.right !== null && a[r.left].eq(b[r.right]) ? { ...r, kind: 'same' as const } : r,
-  )
+  return rows
+}
+
+/** Same text, attributes and marks (compared as JSON: the nodes may come from different schemas). */
+function sameBlock(a: PMNode, b: PMNode): boolean {
+  if (blockText(a).text !== blockText(b).text || a.type.name !== b.type.name) return false
+  return JSON.stringify(a.toJSON()) === JSON.stringify(b.toJSON())
 }
 
 /** A range to highlight, in document positions of its own side. */
