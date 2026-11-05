@@ -29,6 +29,9 @@ export {
   type SaveOptions,
 } from './project'
 
+// The native go-ahead / Cancel question, for other slices (Accept All Changes); injected at the root.
+export { askConfirm } from './dialogs'
+
 // Autosave + crash recovery (.recovery/manuscript.json; see docs/project-format.md)
 export { startAutosave, stopAutosave, autosaveNow, AUTOSAVE_INTERVAL_MS, AUTOSAVE_RETRY_DELAYS_MS } from './autosave'
 export {
