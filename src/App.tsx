@@ -4,6 +4,7 @@ import {
   FindButton,
   FindReplacePanel,
   getDocJSON,
+  getEditor,
   getDocVersion,
   HistoryButtons,
   InsertMenu,
@@ -55,6 +56,7 @@ import {
   registerTrackChangesCommands,
   setMarkupViewRepaginate,
   setReviewConfirm,
+  setReviewViewSource,
   setOnTrackingSwitchedOn,
   setTrackChangesAuthorSource,
   TrackChangesButton,
@@ -145,7 +147,12 @@ export function App() {
   // Accept / Reject All above 50 changes asks with the app's native message dialog.
   useEffect(() => {
     setReviewConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
-    return () => setReviewConfirm(null)
+    // The review commands, the change popover and the count act on the manuscript only.
+    setReviewViewSource(() => getEditor()?.view)
+    return () => {
+      setReviewConfirm(null)
+      setReviewViewSource(null)
+    }
   }, [])
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.

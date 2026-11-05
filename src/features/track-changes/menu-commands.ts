@@ -4,6 +4,7 @@ import { getMarkupView, isTracking, setMarkupView, toggleTrackChanges } from './
 import { BY_AUTHOR_SUBMENU, MARKUP_VIEW_OPTIONS, TRACK_CHANGES_CONTROLS } from './controls'
 import { showChangeAtCaret } from './popover-actions'
 import { nextChange, prevChange, resolveAll, resolveAndNext, resolveSelection } from './review-actions'
+import { hasTrackedChanges } from './has-changes'
 import { getChangeSummary, getReviewView, subscribeChangeSummary } from './review-state'
 
 /**
@@ -41,7 +42,15 @@ export function trackChangesCommands(): Command[] {
   ]
 }
 
-const hasChanges = () => getChangeSummary().count > 0
+/**
+ * The manuscript holds a change now. Read from the current document (cached per node, so after an edit
+ * only the edited block's path is looked at), not the debounced summary: Accept and Mod-Alt-a / r work
+ * right after an edit or an undo.
+ */
+const hasChanges = () => {
+  const v = getReviewView()
+  return !!v && hasTrackedChanges(v.state.doc)
+}
 const canEdit = () => hasChanges() && !!getReviewView()?.editable
 
 /**
@@ -73,8 +82,12 @@ export function reviewCommands(): Command[] {
   ]
 }
 
-/** `review.acceptAll.author.<n>` / `review.rejectAll.author.<n>`: the n-th author present. */
-export const byAuthorCommandId = (mode: 'accept' | 'reject', index: number) => `review.${mode}All.author.${index}`
+/**
+ * `review.acceptAll.author.<name>` / `review.rejectAll.author.<name>` (the name URI-encoded): keyed by
+ * the author, so a stale native-menu item resolves that author's changes or, once the author has none
+ * left, nothing.
+ */
+export const byAuthorCommandId = (mode: 'accept' | 'reject', author: string) => `review.${mode}All.author.${encodeURIComponent(author)}`
 
 /**
  * Review > Accept All by Author ▸ / Reject All by Author ▸: one item per author present (in document
@@ -88,7 +101,7 @@ export function byAuthorCommands(authors: readonly string[]): Command[] {
     const verb = mode === 'accept' ? 'Keep' : 'Undo'
     if (authors.length === 0) {
       out.push({
-        id: `review.${mode}All.author.none`,
+        id: `review.${mode}All.noAuthors`,
         label: 'No Changes',
         description: 'The book has no tracked changes.',
         menu: { id: 'review', group: mode, order, submenu },
@@ -100,7 +113,7 @@ export function byAuthorCommands(authors: readonly string[]): Command[] {
     }
     authors.forEach((author, i) =>
       out.push({
-        id: byAuthorCommandId(mode, i),
+        id: byAuthorCommandId(mode, author),
         label: author,
         description: `${verb} every tracked change by ${author}. Other people's changes stay.`,
         menu: { id: 'review', group: mode, order: order + i / 1000, submenu },

@@ -166,8 +166,12 @@ change) or `null` when there is nothing to do.
 
 - `acceptChange(state, id)`, `rejectChange(state, id)`: every mark and block attribute with that id.
 - `acceptAll(state)`, `rejectAll(state)`.
-- `acceptChangesInRange(state, from, to)`, `rejectChangesInRange(state, from, to)`: every change whose
-  marks or blocks touch the range (or contain `from` when the range is empty).
+- `acceptChangesInRange(state, from, to)`, `rejectChangesInRange(state, from, to)`: as Word does,
+  **only the selected part** of each inline change (insertion, deletion, format change) is resolved:
+  the text is split at the range's ends and the rest stays pending with the same id, author and date.
+  Plain text between two pieces of one change does not count as touching it. A footnote reference (an
+  atom) and every block-level change (a split or join boundary, a break, a style change) that the range
+  touches are resolved **whole**. An empty range resolves every change containing it, whole.
 - `acceptAllByAuthor(state, author)`, `rejectAllByAuthor(state, author)`: every change by that author.
 - `listChanges(doc)` → `{ id, kinds, author, date, from, to }[]` in document order (it skips blocks
   without changes, cached per node); `countChanges(state)`; `listAuthors(changes)`.
@@ -200,15 +204,24 @@ tracking on.
 |---|---|---|
 | Previous Change / Next Change | Mod-Alt-↑ / Mod-Alt-↓ | Selects the change before / after the selection (wraps) and scrolls its page into the middle of the editor region. Inline changes: their text is selected; a break: the break (node selection); a boundary or style change: the caret at the block's start. |
 | Show Change Details | Alt-Enter | The change popover for the change at the caret, with the focus on Accept (All / Simple Markup). |
-| Accept Change / Reject Change | | The change Next Change selected, else the change at a collapsed caret (`changeIdAt`), else every change touching the selection. |
+| Accept Change / Reject Change | | The change Next Change selected (whole), else the change at a collapsed caret (`changeIdAt`, whole), else the selected part of every change in the selection (`acceptChangesInRange`). |
 | Accept and Move to Next / Reject and Move to Next | Mod-Alt-a / Mod-Alt-r | The same, then Next Change. |
 | Accept All Changes / Reject All Changes | | Every change. More than 50 (`CONFIRM_ABOVE`) asks first with the app's native message dialog (`setReviewConfirm`, wired to storage's `askConfirm`). |
-| Accept All by Author ▸ / Reject All by Author ▸ | | One item per author present (re-registered when the authors change). |
+| Accept All by Author ▸ / Reject All by Author ▸ | | One item per author present (re-registered when the authors change), id `review.acceptAll.author.<name, URI-encoded>`: a stale native-menu item resolves that author's changes, or nothing once there are none. |
 
 Guards: navigation `none`; Accept / Reject at the caret and Show Change Details `manuscript`; All and By
 Author `modal`. Alt-Enter is also bound in the manuscript keymap (ProseMirror prevents the default of
 every Enter, so the window dispatcher never sees it there). Mod-Alt-Enter (asked for in the brief) is Insert
-Scene Break.
+Scene Break. The registry holds one shortcut per command, so there is no Mod-Alt-PageUp / PageDown
+alternative for Previous / Next Change (in case an OS screen-rotation hotkey takes Mod-Alt-arrows);
+they stay in the Review menu. Enabled state reads the current document (`hasTrackedChanges`, cached per
+node), never the debounced count, so Accept and Mod-Alt-a / r work right after an edit or an undo.
+
+**The manuscript only.** The review acts on one view: the one the composition root names with
+`setReviewViewSource(() => getEditor()?.view)` (without a source, the last mounted view with the
+extension, for isolated tests). Another editor built with TrackChanges (the re-write view) never takes
+the commands, the popover, Alt-Enter or the count; `TrackChanges.configure({ review: false })` leaves
+the review side out of such an editor entirely.
 
 **Change popover** (`ChangePopover`, portalled): author, relative date, kind ("Inserted", "Deleted",
 "Replaced", "New paragraph", "Joined paragraphs", "Inserted page break", "Formatted", "Paragraph
@@ -216,8 +229,9 @@ formatting changed") and a preview, with Accept and Reject. Opens on a click or 
 Simple Markup (ProseMirror's `handleClick`, which never fires after a drag-selection: the innermost
 tracked span under the pointer, or a changed block clicked outside its text), or with Show Change Details.
 Placed with the footnote editor's placement (`placeAnchored`, `@/shared/ui`). Tab cycles its buttons;
-Escape returns to the text. It closes when the caret leaves the change, the change is gone, the focus
-goes elsewhere (a menu), or the view changes to No Markup / Original.
+Escape returns to the text. It closes on any document change (typing, undo, a document load, also with
+the focus in it), when the caret leaves the change, when the focus goes elsewhere (a menu), or when the
+view changes to No Markup / Original. While it is closed nothing is computed for it per keystroke.
 
 **Status bar** (`ChangesIndicator`, next to `TrackChangesNotice`): "N changes" while tracking is on or
 changes exist (recounted 200 ms after edits pause); a button that runs Next Change.

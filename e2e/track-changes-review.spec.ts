@@ -106,7 +106,7 @@ test('Accept All, Reject All (confirmed above 50 changes) and Accept All by one 
   expect(await count(page)).toBe(55)
 
   // By author: Bob's two changes only.
-  await reviewMenu(page, 'review.acceptAll.author.1', 'menu.review.accept-all-by-author')
+  await reviewMenu(page, 'review.acceptAll.author.Bob', 'menu.review.accept-all-by-author')
   await expect.poll(() => count(page)).toBe(53)
   expect((await blocks(page)).slice(0, 4)).toEqual(['Kept old new end.', 'Split half.', '[pageBreak]', 'Note here.'])
 

@@ -17,6 +17,7 @@ import { copiedSlice } from './copy'
 import { hasTrackedChanges } from './has-changes'
 import { showChangeAtCaret } from './popover-actions'
 import { reviewPlugin } from './review-plugin'
+import { isReviewView } from './review-state'
 import {
   cleanSlice,
   DEFERRED_INSERT_META,
@@ -35,6 +36,12 @@ export interface TrackChangesOptions {
   getAuthor: () => Author
   /** Whether changes are recorded now. Default: the project's book setting `trackChanges`. */
   isEnabled: () => boolean
+  /**
+   * The review side (click-to-review popover, Escape, Alt-Enter, the change count). Default true;
+   * false for an editor that is not the manuscript (the re-write view). Even when true, it acts only in
+   * the view the composition root names (setReviewViewSource).
+   */
+  review: boolean
 }
 
 export const trackChangesKey = new PluginKey<DecorationSet>('nvTrackChanges')
@@ -236,6 +243,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
     return {
       getAuthor: () => currentTrackAuthor(),
       isEnabled: () => useStore.getState().book.trackChanges === true,
+      review: true,
     }
   },
 
@@ -294,6 +302,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
       // Show Change Details (also a registry command): ProseMirror keeps Enter-with-modifiers from the
       // window's shortcut dispatcher (it prevents the default of every Enter), so it is bound here too.
       'Alt-Enter': () => {
+        if (!this.options.review || !isReviewView(this.editor.view)) return false
         showChangeAtCaret()
         return true
       },
@@ -304,7 +313,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
 
   addProseMirrorPlugins() {
     return [
-      reviewPlugin(),
+      ...(this.options.review ? [reviewPlugin()] : []),
       new Plugin<DecorationSet>({
         key: trackChangesKey,
         state: {

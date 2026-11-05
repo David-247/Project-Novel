@@ -12,17 +12,48 @@ import { listAuthors, listChanges } from './review'
 
 // ---- The manuscript view --------------------------------------------------------------------------
 
-let reviewView: EditorView | null = null
+/**
+ * Views with the TrackChanges review plugin, in mount order. Without a source (isolated tests) the
+ * review acts on the last one; with one (the composition root: the manuscript editor's view) only
+ * that view is reviewed, so another editor built with the extension (the re-write view) never takes
+ * the review commands, the popover or the count.
+ */
+const mounted: EditorView[] = []
+let source: (() => EditorView | null | undefined) | null = null
 
-/** Set by the TrackChanges plugin view (the manuscript editor); null on destroy. */
-export function setReviewView(view: EditorView | null): void {
-  reviewView = view
+const alive = (v: EditorView | null | undefined): v is EditorView => !!v && !(v as unknown as { isDestroyed?: boolean }).isDestroyed
+
+/** Called by the review plugin view on mount (`view`) and destroy (`null` with `gone`). Internal. */
+export function setReviewView(view: EditorView | null, gone?: EditorView): void {
+  if (view && !mounted.includes(view)) mounted.push(view)
+  if (gone) {
+    const i = mounted.indexOf(gone)
+    if (i >= 0) mounted.splice(i, 1)
+  }
 }
 
-/** The manuscript view, or null (none mounted, or destroyed). */
+/** The composition root: which view is the manuscript (e.g. `() => getEditor()?.view`); null resets. */
+export function setReviewViewSource(fn: (() => EditorView | null | undefined) | null): void {
+  source = fn
+}
+
+/** The manuscript view the review acts on, or null (none mounted, or destroyed). */
 export function getReviewView(): EditorView | null {
-  return reviewView && !(reviewView as unknown as { isDestroyed?: boolean }).isDestroyed ? reviewView : null
+  if (source) {
+    let v: EditorView | null | undefined
+    try {
+      v = source()
+    } catch {
+      v = null
+    }
+    return alive(v) ? v : null
+  }
+  for (let i = mounted.length - 1; i >= 0; i--) if (alive(mounted[i])) return mounted[i]
+  return null
 }
+
+/** `view` is the one the review acts on. */
+export const isReviewView = (view: EditorView): boolean => getReviewView() === view
 
 // ---- Change summary -------------------------------------------------------------------------------
 
@@ -126,5 +157,6 @@ export function __resetReviewStateForTests(): void {
   summary = EMPTY
   summaryDoc = null
   popover = null
-  reviewView = null
+  mounted.length = 0
+  source = null
 }

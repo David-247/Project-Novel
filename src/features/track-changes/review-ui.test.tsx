@@ -13,6 +13,8 @@ import {
   acceptAll,
   acceptAllByAuthor,
   acceptChange,
+  acceptChangesInRange,
+  rejectChangesInRange,
   changeIdAt,
   listAuthors,
   listChanges,
@@ -30,7 +32,8 @@ import {
   resolveSelection,
   setReviewConfirm,
 } from './review-actions'
-import { __resetReviewStateForTests, getChangePopover, getChangeSummary, refreshChangeSummary } from './review-state'
+import { __resetReviewStateForTests, getChangePopover, getChangeSummary, getReviewView, refreshChangeSummary, setReviewViewSource } from './review-state'
+import { TrackChanges } from './extension'
 import { ChangePopover, ChangesIndicator } from './ReviewUI'
 
 /**
@@ -176,6 +179,67 @@ describe('semantics', () => {
     expect(acceptAllByAuthor(s, 'Nobody')).toBeNull()
   })
 
+  describe('a selection over part of a change resolves only that part (Word)', () => {
+    /** Text runs as "text{id}" (ids of tracking marks) or "text" (none). */
+    const runs = (doc: PMNode) => {
+      const out: string[] = []
+      doc.descendants((n) => {
+        if (n.isText) {
+          const tm = n.marks.filter((m) => ['insertion', 'deletion', 'formatChange'].includes(m.type.name)).map((m) => m.attrs.id)
+          const fm = n.marks.filter((m) => ['bold', 'italic'].includes(m.type.name)).map((m) => m.type.name)
+          out.push(`${n.text}${tm.length ? `{${tm.join(',')}}` : ''}${fm.length ? `[${fm.join(',')}]` : ''}`)
+        }
+        return true
+      })
+      return out.join('|')
+    }
+    const insDoc = () => state([p([t('ab'), t('inserted', [ins('i')]), t('cd')])])
+    const delDoc = () => state([p([t('ab'), t('deleted', [del('d')]), t('cd')])])
+
+    it('insertion: accept / reject the selected letters only', () => {
+      const s = insDoc()
+      expect(runs(apply(s, acceptChangesInRange(s, 3, 6)).doc)).toBe('abins|erted{i}|cd')
+      expect(runs(apply(s, rejectChangesInRange(s, 5, 8)).doc)).toBe('ab|inted{i}|cd')
+    })
+
+    it('deletion: accept removes the selected letters; reject keeps them, the rest stays deleted', () => {
+      const s = delDoc()
+      expect(runs(apply(s, acceptChangesInRange(s, 3, 5)).doc)).toBe('ab|leted{d}|cd')
+      expect(runs(apply(s, rejectChangesInRange(s, 3, 5)).doc)).toBe('abde|leted{d}|cd')
+    })
+
+    it('format change: only the selected letters keep or lose the new formatting', () => {
+      const s = state([p([t('bold', [{ type: 'bold' }, fmt('f', [{ type: 'italic' }])])])])
+      expect(runs(apply(s, rejectChangesInRange(s, 1, 3)).doc)).toBe('bo[italic]|ld{f}[bold]')
+      expect(runs(apply(s, acceptChangesInRange(s, 1, 3)).doc)).toBe('bo[bold]|ld{f}[bold]')
+    })
+
+    it('a selection over parts of two changes resolves both parts; plain text between pieces does not count', () => {
+      const s = state([p([t('aa', [ins('x')]), t(' mid '), t('bb', [del('y')])])])
+      const a = apply(s, acceptChangesInRange(s, 2, 9))
+      expect(runs(a.doc)).toBe('a{x}|a mid |b{y}')
+      expect(ids(a.doc)).toEqual(['x', 'y'])
+      const r = apply(s, rejectChangesInRange(s, 2, 9))
+      expect(runs(r.doc)).toBe('a{x}| mid b|b{y}')
+      const split = state([p([t('one', [ins('z')]), t(' plain '), t('two', [ins('z')])])])
+      expect(rejectChangesInRange(split, 5, 9)).toBeNull()
+    })
+
+    it('block-level changes and footnote atoms the selection touches are resolved whole', () => {
+      const s = state([p([t('ab')]), p([t('cdef')], { trackedInsert: stamp('s') })])
+      expect(texts(apply(s, rejectChangesInRange(s, 6, 7)).doc)).toEqual(['abcdef'])
+      const f = state([p([t('a'), fn('Note text', [ins('fi')]), t('b')])])
+      // The selection covers "a" and the start of the reference only.
+      const r = apply(f, rejectChangesInRange(f, 1, 3))
+      expect(footnotes(r.doc)).toEqual([])
+    })
+
+    it('a collapsed caret still resolves the whole change', () => {
+      const s = insDoc()
+      expect(runs(apply(s, acceptChangesInRange(s, 5, 5)).doc)).toBe('abinsertedcd')
+    })
+  })
+
   it('changeIdAt: the text at the caret (innermost), a break beside it, then the block', () => {
     const s = state([p([t('ab'), t('cd', [ins('a'), del('b')]), t('ef')]), p([t('gh')], { trackedInsert: stamp('s') }), { type: 'pageBreak', attrs: { trackedInsert: stamp('pb') } }, p([t('ij')])])
     expect(changeIdAt(s.doc, 4)).toBe('b') // inside "cd": the deletion (innermost)
@@ -240,7 +304,7 @@ describe('review commands on the manuscript', () => {
 
   it('Reject over a selection: every change it touches, one undo step', () => {
     const ed = make(sample())
-    select(ed, 1, ed.state.doc.child(0).nodeSize + 10)
+    select(ed, 1, ed.state.doc.child(0).nodeSize + 13) // to the end of "added"
     expect(resolveSelection('reject')).toBe(true)
     expect(texts(ed.state.doc).slice(0, 2)).toEqual(['Keep old end.', 'Second .'])
     expect(ids(ed.state.doc)).toEqual(['pb', 'j1'])
@@ -267,15 +331,18 @@ describe('review commands on the manuscript', () => {
     const ed = make(sample())
     refreshChangeSummary(ed.state.doc)
     expect(getChangeSummary().authors).toEqual(['Ann', 'Bob'])
-    const bob = getCommand(byAuthorCommandId('accept', 1))!
+    const bob = getCommand(byAuthorCommandId('accept', 'Bob'))!
     expect(bob.label).toBe('Bob')
     expect(bob.menu?.submenu).toBe('Accept All by Author')
-    expect(getCommand(byAuthorCommandId('reject', 0))!.label).toBe('Ann')
+    expect(getCommand(byAuthorCommandId('reject', 'Ann'))!.label).toBe('Ann')
     bob.run()
     await vi.waitFor(() => expect(ids(ed.state.doc)).toEqual(['d1', 'i2', 'pb']))
     // The by-author items follow the authors present.
-    await vi.waitFor(() => expect(getCommand(byAuthorCommandId('accept', 1))).toBeUndefined())
-    expect(getCommand(byAuthorCommandId('accept', 0))!.label).toBe('Ann')
+    await vi.waitFor(() => expect(getCommand(byAuthorCommandId('accept', 'Bob'))).toBeUndefined())
+    expect(getCommand(byAuthorCommandId('accept', 'Ann'))!.label).toBe('Ann')
+    // A stale item (Bob has no changes left) does nothing.
+    expect(await bob.run()).toBeUndefined()
+    expect(ids(ed.state.doc)).toEqual(['d1', 'i2', 'pb'])
   })
 
   it('more than 50 changes: asks first; Cancel leaves everything', async () => {
@@ -401,5 +468,69 @@ describe('change popover and status bar', () => {
     select(ed, 1)
     fireEvent.click(btn)
     expect(ed.state.doc.textBetween(ed.state.selection.from, ed.state.selection.to)).toBe('old')
+  })
+})
+
+describe('the manuscript view only', () => {
+  it('another editor with TrackChanges never takes the review commands (source set by the root)', async () => {
+    const manuscript = make(sample())
+    setReviewViewSource(() => manuscript.view)
+    // A second editor built later (the re-write view), with the extension's review side on or off.
+    const other = make([p([t('x'), t('y', [ins('o1')])])])
+    const quiet = new Editor({
+      element: document.createElement('div'),
+      extensions: createEditorExtensions().map((e) => (e.name === 'trackChanges' ? TrackChanges.configure({ review: false }) : e)),
+      content: { type: 'doc', content: [p([t('z', [ins('o2')])])] },
+    })
+    expect(getReviewView()).toBe(manuscript.view)
+    select(manuscript, 1)
+    nextChange()
+    expect(manuscript.state.doc.textBetween(manuscript.state.selection.from, manuscript.state.selection.to)).toBe('old')
+    expect(await resolveAll('accept')).toBe(true)
+    expect(ids(manuscript.state.doc)).toEqual([])
+    expect(ids(other.state.doc)).toEqual(['o1'])
+    // Closing the other editors leaves the review working.
+    quiet.destroy()
+    editors.splice(editors.indexOf(other), 1)
+    other.destroy()
+    expect(getReviewView()).toBe(manuscript.view)
+    undo(manuscript.state, manuscript.view.dispatch)
+    expect(resolveSelection('reject')).toBe(true)
+  })
+
+  it('without a source, a destroyed editor hands the review back to the one before it', () => {
+    const a = make(sample())
+    const b = make([p([t('b', [ins('bx')])])])
+    expect(getReviewView()).toBe(b.view)
+    editors.splice(editors.indexOf(b), 1)
+    b.destroy()
+    expect(getReviewView()).toBe(a.view)
+  })
+
+  it('Accept works right after an edit or undo (no wait for the debounced count)', () => {
+    const ed = make([p([t('plain')])])
+    expect(getCommand('review.accept')!.isEnabled!()).toBe(false)
+    // Typed with tracking on: recorded as an insertion.
+    ed.view.dispatch(ed.state.tr.insertText('new', 1))
+    expect(ids(ed.state.doc)).toHaveLength(1)
+    expect(getCommand('review.accept')!.isEnabled!()).toBe(true)
+    expect(getCommand('review.change.next')!.isEnabled!()).toBe(true)
+  })
+
+  it('the popover closes on any document change (typing, a load), even with the focus in it', () => {
+    const ed = make(sample())
+    render(<ChangePopover />)
+    select(ed, 7)
+    act(() => void showChangeAtCaret())
+    expect(document.activeElement?.getAttribute('data-control-id')).toBe('review.popover.accept')
+    act(() => ed.view.dispatch(ed.state.tr.insertText('x', 1)))
+    expect(getChangePopover()).toBeNull()
+    expect(screen.queryByTestId('change-popover')).toBeNull()
+    // A document load (the controller replaces the state with the same plugins).
+    select(ed, 8)
+    act(() => void showChangeAtCaret())
+    expect(getChangePopover()).not.toBeNull()
+    act(() => ed.view.updateState(EditorState.create({ schema: ed.schema, doc: ed.schema.nodeFromJSON({ type: 'doc', content: sample() }), plugins: ed.state.plugins })))
+    expect(getChangePopover()).toBeNull()
   })
 })

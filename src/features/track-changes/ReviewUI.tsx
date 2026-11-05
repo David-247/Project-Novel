@@ -31,7 +31,7 @@ function PopoverBody({ state }: { state: ChangePopoverState }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const acceptRef = useRef<HTMLButtonElement>(null)
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null)
-  const [details, setDetails] = useState<ChangeDetails | null>(() => {
+  const [details] = useState<ChangeDetails | null>(() => {
     const v = getReviewView()
     return v ? describeChange(v.state.doc, state.id) : null
   })
@@ -66,14 +66,8 @@ function PopoverBody({ state }: { state: ChangePopoverState }) {
     window.addEventListener('scroll', onMove, true)
     window.addEventListener('resize', onMove)
     const unstore = useStore.subscribe((s, p) => {
+      // (A document change closes the popover: the review plugin.)
       if (s.layout !== p.layout) requestAnimationFrame(reposition)
-      if (s.editor !== p.editor) {
-        // The document changed under the popover (undo, another edit): follow or close.
-        const v = getReviewView()
-        const d = v ? describeChange(v.state.doc, state.id) : null
-        if (!d) closeChangePopover()
-        else setDetails(d)
-      }
     })
     return () => {
       window.removeEventListener('scroll', onMove, true)
