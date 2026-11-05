@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { budget } from './budget'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedProject, showPage, waitForLayout } from './helpers'
 
 /**
  * Pagination performance budget on a 100,000-word manuscript (serial perf projects, like
@@ -32,8 +32,11 @@ async function openFixture(page: Page, folder: string) {
   await openRecent(page, folder)
   await expect(saveStatus(page)).toHaveText(`${title}: All changes saved`, { timeout: 60_000 })
   await waitForLayout(page)
-  // Running heads and page numbers are on (the defaults): the budgets below include them.
+  // Running heads and page numbers are on (the defaults): the budgets below include them. (Book mode
+  // opens on page 1, the chapter opening, which has none: look on the next spread.)
+  await showPage(page, 2)
   await expect(page.locator('.nv-frames [data-hf="text"], .nv-frames [data-hf="number"]').first()).toBeAttached()
+  await showPage(page, 0)
   return { fx, openMs: Date.now() - t0 }
 }
 
