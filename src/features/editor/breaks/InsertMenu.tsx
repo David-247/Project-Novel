@@ -12,6 +12,8 @@ import { useResolvedStyles } from '../styles/resolved'
 import { STYLE_IDS } from '@/shared/book'
 
 export interface InsertMenuProps {
+  /** Visible name and accessible name of the trigger (default "Insert"). */
+  label?: string
   /** Props from an asChild parent (a toolbar item) land on the trigger button. */
   [prop: string]: unknown
   ref?: Ref<HTMLButtonElement>
@@ -41,7 +43,7 @@ function Check() {
  * selects, Escape closes and returns focus to the button. Rows are 40px tall for touch. The ornament
  * applies to the selected scene break, if one is selected, and to scene breaks inserted afterwards.
  */
-export function InsertMenu({ ref, ...forwarded }: InsertMenuProps) {
+export function InsertMenu({ ref, label = INSERT_MENU_CONTROL.label, ...forwarded }: InsertMenuProps) {
   const styles = useResolvedStyles()
   const chaptersStartOn: ChaptersStartOn = styles.get(STYLE_IDS.chapterTitle)?.breakBefore === 'recto' ? 'recto' : 'page'
   const [ornament, setOrnament] = useState(getNewSceneBreakOrnament)
@@ -61,8 +63,8 @@ export function InsertMenu({ ref, ...forwarded }: InsertMenuProps) {
     <Menu.Root modal={false}>
       <Tooltip controlId={INSERT_MENU_CONTROL.id} {...forwarded} ref={ref as Ref<HTMLElement>}>
         <Menu.Trigger asChild>
-          <Button variant="ghost" data-control-id={INSERT_MENU_CONTROL.id} aria-label={INSERT_MENU_CONTROL.label} className="gap-2">
-            <span>{INSERT_MENU_CONTROL.label}</span>
+          <Button variant="ghost" data-control-id={INSERT_MENU_CONTROL.id} aria-label={label} className="gap-2">
+            <span>{label}</span>
             <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 text-text-muted">
               <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>

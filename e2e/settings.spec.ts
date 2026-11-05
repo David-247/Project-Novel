@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { launch, newProject, pressTab, readFile } from './helpers'
+import { launch, newProject, pressTab, readFile, reveal } from './helpers'
 
 /**
- * Settings dialog and app preferences (Phase 3, T2): opening it (gear and Mod-,), the author name
+ * Settings dialog and app preferences (Phase 3, T2): opening it (File > Settings… and Mod-,), the author name
  * kept across a restart, a damaged preferences.json, the one-time author question, new-project
  * defaults, tooltips and keyboard access, and AA contrast on the four paper surfaces in both themes.
  * "Restart" = a new page load over the same fake disk (IndexedDB).
@@ -10,6 +10,12 @@ import { launch, newProject, pressTab, readFile } from './helpers'
 
 const ctl = (page: Page, id: string) => page.locator(`[data-control-id="${id}"]`)
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Settings' })
+
+/** File > Settings… in the in-app menu bar (Settings is a menu command, as in Word; no ribbon button). */
+async function openSettings(page: Page) {
+  await ctl(page, 'menu.file').click()
+  await page.locator('[role="menu"] [data-control-id="settings.open"]').click()
+}
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
 
 async function setDefaultAuthor(page: Page, name: string) {
@@ -21,14 +27,14 @@ async function setDefaultAuthor(page: Page, name: string) {
 /** preferences.json as parsed from the fake disk. */
 const prefsFile = (page: Page) => page.evaluate(() => window.__nvE2E.preferencesFile())
 
-test('opens from the gear and from the shortcut, closes with Escape and returns focus', async ({ page }) => {
+test('opens from the File menu and from the shortcut, closes with Escape and returns focus', async ({ page }) => {
   await launch(page)
-  const gear = ctl(page, 'settings.open')
-  await gear.click()
+  await page.locator('main [contenteditable="true"]').click()
+  await openSettings(page)
   await expect(dialog(page)).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(dialog(page)).toBeHidden()
-  await expect(gear).toBeFocused()
+  await expect(page.locator('main [contenteditable="true"]')).toBeFocused()
 
   await page.locator('main [contenteditable="true"]').click()
   await page.keyboard.press(`${MOD}+,`)
@@ -40,7 +46,7 @@ test('opens from the gear and from the shortcut, closes with Escape and returns 
 test('the author name defaults to the OS name, and a change is kept across a restart', async ({ page }) => {
   await setDefaultAuthor(page, 'Ada Lovelace')
   await launch(page)
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   const name = ctl(page, 'settings.authorName')
   await expect(name).toHaveValue('Ada Lovelace')
   await name.fill('A. A. Milne')
@@ -49,7 +55,7 @@ test('the author name defaults to the OS name, and a change is kept across a res
   await page.keyboard.press('Escape')
 
   await launch(page) // restart
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   await expect(ctl(page, 'settings.authorName')).toHaveValue('A. A. Milne')
   await expect(ctl(page, 'settings.pageNavigation')).toHaveValue('book')
 })
@@ -59,7 +65,7 @@ test('a damaged preferences.json starts the app on defaults and the next change 
   await launch(page)
   await page.evaluate(() => window.__nvE2E.setPreferencesFile('{ "authorName": "Brok'))
   await launch(page) // restart over the damaged file
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   await expect(ctl(page, 'settings.authorName')).toHaveValue('Account Name')
   await expect(ctl(page, 'settings.defaultPaper')).toHaveValue('auto')
   expect(await prefsFile(page)).toBe('{ "authorName": "Brok') // reading never writes
@@ -71,13 +77,13 @@ test('a damaged preferences.json starts the app on defaults and the next change 
 test('a deleted preferences.json falls back to defaults', async ({ page }) => {
   await setDefaultAuthor(page, 'Account Name')
   await launch(page)
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   await ctl(page, 'settings.authorName').fill('Someone Else')
   await expect.poll(async () => await prefsFile(page)).not.toBeNull()
   await page.keyboard.press('Escape')
   await page.evaluate(() => window.__nvE2E.setPreferencesFile(null))
   await launch(page)
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   await expect(ctl(page, 'settings.authorName')).toHaveValue('Account Name')
 })
 
@@ -85,7 +91,7 @@ test('unknown keys in preferences.json survive a change', async ({ page }) => {
   await launch(page)
   await page.evaluate(() => window.__nvE2E.setPreferencesFile(JSON.stringify({ version: 1, authorName: 'Kept', futureKey: { a: [1] } })))
   await launch(page)
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   await ctl(page, 'settings.reduceMotion').selectOption('on')
   await expect.poll(async () => JSON.parse((await prefsFile(page)) ?? '{}').reduceMotion).toBe('on')
   expect(JSON.parse((await prefsFile(page))!)).toMatchObject({ futureKey: { a: [1] }, authorName: 'Kept' })
@@ -123,7 +129,7 @@ test('a dismissed author question is not asked again', async ({ page }) => {
 
 test('a new project starts with the paper and trim size chosen in Settings', async ({ page }) => {
   await launch(page)
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   await ctl(page, 'settings.defaultPaper').selectOption('book')
   await ctl(page, 'settings.defaultTrimSize').selectOption('uk-a5')
   await ctl(page, 'settings.done').click()
@@ -135,7 +141,7 @@ test('a new project starts with the paper and trim size chosen in Settings', asy
 
 test('every control has a tooltip, is reachable with Tab, and the audit finds nothing missing', async ({ page }) => {
   await launch(page)
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   await expect(dialog(page)).toBeVisible()
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
 
@@ -175,7 +181,7 @@ test('every control has a tooltip, is reachable with Tab, and the audit finds no
 test('targets are at least 32px and the dialog fits a narrow window', async ({ page }) => {
   await page.setViewportSize({ width: 380, height: 700 })
   await launch(page)
-  await ctl(page, 'settings.open').click()
+  await openSettings(page)
   const ids = ['settings.authorName', 'settings.authorColor', 'settings.pageNavigation', 'settings.reduceMotion', 'settings.defaultPaper', 'settings.defaultTrimSize', 'settings.reset', 'settings.done']
   for (const id of ids) {
     const box = (await ctl(page, id).boundingBox())!
@@ -197,8 +203,8 @@ test('WCAG AA contrast in the Settings dialog: four paper surfaces x OS light an
     await page.emulateMedia({ colorScheme: scheme })
     await launch(page)
     for (const surface of ['auto', 'book', 'white', 'dark'] as const) {
-      await ctl(page, `book.surface.${surface}`).click()
-      await ctl(page, 'settings.open').click()
+      await (await reveal(page, `book.surface.${surface}`)).click()
+      await openSettings(page)
       await expect(dialog(page)).toBeVisible()
       await page.evaluate(() => new Promise((r) => setTimeout(r, 300)))
       const got = await page.evaluate(() => {

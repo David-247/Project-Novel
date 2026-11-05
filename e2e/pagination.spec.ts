@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { clickBlockStart, docEnd, docStart, lineEnd, waitForLayout } from './helpers'
+import { clickBlockStart, docEnd, docStart, lineEnd, waitForLayout, reveal } from './helpers'
 import { logFocusOnRetry } from './focus-log'
 
 /**
@@ -551,7 +551,7 @@ test('Chapters start on right-hand page: a New chapter lands on a recto, with a 
   // Next page (the default): the chapter opens on page 2, a verso.
   expect(l.pages.map((p) => (p.isBlank ? 'blank' : `${p.side}:${p.chapterIndex}`))).toEqual(['recto:-1', 'verso:0'])
 
-  await page.locator('[data-control-id="insert.menu"]').click()
+  await (await reveal(page, 'insert.menu')).click()
   await page.locator('[data-control-id="insert.chapterStart.recto"]').click()
   await waitForLayout(page)
   l = await layout(page)
@@ -669,7 +669,7 @@ test('progressive restyle never paints a block at a stale place (Body font size)
     // Every paragraph changes height: more blocks than the progressive threshold are re-measured.
     await editor(page).locator('p').nth(500).click()
     await waitForLayout(page)
-    await page.locator('[data-control-id="styles.edit"]').click()
+    await (await reveal(page, 'styles.edit')).click()
     const dialog = page.getByRole('dialog', { name: /^Modify style:/ })
     await dialog.locator('[data-control-id="styles.field.fontSize"]').fill('14')
     await dialog.locator('[data-control-id="styles.modify.save"]').evaluate((b: HTMLButtonElement) => (window.__nvArm!(), b.click()))

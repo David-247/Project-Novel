@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { editor, launch, newProject, openRecent, pressTab, recoveryControl, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
+import { editor, launch, newProject, openRecent, pressTab, recoveryControl, saveStatus, seedProject, waitForLayout, writeFile, reveal } from './helpers'
 
 /**
  * Comments (Phase 3): anchored threads in the margin panel. Full flow with undo / redo of every step,
@@ -27,7 +27,7 @@ async function freshProject(page: Page, name: string) {
 /** Select `from..to` and add a comment through the toolbar button and the composer. */
 async function addComment(page: Page, from: number, to: number, body: string) {
   await page.evaluate(([f, t]) => window.__nvE2E.selectText(f, t), [from, to] as const)
-  await ctl(page, 'comment.new').click()
+  await (await reveal(page, 'comment.new')).click()
   const field = ctl(page, 'comment.composeField')
   await expect(field).toBeFocused()
   await field.fill(body)
@@ -261,7 +261,7 @@ test('a narrow window shows the comments in a drawer; tapping a thread jumps to 
   )
   await expect(page.locator('[data-comments-layout="drawer"]')).toHaveCount(1)
   await expect(page.locator('[data-testid="comments-panel"]')).toHaveCount(0)
-  await ctl(page, 'comment.panel').click()
+  await (await reveal(page, 'comment.panel')).click()
   const drawer = page.getByRole('dialog', { name: 'Comments' })
   await expect(drawer).toBeVisible()
   await expect(drawer.locator('article')).toHaveCount(2)
@@ -275,7 +275,7 @@ test('a narrow window shows the comments in a drawer; tapping a thread jumps to 
 
   // Touch widths: a bottom sheet.
   await page.setViewportSize({ width: 420, height: 800 })
-  await ctl(page, 'comment.panel').click()
+  await (await reveal(page, 'comment.panel')).click()
   await expect(page.locator('[data-testid="comments-drawer"][data-sheet]')).toBeVisible()
   // Wide again: the margin panel.
   await page.setViewportSize({ width: 1400, height: 800 })
@@ -363,7 +363,7 @@ test('comment controls have tooltips, work from the keyboard, and pass AA contra
     await page.emulateMedia({ colorScheme: scheme })
     await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
     for (const surface of ['auto', 'book', 'white', 'dark'] as const) {
-      await ctl(page, `book.surface.${surface}`).click()
+      await (await reveal(page, `book.surface.${surface}`)).click()
       await page.evaluate(() => new Promise((r) => setTimeout(r, 300)))
       for (const active of [false, true]) {
         await page.evaluate((a) => (a ? window.__nvE2E.selectText(2, 2) : window.__nvE2E.selectText(20, 20)), active)

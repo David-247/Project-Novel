@@ -61,11 +61,8 @@ const ALIGNMENTS: ReadonlyArray<{ key: ToolbarControlKey; value: Alignment; icon
   { key: 'alignJustify', value: 'justify', icon: I.AlignJustifyIcon },
 ]
 
-/**
- * Formatting toolbar (ARIA `toolbar` with roving focus). Active states come from
- * `useToolbarState`, which reads only the selection (see `readToolbarState`).
- */
-export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFonts, className }: ToolbarProps) {
+/** The formatting state and the control builders shared by the toolbar's groups. */
+function useFormatControls() {
   const editor = useMountedEditor()
   const s = useToolbarState(editor)
   const disabled = !editor || !s.ready
@@ -134,6 +131,115 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFont
     )
   }
 
+  return { editor, s, disabled, toggle, action, select }
+}
+
+/** Font family and size. `compact`: narrower fields (the ribbon's compact Font group). */
+export function FontControls({ compact = false, loadFonts = loadSystemFonts }: { compact?: boolean; loadFonts?: () => Promise<string[]> }) {
+  const { editor, s, disabled, select } = useFormatControls()
+  return (
+    <>
+      <ToolbarItem disabled={disabled}>
+        <Tooltip controlId={TOOLBAR_CONTROLS.fontFamily.id}>
+          <FontFamilyPicker loadFonts={loadFonts} disabled={disabled} wrapperClassName={compact ? 'w-32' : 'w-40'} />
+        </Tooltip>
+      </ToolbarItem>
+      {select(
+        'fontSize',
+        s.fontSize,
+        FONT_SIZES,
+        (v) => {
+          if (!editor) return
+          if (v) markChain(editor).setFontSize(v).run()
+          else markChain(editor).unsetFontSize().run()
+        },
+        compact ? 'w-28' : 'w-32',
+      )}
+    </>
+  )
+}
+
+/** Bold, italic, underline. */
+export function TextStyleControls() {
+  const { s, toggle } = useFormatControls()
+  return (
+    <>
+      {toggle('bold', s.bold, (c) => c.toggleBold(), <I.BoldIcon />)}
+      {toggle('italic', s.italic, (c) => c.toggleItalic(), <I.ItalicIcon />)}
+      {toggle('underline', s.underline, (c) => c.toggleUnderline(), <I.UnderlineIcon />)}
+    </>
+  )
+}
+
+/** Bulleted and numbered lists. */
+export function ListControls() {
+  const { s, toggle } = useFormatControls()
+  return (
+    <>
+      {toggle('bulletList', s.bulletList, (c) => c.toggleBulletList(), <I.BulletListIcon />)}
+      {toggle('orderedList', s.orderedList, (c) => c.toggleOrderedList(), <I.OrderedListIcon />)}
+    </>
+  )
+}
+
+/** Left, center, right, justify. */
+export function AlignmentControls() {
+  const { s, toggle } = useFormatControls()
+  return (
+    <>
+      {ALIGNMENTS.map(({ key, value, icon: Icon }) => (
+        <Fragment key={key}>
+          {toggle(key, s.align === value, (c) => (value === 'left' ? c.unsetTextAlign() : c.setTextAlign(value)), <Icon />)}
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+/**
+ * Line spacing, space after, first-line indent and the indent buttons. `compact` leaves out the three
+ * fields (the ribbon then offers them as registry submenus in a "Spacing" dropdown).
+ */
+export function SpacingControls({ compact = false }: { compact?: boolean }) {
+  const { editor, s, select, action } = useFormatControls()
+  return (
+    <>
+      {compact ? null : (
+        <>
+          {select('lineSpacing', s.lineHeight, LINE_SPACINGS, (v) => editor?.chain().setBlockLineHeight(v || null).run(), 'w-32')}
+          {select('paragraphSpacing', s.paragraphSpacing, PARAGRAPH_SPACINGS, (v) => editor?.chain().setBlockSpacing(v || null).run(), 'w-36')}
+          {select('firstLineIndent', s.firstLineIndent, FIRST_LINE_INDENTS, (v) => editor?.chain().setFirstLineIndent(v || null).run(), 'w-40')}
+        </>
+      )}
+      {action('indentDecrease', s.canOutdent, (c) => c.outdentBlock(), <I.IndentDecreaseIcon />)}
+      {action('indentIncrease', s.canIndent, (c) => c.indentBlock(), <I.IndentIncreaseIcon />)}
+    </>
+  )
+}
+
+/** The Styles controls (picker, modify, manage, clear) and their dialogs. `bare`: no own group. */
+export function StylesControls({ bare = false }: { bare?: boolean }) {
+  const { editor, s, disabled } = useFormatControls()
+  return (
+    <StylesGroup
+      editor={editor}
+      disabled={disabled}
+      styleId={s.styleId}
+      fallbackStyleId={s.fallbackStyleId}
+      bare={bare}
+      item={(control) => <ToolbarItem disabled={disabled}>{control}</ToolbarItem>}
+    />
+  )
+}
+
+/**
+ * Formatting toolbar (ARIA `toolbar` with roving focus): every formatting group in one bar. The app
+ * shows these groups in its ribbon (@/features/ribbon); this bar composes them for tests and embeds.
+ * Active states come from `useToolbarState`, which reads only the selection (see `readToolbarState`).
+ */
+export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFonts, className }: ToolbarProps) {
+  const editor = useMountedEditor()
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     // Only for the toolbar's own items: controls placed in the slots (e.g. a find field)
     // handle Escape themselves, and anything that already handled it is left alone.
@@ -159,57 +265,31 @@ export function Toolbar({ leadingGroups, extraGroups, loadFonts = loadSystemFont
       ) : null}
 
       <ToolbarGroup label="Font" className="gap-1">
-        <ToolbarItem disabled={disabled}>
-          <Tooltip controlId={TOOLBAR_CONTROLS.fontFamily.id}>
-            <FontFamilyPicker loadFonts={loadFonts} disabled={disabled} />
-          </Tooltip>
-        </ToolbarItem>
-        {select('fontSize', s.fontSize, FONT_SIZES, (v) => {
-          if (!editor) return
-          if (v) markChain(editor).setFontSize(v).run()
-          else markChain(editor).unsetFontSize().run()
-        }, 'w-32')}
+        <FontControls loadFonts={loadFonts} />
       </ToolbarGroup>
       <ToolbarSeparator />
 
       <ToolbarGroup label="Text style">
-        {toggle('bold', s.bold, (c) => c.toggleBold(), <I.BoldIcon />)}
-        {toggle('italic', s.italic, (c) => c.toggleItalic(), <I.ItalicIcon />)}
-        {toggle('underline', s.underline, (c) => c.toggleUnderline(), <I.UnderlineIcon />)}
+        <TextStyleControls />
       </ToolbarGroup>
       <ToolbarSeparator />
 
       <ToolbarGroup label="Lists">
-        {toggle('bulletList', s.bulletList, (c) => c.toggleBulletList(), <I.BulletListIcon />)}
-        {toggle('orderedList', s.orderedList, (c) => c.toggleOrderedList(), <I.OrderedListIcon />)}
+        <ListControls />
       </ToolbarGroup>
       <ToolbarSeparator />
 
       <ToolbarGroup label="Alignment">
-        {ALIGNMENTS.map(({ key, value, icon: Icon }) => (
-          <Fragment key={key}>
-            {toggle(key, s.align === value, (c) => (value === 'left' ? c.unsetTextAlign() : c.setTextAlign(value)), <Icon />)}
-          </Fragment>
-        ))}
+        <AlignmentControls />
       </ToolbarGroup>
       <ToolbarSeparator />
 
       <ToolbarGroup label="Spacing and indent" className="gap-1">
-        {select('lineSpacing', s.lineHeight, LINE_SPACINGS, (v) => editor?.chain().setBlockLineHeight(v || null).run(), 'w-32')}
-        {select('paragraphSpacing', s.paragraphSpacing, PARAGRAPH_SPACINGS, (v) => editor?.chain().setBlockSpacing(v || null).run(), 'w-36')}
-        {select('firstLineIndent', s.firstLineIndent, FIRST_LINE_INDENTS, (v) => editor?.chain().setFirstLineIndent(v || null).run(), 'w-40')}
-        {action('indentDecrease', s.canOutdent, (c) => c.outdentBlock(), <I.IndentDecreaseIcon />)}
-        {action('indentIncrease', s.canIndent, (c) => c.indentBlock(), <I.IndentIncreaseIcon />)}
+        <SpacingControls />
       </ToolbarGroup>
       <ToolbarSeparator />
 
-      <StylesGroup
-        editor={editor}
-        disabled={disabled}
-        styleId={s.styleId}
-        fallbackStyleId={s.fallbackStyleId}
-        item={(control) => <ToolbarItem disabled={disabled}>{control}</ToolbarItem>}
-      />
+      <StylesControls />
 
       {extraGroups ? (
         <>

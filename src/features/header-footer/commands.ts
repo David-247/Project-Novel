@@ -13,6 +13,7 @@ export function registerHeaderFooterCommands(): () => void {
       label: 'Book Details…',
       description: 'Edit the book title and author used in the page headers.',
       menu: { id: 'file', group: 'book', order: 10 },
+      ribbon: { group: 'layout.book', order: 10 },
       // Title and author live in project.json: only with a project open (as in the Headers dialog).
       isEnabled: projectOpen,
       run: () => {

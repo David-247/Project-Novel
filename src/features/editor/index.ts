@@ -15,7 +15,18 @@ export { NovelEditor } from './NovelEditor'
 export type { NovelEditorProps } from './NovelEditor'
 // The mounted editor (re-renders when it mounts/unmounts, not per transaction), for hosts such as pagination.
 export { useMountedEditor } from './use-mounted-editor'
-export { FontFamilyPicker, Toolbar, ToolbarItem, TOOLBAR_CONTROLS } from './toolbar'
+export {
+  FontFamilyPicker,
+  Toolbar,
+  ToolbarItem,
+  TOOLBAR_CONTROLS,
+  FontControls,
+  TextStyleControls,
+  ListControls,
+  AlignmentControls,
+  SpacingControls,
+  StylesControls,
+} from './toolbar'
 export type { FontFamilyPickerProps, ToolbarProps, ToolbarControlMeta, ToolbarControlKey } from './toolbar'
 export {
   getDocJSON,

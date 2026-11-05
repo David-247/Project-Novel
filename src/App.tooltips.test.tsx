@@ -50,7 +50,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
   it('finds no control without a tooltip in the full app', async () => {
     const { container } = await renderFullApp()
     const rendered = Array.from(container.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
-    // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel
+    // Sanity: the audit really saw the whole UI (the ribbon's tabs and groups, 16 formatting, undo/redo, find button, 9 panel
     // controls, the no-project New / Open actions and the page view controls in the status bar).
     const expected = [
       ...Object.values(TOOLBAR_CONTROLS),
@@ -65,7 +65,6 @@ describe('tooltip coverage (every control in the app has a registered, wired too
         ...surfaces,
         'book.trimSize',
         'book.headerFooter',
-        'settings.open',
         'insert.menu',
         'footnote.options',
         'comment.new',
@@ -74,6 +73,28 @@ describe('tooltip coverage (every control in the app has a registered, wired too
         'review.markup',
         'file.new_project',
         'file.open_project',
+        // The ribbon: its tabs, and registry commands shown as buttons (all tabs stay mounted).
+        ...['home', 'insert', 'layout', 'review', 'view'].map((t) => `ribbon.tab.${t}`),
+        ...[
+          'edit.replace',
+          'insert.newChapter',
+          'insert.pageBreak',
+          'insert.sceneBreak',
+          'footnote.insert',
+          'insert.comment',
+          'book.details',
+          'comment.prev',
+          'comment.next',
+          'comment.showResolved',
+          'view.singlePage',
+          'pagination.spreadView',
+          'pagination.zoomOut',
+          'pagination.zoomIn',
+          'view.fitSpread',
+          'view.fitWidth',
+          'view.actualSize',
+          'view.fullScreen',
+        ].map((id) => `ribbon.cmd.${id}`),
         // The in-app menu bar's titles (its items are covered in App.menus.test.tsx).
         ...['file', 'edit', 'view', 'insert', 'format', 'review', 'help'].map((m) => `menu.${m}`),
       ]),

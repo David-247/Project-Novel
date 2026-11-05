@@ -23,6 +23,13 @@ import { getCommand, getCommands, submenuControlId } from '@/shared/commands'
 import { MARKUP_VIEW_OPTIONS, TRACK_CHANGES_CONTROLS } from '@/features/track-changes'
 import { SURFACE_CONTROLS } from '@/shared/theme'
 import { TRIM_SIZES } from '@/shared/book'
+import {
+  getRibbonGroup,
+  RIBBON_COMMAND_PREFIX,
+  RIBBON_MORE_ID,
+  RIBBON_TABS,
+  ribbonTabControlId,
+} from '@/shared/ribbon'
 import type { TooltipCopy } from '@/shared/ui'
 
 function fromMeta<K extends string>(
@@ -329,7 +336,14 @@ const MENU_TOOLTIPS: Record<string, TooltipCopy> = {
   [MENU_DIALOG_CONTROLS.formatClose.id]: { title: MENU_DIALOG_CONTROLS.formatClose.label, description: 'Close the document.' },
 }
 
+/** The ribbon's tabs and its overflow menu. (Group buttons and command buttons: see derivedCopy.) */
+const RIBBON_TOOLTIPS: Record<string, TooltipCopy> = {
+  ...Object.fromEntries(RIBBON_TABS.map((t) => [ribbonTabControlId(t.id), { title: t.label, description: `Show the ${t.label} tab: ${t.description.charAt(0).toLowerCase()}${t.description.slice(1)}` }])),
+  [RIBBON_MORE_ID]: { title: 'More', description: 'The groups that do not fit in the window right now.' },
+}
+
 export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.freeze({
+  ...RIBBON_TOOLTIPS,
   ...fromMeta(TOOLBAR_CONTROLS, TOOLBAR_DESCRIPTIONS),
   ...fromMeta(PAGINATION_CONTROLS, PAGINATION_DESCRIPTIONS),
   ...fromMeta(HEADER_FOOTER_CONTROLS, HEADER_FOOTER_DESCRIPTIONS),
@@ -357,6 +371,15 @@ const SUBMENU_ID = /^menu\.(file|edit|view|insert|format|review|help|app)\.[a-z0
  * and for a submenu title (`menu.<menu>.<slug>`) a line naming it.
  */
 function derivedCopy(controlId: string): TooltipCopy | undefined {
+  // A ribbon button for a command reads like the command's menu item.
+  if (controlId.startsWith(RIBBON_COMMAND_PREFIX)) return derivedCopy(controlId.slice(RIBBON_COMMAND_PREFIX.length))
+  const group = /^ribbon\.(group|compact)\.(.+)$/.exec(controlId)
+  if (group) {
+    const g = getRibbonGroup(group[2])
+    if (!g) return undefined
+    if (group[1] === 'compact' && g.compactMenu) return { title: g.compactMenu.label, description: `Show the ${g.compactMenu.label.toLowerCase()} choices that do not fit.` }
+    return { title: g.label, description: `Show the ${g.label} commands.` }
+  }
   const cmd = getCommand(controlId)
   if (cmd) return { title: cmd.label.replace(/…$/, ''), description: cmd.description, shortcut: cmd.shortcut }
   if (SUBMENU_ID.test(controlId)) {
