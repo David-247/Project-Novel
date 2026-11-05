@@ -251,6 +251,15 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       view?.domObserver?.flush()
     },
     // ---- Comments (Phase 3) ----
+    /** Start recording when each layoutVersion is published (performance.now()); returns the record. */
+    watchLayoutPublishes: () => {
+      const times: Record<number, number> = {}
+      useStore.subscribe((st, prev) => {
+        if (st.layout.layoutVersion !== prev.layout.layoutVersion) times[st.layout.layoutVersion] = performance.now()
+      })
+      ;(window as unknown as { __nvLayoutTimes: Record<number, number> }).__nvLayoutTimes = times
+    },
+    layoutPublishedAt: (version: number) => (window as unknown as { __nvLayoutTimes?: Record<number, number> }).__nvLayoutTimes?.[version] ?? null,
     /** Select document positions `from..to` in the manuscript (as a mouse drag would). */
     selectText: (from: number, to: number) => {
       const view = getEditor()?.view

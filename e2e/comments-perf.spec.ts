@@ -8,7 +8,8 @@ import { clickBlockStart, editor, launch, lineEnd, openRecent, saveStatus, seedP
  * Comments performance (serial perf projects, like pagination-perf.spec.ts): the 100,000-word
  * manuscript with 500 comment threads.
  *  - typing latency (keydown -> next frame painted), median < 50 ms;
- *  - margin panel re-layout after a reflow (a trim size change), < 100 ms for the visible spread.
+ *  - margin panel re-layout after a reflow (a trim size change): from the new page model being published
+ *    to the visible spread's cards rendered, positioned and painted, < 100 ms.
  * Gating: e2e/budget.ts (decision f040009b). Numbers go to perf-results/comments-*.json.
  */
 
@@ -123,29 +124,105 @@ test('500 comment threads at 100k words: typing median < 50 ms', async ({ page }
 test('500 comment threads: margin panel re-layout after a reflow < 100 ms', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   const { threads } = await openFixture(page, '/projects/CommentLayout')
-  const runs: { trim: string; panelLayoutMs: number; reflowToPanelMs: number; cards: number }[] = []
+  await page.evaluate(() => window.__nvE2E.watchLayoutPublishes())
+  const runs: { trim: string; panelReadyMs: number; panelCommitMs: number; fromFirstPublishMs: number; versions: number; positionMs: number; reflowToPanelMs: number; cards: number; misplaced: number; sameFrame: boolean }[] = []
   for (const trim of ['us-6x9', 'uk-a5', 'us-5.5x8.5']) {
     const r = await page.evaluate(async (id) => {
-      const v = window.__nvE2E.layout().layoutVersion
+      const v0 = window.__nvE2E.layout().layoutVersion
       const t0 = performance.now()
       window.__nvE2E.setTrimSize(id)
+      // The next frame, before it paints: are the cards already positioned for the published layout?
+      const firstFrame = await new Promise<{ laidOut: number; published: number }>((resolve) =>
+        requestAnimationFrame(() => resolve({ laidOut: window.__nvE2E.comments().layout.laidOutVersion, published: window.__nvE2E.layout().layoutVersion })),
+      )
+      // The visible spread's cards rendered and positioned for the published layout ...
       await new Promise<void>((resolve) => {
         const check = () => {
           const l = window.__nvE2E.layout()
           const c = window.__nvE2E.comments().layout
-          if (window.__nvE2E.paginationModelSettled() && l.layoutVersion > v && c.laidOutVersion >= l.layoutVersion) resolve()
+          if (window.__nvE2E.paginationModelSettled() && l.layoutVersion > v0 && c.laidOutVersion >= l.layoutVersion) resolve()
           else requestAnimationFrame(check)
         }
-        requestAnimationFrame(check)
+        check()
       })
+      // ... and painted (the frame after the commit).
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => {
+          const ch = new MessageChannel()
+          ch.port1.onmessage = () => resolve()
+          ch.port2.postMessage(null)
+        }),
+      )
+      const paintedAt = performance.now()
       const c = window.__nvE2E.comments().layout
-      return { panelLayoutMs: c.lastLayoutMs, reflowToPanelMs: performance.now() - t0, cards: document.querySelectorAll('[data-testid="comments-panel"] article[data-thread-id]').length }
+      // Publish times of the first model after the change and of the one the panel laid out for.
+      const firstPublishedAt = window.__nvE2E.layoutPublishedAt(v0 + 1) ?? t0
+      const publishedAt = window.__nvE2E.layoutPublishedAt(c.laidOutVersion) ?? firstPublishedAt
+      // Every card shown is level with its anchor or below the card above it (positioned, not stale).
+      const box = document.querySelector('[data-testid="comment-cards"]')!.getBoundingClientRect()
+      let misplaced = 0
+      let prevBottom = -Infinity
+      for (const slot of Array.from(document.querySelectorAll<HTMLElement>('.nv-comment-slot'))) {
+        const anchor = document.querySelector(`.novel-editor-content [data-comment-id="${slot.dataset.slot}"]`)?.getClientRects()[0]
+        const top = box.top + Number(slot.dataset.top)
+        // Stacked below the card above it, never above its own anchor line.
+        if (!anchor || top < prevBottom - 1 || top < anchor.top - 2) misplaced++
+        prevBottom = top + slot.offsetHeight
+      }
+      return {
+        panelReadyMs: paintedAt - publishedAt,
+        panelCommitMs: c.laidOutAt - publishedAt,
+        fromFirstPublishMs: paintedAt - firstPublishedAt,
+        versions: c.laidOutVersion - v0,
+        sameFrame: firstFrame.published > v0 && firstFrame.laidOut >= firstFrame.published,
+        positionMs: window.__nvE2E.comments().layout.lastLayoutMs,
+        reflowToPanelMs: paintedAt - t0,
+        cards: document.querySelectorAll('[data-testid="comments-panel"] article[data-thread-id]').length,
+        misplaced,
+      }
     }, trim)
-    runs.push({ trim, panelLayoutMs: +r.panelLayoutMs.toFixed(2), reflowToPanelMs: +r.reflowToPanelMs.toFixed(1), cards: r.cards })
+    runs.push({ trim, panelReadyMs: +r.panelReadyMs.toFixed(1), panelCommitMs: +r.panelCommitMs.toFixed(1), fromFirstPublishMs: +r.fromFirstPublishMs.toFixed(1), versions: r.versions, positionMs: +r.positionMs.toFixed(2), reflowToPanelMs: +r.reflowToPanelMs.toFixed(1), cards: r.cards, misplaced: r.misplaced, sameFrame: r.sameFrame })
   }
-  await report(testInfo, 'comments-panel-layout', { threads, runs, maxPanelLayoutMs: Math.max(...runs.map((r) => r.panelLayoutMs)), budgets: { panelLayoutMs: 100 } })
+  // Baseline for the report: the same trims with the panel hidden (publish -> painted is then the
+  // reflow's own paint); the difference is what the panel adds.
+  await page.locator('[data-control-id="comment.panel"]').click()
+  await expect(page.locator('[data-testid="comments-panel"]')).toHaveCount(0)
+  const baseline: { trim: string; readyMs: number }[] = []
+  for (const trim of ['us-6x9', 'uk-a5', 'us-5.5x8.5']) {
+    const ms = await page.evaluate(async (id) => {
+      const v0 = window.__nvE2E.layout().layoutVersion
+      window.__nvE2E.setTrimSize(id)
+      await new Promise<void>((resolve) => {
+        const check = () => (window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > v0 ? resolve() : requestAnimationFrame(check))
+        check()
+      })
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => {
+          const ch = new MessageChannel()
+          ch.port1.onmessage = () => resolve()
+          ch.port2.postMessage(null)
+        }),
+      )
+      return performance.now() - (window.__nvE2E.layoutPublishedAt(window.__nvE2E.layout().layoutVersion) ?? 0)
+    }, trim)
+    baseline.push({ trim, readyMs: +ms.toFixed(1) })
+  }
+  const added = runs.map((r, i) => +(r.panelReadyMs - baseline[i].readyMs).toFixed(1))
+  await report(testInfo, 'comments-panel-layout', {
+    threads,
+    runs,
+    baselineWithoutPanel: baseline,
+    panelAddedMs: added,
+    maxPanelReadyMs: Math.max(...runs.map((r) => r.panelReadyMs)),
+    budgets: { panelReadyMs: 100 },
+  })
   for (const r of runs) {
     expect(r.cards, `${r.trim}: cards on the spread in view`).toBeGreaterThan(0)
-    budget(testInfo, `${r.trim}: panel re-layout ms`, r.panelLayoutMs, 100)
+    expect(r.misplaced, `${r.trim}: cards positioned for the new layout`).toBe(0)
+    // The cards move in the same frame as the pages: positioned before the first paint of the new layout.
+    expect(r.sameFrame, `${r.trim}: cards positioned before the reflowed pages are painted`).toBe(true)
+    // What the user sees: from the new page model being published to the visible spread's cards rendered,
+    // positioned and painted (the frame after the commit).
+    budget(testInfo, `${r.trim}: panel re-layout ms (publish to cards painted)`, r.panelReadyMs, 100)
   }
 })

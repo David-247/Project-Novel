@@ -24,7 +24,7 @@ interface ShownItem {
 }
 
 /** Last panel layout (e2e / perf). */
-export const commentsDebug = { lastLayoutMs: 0, layouts: 0, laidOutVersion: -1 }
+export const commentsDebug = { lastLayoutMs: 0, layouts: 0, laidOutVersion: -1, laidOutAt: 0 }
 
 /** Threads shown (anchored, resolved only with Show Resolved), in document order. */
 function useShownItems(rangeFilter: boolean, includeResolved = false): ShownItem[] {
@@ -191,17 +191,15 @@ function MarginPanel() {
       })
       const activeIndex = items.findIndex((i) => (activeId ? i.key === activeId : i.key === 'draft'))
       const tops = stackCards(boxes, activeIndex)
-      let bottom = 0
       els.forEach((el, i) => {
         el.style.transform = `translateY(${Math.round(tops[i])}px)`
         el.dataset.top = String(Math.round(tops[i]))
         el.dataset.anchorTop = String(Math.round(boxes[i].desired))
-        bottom = Math.max(bottom, tops[i] + boxes[i].height)
       })
-      box.style.height = `${Math.ceil(bottom)}px`
       commentsDebug.lastLayoutMs = performance.now() - t0
       commentsDebug.layouts++
       commentsDebug.laidOutVersion = useStore.getState().layout.layoutVersion
+      commentsDebug.laidOutAt = performance.now()
       box.dataset.layoutVersion = String(commentsDebug.laidOutVersion)
     }
   })
@@ -210,8 +208,17 @@ function MarginPanel() {
   // Which cards, not where their anchors are: typing re-renders the panel without a relayout; the
   // reflow that follows (layoutVersion) moves the cards.
   const cardsKey = items.map((i) => i.key).join(' ')
+  // Positions are read in a microtask: after the pagination pass that published the layout has
+  // finished writing the DOM (a commit can run in the middle of it), so the read does not force a
+  // layout the pass then invalidates again, and still before that frame is painted.
+  const placeQueued = useRef(false)
   useLayoutEffect(() => {
-    layout.current()
+    if (placeQueued.current) return
+    placeQueued.current = true
+    queueMicrotask(() => {
+      placeQueued.current = false
+      layout.current()
+    })
   }, [cardsKey, activeId, layoutVersion, scale])
 
   // A card that grows or shrinks (reply field opened, text typed) restacks the others.
@@ -237,7 +244,7 @@ function MarginPanel() {
   return (
     <aside
       aria-label="Comments"
-      className="nv-comments-panel relative shrink-0 border-l border-border bg-desk"
+      className="nv-comments-panel relative shrink-0 border-l border-border bg-desk [contain:layout_style]"
       style={{ width: PANEL_WIDTH }}
       data-testid="comments-panel"
       onKeyDown={onPanelKeyDown}
@@ -245,12 +252,15 @@ function MarginPanel() {
       <div className="sticky top-0 z-10">
         <PanelHeader />
       </div>
-      <div ref={cardsRef} className="nv-comment-cards relative mx-3 mt-0" data-testid="comment-cards">
-        {items.map((item) => (
-          <div key={item.key} className="nv-comment-slot absolute inset-x-0 top-0" data-slot={item.key}>
-            <Card item={item} />
-          </div>
-        ))}
+      {/* Out of flow (a zero-height anchor): moving or resizing cards never relays out the pages beside. */}
+      <div className="relative h-0">
+        <div ref={cardsRef} className="nv-comment-cards absolute inset-x-3 top-0" data-testid="comment-cards">
+          {items.map((item) => (
+            <div key={item.key} className="nv-comment-slot absolute inset-x-0 top-0" data-slot={item.key}>
+              <Card item={item} />
+            </div>
+          ))}
+        </div>
       </div>
     </aside>
   )
