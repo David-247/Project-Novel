@@ -1,0 +1,120 @@
+/* Track changes markup views (docs/track-changes.md). The view is <html data-nv-markup="all |
+   simple | none | original">, so the manuscript, the footnote area and the footnote editor follow it.
+   Rules that hide use display:none (inline marks) or collapse a whole block to zero height with
+   everything inside it display:none: hidden text then has no line boxes, and the pagination engine,
+   which measures rendered lines, gives it no space. Nothing here changes the width of visible text,
+   so line breaking in All Markup equals the final text plus the deleted words.
+   Colours: text keeps the page colour (contrast unchanged); the marks are non-text graphics with at
+   least 3:1 against each of the four papers. */
+
+:root[data-surface='white'],
+:root:not([data-surface]) {
+  --page-tc-ins: #0b6e4f;
+  --page-tc-del: #b3261e;
+  --page-tc-fmt: #6b3fa0;
+}
+:root[data-surface='dark'] {
+  --page-tc-ins: #6fd3a8;
+  --page-tc-del: #ff8a80;
+  --page-tc-fmt: #c9a7f5;
+}
+:root[data-surface='book'] {
+  --page-tc-ins: #0b5e43;
+  --page-tc-del: #9e2219;
+  --page-tc-fmt: #5d3590;
+}
+:root[data-surface='book'][data-theme='dark'] {
+  --page-tc-ins: #7fd7b0;
+  --page-tc-del: #ff9a8f;
+  --page-tc-fmt: #d2b4f7;
+}
+
+/* ---- All Markup (also the default when no view is set) ------------------------------------- */
+:root:not([data-nv-markup]) .nv-ins,
+:root[data-nv-markup='all'] .nv-ins {
+  text-decoration: underline;
+  text-decoration-color: var(--nv-tc-color, var(--page-tc-ins));
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+:root:not([data-nv-markup]) .nv-del,
+:root[data-nv-markup='all'] .nv-del {
+  text-decoration: line-through;
+  text-decoration-color: var(--nv-tc-color, var(--page-tc-del));
+  text-decoration-thickness: 2px;
+}
+/* Formatting changes: a dotted rule under the text (an inline border never changes the line box). */
+:root:not([data-nv-markup]) .nv-fmt,
+:root[data-nv-markup='all'] .nv-fmt {
+  border-bottom: 1px dotted var(--page-tc-fmt);
+}
+/* Block changes (inserted / deleted paragraph boundary, paragraph style change): a bar in the margin
+   beside the block's first line (absolutely placed: no layout). */
+:root:not([data-nv-markup]) :is([data-tc-block-ins], [data-tc-block-del], [data-tc-style]),
+:root[data-nv-markup='all'] :is([data-tc-block-ins], [data-tc-block-del], [data-tc-style]),
+:root[data-nv-markup='simple'] :is([data-tc-block-ins], [data-tc-block-del], [data-tc-style], .nv-tc-has-del) {
+  position: relative;
+}
+:root:not([data-nv-markup]) :is([data-tc-block-ins], [data-tc-block-del], [data-tc-style])::before,
+:root[data-nv-markup='all'] :is([data-tc-block-ins], [data-tc-block-del], [data-tc-style])::before,
+:root[data-nv-markup='simple'] :is([data-tc-block-ins], [data-tc-block-del], [data-tc-style], .nv-tc-has-del)::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 0;
+  width: 3px;
+  height: 1.3em;
+  border-radius: 1px;
+  background: var(--page-tc-ins);
+  pointer-events: none;
+}
+:root:not([data-nv-markup]) [data-tc-block-del]::before,
+:root[data-nv-markup='all'] [data-tc-block-del]::before {
+  background: var(--page-tc-del);
+}
+:root:not([data-nv-markup]) [data-tc-style]::before,
+:root[data-nv-markup='all'] [data-tc-style]::before {
+  background: var(--page-tc-fmt);
+}
+
+/* ---- Simple Markup: the final text, a change bar beside changed lines ------------------------ */
+:root[data-nv-markup='simple'] .novel-editor-content > * {
+  position: relative;
+}
+:root[data-nv-markup='simple'] :is(.nv-ins, .nv-fmt)::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  width: 3px;
+  height: 1.3em;
+  border-radius: 1px;
+  background: var(--page-tc-ins);
+  pointer-events: none;
+}
+
+/* ---- Hidden text --------------------------------------------------------------------------- */
+:root:is([data-nv-markup='simple'], [data-nv-markup='none']) .nv-del,
+:root[data-nv-markup='original'] .nv-ins {
+  display: none;
+}
+/* A whole block that is not part of the text shown: no height, nothing inside it laid out. */
+:root:is([data-nv-markup='simple'], [data-nv-markup='none']) .nv-tc-gone-final,
+:root[data-nv-markup='original'] .nv-tc-gone-original {
+  height: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  /* Text directly inside a block atom (a scene break's ornament) gets no line box either. */
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+:root:is([data-nv-markup='simple'], [data-nv-markup='none']) .nv-tc-gone-final *,
+:root[data-nv-markup='original'] .nv-tc-gone-original * {
+  display: none !important;
+}
+:root:is([data-nv-markup='simple'], [data-nv-markup='none']) :is(.nv-tc-gone-final::before, .nv-tc-gone-final::after),
+:root[data-nv-markup='original'] :is(.nv-tc-gone-original::before, .nv-tc-gone-original::after) {
+  display: none !important;
+}

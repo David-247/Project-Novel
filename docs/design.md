@@ -438,3 +438,13 @@ Slice `src/features/comments/` (public interface `index.ts`). Format: docs/proje
   enabled while some thread is shown (resolved ones only with Show Resolved).
 - **Author**: the Settings author (`getAuthor()`), "Unknown author" when no name is known. When no name is known
   and the one-time question was never asked, New Comment asks it first and opens the composer after the answer.
+
+## Track changes: Review group (Phase 3)
+
+Toolbar group "Review": the Track Changes toggle (`review.track`, Mod-Shift-e; a toggle button with a pen icon,
+its label shown from the `xl` breakpoint, pressed while recording) and the Markup picker (`review.markup`, a
+dropdown whose trigger shows the current view, radio items All Markup / Simple Markup / No Markup / Original, 40 px
+rows). On the page, marks never recolour text, so text contrast is the page's own on every paper; insertions get a
+2 px underline, deletions a 2 px strike-through, formatting changes a dotted rule, and changed blocks / lines a 3 px
+bar 12 px into the inside margin, all in per-surface `--page-tc-*` colours with at least 3:1 against the paper (or
+the author's colour when settings give one). Details: docs/track-changes.md.

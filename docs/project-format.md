@@ -82,6 +82,25 @@ A footnote is an inline node at its reference point, inside a paragraph or headi
 
 An empty note is `{"type":"footnote"}`. Marks may sit on the footnote node itself and on its text.
 
+### Tracked changes in the manuscript
+
+Phase 3 (docs/track-changes.md). Tracked changes are ordinary marks and block attributes, so save, reopen and
+crash recovery keep them:
+
+- marks `insertion`, `deletion` (attrs `id`, `author`, `authorColor` (`"#rrggbb"` or `null`), `date`, ISO 8601)
+  and `formatChange` (attrs `id`, `author`, `date`, `before`: the earlier formatting marks as JSON). Deleted text
+  stays in the file with its `deletion` mark until the deletion is accepted;
+- on `paragraph`, `heading`, `pageBreak` and `sceneBreak`: `attrs.trackedInsert` / `attrs.trackedDelete`
+  (`{ id, author, authorColor?, date }`: the boundary before the block was inserted / deleted) and
+  `attrs.trackedStyleChange` (`{ id, author, date, beforeStyleId, beforeType, beforeAttrs }`). Written only when
+  set.
+
+```json
+{"type":"paragraph","content":[{"type":"text","text":"It was a "},{"type":"text","marks":[{"type":"deletion","attrs":{"id":"c1","author":"Ann","authorColor":null,"date":"2026-11-04T10:00:00.000Z"}}],"text":"dark"},{"type":"text","marks":[{"type":"insertion","attrs":{"id":"c2","author":"Ann","authorColor":null,"date":"2026-11-04T10:00:00.000Z"}}],"text":"bright"},{"type":"text","text":" night."}]}
+```
+
+A manuscript without them (every Phase 1 and 2 project) loads and saves unchanged.
+
 ### Paragraph and chapter styles in the manuscript
 
 Paragraphs and headings may carry `attrs.styleId`, the id of a style in `book.json` → `styles` (lowercase letters,
@@ -142,6 +161,7 @@ the file is created at the next save.
 | `footnotes`    | object  | Footnote options (below). Owned by the footnotes feature; default `{}`.                       |
 | `surface`      | string  | Paper surface: `"auto"` (default), `"book"`, `"white"` or `"dark"`.                           |
 | `view`         | string  | `"spread"` (default) or `"single"`.                                                           |
+| `trackChanges` | boolean | Track Changes is recording for this project (Phase 3). Written only while `true`; missing means off. Any other value is ignored with a warning. |
 
 ```json
 {

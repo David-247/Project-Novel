@@ -3,6 +3,7 @@ import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { chapterRoleSignature, footnoteLabel, resolveFootnoteOptions, type FootnoteOptions } from '@/shared/book'
 import { useStore } from '@/shared/store'
+import { currentMarkupView, isInlineHidden, MARKUP_VIEW_META, type MarkupView } from '@/shared/track-changes'
 import { chapterIndexAt, getChapters } from '../breaks/chapters'
 import { resolveStyles } from '../styles/resolved'
 import { FOOTNOTE_NODE } from './name'
@@ -58,11 +59,15 @@ function notesOf(block: PMNode): readonly { rel: number; node: PMNode }[] {
   return list
 }
 
-/** Every footnote of `doc` in order, numbered per `options`. O(top-level blocks) for unchanged blocks. */
-export function collectFootnotes(doc: PMNode, options: FootnoteOptions): FootnoteRef[] {
+/**
+ * Every footnote of `doc` in order, numbered per `options`. O(top-level blocks) for unchanged blocks.
+ * Track changes: a footnote the markup view hides (a deleted note in Simple / No Markup, an inserted
+ * one in Original) takes no number and is left out (default view: the current one).
+ */
+export function collectFootnotes(doc: PMNode, options: FootnoteOptions, markupView: MarkupView = currentMarkupView()): FootnoteRef[] {
   const found: { pos: number; node: PMNode }[] = []
   doc.forEach((block, pos) => {
-    for (const n of notesOf(block)) found.push({ pos: pos + n.rel, node: n.node })
+    for (const n of notesOf(block)) if (markupView === 'all' || !isInlineHidden(n.node, markupView)) found.push({ pos: pos + n.rel, node: n.node })
   })
   if (found.length === 0) return []
   const chapters = options.numbering === 'chapter' ? getChapters(doc) : null
@@ -126,7 +131,7 @@ export function footnoteNumberingPlugin(): Plugin<NumberingState> {
     state: {
       init: (_, state) => compute(state.doc),
       apply: (tr, prev) => {
-        const renumber = tr.getMeta(footnoteNumberingKey) === true
+        const renumber = tr.getMeta(footnoteNumberingKey) === true || tr.getMeta(MARKUP_VIEW_META) !== undefined
         if (!tr.docChanged && !renumber) return prev
         const options = optionsNow()
         const refs = collectFootnotes(tr.doc, options)

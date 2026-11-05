@@ -14,6 +14,7 @@ import {
   type ResolvedStyles,
 } from '@/shared/book'
 import { useStore } from '@/shared/store'
+import { currentMarkupView, isBlockHidden, MARKUP_VIEW_META, type MarkupView } from '@/shared/track-changes'
 import { inListItem } from '../toolbar/block-format'
 import { getResolvedStyles, resolveStyles } from './resolved'
 
@@ -175,7 +176,10 @@ function computeBreaks(doc: PMNode, styles: ResolvedStyles): DecorationSet {
   const decos: Decoration[] = []
   let prev: string | null = null
   let afterPageBreak = false
+  // Track changes: a block (or page break) the markup view hides is not there for breaking.
+  const view = currentMarkupView()
   doc.forEach((node, offset) => {
+    if (view !== 'all' && isBlockHidden(node, view)) return
     if (node.type.name === 'pageBreak') {
       // A manual page break makes the block after it start a page (recto, when its style says so).
       afterPageBreak = true
@@ -187,11 +191,30 @@ function computeBreaks(doc: PMNode, styles: ResolvedStyles): DecorationSet {
     let value: 'page' | 'recto' | undefined =
       id && (b === 'page' || b === 'recto') && !continuesHeadingGroup(prev, id, styles) ? b : undefined
     if (afterPageBreak && value !== 'recto') value = 'page'
-    if (value) decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': value }))
+    if (value) decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': value }, { nvBreak: value }))
     afterPageBreak = false
     prev = id
   })
   return DecorationSet.create(doc, decos)
+}
+
+/** Same data-break-before decorations at the same places. */
+function sameBreaks(a: DecorationSet, b: DecorationSet): boolean {
+  const x = a.find()
+  const y = b.find()
+  if (x.length !== y.length) return false
+  return x.every((d, i) => d.from === y[i].from && d.to === y[i].to && d.spec.nvBreak === y[i].spec.nvBreak)
+}
+
+/** A top-level block that changed between `a` and `b` (same shape) became hidden or visible in `view`. */
+function hiddenFlipped(a: PMNode, b: PMNode, view: MarkupView): boolean {
+  if (view === 'all') return false
+  for (let i = 0; i < a.childCount; i++) {
+    const x = a.child(i)
+    const y = b.child(i)
+    if (x !== y && isBlockHidden(x, view) !== isBlockHidden(y, view)) return true
+  }
+  return false
 }
 
 /** True when both docs have the same top-level block types and attrs (typing inside a block). */
@@ -218,8 +241,15 @@ function breaksPlugin(): Plugin<BreakState> {
       apply: (tr, value, oldState, newState) => {
         const meta = tr.getMeta(STYLES_META) as ResolvedStyles | undefined
         if (meta) return { decorations: computeBreaks(newState.doc, meta), signature: breakSignature(meta) }
+        if (tr.getMeta(MARKUP_VIEW_META) !== undefined) {
+          // Keep the same set when the view hides no block that breaks (no decoration work in the view).
+          const next = computeBreaks(newState.doc, getResolvedStyles())
+          return sameBreaks(next, value.decorations) ? value : { ...value, decorations: next }
+        }
         if (!tr.docChanged) return value
-        if (sameTopLevelShape(oldState.doc, newState.doc)) {
+        // Outside All Markup a text edit can hide or show a whole block (track changes): recompute only
+        // when one of the edited blocks did (typing stays a mapping, as in All Markup).
+        if (sameTopLevelShape(oldState.doc, newState.doc) && !hiddenFlipped(oldState.doc, newState.doc, currentMarkupView())) {
           return { ...value, decorations: value.decorations.map(tr.mapping, tr.doc) }
         }
         return { ...value, decorations: computeBreaks(newState.doc, getResolvedStyles()) }

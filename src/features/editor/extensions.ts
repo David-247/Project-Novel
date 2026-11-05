@@ -17,6 +17,7 @@ import { BlockStyles } from './styles/block-styles'
 import { BookBreaks } from './breaks/nodes'
 import { Footnotes } from './footnote/node'
 import { CommentsExtension } from '@/features/comments'
+import { TrackChanges } from '@/features/track-changes'
 
 /**
  * Phase 1 base schema.
@@ -44,10 +45,20 @@ export function createEditorExtensions(): Extensions {
     FontFamily,
 
     // --- Formatting toolbar (task 3): additive only ---
-    // textStyle.fontSize; paragraph/heading textAlign (Mod-Shift-l/e/r/j);
+    // textStyle.fontSize; paragraph/heading textAlign (Mod-Shift-l, Mod-e, Mod-Shift-r, Mod-Shift-j);
     // paragraph/heading lineHeight, paragraphSpacing, indent (Mod-] / Mod-[).
     FontSize,
-    TextAlign.configure({ types: [...BLOCK_FORMAT_TYPES], alignments: ['left', 'center', 'right', 'justify'] }),
+    // Center is Mod-e (as in Word): Mod-Shift-e is Track Changes (Phase 3).
+    TextAlign.extend({
+      addKeyboardShortcuts() {
+        return {
+          'Mod-Shift-l': () => this.editor.commands.setTextAlign('left'),
+          'Mod-e': () => this.editor.commands.setTextAlign('center'),
+          'Mod-Shift-r': () => this.editor.commands.setTextAlign('right'),
+          'Mod-Shift-j': () => this.editor.commands.setTextAlign('justify'),
+        }
+      },
+    }).configure({ types: [...BLOCK_FORMAT_TYPES], alignments: ['left', 'center', 'right', 'justify'] }),
     BlockFormat,
     // --- end formatting toolbar ---
 
@@ -81,5 +92,9 @@ export function createEditorExtensions(): Extensions {
     // comments and every other mark), the thread plugin (threads change through undoable steps) and
     // Mod-Alt-m (New Comment).
     CommentsExtension,
+    // --- Track changes (Phase 3): additive only. insertion / deletion / formatChange marks, the
+    // trackedInsert / trackedDelete / trackedStyleChange block attrs, the recorder (dispatch hook),
+    // Mod-Shift-e and the markup view decorations (docs/track-changes.md).
+    TrackChanges,
   ]
 }

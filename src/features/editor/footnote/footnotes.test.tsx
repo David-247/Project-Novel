@@ -304,3 +304,163 @@ describe('footnote editor (nested view, unified undo)', () => {
   })
 })
 
+describe('footnote editor with Track Changes on (real inner / outer round trip)', () => {
+  type View = NonNullable<ReturnType<typeof activeFootnoteView>>
+  /** A key in the note: its handlers first, then what the browser does natively (one character). */
+  function press(inner: View, key: 'Backspace' | 'Delete') {
+    const before = inner.state.doc
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+    act(() => void inner.dom.dispatchEvent(ev))
+    if (ev.defaultPrevented || inner.state.doc !== before) return
+    const { head } = inner.state.selection
+    act(() => void inner.dispatch(key === 'Backspace' ? inner.state.tr.delete(head - 1, head) : inner.state.tr.delete(head, head + 1)))
+  }
+  const noteOf = (ed: Editor) => ed.state.doc.firstChild!.child(1)
+  const deletedText = (ed: Editor) => {
+    let s = ''
+    noteOf(ed).forEach((c) => {
+      if (c.marks.some((m) => m.type.name === 'deletion')) s += c.text ?? ''
+    })
+    return s
+  }
+  async function open(ed: Editor): Promise<View> {
+    act(() => void ed.commands.editFootnote(2))
+    await screen.findByTestId('footnote-editor')
+    return activeFootnoteView()!
+  }
+
+  it('Backspace twice keeps both characters as deletions; the note stays open and in step; typing goes on', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    act(() => void inner.dispatch(inner.state.tr.setSelection(TextSelection.atEnd(inner.state.doc))))
+    press(inner, 'Backspace')
+    press(inner, 'Backspace')
+    expect(noteOf(ed).textContent).toBe('note')
+    expect(deletedText(ed)).toBe('te')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+    // Deleting already-deleted text (natively, no key handler) changes nothing in the manuscript:
+    // the note is mirrored back instead of drifting apart.
+    act(() => void inner.dispatch(inner.state.tr.delete(3, 4)))
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+    // The next keystroke still lands (the editor did not close on a mismatch).
+    act(() => void inner.dispatch(inner.state.tr.insertText('X', inner.state.selection.from)))
+    expect(getFootnoteEditing()).not.toBeNull()
+    expect(noteOf(ed).textContent).toContain('X')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+  })
+
+  /** Make the note view report an IME composition (as ProseMirror does between compositionstart / end). */
+  function composingFlag(view: View) {
+    let on = false
+    Object.defineProperty(view, 'composing', { configurable: true, get: () => on })
+    return (v: boolean) => (on = v)
+  }
+  const insertedText = (ed: Editor) => {
+    let s = ''
+    noteOf(ed).forEach((c) => {
+      if (c.marks.some((m) => m.type.name === 'insertion')) s += c.text ?? ''
+    })
+    return s
+  }
+  const innerMarked = (inner: View) => inner.dom.querySelector('.nv-ins') !== null
+
+  it('IME in the note: unmarked (no re-wrap) while composing; marked on compositionend; one undo step', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    act(() => void inner.dispatch(inner.state.tr.setSelection(TextSelection.atEnd(inner.state.doc))))
+    const composing = composingFlag(inner)
+    composing(true)
+    act(() => void inner.dispatch(inner.state.tr.insertText('k', 4).setMeta('composition', 7)))
+    act(() => void inner.dispatch(inner.state.tr.insertText('か', 4, 5).setMeta('composition', 7)))
+    expect(noteOf(ed).textContent).toBe('noteか')
+    expect(insertedText(ed)).toBe('') // deferred: nothing re-wraps the composing text
+    expect(innerMarked(inner)).toBe(false)
+    expect(getFootnoteEditing()).not.toBeNull()
+    composing(false)
+    act(() => void inner.dom.dispatchEvent(new CompositionEvent('compositionend', { data: 'か', bubbles: true })))
+    await act(() => new Promise((r) => setTimeout(r, 80)))
+    expect(insertedText(ed)).toBe('か')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true) // mirrored after the composition
+    expect(innerMarked(inner)).toBe(true)
+    act(() => void ed.commands.undo())
+    expect(noteOf(ed).textContent).toBe('note')
+  })
+
+  it('IME in the note, closed (Escape) before compositionend: marked in its own undo step; a later composition is unaffected', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    const composing = composingFlag(inner)
+    composing(true)
+    act(() => void inner.dispatch(inner.state.tr.insertText('か', 4).setMeta('composition', 9)))
+    expect(insertedText(ed)).toBe('')
+    act(() => void inner.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(getFootnoteEditing()).toBeNull()
+    expect(insertedText(ed)).toBe('か')
+    expect((ed.storage as unknown as { trackChanges: { pending: unknown[] } }).trackChanges.pending).toEqual([])
+
+    // A later composition in the manuscript: only its own text, in its own undo step.
+    let outerComposing = false
+    Object.defineProperty(ed.view, 'composing', { configurable: true, get: () => outerComposing })
+    const end = ed.state.doc.firstChild!.nodeSize - 1
+    act(() => void ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, end))))
+    outerComposing = true
+    act(() => void ed.view.dispatch(ed.state.tr.insertText('字').setMeta('composition', 1)))
+    outerComposing = false
+    act(() => void ed.view.dom.dispatchEvent(new CompositionEvent('compositionend', { data: '字', bubbles: true })))
+    await act(() => new Promise((r) => setTimeout(r, 60)))
+    const marked = ed.state.doc.firstChild!.lastChild!
+    expect(marked.text).toBe('字')
+    expect(marked.marks.map((m) => m.type.name)).toEqual(['insertion'])
+    act(() => void ed.commands.undo())
+    expect(ed.state.doc.firstChild!.textContent).toBe('anoteかb')
+    act(() => void ed.commands.undo())
+    expect(noteOf(ed).textContent).toBe('note')
+  })
+
+  it('IME in the note with Track Changes turned off before it ends: the text stays unmarked', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    const composing = composingFlag(inner)
+    composing(true)
+    act(() => void inner.dispatch(inner.state.tr.insertText('か', 4).setMeta('composition', 2)))
+    act(() => useStore.getState().bookActions.setTrackChanges(false))
+    composing(false)
+    act(() => void inner.dom.dispatchEvent(new CompositionEvent('compositionend', { data: 'か', bubbles: true })))
+    await act(() => new Promise((r) => setTimeout(r, 80)))
+    expect(noteOf(ed).textContent).toBe('noteか')
+    expect(insertedText(ed)).toBe('')
+    expect((ed.storage as unknown as { trackChanges: { pending: unknown[] } }).trackChanges.pending).toEqual([])
+  })
+
+  it("IME in the note: the composition's last change carries the mark", async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    const composing = composingFlag(inner)
+    composing(true)
+    act(() => void inner.dispatch(inner.state.tr.insertText('k', 4).setMeta('composition', 3)))
+    composing(false)
+    act(() => void inner.dispatch(inner.state.tr.insertText('漢字', 4, 5).setMeta('composition', 3)))
+    expect(insertedText(ed)).toBe('漢字')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+    act(() => void ed.commands.undo())
+    expect(noteOf(ed).textContent).toBe('note')
+  })
+
+  it('Delete past deleted text acts on the character after it', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    const ed = mount([p(text('a'), fn('note'), text('b'))])
+    const inner = await open(ed)
+    act(() => void inner.dispatch(inner.state.tr.setSelection(TextSelection.create(inner.state.doc, 0))))
+    press(inner, 'Delete')
+    act(() => void inner.dispatch(inner.state.tr.setSelection(TextSelection.create(inner.state.doc, 0))))
+    press(inner, 'Delete')
+    expect(deletedText(ed)).toBe('no')
+    expect(inner.state.doc.content.eq(noteOf(ed).content)).toBe(true)
+  })
+})
+

@@ -46,6 +46,11 @@ export interface BookSettings {
   surface: PaperSurface
   view: BookView
   /**
+   * Track Changes recording is on for this project (Phase 3, track changes ticket). Absent (off) in
+   * default settings and in books saved before it existed.
+   */
+  trackChanges?: boolean
+  /**
    * Unknown top-level keys of book.json (written by a newer Novel), kept so a save does not drop them.
    * Added by the Book settings ticket; absent for default settings.
    */

@@ -73,6 +73,8 @@ export {
 export { getChapters, chapterIndexAt, FRONT_MATTER_INDEX } from './breaks/chapters'
 // A block's text without the text of its footnotes (chapter titles, previews): use instead of textContent.
 export { blockPlainText } from './block-text'
+// Track changes: blockPlainText(node, { markupView }) leaves out what that markup view hides.
+export type { BlockPlainTextOptions } from './block-text'
 export type { Chapter } from './breaks/chapters'
 export { getChaptersStartOn, setChaptersStartOn } from './breaks/chapter-start'
 export type { ChaptersStartOn } from './breaks/chapter-start'

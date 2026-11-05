@@ -2,6 +2,7 @@ import { getSchema, type Editor, type JSONContent } from '@tiptap/core'
 import type { Node as PMNode, Schema } from '@tiptap/pm/model'
 import { EditorState, type Transaction } from '@tiptap/pm/state'
 import { useStore } from '@/shared/store'
+import { TRACKING_BLOCK_ATTRS } from '@/shared/track-changes'
 import { createEditorExtensions } from './extensions'
 
 /**
@@ -140,7 +141,16 @@ export function getEditor(): Editor | null {
  * Optional block layout attributes (formatting toolbar). A block that does not use one gets no
  * entry in the saved JSON; loading a doc without them gives the same defaults.
  */
-const OPTIONAL_BLOCK_ATTRS = ['textAlign', 'lineHeight', 'paragraphSpacing', 'indent', 'firstLineIndent', 'styleId'] as const
+const OPTIONAL_BLOCK_ATTRS = [
+  'textAlign',
+  'lineHeight',
+  'paragraphSpacing',
+  'indent',
+  'firstLineIndent',
+  'styleId',
+  // Track changes (Phase 3): null unless the block carries a tracked change.
+  ...TRACKING_BLOCK_ATTRS,
+] as const
 
 /**
  * Drop OPTIONAL_BLOCK_ATTRS that equal the schema default (textAlign/lineHeight/paragraphSpacing/styleId/

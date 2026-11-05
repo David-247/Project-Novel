@@ -7,6 +7,7 @@ import type { BookSlice } from './book-slice'
 import type { LayoutSlice } from './layout-slice'
 import type { PreferencesSlice } from './preferences-slice'
 import type { CommentsSlice } from './comments-slice'
+import type { TrackChangesSlice } from './track-changes-slice'
 
 /**
  * Compose the full store state here: `RootState = AppSlice & EditorSlice & ...`.
@@ -19,7 +20,8 @@ export type RootState = AppSlice &
   BookSlice &
   LayoutSlice &
   PreferencesSlice &
-  CommentsSlice
+  CommentsSlice &
+  TrackChangesSlice
 
 /** A slice creator contributes state + named actions to the single store. */
 export type SliceCreator<S> = StateCreator<RootState, [], [], S>

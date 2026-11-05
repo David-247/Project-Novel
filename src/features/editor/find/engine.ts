@@ -5,6 +5,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { DecorationSet } from '@tiptap/pm/view'
 import { useStore } from '@/shared/store'
+import { currentMarkupView, type MarkupView } from '@/shared/track-changes'
 import { getEditor, subscribeEditor } from '../controller'
 import { FOOTNOTE_NODE } from '../footnote/name'
 import {
@@ -17,7 +18,7 @@ import {
   noteAround,
   setFindDecorations,
 } from './plugin'
-import { findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
+import { deletedRange, findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
 import type { FindOptions, MatchRange } from './search'
 
 /**
@@ -58,10 +59,11 @@ function findState() {
   return useStore.getState().find
 }
 
-function searchParams(): { query: string; options: FindOptions; key: string } {
+function searchParams(): { query: string; options: FindOptions; key: string; markupView: MarkupView } {
   const f = findState()
   const options = { caseSensitive: f.caseSensitive, wholeWord: f.wholeWord }
-  return { query: f.query, options, key: `${f.caseSensitive ? 1 : 0}${f.wholeWord ? 1 : 0}:${f.query}` }
+  const markupView = currentMarkupView()
+  return { query: f.query, options, markupView, key: `${f.caseSensitive ? 1 : 0}${f.wholeWord ? 1 : 0}${markupView}:${f.query}` }
 }
 
 function publish() {
@@ -99,9 +101,9 @@ export function scanNow(opts: ScanOptions = {}): void {
     publish()
     return
   }
-  const { query, options, key } = searchParams()
+  const { query, options, key, markupView } = searchParams()
   const state = ed.state
-  matches = findMatches(state.doc, query, options)
+  matches = findMatches(state.doc, query, options, markupView)
   scannedDoc = state.doc
   scannedKey = key
   current = indexAtOrAfter(matches, opts.anchor ?? state.selection.from)
@@ -244,25 +246,42 @@ export function replaceCurrent(): boolean {
   const ed = getEditor()
   if (!ed) return false
   if (!isFresh(ed)) scanNow()
-  const m = matches[current]
+  // Track changes: a match that is all deleted text (found in All Markup) cannot be replaced.
+  const at = replaceableFrom(ed.state.doc, current)
+  const m = matches[at]
   if (!m) return false
   const replacement = findState().replacement
   const tr = replaceRange(ed.state.tr, ed.schema, m, replacement)
   closeHistory(clearFindDecorations(tr))
   ed.view.dispatch(tr)
-  scanNow({ anchor: m.from + replacement.length, reveal: true, closeUndoGroup: true })
+  scanNow({ anchor: m.from + replacement.length, closeUndoGroup: true })
+  // With Track Changes on the replaced text stays (deleted): go on past it, to a match still there.
+  const next = replaceableFrom(ed.state.doc, current)
+  if (next >= 0) goTo(ed, next)
+  else if (current >= 0) goTo(ed, current)
   return true
+}
+
+/** The first match at or after `index` (wrapping) that is not all deleted text; -1 when none is. */
+function replaceableFrom(doc: PMNode, index: number): number {
+  if (index < 0 || matches.length === 0) return -1
+  for (let k = 0; k < matches.length; k++) {
+    const i = (index + k) % matches.length
+    if (!deletedRange(doc, matches[i])) return i
+  }
+  return -1
 }
 
 /**
  * Replace every match in a single transaction (one undo step restores all of them).
- * Returns the number of replacements.
+ * Returns the number of replacements (matches that are all deleted text are skipped).
  */
 export function replaceAll(): number {
   const ed = getEditor()
   if (!ed) return 0
   if (!isFresh(ed)) scanNow()
-  const count = matches.length
+  const doc = ed.state.doc
+  const count = matches.filter((m) => !deletedRange(doc, m)).length
   if (count === 0) return 0
   const tr = replaceAllRanges(ed.state.tr, ed.schema, matches, findState().replacement)
   closeHistory(clearFindDecorations(tr))
@@ -306,6 +325,9 @@ export function startFindEngine(): () => void {
       scheduleScan(QUERY_DEBOUNCE_MS, { reveal: true })
     } else if (s.editor.docVersion !== prev.editor.docVersion) {
       scheduleScan(DOC_DEBOUNCE_MS)
+    } else if (s.trackChanges.markupView !== prev.trackChanges.markupView) {
+      // Track changes: what can be found follows the markup view.
+      scheduleScan(0)
     }
   })
   const unsubEditor = subscribeEditor(() => {

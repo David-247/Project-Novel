@@ -17,7 +17,9 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { getEditor, getFootnotes, setDocJSON } from '@/features/editor'
+import { getDocJSON, getEditor, getFootnotes, setDocJSON } from '@/features/editor'
+import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
+import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
 import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
@@ -265,6 +267,46 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const schema = ed.schema
       ed.view.dispatch(ed.state.tr.insert(pos, schema.nodes.footnote.create(null, text ? schema.text(text) : null)))
     },
+    // ---- Track changes (Phase 3) ----
+    /** Turn recording on or off (the book setting the toolbar toggle writes). */
+    setTracking: (on: boolean) => setTracking(on),
+    /** View ▸ Markup. */
+    setMarkupView: (view: MarkupView) => setMarkupView(view),
+    /** Number of tracked changes in the document. */
+    countChanges: () => {
+      const ed = getEditor()
+      return ed ? countChanges(ed.state) : 0
+    },
+    /** Accept (or reject) every change, as one transaction. */
+    resolveAllChanges: (mode: 'accept' | 'reject') => {
+      const ed = getEditor()
+      if (!ed) return
+      const tr = mode === 'accept' ? acceptAll(ed.state) : rejectAll(ed.state)
+      if (tr) ed.view.dispatch(tr)
+    },
+    /**
+     * The first characters of text shown at the top of each page in the current markup view
+     * ('(blank)' for a blank page): compares page breaks between documents whose positions differ.
+     */
+    pageStarts: (chars = 24) => {
+      const ed = getEditor()
+      if (!ed) return []
+      const view = useStore.getState().trackChanges.markupView
+      const doc = ed.state.doc
+      return useStore.getState().layout.pages.map((pg) => {
+        if (pg.isBlank) return '(blank)'
+        let out = ''
+        doc.nodesBetween(pg.from, pg.to, (n, pos) => {
+          if (out.length >= chars || n.type.name === 'footnote') return false
+          if (n.isBlock && isBlockHidden(n, view)) return false
+          if (n.isText && !isInlineHidden(n, view)) out += n.text!.slice(Math.max(0, pg.from - pos))
+          return true
+        })
+        return out.slice(0, chars)
+      })
+    },
+    /** The document as saved (manuscript.json shape). */
+    docJSON: () => getDocJSON(),
     /** Editor document version (bumps on every document change; style edits must not bump it). */
     docVersion: () => useStore.getState().editor.docVersion,
     /**

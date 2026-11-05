@@ -43,7 +43,10 @@ function OpenPanel({ className }: FindReplacePanelProps) {
   const actions = useStore((s) => s.findActions)
   const findRef = useRef<HTMLInputElement>(null)
   // Replace-all summary, shown only until the search (or the doc) changes.
-  const [replaced, setReplaced] = useState<{ count: number; key: string } | null>(null)
+  // `version`: the document right after the replace. With Track Changes on, the replaced text stays
+  // (deleted) and All Markup still finds it: the summary then shows until the document changes.
+  const [replaced, setReplaced] = useState<{ count: number; key: string; version: number } | null>(null)
+  const docVersion = useStore((s) => s.editor.docVersion)
   const searchKey = `${caseSensitive}|${wholeWord}|${query}`
 
   useEffect(() => startFindEngine(), [])
@@ -74,7 +77,7 @@ function OpenPanel({ className }: FindReplacePanelProps) {
 
   const hasMatches = matchCount > 0
   const status =
-    replaced && replaced.key === searchKey && !hasMatches
+    replaced && replaced.key === searchKey && (!hasMatches || replaced.version === docVersion)
       ? `Replaced ${replaced.count}`
       : statusLabel(query, matchCount, currentIndex)
 
@@ -176,7 +179,7 @@ function OpenPanel({ className }: FindReplacePanelProps) {
           </Button>
         </Tooltip>
         <Tooltip>
-          <Button aria-label={FIND_CONTROLS.replaceAll.label} data-control-id={FIND_CONTROLS.replaceAll.id} disabled={!hasMatches} onClick={() => setReplaced({ count: act(replaceAll), key: searchKey })}>
+          <Button aria-label={FIND_CONTROLS.replaceAll.label} data-control-id={FIND_CONTROLS.replaceAll.id} disabled={!hasMatches} onClick={() => setReplaced({ count: act(replaceAll), key: searchKey, version: useStore.getState().editor.docVersion })}>
             Replace all
           </Button>
         </Tooltip>

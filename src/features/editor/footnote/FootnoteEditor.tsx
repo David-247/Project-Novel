@@ -12,6 +12,8 @@ import { createPortal } from 'react-dom'
 import { filterPastedComments } from '@/features/comments'
 import { useStore } from '@/shared/store'
 import { Button, cn, fieldBase, Tooltip } from '@/shared/ui'
+import { COMPOSITION_FLUSH_MS, flushComposedText, isTracking, skipDeleted } from '@/features/track-changes'
+import { COMPOSING_META } from '@/shared/track-changes'
 import { useMountedEditor } from '../use-mounted-editor'
 import { FOOTNOTE_EDITOR_CONTROLS } from './controls'
 import { closeFootnoteEditor, useFootnoteEditing } from './editing'
@@ -125,6 +127,10 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
               'Mod-u': mark('underline'),
               Escape: () => (back(), true),
               Enter: () => (back(), true),
+              // Track changes: deleted text stays in the note; Backspace / Delete go past it first (as
+              // in the manuscript), so they act on text that is still there.
+              Backspace: skipKey(-1),
+              Delete: skipKey(1),
             }),
             keymap(baseKeymap),
           ],
@@ -141,6 +147,13 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
         // (a copy of commented text does not duplicate the thread; after a cut the paste moves it).
         transformPasted: (slice, view) =>
           filterPastedComments(flattenPasted(slice, schema), outerView.state, !!(view as unknown as { dragging?: { move?: boolean } }).dragging?.move),
+        handleDOMEvents: {
+          // Track changes: what was composed in the note is marked as inserted once the composition ends.
+          compositionend: () => {
+            setTimeout(() => flushComposedText(outerView), COMPOSITION_FLUSH_MS)
+            return false
+          },
+        },
         clipboardTextParser: (text) => {
           const t = text.replace(/\s*[\r\n]+\s*/g, ' ').trim()
           return t ? new Slice(Fragment.from(schema.text(t)), 0, 0) : Slice.empty
@@ -155,7 +168,8 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
           // The manuscript must still hold this very note where we think it is (a document load or a
           // change we missed would send the steps into other text): otherwise close, change nothing.
           const target = outerView.state.doc.nodeAt(posRef.current)
-          if (target?.type.name !== FOOTNOTE_NODE || !target.content.eq(before.content)) {
+          // While composing, a difference in marks only is expected (see mirror): the text must match.
+          if (target?.type.name !== FOOTNOTE_NODE || !(inner.composing ? sameText(target, before) : target.content.eq(before.content))) {
             closeFootnoteEditor()
             return
           }
@@ -178,12 +192,32 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
             closeHistory(outerTr)
             first = false
           }
+          // An IME composition in the note: the recorder leaves the composed text unmarked until it ends
+          // (re-wrapping the composing text node cancels or doubles the composition in Safari), and
+          // the composition's id keeps its steps (and the marking after it) in one undo step.
+          const composition = transactions.find((t) => t.getMeta('composition') !== undefined)?.getMeta('composition')
+          if (composition !== undefined) outerTr.setMeta('composition', `footnote:${String(composition)}`)
+          if (inner.composing) outerTr.setMeta(COMPOSING_META, true)
           if (outerTr.docChanged) outerView.dispatch(outerTr)
+          // The manuscript may have kept what the note removed (Track Changes keeps deleted text, and
+          // deleting already-deleted text changes nothing there): mirror it back whenever the two differ.
+          const now = outerView.state.doc.nodeAt(posRef.current)
+          if (now?.type.name === FOOTNOTE_NODE) mirror(now)
         },
       },
     )
     active = inner
 
+    /**
+     * Mirror the manuscript's note into the note editor. While the note is composing, a difference in
+     * marks only waits for the composition's end (re-rendering the composing text would break it);
+     * a text difference is mirrored at once (the steps must keep mapping 1:1).
+     */
+    const mirror = (now: PMNode) => {
+      if (now.content.eq(inner.state.doc.content)) return
+      if (inner.composing && sameText(now, inner.state.doc)) return
+      syncInner(inner, now)
+    }
     // Follow the manuscript: map the footnote's position; mirror outside changes (undo, redo).
     const onTransaction = ({ transaction }: { transaction: Transaction }) => {
       if (transaction.docChanged) {
@@ -196,7 +230,7 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
           if (inner.hasFocus()) outerView.focus()
           return
         }
-        syncInner(inner, now)
+        mirror(now)
       }
       setLabel(labelAt(outer, posRef.current))
       requestAnimationFrame(reposition)
@@ -222,6 +256,9 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
       unstore()
       ro?.disconnect()
       outer.off('transaction', onTransaction)
+      // Closed mid-composition (Escape, Done, blur, a failed forward): the note's compositionend
+      // handler goes with the view, so mark what was composed now (in its own undo step).
+      flushComposedText(outerView, { force: true })
       inner.destroy()
       if (active === inner) active = null
     }
@@ -286,8 +323,23 @@ function FootnotePopover({ outer, pos: initialPos }: { outer: Editor; pos: numbe
   )
 }
 
+/** Backspace (-1) / Delete (+1) in the note while tracking: move past deleted text, then let the key act. */
+function skipKey(dir: -1 | 1) {
+  return (state: EditorState, dispatch?: (tr: Transaction) => void) => {
+    if (!isTracking()) return false
+    const pos = skipDeleted(state, dir)
+    if (pos !== null && dispatch) dispatch(state.tr.setSelection(TextSelection.create(state.doc, pos)))
+    return false
+  }
+}
+
 function labelAt(editor: Editor, pos: number): string {
   return footnotesOf(editor.state).find((r) => r.pos === pos)?.label ?? ''
+}
+
+/** Same text (and size) in two notes, whatever their marks. */
+function sameText(a: PMNode, b: PMNode): boolean {
+  return a.content.size === b.content.size && a.textContent === b.textContent
 }
 
 /** Mirror a change made outside the note editor (undo/redo in the manuscript) into it. */

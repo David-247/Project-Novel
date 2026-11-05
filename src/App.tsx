@@ -27,7 +27,7 @@ import {
   SaveStatusIndicator,
   useStorageIntegration,
 } from '@/features/storage'
-import { PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
+import { invalidatePaginationAt, PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
 import { FootnoteOptionsButton, registerFootnoteCommands, useFootnotePagination } from '@/features/footnotes'
 import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
 import {
@@ -47,6 +47,7 @@ import {
   setBeforeNewComment,
   setCommentAuthorSource,
 } from '@/features/comments'
+import { MarkupViewMenu, setMarkupViewRepaginate, TrackChangesButton, TrackChangesNotice } from '@/features/track-changes'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
@@ -118,6 +119,8 @@ export function App() {
       setBeforeNewComment(null)
     }
   }, [])
+  // Track changes: a markup view switch re-measures the blocks holding changes (hidden text).
+  useEffect(() => setMarkupViewRepaginate(invalidatePaginationAt), [])
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
@@ -148,6 +151,15 @@ export function App() {
                     </ToolbarItem>
                     <ToolbarItem>
                       <FootnoteOptionsButton />
+                    </ToolbarItem>
+                  </ToolbarGroup>
+                  <ToolbarSeparator />
+                  <ToolbarGroup label="Review">
+                    <ToolbarItem>
+                      <TrackChangesButton />
+                    </ToolbarItem>
+                    <ToolbarItem>
+                      <MarkupViewMenu />
                     </ToolbarItem>
                   </ToolbarGroup>
                   <ToolbarSeparator />
@@ -203,6 +215,7 @@ export function App() {
           <>
             <SaveStatusIndicator />
             <RecoveryStatus />
+            <TrackChangesNotice />
             <span className="flex-1" />
             <NoProjectActions />
             <PageIndicator />
