@@ -615,7 +615,7 @@ export async function confirmUnsavedChanges(action = 'continuing'): Promise<bool
 
 /** Label of the "go on" button of the left-unsaved prompt, for the action the user asked for. */
 function anywayLabel(action: string): string {
-  const verb = action === 'quitting' ? 'Quit' : action === 'closing' ? 'Close' : 'Continue'
+  const verb = action === 'quitting' ? 'Quit' : action === 'closing' || action === 'closing the project' ? 'Close' : 'Continue'
   return `${verb} anyway (keep changes for recovery)`
 }
 

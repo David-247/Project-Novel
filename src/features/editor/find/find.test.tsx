@@ -542,7 +542,7 @@ describe('replace with Track Changes on (All Markup finds deleted text)', () => 
       ed.state.doc.descendants((node) => {
         if (node.isText && node.text === 'dog') authors.push(node.marks.map((m) => `${m.type.name}:${m.attrs.author}`).join())
       })
-      expect(authors).toEqual(['insertion:Author', 'insertion:Author'])
+      expect(authors).toEqual(['insertion:Unknown author', 'insertion:Unknown author'])
     } finally {
       act(() => useStore.getState().bookActions.resetBook())
     }

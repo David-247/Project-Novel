@@ -453,6 +453,29 @@ describe('a Save that leaves a guarded file unsaved, in the unsaved-changes prom
     expect(useStore.getState().project.bookWarning).toMatch(/Your book settings were not saved: book\.json could not be read/)
   })
 
+  it('File > Close Project: the go-on button reads "Close anyway"', async () => {
+    await unreadableNotes()
+    answers = ['Save', 'Cancel']
+    expect(await closeProjectInteractive()).toBe(false)
+    expect((backend.messages.at(-1)!.opts as { buttons: { ok: string } }).buttons.ok).toBe('Close anyway (keep changes for recovery)')
+  })
+
+  it('Close Project and Open clear the side-file warning', async () => {
+    await unreadableNotes()
+    expect(warning()).not.toBeNull()
+    answers = ['Save', 'Close anyway (keep changes for recovery)']
+    expect(await closeProjectInteractive()).toBe(true)
+    expect(warning()).toBeNull()
+    backend.failRead = null
+    backend.files.set(NOTES, '{ not json')
+    await reopen()
+    expect(warning()).toMatch(/notes\.json is damaged/)
+    // Opening the project again with a sound file: the warning goes.
+    backend.files.set(NOTES, JSON.stringify({ version: 1, items: [] }))
+    await reopen()
+    expect(warning()).toBeNull()
+  })
+
   it('a clean Save proceeds without the extra question', async () => {
     await createProject()
     side.change(['fine'])

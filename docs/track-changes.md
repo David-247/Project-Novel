@@ -119,7 +119,8 @@ first (`skipDeleted`, as in the manuscript), and the note is mirrored back from 
 the two differ after a forwarded edit (deleting already-deleted text changes nothing there).
 
 **Author.** `TrackChanges.configure({ getAuthor })`: `() => ({ name, color? })`, default
-`() => ({ name: 'Author' })`. The composition root wires it to the settings at integration.
+`currentTrackAuthor()`: the source set with `setTrackChangesAuthorSource` (the composition root wires the
+Settings author), else "Unknown author" (no source, an empty name, or a source that throws).
 
 ## Markup views
 

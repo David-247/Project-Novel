@@ -5,7 +5,7 @@
 // Schema + recording: `TrackChanges` (in the editor's extension list) adds the insertion, deletion and
 // formatChange marks, the trackedInsert / trackedDelete / trackedStyleChange block attributes, the
 // recorder (dispatch hook), Mod-Shift-e and the markup view decorations. Option `getAuthor` (default
-// `() => ({ name: 'Author' })`) is the author of new changes.
+// `currentTrackAuthor`: the source set by setTrackChangesAuthorSource, else "Unknown author") is the author of new changes.
 // Commands: toggleTrackChanges(editor?), setTracking(on), isTracking(state?), setMarkupView(view),
 // getMarkupView(state?), countChanges(editorState), listChanges(doc).
 // Accept / reject core (pure, return a Transaction or null): acceptChange, rejectChange, acceptAll,

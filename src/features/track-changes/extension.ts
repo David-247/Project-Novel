@@ -222,10 +222,11 @@ export function skipDeleted(state: EditorState, dir: -1 | 1): number | null {
  * Backspace / Delete past deleted text, final-text copy, and the hidden-block decorations of the
  * markup views. See docs/track-changes.md.
  */
-const DEFAULT_AUTHOR: Author = { name: 'Author' }
+/** A change whose author cannot be read (no source, an empty name, a source that throws). */
+const DEFAULT_AUTHOR: Author = { name: 'Unknown author' }
 let authorSource: () => Author = () => DEFAULT_AUTHOR
 
-/** The author of new changes (default option `getAuthor`): the injected source, else "Author". */
+/** The author of new changes (default option `getAuthor`): the injected source, else "Unknown author". */
 export function currentTrackAuthor(): Author {
   try {
     const a = authorSource()
