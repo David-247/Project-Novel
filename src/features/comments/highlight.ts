@@ -68,7 +68,8 @@ export function buildHighlightCss({ threads, activeId, hoverId, showResolved, pa
     }
   }
   if (hidden.length) rules.push(`:root .nv-comment${sel(hidden)}{background-color:transparent}`)
-  const lit = [...new Set([activeId, hoverId])].filter((id): id is string => isCommentId(id))
+  // A hidden (resolved) thread is not lit either.
+  const lit = [...new Set([activeId, hoverId])].filter((id): id is string => isCommentId(id) && !hidden.includes(id))
   if (lit.length) {
     rules.push(
       `:root .nv-comment${sel(lit)}[data-comment-id]{background-color:var(--page-comment-active-bg);box-shadow:inset 0 -2px 0 var(--page-comment-ring)}`,

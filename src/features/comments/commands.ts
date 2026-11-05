@@ -204,7 +204,29 @@ export function goToThread(threadId: string, opts: { focus?: boolean } = {}): bo
   v.dispatch(v.state.tr.setSelection(sel).scrollIntoView())
   actions().setActive(threadId)
   if (opts.focus) v.focus()
+  centerInView(v, a.from)
   return true
+}
+
+/**
+ * Scroll the anchor to the middle of the editor region once the pages are drawn, so its spread is the
+ * visible one (the margin panel shows the visible spread's comments). A minimal scroll into view could
+ * leave the previous spread in the middle of the window.
+ */
+function centerInView(v: EditorView, pos: number): void {
+  requestAnimationFrame(() => {
+    if ((v as unknown as { isDestroyed?: boolean }).isDestroyed) return
+    let scroller: HTMLElement | null = v.dom.parentElement
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+    if (!scroller) return
+    try {
+      const c = v.coordsAtPos(Math.min(pos, v.state.doc.content.size), 1)
+      const r = scroller.getBoundingClientRect()
+      scroller.scrollTop += (c.top + c.bottom) / 2 - (r.top + r.height / 2)
+    } catch {
+      // No layout (tests): nothing to scroll.
+    }
+  })
 }
 
 function step(dir: 1 | -1): boolean {

@@ -5,6 +5,7 @@ import { useStore } from '@/shared/store'
 import { cn, IconButton, ToggleButton, Tooltip } from '@/shared/ui'
 import { nextComment, prevComment, redoInManuscript, setCommentsNarrow, shownAnchors, toggleShowResolved, undoInManuscript } from './commands'
 import { COMMENT_CONTROLS as C } from './controls'
+import { collectAnchors } from './anchors'
 import { commentsKey, getCommentsView } from './extension'
 import { buildHighlightCss } from './highlight'
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ResolvedIcon } from './icons'
@@ -26,9 +27,9 @@ interface ShownItem {
 export const commentsDebug = { lastLayoutMs: 0, layouts: 0, laidOutVersion: -1 }
 
 /** Threads shown (anchored, resolved only with Show Resolved), in document order. */
-function useShownItems(rangeFilter: boolean): ShownItem[] {
+function useShownItems(rangeFilter: boolean, includeResolved = false): ShownItem[] {
   const threads = useStore((s) => s.comments.threads)
-  const showResolved = useStore((s) => s.comments.showResolved)
+  const showResolved = useStore((s) => s.comments.showResolved) || includeResolved
   const draft = useStore((s) => s.comments.draft)
   // The anchors follow the document: recomputed per change (cached per block; no doc scan).
   const docVersion = useStore((s) => s.editor.docVersion)
@@ -51,9 +52,12 @@ function useShownItems(rangeFilter: boolean): ShownItem[] {
   }, [threads, showResolved, draft, docVersion, pages, spread, rangeFilter])
 }
 
-/** Any thread shown anywhere in the manuscript (the panel takes room only then). */
+/**
+ * Any thread anchored anywhere in the manuscript, resolved ones included (the panel takes room only
+ * then; it stays while every comment is resolved, so Show Resolved remains at hand).
+ */
 function useHasComments(): boolean {
-  const all = useShownItems(false)
+  const all = useShownItems(false, true)
   return all.length > 0
 }
 
@@ -171,11 +175,15 @@ function MarginPanel() {
       const t0 = performance.now()
       const top0 = box.getBoundingClientRect().top
       const els = Array.from(box.children) as HTMLElement[]
+      // Positions now (typing before an anchor moves it without re-rendering the cards).
+      const anchors = collectAnchors(v.state.doc)
+      const draftNow = commentsKey.getState(v.state)?.draft ?? null
       const boxes = els.map((el, i) => {
         const item = items[i]
+        const from = item ? (item.thread ? anchors.get(item.key)?.from : draftNow?.from) : undefined
         let desired = 0
         try {
-          if (item) desired = v.coordsAtPos(Math.min(item.from, v.state.doc.content.size), 1).top - top0
+          if (from !== undefined) desired = v.coordsAtPos(Math.min(from, v.state.doc.content.size), 1).top - top0
         } catch {
           desired = 0
         }
@@ -199,9 +207,12 @@ function MarginPanel() {
   })
 
   // After every render that can move an anchor: the reflow is already laid out and painted.
+  // Which cards, not where their anchors are: typing re-renders the panel without a relayout; the
+  // reflow that follows (layoutVersion) moves the cards.
+  const cardsKey = items.map((i) => i.key).join(' ')
   useLayoutEffect(() => {
     layout.current()
-  }, [items, activeId, layoutVersion, scale])
+  }, [cardsKey, activeId, layoutVersion, scale])
 
   // A card that grows or shrinks (reply field opened, text typed) restacks the others.
   useEffect(() => {
@@ -221,7 +232,7 @@ function MarginPanel() {
       if (frame.current) cancelAnimationFrame(frame.current)
       frame.current = 0
     }
-  }, [items])
+  }, [cardsKey])
 
   return (
     <aside

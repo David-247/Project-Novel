@@ -4,7 +4,7 @@ import { useStore } from '@/shared/store'
 import { Button, cn, fieldBase, IconButton, Tooltip } from '@/shared/ui'
 import { cancelDraft, deleteMessage, deleteThread, editMessage, goToThread, reopenThread, replyToThread, resolveThread, submitDraft } from './commands'
 import { COMMENT_CONTROLS as C } from './controls'
-import { currentAuthor } from './extension'
+import { currentAuthor, getCommentsView } from './extension'
 import { CheckIcon, JumpIcon, PencilIcon, ReopenIcon, TrashIcon } from './icons'
 import { relativeDate, type CommentThread } from './model'
 
@@ -245,8 +245,17 @@ export function DraftCard() {
   const [text, setText] = useState('')
   const focusKey = useStore((s) => s.comments.composeRequest)
   const author = currentAuthor()
+  // Keyboard users go back to writing where they were.
+  const backToText = () => getCommentsView()?.focus()
   const submit = () => {
-    if (submitDraft(text)) setText('')
+    if (submitDraft(text)) {
+      setText('')
+      backToText()
+    }
+  }
+  const cancel = () => {
+    cancelDraft()
+    backToText()
   }
   return (
     <article aria-label="New comment" data-thread-id="draft" className={cn(cardBase, 'border-accent ring-1 ring-accent')}>
@@ -254,9 +263,9 @@ export function DraftCard() {
         <Dot color={author.color} />
         <span className="font-semibold">{author.name}</span>
       </div>
-      <TextField controlId={C.composeField.id} label={C.composeField.label} value={text} onChange={setText} onSubmit={submit} onCancel={() => cancelDraft()} autoFocus focusKey={focusKey} />
+      <TextField controlId={C.composeField.id} label={C.composeField.label} value={text} onChange={setText} onSubmit={submit} onCancel={cancel} autoFocus focusKey={focusKey} />
       <div className="mt-1.5 flex justify-end gap-1.5">
-        <CardButton meta={C.composeCancel} onClick={() => cancelDraft()}>
+        <CardButton meta={C.composeCancel} onClick={cancel}>
           {C.composeCancel.label}
         </CardButton>
         <CardButton meta={C.composeSubmit} variant="primary" onClick={submit} disabled={!text.trim()}>
