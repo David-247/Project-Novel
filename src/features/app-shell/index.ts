@@ -1,5 +1,3 @@
 export { AppShell } from './AppShell'
 export type { AppShellProps } from './AppShell'
 export { useReloadGuard, isReloadOrNavigationKey } from './reload-guard'
-export { readToolbarProtoFlag } from './toolbar-proto/groups'
-export type { ToolbarProtoMode } from './toolbar-proto/groups'

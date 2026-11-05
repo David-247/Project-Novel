@@ -3,7 +3,8 @@
 //
 // - <SettingsDialog />: render once in the app. Hosts the Settings dialog and the one-time author
 //   question (both portal).
-// - <SettingsButton />: toolbar gear (data-control-id `settings.open`); wrap in the editor's ToolbarItem.
+// - <SettingsButton />: a gear button (data-control-id `settings.open`); not on the ribbon since T6 (Settings is a
+//   File menu command, as in Word). Kept for embeds; wrap in the editor's ToolbarItem.
 // - useSettingsIntegration(): call once at the composition root. Loads preferences.json, writes
 //   changes (debounced) and applies the Motion preference.
 // - registerSettingsCommands(): Settings… (Mod-,) in the command registry (app menu on macOS, end of
