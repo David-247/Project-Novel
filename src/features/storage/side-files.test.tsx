@@ -182,6 +182,17 @@ describe('project side files', () => {
     expect(onDisk().items).toEqual(['a'])
   })
 
+  it('a batch failure names the file that failed, even with a canonical Windows path in the Rust message', async () => {
+    await createProject()
+    side.change(['a'])
+    editor.update(textDoc('new text'))
+    backend.failWrite = (p) =>
+      p === NOTES ? { kind: 'permission_denied', message: '\\\\?\\C:\\books\\novel\\notes.json: Access is denied. (os error 5)' } : null
+    expect(await saveProject({ silent: true })).toBe(false)
+    expect(useStore.getState().project.saveError).toMatch(/could not write notes\.json\./)
+    backend.failWrite = null
+  })
+
   it('a damaged file loads empty, is not overwritten until a real change, then is copied aside first', async () => {
     await createProject()
     backend.files.set(NOTES, '{ not json')
