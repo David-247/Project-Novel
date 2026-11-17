@@ -451,9 +451,7 @@ test('a version from a newer Novel is shown read-only and never written back; ve
   await revision(page).click()
   await page.keyboard.press('ControlOrMeta+End')
   await page.keyboard.type(' Then night.')
-  // (Switching versions copies the revision into the store; saving within 400 ms of typing is the
-  // storage area's fix.)
-  await view(page).getByRole('tab', { name: 'Version 2' }).click()
+  // Saved straight after typing, with the view still on Version 1: Save flushes the live revision first.
   await page.keyboard.press('ControlOrMeta+s')
   await expect(saveStatus(page)).toHaveText('Newer: Saved')
   const saved = JSON.parse((await page.evaluate(() => window.__nvE2E.readFile('/projects/Newer/rewrites.json')))!)
