@@ -125,6 +125,16 @@ test('100k words paginated, Reduce motion on: trim size reflow < 1 s', async ({ 
   await expect(page.locator('html')).toHaveAttribute('data-reduce-motion', 'on')
 })
 
+// The OS asks for reduced motion but the writer chose Settings > Motion 'Allow motion': the app
+// setting wins, and no OS-keyed rule may give every element a transition (the same budgets).
+test('100k words paginated, OS Reduce motion + Allow motion: trim size reflow < 1 s', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await seedPreferences(page, { reduceMotion: 'off' })
+  await trimScenario(page, testInfo, 'pagination-trim-os-reduced-allow-motion', '/projects/TrimAM')
+  await expect(page.locator('html')).not.toHaveAttribute('data-reduce-motion', 'on')
+})
+
 test('100k words paginated: typing latency (end of a line; inside a paragraph split across pages)', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   const { fx, openMs } = await openFixture(page, '/projects/Typing')
