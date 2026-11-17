@@ -26,6 +26,8 @@ import {
 import { CommentsLayout } from './CommentsLayout'
 import { commentsKey, filterPastedComments, getCommentsView, setCommentAuthorSource } from './extension'
 import { commentsSideFile, __resetCommentsFileForTests } from './persistence'
+import { commentCommands } from './menu-commands'
+import { COMMENT_CONTROLS } from './controls'
 
 beforeAll(() => {
   const rect = { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, toJSON: () => ({}) }
@@ -177,6 +179,14 @@ describe('every thread action undoes and redoes with the main history', () => {
     expect(editMessage(id, threads()[0].messages[0].id, 'Not mine')).toBe(false)
     expect(ed).toBeTruthy()
   })
+
+  it('a nameless user owns no message: "Unknown author" messages are not editable as one\'s own', () => {
+    setCommentAuthorSource(() => ({ name: 'Unknown author', anonymous: true }))
+    const ed = mount()
+    const id = addComment(ed, 5, 10, 'Anonymous')
+    expect(threads()[0].messages[0].author).toBe('Unknown author')
+    expect(editMessage(id, threads()[0].messages[0].id, 'Changed')).toBe(false)
+  })
 })
 
 describe('anchor deletion', () => {
@@ -205,6 +215,18 @@ describe('anchor deletion', () => {
     act(() => void commentsSideFile.load(saved))
     expect(threads().map((t) => t.id)).toEqual([keep])
   })
+
+  it('a recovery snapshot holding the orphans pruned on open compares equal to what was loaded', () => {
+    const ed = mount()
+    addComment(ed, 5, 10)
+    addComment(ed, 24, 28)
+    act(() => ed.view.dispatch(ed.state.tr.delete(23, 29)))
+    const snapshot = structuredClone(commentsSideFile.serialize().data)
+    act(() => void commentsSideFile.load(snapshot))
+    const loaded = commentsSideFile.serialize().data
+    expect(JSON.stringify(loaded)).not.toBe(JSON.stringify(snapshot))
+    expect(commentsSideFile.comparable!(snapshot)).toEqual(commentsSideFile.comparable!(loaded))
+  })
 })
 
 describe('copy and paste', () => {
@@ -229,6 +251,16 @@ describe('copy and paste', () => {
 })
 
 describe('next and previous comment', () => {
+  it('are disabled when the only threads are hidden (anchor text deleted)', () => {
+    const ed = mount()
+    addComment(ed, 5, 10)
+    const next = commentCommands().find((c) => c.id === COMMENT_CONTROLS.next.id)!
+    expect(next.isEnabled!()).toBe(true)
+    act(() => ed.view.dispatch(ed.state.tr.delete(4, 11)))
+    expect(threads()).toHaveLength(1)
+    expect(next.isEnabled!()).toBe(false)
+  })
+
   it('walk the shown threads in document order and wrap; resolved ones are skipped', () => {
     const ed = mount()
     const a = addComment(ed, 5, 10)

@@ -7,7 +7,7 @@ import { nextComment, prevComment, redoInManuscript, setCommentsNarrow, shownAnc
 import { COMMENT_CONTROLS as C } from './controls'
 import { collectAnchors } from './anchors'
 import { commentsKey, getCommentsView } from './extension'
-import { buildHighlightCss } from './highlight'
+import { buildActiveCss, buildColorCss } from './highlight'
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon, ResolvedIcon } from './icons'
 import { inRange, needsDrawer, PANEL_WIDTH, spreadRange, stackCards } from './layout'
 import type { CommentThread } from './model'
@@ -64,36 +64,52 @@ function useHasComments(): boolean {
 /** The anchor highlight style sheet (highlight.ts), kept in sync without re-rendering React. */
 function useCommentHighlights() {
   useEffect(() => {
-    const style = document.createElement('style')
-    style.setAttribute('data-nv-comment-highlights', '')
-    document.head.appendChild(style)
-    let last = ''
-    const update = () => {
+    // Two sheets: the colours (every thread; rebuilt with the threads or the paper) and the small active /
+    // hovered one after it, so a hover never regenerates and reinstalls a rule listing every thread.
+    const sheet = (kind: string) => {
+      const style = document.createElement('style')
+      style.setAttribute('data-nv-comment-highlights', kind)
+      document.head.appendChild(style)
+      let last = ''
+      return {
+        set: (css: string) => void (css !== last && (style.textContent = last = css)),
+        remove: () => style.remove(),
+      }
+    }
+    const colors = sheet('colors')
+    const active = sheet('active')
+    const updateColors = () => {
       const c = useStore.getState().comments
       const root = getComputedStyle(document.documentElement)
-      const css = buildHighlightCss({
-        threads: c.threads,
-        activeId: c.activeId,
-        hoverId: c.hoverId,
-        showResolved: c.showResolved,
-        pageBg: root.getPropertyValue('--page-bg').trim() || null,
-        pageFg: root.getPropertyValue('--page-fg').trim() || null,
-      })
-      if (css !== last) style.textContent = last = css
+      colors.set(
+        buildColorCss({
+          threads: c.threads,
+          showResolved: c.showResolved,
+          pageBg: root.getPropertyValue('--page-bg').trim() || null,
+          pageFg: root.getPropertyValue('--page-fg').trim() || null,
+        }),
+      )
     }
-    update()
+    const updateActive = () => {
+      const c = useStore.getState().comments
+      active.set(buildActiveCss({ threads: c.threads, activeId: c.activeId, hoverId: c.hoverId, showResolved: c.showResolved }))
+    }
+    updateColors()
+    updateActive()
     const unsub = useStore.subscribe((s, p) => {
       const a = s.comments
       const b = p.comments
-      if (a.threads !== b.threads || a.activeId !== b.activeId || a.hoverId !== b.hoverId || a.showResolved !== b.showResolved) update()
+      if (a.threads !== b.threads || a.showResolved !== b.showResolved) updateColors()
+      if (a.threads !== b.threads || a.activeId !== b.activeId || a.hoverId !== b.hoverId || a.showResolved !== b.showResolved) updateActive()
     })
     // The paper (and so the author-colour mix) changes with data-surface / data-theme.
-    const mo = new MutationObserver(update)
+    const mo = new MutationObserver(updateColors)
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-surface', 'data-theme'] })
     return () => {
       unsub()
       mo.disconnect()
-      style.remove()
+      colors.remove()
+      active.remove()
     }
   }, [])
 }

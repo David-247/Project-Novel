@@ -6,8 +6,8 @@ import { isColor, isCommentId, type CommentThread } from './model'
  * highlight is the paper token `--page-comment-bg` (comments.css, AA on all four papers). A thread
  * with an author colour gets that colour mixed into the paper, as strong as AA for the page text
  * allows on the current paper. Resolved threads lose the highlight unless Show Resolved is on; the
- * active (selected / hovered) thread gets `--page-comment-active-bg` and an underline. Everything is
- * one generated style sheet, rebuilt when threads or the selection change: nothing per keystroke.
+ * active (selected / hovered) thread gets `--page-comment-active-bg` and an underline. Two generated
+ * style sheets (colours; active / hovered), each rebuilt only when its inputs change: nothing per keystroke.
  */
 
 function hex(n: number): string {
@@ -50,13 +50,30 @@ export interface HighlightInput {
 const sel = (ids: readonly string[]) =>
   ids.length === 1 ? `[data-comment-id="${ids[0]}"]` : `:is(${ids.map((id) => `[data-comment-id="${id}"]`).join(',')})`
 
-export function buildHighlightCss({ threads, activeId, hoverId, showResolved, pageBg, pageFg }: HighlightInput): string {
+/**
+ * The two sheets: `colors` (author colours, resolved threads hidden), rebuilt only when the threads,
+ * Show Resolved or the paper change, and the small `active` one (the selected / hovered thread), rebuilt
+ * on hover: a hover never regenerates a rule listing every thread.
+ */
+export function buildHighlightSheets(input: HighlightInput): { colors: string; active: string } {
+  return { colors: buildColorCss(input), active: buildActiveCss(input) }
+}
+
+/** `buildHighlightSheets`, joined (one sheet). */
+export function buildHighlightCss(input: HighlightInput): string {
+  const { colors, active } = buildHighlightSheets(input)
+  return [colors, active].filter(Boolean).join('\n')
+}
+
+const isHidden = (t: CommentThread, showResolved: boolean) => t.resolved && !showResolved
+
+export function buildColorCss({ threads, showResolved, pageBg, pageFg }: Omit<HighlightInput, 'activeId' | 'hoverId'>): string {
   const rules: string[] = []
   const byColor = new Map<string, string[]>()
   const hidden: string[] = []
   for (const t of threads) {
     if (!isCommentId(t.id)) continue
-    if (t.resolved && !showResolved) hidden.push(t.id)
+    if (isHidden(t, showResolved)) hidden.push(t.id)
     else if (isColor(t.authorColor)) {
       const c = t.authorColor.toLowerCase()
       byColor.set(c, [...(byColor.get(c) ?? []), t.id])
@@ -68,12 +85,16 @@ export function buildHighlightCss({ threads, activeId, hoverId, showResolved, pa
     }
   }
   if (hidden.length) rules.push(`:root .nv-comment${sel(hidden)}{background-color:transparent}`)
-  // A hidden (resolved) thread is not lit either.
-  const lit = [...new Set([activeId, hoverId])].filter((id): id is string => isCommentId(id) && !hidden.includes(id))
-  if (lit.length) {
-    rules.push(
-      `:root .nv-comment${sel(lit)}[data-comment-id]{background-color:var(--page-comment-active-bg);box-shadow:inset 0 -2px 0 var(--page-comment-ring)}`,
-    )
-  }
   return rules.join('\n')
+}
+
+export function buildActiveCss({ threads, activeId, hoverId, showResolved }: Pick<HighlightInput, 'threads' | 'activeId' | 'hoverId' | 'showResolved'>): string {
+  // A hidden (resolved) thread is not lit either.
+  const lit = [...new Set([activeId, hoverId])].filter((id): id is string => {
+    if (!isCommentId(id)) return false
+    const t = threads.find((x) => x.id === id)
+    return !t || !isHidden(t, showResolved)
+  })
+  if (!lit.length) return ''
+  return `:root .nv-comment${sel(lit)}[data-comment-id]{background-color:var(--page-comment-active-bg);box-shadow:inset 0 -2px 0 var(--page-comment-ring)}`
 }
