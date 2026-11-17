@@ -1,5 +1,5 @@
 import { useStore } from '@/shared/store'
-import { commandGateAllows, getCommand, runCommand, useCommandStateVersion } from '@/shared/commands'
+import { runCommand, useCommandGateAllows } from '@/shared/commands'
 import { Button, IconButton, Select, ToggleButton, Tooltip } from '@/shared/ui'
 import { PAGINATION_CONTROLS as C } from './controls'
 import { MAX_SCALE, MIN_SCALE, stepZoom, ZOOM_STEPS } from './placement'
@@ -70,17 +70,6 @@ const SpreadIcon = () => (
   </svg>
 )
 
-/**
- * The registry's command gate allows `id` (re-render on its state signal). While a re-write is open its
- * gate stops page view and zoom, like their View menu items (rewrite review #5). (A shared
- * `useCommandGateAllows` in src/shared/commands may replace this.)
- */
-function useGateAllows(id: string): boolean {
-  useCommandStateVersion()
-  const cmd = getCommand(id)
-  return !cmd || commandGateAllows(cmd)
-}
-
 /** Zoom out, zoom choice (fit spread / fit width / percentages), zoom in; and the spread toggle. */
 export function ZoomControls() {
   const zoom = useStore((s) => s.layout.zoom)
@@ -89,8 +78,10 @@ export function ZoomControls() {
   const view = useStore((s) => s.book.view)
   const setView = useStore((s) => s.bookActions.setView)
   const effective = useStore((s) => s.layout.effectiveView)
-  const zoomAllowed = useGateAllows(C.zoomIn.id)
-  const spreadAllowed = useGateAllows(C.spreadView.id)
+  // While a re-write is open its command gate stops page view and zoom, like their View menu items
+  // (rewrite review #5): the registry's gate hook, keyed by the commands these controls mirror.
+  const zoomAllowed = useCommandGateAllows('pagination.zoomIn')
+  const spreadAllowed = useCommandGateAllows('pagination.spreadView')
 
   const value = zoom.mode === 'percent' ? String(zoom.percent) : zoom.mode
   const options =
