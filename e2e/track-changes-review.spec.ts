@@ -462,8 +462,10 @@ test('list items while tracking: inserted, deleted and split items, a whole list
   await page.keyboard.press('ControlOrMeta+z')
   await expect.poll(() => count(page)).toBe(1)
   await all('reject')
-  await expect.poll(tree).toBe(LIST)
-  expect(await count(page)).toBe(0)
+  // The tree reads LIST before Reject All too (the deleted item is still in the document), so wait
+  // for the changes to go, then check the tree.
+  await expect.poll(() => count(page)).toBe(0)
+  expect(await tree()).toBe(LIST)
 
   // A whole list: from the end of "Intro line." to the end of "Plum", Delete. Accept All: the list goes.
   await reset()

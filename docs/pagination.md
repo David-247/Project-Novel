@@ -131,7 +131,9 @@ GitHub's free Windows runner misses at 103-120 ms while a desktop measures about
 page turns stay blocking. **Decision a187e880** (extending f040009b) adds the tracked-changes typing
 medians (`e2e/perf.spec.ts`, scenario `perf-track-changes`: All Markup `typing`, `typingNoMarkup`,
 `typingSimpleMarkup`): on that runner they read 50-57 ms even on the T8 base (56 ms in the T5 bisect,
-31 ms on a desktop). Plain hot-path typing on 100k words and every other typing budget stay blocking. The gate is
+31 ms on a desktop). Plain hot-path typing on 100k words and every other typing budget stay blocking. **Decision
+f15842e5** adds the style sheet swap of the restyle test (`e2e/perf.spec.ts`, `restyleMs`, 100 ms): the
+runner reads 100-106 ms against about 50 ms on a desktop; the repagination it causes stays blocking. The gate is
 `budget(testInfo, name, value, limit)` in `e2e/budget.ts`, used by the perf specs and by the
 paste-keystroke check in `e2e/editor.spec.ts`. Functional assertions and the cross-engine
 pagination tolerance stay blocking everywhere.

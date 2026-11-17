@@ -80,7 +80,7 @@ export function toMarkdown(results, dir = 'perf-results') {
     md.push('| scenario | engine / OS | sheet swap ms | reflow complete ms | all drawn ms | chapters restyled |', '| --- | --- | --- | --- | --- | --- |')
     for (const r of styles) {
       if (r.restyleMs !== undefined) {
-        md.push(`| ${r.scenario} | ${pair(r)} | ${cell(r, r.restyleMs, 100)} | ${cell(r, r.repaginatedMs, 1000)} | ${cell(r, r.allDrawnMs, 3000)} | ${v(r.chaptersRestyled)} |`)
+        md.push(`| ${r.scenario} | ${pair(r)} | ${cell(r, r.restyleMs, 100, 'restyleMs')} | ${cell(r, r.repaginatedMs, 1000)} | ${cell(r, r.allDrawnMs, 3000)} | ${v(r.chaptersRestyled)} |`)
       } else {
         const e = r.chapterStyleEdit
         md.push(`| ${r.scenario} | ${pair(r)} | – | ${cell(r, e.ms, 1000)} | ${cell(r, e.allDrawnMs, 3000)} | – |`)
