@@ -1,5 +1,5 @@
 import { useStore } from '@/shared/store'
-import { runCommand } from '@/shared/commands'
+import { commandGateAllows, getCommand, runCommand, useCommandStateVersion } from '@/shared/commands'
 import { Button, IconButton, Select, ToggleButton, Tooltip } from '@/shared/ui'
 import { PAGINATION_CONTROLS as C } from './controls'
 import { MAX_SCALE, MIN_SCALE, stepZoom, ZOOM_STEPS } from './placement'
@@ -70,6 +70,17 @@ const SpreadIcon = () => (
   </svg>
 )
 
+/**
+ * The registry's command gate allows `id` (re-render on its state signal). While a re-write is open its
+ * gate stops page view and zoom, like their View menu items (rewrite review #5). (A shared
+ * `useCommandGateAllows` in src/shared/commands may replace this.)
+ */
+function useGateAllows(id: string): boolean {
+  useCommandStateVersion()
+  const cmd = getCommand(id)
+  return !cmd || commandGateAllows(cmd)
+}
+
 /** Zoom out, zoom choice (fit spread / fit width / percentages), zoom in; and the spread toggle. */
 export function ZoomControls() {
   const zoom = useStore((s) => s.layout.zoom)
@@ -78,6 +89,8 @@ export function ZoomControls() {
   const view = useStore((s) => s.book.view)
   const setView = useStore((s) => s.bookActions.setView)
   const effective = useStore((s) => s.layout.effectiveView)
+  const zoomAllowed = useGateAllows(C.zoomIn.id)
+  const spreadAllowed = useGateAllows(C.spreadView.id)
 
   const value = zoom.mode === 'percent' ? String(zoom.percent) : zoom.mode
   const options =
@@ -96,6 +109,7 @@ export function ZoomControls() {
           label={C.spreadView.label}
           data-control-id={C.spreadView.id}
           pressed={view === 'spread'}
+          disabled={!spreadAllowed}
           className="@max-[640px]/statusbar:hidden"
           onPressedChange={(on) => setView(on ? 'spread' : 'single')}
           data-fallback={effective !== view || undefined}
@@ -108,7 +122,7 @@ export function ZoomControls() {
           label={C.zoomOut.label}
           data-control-id={C.zoomOut.id}
           className="@max-[640px]/statusbar:hidden"
-          disabled={scale <= MIN_SCALE + 0.001 || pct <= ZOOM_STEPS[0]}
+          disabled={!zoomAllowed || scale <= MIN_SCALE + 0.001 || pct <= ZOOM_STEPS[0]}
           onClick={() => setZoom({ mode: 'percent', percent: stepZoom(scale, -1) })}
         >
           <MinusIcon />
@@ -122,6 +136,7 @@ export function ZoomControls() {
           className="min-h-control text-ui-xs"
           options={options}
           value={value}
+          disabled={!zoomAllowed}
           onChange={(e) => {
             const v = e.target.value
             if (v === 'fit-spread' || v === 'fit-width') setZoom({ mode: v })
@@ -134,7 +149,7 @@ export function ZoomControls() {
           label={C.zoomIn.label}
           data-control-id={C.zoomIn.id}
           className="@max-[640px]/statusbar:hidden"
-          disabled={scale >= MAX_SCALE - 0.001 || pct >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+          disabled={!zoomAllowed || scale >= MAX_SCALE - 0.001 || pct >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
           onClick={() => setZoom({ mode: 'percent', percent: stepZoom(scale, 1) })}
         >
           <PlusIcon />
