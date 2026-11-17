@@ -242,6 +242,37 @@ test('collapsed groups and More work from the keyboard; Escape returns focus to 
   await expect(page.locator('main [contenteditable="true"]')).toBeFocused()
 })
 
+test('the Accept / Reject split buttons: greyed out with no changes; from the keyboard, ArrowRight reaches the arrow and Enter opens it', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 })
+  await launch(page)
+  await ribbonTab(page, 'review')
+  const main = page.locator('[data-control-id="ribbon.cmd.review.accept"]')
+  const arrow = page.locator('[data-control-id="review.accept.options"]')
+  // No tracked changes: both halves are disabled (Word greys the whole split button).
+  await expect(main).toBeDisabled()
+  await expect(arrow).toBeDisabled()
+  await expect(page.locator('[data-control-id="review.reject.options"]')).toBeDisabled()
+
+  // A tracked insertion, the caret in it: both halves enabled.
+  await page.evaluate(() => window.__nvE2E.setTracking(true))
+  await editor(page).click()
+  await page.keyboard.type('fresh words')
+  await page.keyboard.press('ArrowLeft')
+  await expect(arrow).toBeEnabled()
+  await expect(main).toBeEnabled()
+  await main.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(arrow).toBeFocused()
+  await page.keyboard.press('Enter')
+  const menu = page.getByRole('menu')
+  await expect(menu).toBeVisible()
+  await expect(menu.locator('[data-control-id="review.acceptNext"]')).toBeVisible()
+  await expect(menu.locator('[data-control-id="review.acceptAll"]')).toBeEnabled()
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
+  await expect(arrow).toBeFocused()
+})
+
 test('formatting from a collapsed group keeps the manuscript focus and selection', async ({ page }) => {
   await launch(page)
   await editor(page).click()

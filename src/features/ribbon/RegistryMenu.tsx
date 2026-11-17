@@ -110,10 +110,20 @@ export interface RegistryMenuProps {
   sections: MenuSection[]
   align?: 'start' | 'end'
   className?: string
+  /**
+   * Grey the trigger out (like a disabled command button) when no item in the menu, submenus
+   * included, is enabled: Word's split button "Accept ▾" with no changes.
+   */
+  disableWhenEmpty?: boolean
+}
+
+/** Some command in `nodes` (submenus walked) is enabled. */
+function anyEnabled(nodes: MenuNode[]): boolean {
+  return nodes.some((n) => (n.kind === 'item' ? isCommandEnabled(n.command) : n.kind === 'submenu' ? anyEnabled(n.children) : false))
 }
 
 /** A toolbar item (Radix roving focus) that opens a registry dropdown. */
-export function RegistryMenu({ controlId, label, trigger, sections, align = 'start', className }: RegistryMenuProps) {
+export function RegistryMenu({ controlId, label, trigger, sections, align = 'start', className, disableWhenEmpty = false }: RegistryMenuProps) {
   const commands = useCommands()
   useCommandStateVersion()
   const byId = useMemo(() => new Map(commands.map((c) => [c.id, c])), [commands])
@@ -175,6 +185,19 @@ export function RegistryMenu({ controlId, label, trigger, sections, align = 'sta
     </DM.Sub>
   )
 
+  const disabled =
+    disableWhenEmpty &&
+    !sections.some((s) =>
+      s.entries.some((e) => {
+        if ('cmd' in e) {
+          const c = byId.get(e.cmd)
+          return !!c && isCommandEnabled(c)
+        }
+        const n = findSubmenu(model, e.submenu.menu, e.submenu.label)
+        return !!n && anyEnabled(n.children)
+      }),
+    )
+
   const entries = (s: MenuSection) =>
     s.entries.map((e) => {
       if ('cmd' in e) {
@@ -187,18 +210,20 @@ export function RegistryMenu({ controlId, label, trigger, sections, align = 'sta
 
   return (
     <DM.Root modal={false}>
-      <RToolbar.Button asChild>
+      <RToolbar.Button asChild disabled={disabled}>
         <Tooltip controlId={controlId}>
-          <DM.Trigger asChild>
+          <DM.Trigger asChild disabled={disabled}>
             <button
               type="button"
+              disabled={disabled}
               aria-label={label}
               data-control-id={controlId}
               onPointerDown={syncEditorSelection}
               onKeyDown={syncEditorSelection}
               className={cn(
                 'inline-flex h-control min-w-control shrink-0 items-center justify-center gap-1.5 rounded-control px-2 text-ui-sm text-text',
-                'hover:bg-surface-hover data-[state=open]:bg-accent-soft data-[state=open]:text-accent',
+                'enabled:hover:bg-surface-hover data-[state=open]:bg-accent-soft data-[state=open]:text-accent',
+                'disabled:cursor-not-allowed disabled:opacity-50',
                 focusRing,
                 className,
               )}
