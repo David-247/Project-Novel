@@ -843,6 +843,8 @@ test('Enter before an empty paragraph, and deleting a scene break: the page mode
   test.setTimeout(90_000)
   await page.setViewportSize({ width: 1400, height: 900 })
   await page.goto('/')
+  await expect(editor(page)).toBeVisible()
+  await page.waitForFunction(() => !!window.__nvE2E?.setDoc)
   const para = (t: string) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] })
   const body = paragraphs(80, 50)
   const content: unknown[] = []
