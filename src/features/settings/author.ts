@@ -59,6 +59,9 @@ export async function ensureAuthorName(): Promise<string> {
   await whenLoaded()
   const known = getAuthor().name
   if (known) return known
+  // Still loading after the wait: the file may say the question was already asked, so do not ask now
+  // (this change goes unattributed; the next one asks once the file is in).
+  if (!useStore.getState().preferences.loaded) return ''
   // The name field in Settings writes on every keystroke: an empty value mid-edit is not "no name".
   if (isSettingsOpen()) return ''
   if (pendingPrompt) return pendingPrompt.promise
