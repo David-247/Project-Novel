@@ -49,8 +49,8 @@ test('create a project, type formatted text, save with Mod-S, relaunch and reope
   const relaunched = await context.newPage()
   await launch(relaunched)
   await expect(saveStatus(relaunched)).toHaveText('No project open')
-  const menu = await relaunched.evaluate(() => window.__nvE2E.recentMenu() as { path: string; label: string }[])
-  expect(menu.map((m) => m.path)).toEqual(['/projects/My Novel'])
+  // The registry's native menu snapshot lists it under File > Open Recent.
+  await expect.poll(() => relaunched.evaluate(() => window.__nvE2E.recentMenu())).toEqual(['My Novel'])
   await openRecent(relaunched, '/projects/My Novel')
   await expect(saveStatus(relaunched)).toHaveText('My Novel: All changes saved')
   await expect(editor(relaunched).locator('h2')).toHaveText('Chapter One')

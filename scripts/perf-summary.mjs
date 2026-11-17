@@ -13,10 +13,16 @@ export const isShipping = (r) => SHIPPING.has(`${engineOf(r.browser)}|${r.platfo
 /** Whether a miss failed the CI job: a shipping pair, except macOS (decision f040009b). */
 export const isBlocking = (r) => isShipping(r) && r.platform !== 'darwin'
 const v = (n) => (n === undefined || n === null ? '–' : String(n))
-/** "12.3" plus a miss marker against `limit` (MISS where it blocks CI, warning elsewhere). */
-const cell = (r, n, limit) => {
+/** A measure the result lists as CI-advisory (e2e/budget.ts `ciAdvisory`): reported, never blocking in CI. */
+export const isAdvisory = (r, key) => Array.isArray(r.ciAdvisory) && r.ciAdvisory.includes(key)
+/**
+ * "12.3" plus a miss marker against `limit` (MISS where it blocks CI, warning elsewhere; a CI-advisory
+ * measure, named by its result key, is marked report-only).
+ */
+const cell = (r, n, limit, key) => {
   if (n === undefined || n === null) return '–'
   if (limit === undefined || n < limit) return String(n)
+  if (key && isAdvisory(r, key)) return `**${n}** (miss, CI-advisory: not blocking)`
   return `**${n}** (${isBlocking(r) ? 'MISS' : 'miss, warning'})`
 }
 const pair = (r) => `${engineOf(r.browser)} / ${r.platform}${isShipping(r) ? ' (shipping)' : ''}`
@@ -41,10 +47,14 @@ export function toMarkdown(results, dir = 'perf-results') {
 
   const typing = []
   for (const r of results) {
-    const add = (label, t) => t && typing.push(`| ${label} | ${pair(r)} | ${cell(r, t.medianMs, 50)} | ${v(t.p95Ms)} | ${v(t.maxMs)} | ${v(r.openMs)} |`)
-    add(r.scenario, r.typing)
+    const add = (label, t, key) => t && typing.push(`| ${label} | ${pair(r)} | ${cell(r, t.medianMs, 50, key)} | ${v(t.p95Ms)} | ${v(t.maxMs)} | ${v(r.openMs)} |`)
+    add(r.scenario, r.typing, 'typing')
+    add(`${r.scenario}: No Markup`, r.typingNoMarkup, 'typingNoMarkup')
+    add(`${r.scenario}: Simple Markup`, r.typingSimpleMarkup, 'typingSimpleMarkup')
     add(`${r.scenario}: end of line`, r.endOfLine)
     add(`${r.scenario}: split paragraph`, r.splitParagraph)
+    add(`${r.scenario}: in the open re-write`, r.typingRevision, 'typingRevision')
+    add(`${r.scenario}: Enter / Backspace`, r.enterBackspace)
   }
   if (typing.length) {
     md.push('#### Typing latency (keydown to paint)', '')
@@ -79,12 +89,58 @@ export function toMarkdown(results, dir = 'perf-results') {
     md.push('')
   }
 
+  const turns = results.filter((r) => r.turnMedianMs !== undefined)
+  if (turns.length) {
+    md.push('#### Book mode page turn (fully drawn spread < 100 ms)', '')
+    md.push('| scenario | engine / OS | median ms | max ms | max during a trim reflow ms |', '| --- | --- | --- | --- | --- |')
+    for (const r of turns)
+      md.push(`| ${r.scenario} | ${pair(r)} | ${v(r.turnMedianMs)} | ${cell(r, r.turnMaxMs, 100)} | ${cell(r, r.duringReflowMaxMs, 100, 'duringReflowMaxMs')} |`)
+    md.push('')
+  }
+
   const replace = results.filter((r) => r.replaceAllMs !== undefined)
   if (replace.length) {
     md.push('#### Replace All (10,000 occurrences, < 2000 ms)', '')
     md.push('| engine / OS | Replace All ms |', '| --- | --- |')
     for (const r of replace) md.push(`| ${pair(r)} | ${cell(r, r.replaceAllMs, 2000)} |`)
     md.push('')
+  }
+
+  // Phase 3 (revision tools): one row per measure, with its budget (e2e/perf.spec.ts, comments-perf,
+  // rewrite-perf, phase3-perf).
+  const rows = []
+  for (const r of results) {
+    const row = (measure, n, limit, key) => n !== undefined && n !== null && rows.push(`| ${r.scenario} | ${measure} | ${pair(r)} | ${cell(r, n, limit, key)} | ${limit} |`)
+    const m = r.markupSwitch
+    if (m) {
+      row('markup view switch to No Markup: reflow complete', m.toNoMarkupMs, 1000)
+      row('markup view switch to Original: reflow complete', m.toOriginalMs, 1000)
+      row('markup view switch to All Markup: reflow complete', m.toAllMarkupMs, 1000)
+      row('markup view switch: all blocks drawn (worst)', m.allDrawnWorstMs, 3000)
+    }
+    if (r.replaceAll && typeof r.replaceAll === 'object') row('Replace All with recording on', r.replaceAll.ms, 2000)
+    if (r.acceptAll) row('Accept All of 2,000 changes (incl. repagination)', r.acceptAll.ms, 2000)
+    if (r.rejectAll) row('Reject All of 2,000 changes (incl. repagination)', r.rejectAll.ms, 2000)
+    if (r.maxPanelCommitMs !== undefined) row('comment panel re-layout after a reflow (worst trim)', r.maxPanelCommitMs, 100)
+    if (Array.isArray(r.open)) r.open.forEach((o, i) => row(`open re-write #${i + 1}`, o.openMs, 300))
+    else if (r.open && typeof r.open === 'object') row('open re-write', r.open.openMs, 300)
+    if (r.keep) {
+      row('Keep This Version: reflow complete', r.keep.reflowMs, 1000)
+      row('Keep This Version: all blocks drawn', r.keep.allDrawnMs, 3000)
+    }
+    for (const [key, label] of [
+      ['selectAllBold', 'Select All + Bold'],
+      ['selectAllBoldTracked', 'Select All + Bold, recording on'],
+      ['acceptAllFormatting', 'Accept All of the formatting changes'],
+    ]) {
+      if (!r[key]) continue
+      row(`${label}: reflow complete`, r[key].ms, 1000)
+      row(`${label}: all blocks drawn`, r[key].allDrawnMs, 3000)
+    }
+  }
+  if (rows.length) {
+    md.push('#### Revision tools (track changes, comments, re-write)', '')
+    md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...rows, '')
   }
 
   const broken = results.filter((r) => r.error)

@@ -50,17 +50,68 @@ describe('tooltip coverage (every control in the app has a registered, wired too
   it('finds no control without a tooltip in the full app', async () => {
     const { container } = await renderFullApp()
     const rendered = Array.from(container.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
-    // Sanity: the audit really saw the whole UI (16 formatting, undo/redo, find button, 9 panel
+    // Sanity: the audit really saw the whole UI (the ribbon's tabs and groups, 16 formatting, undo/redo, find button, 9 panel
     // controls, the no-project New / Open actions and the page view controls in the status bar).
     const expected = [
       ...Object.values(TOOLBAR_CONTROLS),
       ...Object.values(HISTORY_CONTROLS),
       ...Object.values(FIND_CONTROLS),
-      ...Object.values(PAGINATION_CONTROLS),
+      // (The page indicator button shows once pages are laid out; jsdom lays none out.)
+      ...Object.values(PAGINATION_CONTROLS).filter((m) => m.id !== PAGINATION_CONTROLS.pageIndicator.id),
     ]
     const surfaces = Object.values(SURFACE_CONTROLS).map((m) => m.id)
     expect(new Set(rendered)).toEqual(
-      new Set([...expected.map((m) => m.id), ...surfaces, 'book.trimSize', 'book.headerFooter', 'insert.menu', 'footnote.options', 'file.new_project', 'file.open_project']),
+      new Set([
+        ...expected.map((m) => m.id),
+        ...surfaces,
+        'book.trimSize',
+        'book.headerFooter',
+        'insert.menu',
+        'footnote.options',
+        'comment.new',
+        'comment.panel',
+        'review.track',
+        'review.markup',
+        'file.new_project',
+        'file.open_project',
+        // The ribbon: its tabs, and registry commands shown as buttons (all tabs stay mounted).
+        ...['home', 'insert', 'layout', 'review', 'view'].map((t) => `ribbon.tab.${t}`),
+        ...[
+          'edit.replace',
+          'insert.newChapter',
+          'insert.pageBreak',
+          'insert.sceneBreak',
+          'footnote.insert',
+          'insert.comment',
+          'book.details',
+          'comment.prev',
+          'comment.next',
+          'comment.showResolved',
+          'review.change.prev',
+          'review.change.next',
+          'review.accept',
+          'review.reject',
+          'rewrite.open',
+          'rewrite.list',
+          'rewrite.prev',
+          'rewrite.next',
+          'view.singlePage',
+          'pagination.spreadView',
+          'view.bookNavigation',
+          'view.scrollNavigation',
+          'pagination.zoomOut',
+          'pagination.zoomIn',
+          'view.fitSpread',
+          'view.fitWidth',
+          'view.actualSize',
+          'view.fullScreen',
+        ].map((id) => `ribbon.cmd.${id}`),
+        // Review > Changes: the dropdown halves of the Accept / Reject split buttons.
+        'review.accept.options',
+        'review.reject.options',
+        // The in-app menu bar's titles (its items are covered in App.menus.test.tsx).
+        ...['file', 'edit', 'view', 'insert', 'format', 'review', 'help'].map((m) => `menu.${m}`),
+      ]),
     )
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
@@ -209,6 +260,9 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     await renderFullApp(
       <>
         <button type="button">Mystery action</button>
+        {/* An explicit proxy is skipped; hidden and out of the tab order alone is not enough. */}
+        <input type="color" aria-hidden="true" tabIndex={-1} data-tooltip-proxy="" />
+        <input type="color" aria-hidden="true" tabIndex={-1} />
         <button type="button" data-control-id="nowhere.registered">
           Unregistered
         </button>
@@ -226,6 +280,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
     )
     const problems = auditTooltipCoverage(document.body)
     expect(problems.map((p) => [p.reason, p.controlId])).toEqual([
+      ['missing-id', null],
       ['missing-id', null],
       ['unregistered', 'nowhere.registered'],
       ['not-wired', TOOLBAR_CONTROLS.bold.id],

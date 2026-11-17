@@ -1,36 +1,65 @@
 import { useEffect } from 'react'
 import { AppShell, useReloadGuard } from '@/features/app-shell'
 import {
-  FindButton,
   FindReplacePanel,
   getDocJSON,
+  getEditor,
+  subscribeEditor,
   getDocVersion,
-  HistoryButtons,
-  InsertMenu,
   isDirty,
   markClean,
   markDirty,
   NovelEditor,
   onDocChange,
+  registerEditorCommands,
   setDocJSON,
-  Toolbar,
-  ToolbarItem,
 } from '@/features/editor'
-import { TrimSizePicker } from '@/features/book-settings'
-import { HeaderFooter, HeaderFooterButton } from '@/features/header-footer'
+import { registerBookSettingsCommands } from '@/features/book-settings'
+import { HeaderFooter, registerHeaderFooterCommands } from '@/features/header-footer'
 import {
+  askConfirm,
   NoProjectActions,
   RecoveryDialog,
   RecoveryStatus,
+  registerStorageCommands,
   SaveStatusIndicator,
   useStorageIntegration,
 } from '@/features/storage'
-import { PageIndicator, PaginatedView, ZoomControls } from '@/features/pagination'
-import { FootnoteOptionsButton, useFootnotePagination } from '@/features/footnotes'
+import { invalidatePaginationAt, PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
+import { registerFootnoteCommands, useFootnotePagination } from '@/features/footnotes'
+import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
+import {
+  ensureAuthorName,
+  getAuthor,
+  registerSettingsCommands,
+  SettingsDialog,
+  useSettingsIntegration,
+} from '@/features/settings'
+import {
+  CommentsLayout,
+  registerCommentsCommands,
+  registerCommentsSideFile,
+  setBeforeNewComment,
+  setCommentAuthorSource,
+} from '@/features/comments'
+import {
+  ChangePopover,
+  ChangesIndicator,
+  registerTrackChangesCommands,
+  setMarkupViewRepaginate,
+  setReviewConfirm,
+  setReviewViewSource,
+  setOnTrackingSwitchedOn,
+  setTrackChangesAuthorSource,
+  TrackChangesNotice,
+} from '@/features/track-changes'
+import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
-import { ToolbarGroup, ToolbarSeparator, TooltipProvider } from '@/shared/ui'
-import { SurfacePicker, useSurfaceFollow, useThemeFollow } from '@/shared/theme'
+import { TooltipProvider } from '@/shared/ui'
+import { registerSurfaceCommands, useSurfaceFollow, useThemeFollow } from '@/shared/theme'
+import { Ribbon } from '@/features/ribbon'
+import { registerAppRibbon, RibbonQuickAccess } from './ribbon-groups'
 
 /** The editor slice, seen by storage through the shared DocumentProvider contract. */
 export const editorDocumentProvider: DocumentProvider = {
@@ -44,6 +73,25 @@ export const editorDocumentProvider: DocumentProvider = {
 }
 
 /** Composition root: the only place that wires slices together. */
+/** Shown on comments and tracked changes when the author has no name (the question was dismissed). */
+export const UNKNOWN_AUTHOR = 'Unknown author'
+
+/**
+ * The author of comments and tracked changes: the Settings name and colour (`Unknown author` without a
+ * name). Without a name the author is `anonymous`, so they own no comment message: an "Unknown author"
+ * message is nobody's to edit or delete (storage review #13; see comments' `Author.anonymous`).
+ */
+export function commentAuthor(): { name: string; color: string | null; anonymous: boolean } {
+  const a = getAuthor()
+  return { name: a.name || UNKNOWN_AUTHOR, color: a.color, anonymous: !a.name }
+}
+
+/**
+ * After the author question closed: its dialog gives the focus back (Radix, a task after unmount), so
+ * the comment composer, which takes the focus when it opens, must open after that.
+ */
+const afterDialogFocus = () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+
 export function App() {
   useThemeFollow()
   useSurfaceFollow()
@@ -52,74 +100,103 @@ export function App() {
   useReloadGuard(!import.meta.env.DEV)
   useEffect(() => registerDocumentProvider(editorDocumentProvider), [])
   useStorageIntegration()
+  // App preferences: load/save preferences.json and the Motion preference (Settings… is a command).
+  useSettingsIntegration()
   // Footnotes at the bottom of their page (bottom reservations + the footnote area page slot).
   useFootnotePagination()
+  // Every slice's menu commands (shared registry), then the menus and shortcuts that render them.
+  useEffect(() => {
+    const offs = [
+      registerStorageCommands(),
+      registerEditorCommands(),
+      registerPaginationCommands(),
+      registerSurfaceCommands(),
+      registerBookSettingsCommands(),
+      registerHeaderFooterCommands(),
+      registerFootnoteCommands(),
+      registerSettingsCommands(),
+      registerCommentsCommands(),
+      registerTrackChangesCommands(),
+      registerRewriteCommands(),
+      // The toolbar's tabs and groups (Word-style ribbon; commands join groups by their `ribbon` field).
+      registerAppRibbon(),
+    ]
+    return () => offs.forEach((off) => off())
+  }, [])
+  useAppMenus()
+  // comments.json is saved, autosaved and recovered with the manuscript (storage side file).
+  useEffect(() => registerCommentsSideFile(), [])
+  // rewrites.json likewise (re-write versions are saved, autosaved and recovered with the manuscript).
+  useEffect(() => registerRewritesSideFile(), [])
+  // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.
+  useEffect(() => {
+    setRewriteConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
+    return () => setRewriteConfirm(null)
+  }, [])
+  // Comments and tracked changes are by the Settings author. With no name known, New Comment first
+  // asks once; switching Track Changes on asks before the first change is recorded (the recorder
+  // cannot wait: changes made while the question is open carry "Unknown author").
+  useEffect(() => {
+    setCommentAuthorSource(commentAuthor)
+    // Tracked changes carry the name and colour only (ownership there is by name; `anonymous` is comments').
+    setTrackChangesAuthorSource(() => {
+      const { name, color } = commentAuthor()
+      return { name, color }
+    })
+    setBeforeNewComment(() => (getAuthor().name ? null : ensureAuthorName().then(afterDialogFocus)))
+    setOnTrackingSwitchedOn(() => {
+      if (!getAuthor().name) void ensureAuthorName()
+    })
+    return () => {
+      setCommentAuthorSource(null)
+      setTrackChangesAuthorSource(null)
+      setBeforeNewComment(null)
+      setOnTrackingSwitchedOn(null)
+    }
+  }, [])
+  // Track changes: a markup view switch re-measures the blocks holding changes (hidden text).
+  useEffect(() => setMarkupViewRepaginate(invalidatePaginationAt), [])
+  // Accept / Reject All above 50 changes asks with the app's native message dialog.
+  useEffect(() => {
+    setReviewConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
+    // The review commands, the change popover and the count act on the manuscript only.
+    setReviewViewSource(() => getEditor()?.view, subscribeEditor)
+    return () => {
+      setReviewConfirm(null)
+      setReviewViewSource(null)
+    }
+  }, [])
   return (
     // One provider for every tooltip: hover delay + the registry as the copy source.
     <TooltipProvider lookup={getTooltipCopy}>
       <AppShell
-        toolbar={
-          <>
-            <span className="px-1 text-ui font-semibold">Novel</span>
-            <Toolbar
-              leadingGroups={
-                <ToolbarGroup label="History">
-                  <HistoryButtons
-                    wrap={(button, { disabled }) => <ToolbarItem disabled={disabled}>{button}</ToolbarItem>}
-                  />
-                </ToolbarGroup>
-              }
-              extraGroups={
-                <>
-                  <ToolbarGroup label="Find">
-                    <ToolbarItem>
-                      <FindButton />
-                    </ToolbarItem>
-                  </ToolbarGroup>
-                  <ToolbarSeparator />
-                  <ToolbarGroup label="Insert">
-                    <ToolbarItem>
-                      <InsertMenu />
-                    </ToolbarItem>
-                    <ToolbarItem>
-                      <FootnoteOptionsButton />
-                    </ToolbarItem>
-                  </ToolbarGroup>
-                  <ToolbarSeparator />
-                  <ToolbarGroup label="Paper">
-                    <SurfacePicker wrap={(button) => <ToolbarItem>{button}</ToolbarItem>} />
-                  </ToolbarGroup>
-                  <ToolbarSeparator />
-                  <ToolbarGroup label="Book layout">
-                    <ToolbarItem>
-                      <TrimSizePicker />
-                    </ToolbarItem>
-                    <ToolbarItem>
-                      <HeaderFooterButton />
-                    </ToolbarItem>
-                  </ToolbarGroup>
-                </>
-              }
-            />
-          </>
-        }
+        menuBar={<AppMenuBar />}
+        toolbar={<Ribbon quickAccess={<RibbonQuickAccess />} />}
         editor={
           <>
             {/* Zero-height sticky anchor: the find panel floats at the top of the scrolling editor
-                region (never over the toolbar, whatever its wrapped height) and takes no layout
+                region (never over the toolbar) and takes no layout
                 space while closed. Full width minus gutters on narrow screens. */}
             <div className="pointer-events-none sticky top-0 z-10 flex h-0 items-start justify-end px-2 sm:px-4">
               <FindReplacePanel className="pointer-events-auto mt-2" />
             </div>
-            <PaginatedView>
-              <NovelEditor paged />
-            </PaginatedView>
+            {/* While a re-write is open its comparison view takes the place of the pages (kept mounted). */}
+            <RewriteHost>
+              {/* The comments margin panel sits beside the pages (a drawer in a narrow window). */}
+              <CommentsLayout>
+                <PaginatedView>
+                  <NovelEditor paged />
+                </PaginatedView>
+              </CommentsLayout>
+            </RewriteHost>
           </>
         }
         statusBar={
           <>
             <SaveStatusIndicator />
             <RecoveryStatus />
+            <TrackChangesNotice />
+            <ChangesIndicator />
             <span className="flex-1" />
             <NoProjectActions />
             <PageIndicator />
@@ -129,8 +206,14 @@ export function App() {
       />
       {/* Running heads / page numbers in the page margins, and their dialogs (portal). */}
       <HeaderFooter />
+      {/* Settings dialog and the one-time author question (portal). */}
+      <SettingsDialog />
       {/* Crash-recovery prompts (portal). */}
       <RecoveryDialog />
+      {/* Help and Go to Page dialogs (portal). */}
+      <MenuDialogs />
+      {/* Tracked change details with Accept / Reject (portal). */}
+      <ChangePopover />
     </TooltipProvider>
   )
 }

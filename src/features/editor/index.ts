@@ -14,8 +14,19 @@
 export { NovelEditor } from './NovelEditor'
 export type { NovelEditorProps } from './NovelEditor'
 // The mounted editor (re-renders when it mounts/unmounts, not per transaction), for hosts such as pagination.
-export { useMountedEditor } from './use-mounted-editor'
-export { FontFamilyPicker, Toolbar, ToolbarItem, TOOLBAR_CONTROLS } from './toolbar'
+export { useMountedEditor, useActiveEditor } from './use-mounted-editor'
+export {
+  FontFamilyPicker,
+  Toolbar,
+  ToolbarItem,
+  TOOLBAR_CONTROLS,
+  FontControls,
+  TextStyleControls,
+  ListControls,
+  AlignmentControls,
+  SpacingControls,
+  StylesControls,
+} from './toolbar'
 export type { FontFamilyPickerProps, ToolbarProps, ToolbarControlMeta, ToolbarControlKey } from './toolbar'
 export {
   getDocJSON,
@@ -26,9 +37,14 @@ export {
   getDocVersion,
   onDocChange,
   getEditor,
+  subscribeEditor,
+  getActiveEditor,
+  setActiveEditorSource,
+  activeEditorChanged,
 } from './controller'
 export type { DocChangeListener } from './controller'
 export { createEditorExtensions } from './extensions'
+export type { EditorExtensionOptions } from './extensions'
 export { SYSTEM_FONT_STACK, listSystemFonts, fontFamilyCss, primaryFontFamily } from './fonts'
 // Find & replace + history (task 4)
 export { FindReplacePanel } from './find/FindReplacePanel'
@@ -57,10 +73,12 @@ export {
   deleteStyle,
   duplicateStyle,
   getStyleDefinition,
+  onStyleDeleted,
   renameStyle,
   resetStyle,
   saveStyle,
 } from './styles/actions'
+export type { StyleRemap } from './styles/actions'
 // Chapter, page and scene breaks (Phase 2).
 // getChapters(doc, styles?) -> [{ index, title, from, to }] from chapter title blocks (see below; 0-based;
 // content before the first chapter is front matter, chapter index FRONT_MATTER_INDEX = -1;
@@ -73,6 +91,8 @@ export {
 export { getChapters, chapterIndexAt, FRONT_MATTER_INDEX } from './breaks/chapters'
 // A block's text without the text of its footnotes (chapter titles, previews): use instead of textContent.
 export { blockPlainText } from './block-text'
+// Track changes: blockPlainText(node, { markupView }) leaves out what that markup view hides.
+export type { BlockPlainTextOptions } from './block-text'
 export type { Chapter } from './breaks/chapters'
 export { getChaptersStartOn, setChaptersStartOn } from './breaks/chapter-start'
 export type { ChaptersStartOn } from './breaks/chapter-start'
@@ -88,4 +108,8 @@ export { SCENE_ORNAMENTS } from './breaks/nodes'
 export { FOOTNOTE_NODE, onFootnotesChange, collectFootnotes } from './footnote/numbering'
 export type { FootnoteRef, FootnotesListener } from './footnote/numbering'
 export { getFootnotes } from './footnote/api'
+// Menu commands (Phase 3, shared command registry): Edit (undo, clipboard, find), Insert and Format.
+// registerEditorCommands() -> unregister; call once from the composition root.
+export { registerEditorCommands } from './commands'
+export { openModifyStyle, setManagingStyles } from './styles/dialog-state'
 export { FOOTNOTE_EDITOR_CONTROLS } from './footnote/controls'

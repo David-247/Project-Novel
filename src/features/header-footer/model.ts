@@ -67,7 +67,11 @@ export function trackChapterTitles(): () => void {
   // blocks are chapter titles depends on the style sheet too (a style based on Chapter Title opens
   // chapters): look again after a style change.
   const offStore = useStore.subscribe((s, prev) => {
-    const relevant = s.book.headerFooter !== prev.book.headerFooter || s.book.styles !== prev.book.styles
+    // The markup view (track changes) decides which chapter titles show and how they read.
+    const relevant =
+      s.book.headerFooter !== prev.book.headerFooter ||
+      s.book.styles !== prev.book.styles ||
+      s.trackChanges.markupView !== prev.trackChanges.markupView
     if (relevant && usesChapterTitles(s.book.headerFooter) && !frame) {
       frame = requestAnimationFrame(check)
     }

@@ -133,7 +133,7 @@ describe('autosave cadence', () => {
     expect(backend.files.get(MANUSCRIPT)).toBe(manuscriptBefore)
     expect(backend.dirs.has(`${ROOT}/.recovery`)).toBe(true)
     const snap = parseRecovery(backend.files.get(RECOVERY)!)!
-    expect(snap).toMatchObject({ format: 'novel-recovery', version: 2, docVersion: editor.getDocVersion() })
+    expect(snap).toMatchObject({ format: 'novel-recovery', version: 3, docVersion: editor.getDocVersion() })
     expect(project().lastBackupAt).not.toBeNull()
     expect(editor.isDirty()).toBe(true)
   })

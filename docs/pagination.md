@@ -10,7 +10,9 @@ directly on the pages: there is one ProseMirror view, and it stays the single so
 - [Page-break contract (`breakBefore`)](#page-break-contract)
 - [Extension points](#extension-points)
 - [View, zoom, keys](#view-zoom-and-keys)
+- [Navigation modes: Book and Continuous Scroll](#navigation-modes) (Phase 3)
 - [Tests and fixtures](#tests-and-fixtures)
+- Track changes and hidden text (Phase 3): [docs/track-changes.md](track-changes.md#pagination)
 
 ---
 
@@ -121,7 +123,15 @@ macOS runner is a shared 3-core M1 that misses the WebKit trim reflow and style 
 commits that change no app code, so in CI a macOS miss is also a warning; only Windows Chromium
 blocks. Outside CI (no `CI` env var) the macOS WebKit budgets block as before: run the perf specs on a
 real Mac to enforce them. Any other CI check that keeps failing for runner rather than app reasons
-is demoted or cut the same way. The gate is
+is demoted or cut the same way: a measure is made **CI-advisory** with `budget(..., { ciAdvisory: true })`
+(reported in CI on every pair, marked "CI-advisory: not blocking" in the perf summary through the
+result's `ciAdvisory` keys; blocking outside CI on the shipping pairs as usual). First, Book
+mode's **page turn during a trim reflow** (`e2e/pagination-perf.spec.ts`, `duringReflowMaxMs`), which
+GitHub's free Windows runner misses at 103-120 ms while a desktop measures about 58 ms; the ordinary
+page turns stay blocking. **Decision a187e880** (extending f040009b) adds the tracked-changes typing
+medians (`e2e/perf.spec.ts`, scenario `perf-track-changes`: All Markup `typing`, `typingNoMarkup`,
+`typingSimpleMarkup`): on that runner they read 50-57 ms even on the T8 base (56 ms in the T5 bisect,
+31 ms on a desktop). Plain hot-path typing on 100k words and every other typing budget stay blocking. The gate is
 `budget(testInfo, name, value, limit)` in `e2e/budget.ts`, used by the perf specs and by the
 paste-keystroke check in `e2e/editor.spec.ts`. Functional assertions and the cross-engine
 pagination tolerance stay blocking everywhere.
@@ -161,7 +171,14 @@ size / margin / view change, a font load, or `invalidatePagination()`.
 
 1. **Measure** (`measure.ts`). For each top-level block whose node changed (or after a geometry
    change): text and `<br>` fragments of each textblock (`Range.getClientRects`), grouped into line
-   boxes, in "stream px" (unscaled, page offsets subtracted). Cached by node identity. A change to
+   boxes, in "stream px" (unscaled, page offsets subtracted). Cached by node identity; a new node
+   that renders like the block at its place in the last pass (same type, content and marks, attributes
+   equal but for non-rendering ones: `rewriteId`, the re-write anchor) keeps the cached metrics, so
+   opening a chapter re-write re-measures nothing (and such attribute steps are never `bulk`). Stream tops
+   are kept the same way (a block's top in the last pass plus the shift of the changed blocks above),
+   but a kept top is trusted only below the same block as in the last pass, compared by the node each
+   block stands for: after a block deleted above it, or below a node another block already stood for
+   (Enter before an empty paragraph), the block's box is read instead. A change to
    `book.styles` re-measures only the blocks whose `data-style` resolves differently. Unchanged
    blocks keep their last stream top plus the shift of changed blocks above them (moves under
    0.1 px are box snapping, not moves).
@@ -190,7 +207,23 @@ and fails if any visible block is painted anywhere but its final place. Scrollin
 (ProseMirror `scrollIntoView`, e.g. Mod-End) and the find panel's reveal of the current match
 finish the pending frames first (`handleScrollToSelection`, the editor's `setFindRevealHook`).
 Large document changes (Replace All of a common word, a restyle) take the same path: dirty blocks
-in view first, the rest progressively.
+in view first, the rest progressively. A transaction with more than 200 position-changing steps is
+not mapped: its decorations are dropped and redrawn. Steps that move nothing (AttrStep, e.g. the
+re-write anchor set on every block of a chapter) do not count and are left out of the mapping.
+(The mapping built from the remaining maps has no mirrors; that is fine, `tr.mapping` never has
+any.) Mark-only bulk changes (a format change or Accept / Reject All over the whole book) move
+nothing, so their decorations stay mapped, but the plugin state marks them `bulk` (more than 200
+steps, or more than 20,000 characters of mark / attribute steps; O(steps), so typing pays nothing),
+and a pass that re-measured more than 160 blocks counts as bulk too: every block is still measured
+(the published model is exact), but the pass draws only the pages in view and the nearest 120
+blocks, and hides the rest as `.nv-stale` until the following frames draw them. Every catch-up
+frame stops drawing after 8 ms (after at least 16 blocks), so typing during a catch-up stays fast.
+**Exception: a selection over more than 160 blocks** (Select All). Profiled at 100k words, every
+frame that changes the DOM inside such a selection costs the browser a repaint of all of it
+(Chromium: about 100 ms a frame, against about 25 ms with a caret), so a draw spread over a dozen
+frames costs far more than one frame that draws everything: with a big selection the pass draws all
+blocks at once (and a catch-up already under way finishes in its next frame). The perf report
+(`phase3-mark-only`) lists every pass and long task of each reflow (`firstPasses`, `longTasks`).
 Anything that needs them all (hit tests for the arrow keys and presses on the desk, PageUp/Down)
 finishes the pending frames first. `getPaginationDebug().modelSettled` is "reflow complete";
 `settled` is "every block drawn". The perf test asserts the first < 1 s and reports (and caps at 3 s)
@@ -308,6 +341,14 @@ page, or leave a page holding only the break). It stays in the document and keep
 below the last line, in the bottom margin, outside layout. Known limitation: with zero height it cannot
 be selected with the mouse, only with the keyboard (Backspace after it selects it, a second one
 deletes it).
+
+### Hidden text (track changes)
+
+Markup views hide text (deleted text in No Markup, inserted text in Original). Hidden inline text is
+`display: none`; a hidden block collapses to zero height with nothing inside it laid out, leaving one
+zero-height line. A view switch re-measures the blocks holding changes (`invalidatePaginationAt`). The
+rules, and the e2e check that a view's breaks equal the manuscript with its changes applied or rejected,
+are in [docs/track-changes.md](track-changes.md#pagination).
 
 ### Invalidation
 
@@ -436,7 +477,9 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
 
 - **Spread** by default; **single page** when `book.view === 'single'` or when two pages would be
   narrower than 75 % of their size in the window (`MIN_READABLE_SPREAD_SCALE`). Page breaks never
-  depend on the view or the zoom.
+  depend on the view or the zoom. The width that counts is the desk's own (`PaginatedView`'s host),
+  so something beside it in the scrolling editor region (the comments margin panel, Phase 3) narrows
+  the room for the pages, and the fit zooms fit the pages into what is left.
 - **Zoom** (status bar): Fit spread (default; the whole spread fits the window), Fit width, and 50 %
   to 200 % steps; zoom out / in step through the presets. A CSS transform, so zoom never changes
   line breaking.
@@ -448,6 +491,96 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
   geometry only. The page surface sets `--nv-pt` to 96/72 px (one point at 100 %), for style sizes.
 - **Geometry**: `resolvePageGeometry(trimSize, margins)` (`geometry.ts`) wraps the book settings
   catalog's `pageBox` (96 px per inch, margins in points x 96/72).
+
+## Navigation modes
+
+Ticket "Book page-turn view as the default; continuous scroll becomes an option" (Phase 3). The app
+preference `preferences.pageNavigation` (`'book'` default, or `'scroll'`; docs/project-format.md,
+preferences.json) picks how the writer moves between pages. It is independent of `book.view`
+(single / spread) and of the zoom.
+
+- **Continuous scroll** is the Phase 2 view, unchanged: every row of the canvas is laid out vertically in
+  the editor region's scroller, and `visibleSpread` is the row at the middle of the window.
+- **Book** shows exactly one row (a spread, or one page when `effectiveView` is `'single'`).
+
+### Book mode is a viewport layer, not a second engine
+
+The engine, the page model, the placement and the single ProseMirror view are the same in both modes.
+Book mode only changes what is on screen:
+
+- The sizer (`.nv-sizer`) is one row tall (`bookRowHeight`: page height plus the desk padding above and
+  below, × scale) and clips with `overflow: clip`. The canvas inside is translated up by
+  `(rowTop(row) − DESK_PAD) × scale`, so the row shown sits in that window. Clip, not hidden: nothing can
+  scroll the rest of the stream into the window, whether ProseMirror's `scrollIntoView`, the browser's own
+  caret reveal, or `Element.scrollIntoView`.
+- **`layout.visibleSpread` is set by navigation**, not by the scroll position. The row shown is derived
+  from `visibleSpread.first`, so it survives a single ↔ spread switch and a change of page count. Page
+  frames are virtualised to that one row.
+- **The engine draws the shown spread first.** `setViewWindowProvider` hands the engine the spread's pages
+  (±2) in place of the scroll viewport for the progressive draw. When a turn lands on a spread while a
+  progressive reflow is still catching up, the view runs one catch-up pass in the same task, before paint
+  (a layout effect, `engine.drawWindowNow()`). That pass draws only the pending blocks on the pages shown
+  (±2); the other pending blocks follow in the next frames. So a turned-to spread is fully drawn when it is
+  first painted, and `.nv-stale` blocks are never visible (decision b4f37763).
+- The desk keeps a 48 px lane (`TURN_LANE`) on each side for the turn controls. Fit zooms and the narrow
+  fallback measure the width without the lanes. Fit spread still fits the one spread to the window.
+- Zoomed in, a spread can be taller than the window. Then the editor region scrolls *within* that spread,
+  and a wheel gesture that starts at its top or bottom edge turns the page.
+
+### Turning pages
+
+| Input | Effect |
+|---|---|
+| Click / tap on the blank desk left / right of the spread | previous / next spread (the press never takes the focus from the manuscript) |
+| Wheel or trackpad (vertical or horizontal) | one spread per gesture (`wheelGestureStarts`, unit-tested). A gesture ends after a 220 ms pause (`WHEEL_GESTURE_GAP_MS`) or a change of direction. Inside a momentum stream that has decayed below half its peak, a sharp rise (a second flick) starts a new gesture; a long smooth tail (over 1 s) stays one turn. Zoomed in past the window, a gesture first scrolls or pans the spread vertically or horizontally, and only a gesture that starts at the scroll edge turns. Ctrl+wheel (pinch zoom) is left alone |
+| PageUp / PageDown in the manuscript | as in Phase 2: the caret moves to the first page of the previous / next spread, and the view turns there. On the last (first) spread it goes to the end (start) of the book |
+| Ctrl+Home / Ctrl+End (Cmd+Up / Cmd+Down) in the manuscript | caret to the start / end of the book; the view follows |
+| PageUp / PageDown, Ctrl+Home / Ctrl+End with the focus outside a text field, a dialog or the manuscript (the turn controls, nothing focused) | turn / first / last spread, view only |
+| Turn controls (`pagination.previousSpread` / `pagination.nextSpread`), Home / End on them | previous / next spread, first / last spread, view only |
+| View > Previous / Next / First / Last Spread | the same, view only (in continuous scroll they scroll to that row) |
+| Edit > Go to Page, or the status-bar page indicator (a button, `pagination.pageIndicator`, that opens it) | caret to the page; the spread holding it is shown |
+| Turning back while zoomed in | lands at the bottom of the previous spread, where reading continues (a turn forward lands at the top) |
+
+At the first / last spread every path stops there. The turn controls show the disabled state
+(`aria-disabled`, still focusable for their tooltip), and the commands are disabled. The keys are not
+bound in the command registry: the view handles them (inside the manuscript through the pagination
+plugin, outside it with a window listener that skips text fields, dialogs and menus), so nothing is bound
+twice.
+
+### The caret drives the view
+
+When the selection head leaves the spread shown, the view turns to the spread holding it:
+
+- after a selection change without a document change (arrows, clicks, Find, Next Comment, a footnote
+  popover closing, Shift-extension), in a microtask;
+- never under an IME composition: a follow asked for then runs after `compositionend`;
+- after a transaction that asks to scroll the selection into view (typing, paste, undo). There Book mode
+  takes over ProseMirror's `handleScrollToSelection`, so the clipped stream is never scrolled. If the
+  document changed, the turn waits for the pass that lays it out (`onPass`), so typing that overflows onto
+  the next page turns once its line lands there.
+
+A head at the start of a page that begins mid-paragraph is also the end of the previous page's last line.
+There the painted caret decides which spread holds it: ProseMirror draws it at the line end, while
+PageDown and Go to Page draw it at the top of the next page. Turning by hand never moves the caret, and
+the next keystroke turns back to it. A header / footer double-click on a spread turned to by hand leaves
+the caret on that spread, so the page does not turn away from the header being edited. ArrowDown on a
+recto's last line turns synchronously before the hit test (the browser hit-tests only what is painted).
+
+**`revealPosition(pos)`** (public index) brings any document position into view in either mode. In Book
+mode it turns to the spread where the position is painted; in continuous scroll it centres the position
+in the window. It finishes a pending reflow first. The comments slice uses it for Next / Previous Comment
+and a card click; track changes' Next / Previous Change (its default change revealer) and the re-write
+slice's go-to-passage call it after moving the selection. The
+find panel's reveal hook (`setFindRevealHook`, now `(el) => boolean`) turns to the current match's spread
+in Book mode and returns true, so the panel does not scroll.
+
+**While a re-write is open** (its view lies over the pages) nothing turns them: the re-write command gate
+disables View > Book / Continuous Scroll and the spread commands with page view and zoom, and
+`turnSpread` / `goToEdgeSpread` check the same gate (`commandGateAllows` on the spread command), so the
+wheel, a desk press, PageUp / PageDown outside the manuscript and the turn controls do nothing either.
+
+The comments margin panel already positions its cards from `pages[]`, `visibleSpread` and the painted
+anchor positions, never from the scroll position, so it shows the shown spread's comments in Book mode.
 
 ## Tests and fixtures
 
@@ -468,7 +601,28 @@ after it to continue on. Footnote-only trailing pages are a follow-up.
   reopen, recovery, copy / paste, options dialog); perf: the 200-footnote typing test in `e2e/perf.spec.ts`.
 - Guard (`pm-internals.test.ts`): fails if the prosemirror-view internals the engine uses disappear
   (prosemirror-view is pinned with `pnpm.overrides`).
-- Perf (`e2e/pagination-perf.spec.ts`, serial perf projects): trim reflow and typing latency.
+- Perf (`e2e/pagination-perf.spec.ts`, serial perf projects): trim reflow and typing latency, and the
+  Book mode page turn (turn → spread painted < 100 ms on the 100k-word fixture, also while a trim reflow is
+  still drawing off-screen blocks; every turn must paint a complete spread in its first frame, blocking).
+- Navigation modes (Phase 3): `e2e/page-turn.spec.ts` covers every turn path, the disabled edges, caret
+  follow (typing over the recto, arrows, Find, a footnote), comments, a header double-click, single page
+  and narrow windows, the View menu, persistence, the turn controls' tooltips, wheel gestures (a long
+  momentum tail, a second flick, panning at 200 %) and the page indicator.
+  **Both modes:** the pagination, footnotes, headers and page-turn suites run in Book mode (projects
+  `chromium` / `webkit`) and again in continuous scroll (projects `chromium-scroll` / `webkit-scroll`,
+  `BOTH_MODES` in playwright.config.ts). The scroll projects seed preferences.json from the project
+  metadata through `seedProjectNavigation`. CI runs all four. The tests are mode-agnostic: `showPage` /
+  `acrossSpreads` (e2e/helpers.ts) turn to a page before its frame is read in Book mode, and
+  `clickBlockStart` turns to the block. Where the Phase 2 assertion is about the scrolled column (the first
+  split paragraph, a recto → next-row verso included; ArrowDown to a row below the viewport and its scroll),
+  the scroll branch keeps it and Book mode checks its own variant. Book-only tests skip in the scroll
+  projects. Tests about scroll positions or about rows mounted together (progressive draw at scroll
+  positions; DOM identity of heads several rows apart) seed continuous scroll themselves in every project.
+- Caret hit tests (both modes, both engines): ArrowDown onto a continued paragraph keeps the column, and
+  ArrowUp onto the last line of a page that ends mid-paragraph keeps it too. When that line's end is the
+  very position the next page starts at, the caret is drawn on the page above. Past the end of a short
+  line the browser's hit test can answer from the paragraph's layout box, so `moveLineAcrossPages` checks
+  the answer (same line, same column) and otherwise walks the painted target line (`nearestOnLine`).
 - Cross-engine fixture (`e2e/pagination-fixture.spec.ts`): the deterministic manuscript
   (`e2e/fixtures/pagination-manuscript.ts`) typeset in the bundled OFL test font (`e2e/fixtures/fonts`,
   Libre Baskerville, `OFL.txt`), with chapters breaking in `page` mode and in `recto` mode, for every

@@ -1,5 +1,14 @@
 // Toolbar internals of the editor slice; re-exported publicly via ../index.ts.
-export { Toolbar, ToolbarItem } from './Toolbar'
+export {
+  Toolbar,
+  ToolbarItem,
+  FontControls,
+  TextStyleControls,
+  ListControls,
+  AlignmentControls,
+  SpacingControls,
+  StylesControls,
+} from './Toolbar'
 export type { ToolbarProps } from './Toolbar'
 export { FontFamilyPicker } from './FontFamilyPicker'
 export type { FontFamilyPickerProps } from './FontFamilyPicker'

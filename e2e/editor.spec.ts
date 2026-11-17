@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { budget } from './budget'
+import { turnSettled } from './helpers'
 
 test('user types into the editor in the OS system font', async ({ page }) => {
   await page.goto('/')
@@ -30,6 +31,8 @@ test('100k-word paste stays responsive', async ({ page }, testInfo) => {
   // The paste's own pagination (laying out 1,000 new paragraphs) is the paste's cost, not a
   // keystroke's: wait for the page model and every block to be drawn before measuring keystrokes.
   await page.waitForFunction(() => window.__nvE2E.paginationSettled(), undefined, { timeout: 30_000 })
+  // Book mode (the default) turns to the caret's spread at the end of the paste: let the turn finish.
+  await turnSettled(page)
 
   // Keystroke latency after the paste (input -> DOM updated -> next frame), median of 5.
   const keyMs = await page.evaluate(async () => {

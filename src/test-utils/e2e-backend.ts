@@ -15,13 +15,20 @@
  * and folder picker through `window.__nvE2E` (see e2e/helpers.ts).
  */
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
-import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { getEditor, getFootnotes, setDocJSON } from '@/features/editor'
-import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination } from '@/features/pagination'
+import { getDocJSON, getEditor, getFootnotes, setDocJSON } from '@/features/editor'
+import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
+import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
+import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition, turnSpread, goToEdgeSpread, showPage } from '@/features/pagination'
+import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
+import { commentsDebug } from '@/features/comments'
+import { rewriteDebug } from '@/features/rewrite'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
+import { getCommands, runCommand } from '@/shared/commands'
+import { formatShortcut } from '@/shared/ui'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
 
@@ -31,6 +38,8 @@ export interface E2EConfig {
   failFonts?: boolean
   /** Families list_system_fonts returns. */
   fonts?: string[]
+  /** The OS user's name preferences_default_author returns ('' = none known). */
+  defaultAuthor?: string
 }
 
 // ---- IndexedDB persistence -------------------------------------------------
@@ -139,7 +148,28 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     listFiles: () => [...state.files.keys()].sort(),
     /** Add a folder to the Rust-owned recent list (as if opened before). */
     addRecent: (path: string, name: string) => core.seedRecent(path, name),
-    recentMenu: () => state.menu,
+    /** preferences.json as stored (null = no file); and replace it, even with damaged text. */
+    preferencesFile: () => state.preferences,
+    setPreferencesFile: (text: string | null) => core.seedPreferences(text),
+    /** Ask for the author name as a tracked change or comment would (shows the one-time question). */
+    ensureAuthorName: () => ensureAuthorName(),
+    /** The preferences slice as the app holds it. */
+    preferences: () => useStore.getState().preferences,
+    /** Labels of File > Open Recent in the last native menu snapshot (menu_set). */
+    recentMenu: () => {
+      type Node = { kind: string; label?: string; items?: Node[] }
+      const file = state.menu?.menus.find((m) => m.id === 'file')
+      const recent = (file?.items as Node[] | undefined)?.find((n) => n.kind === 'submenu' && n.label === 'Open Recent')
+      return (recent?.items ?? []).map((n) => n.label ?? '')
+    },
+    /** The last native menu snapshot (menu_set), as Rust would build it. */
+    nativeMenu: () => state.menu,
+    /** Registered commands with a shortcut, and the keys as shown on this platform. */
+    shortcutRows: () =>
+      getCommands()
+        .filter((c) => c.shortcut)
+        .map((c) => ({ id: c.id, label: c.label, keys: formatShortcut(c.shortcut!) })),
+    fullscreen: () => state.fullscreen,
     exits: () => state.exits,
     /** auditTooltipCoverage over the whole page incl. portals (the fake native dialog excluded). */
     auditTooltips: () =>
@@ -167,7 +197,7 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     },
     paginationLines: () => {
       const d = getPaginationDebug()
-      return { lineCount: d.lineCount, lineRanges: d.lineRanges, lastPass: d.lastPass }
+      return { lineCount: d.lineCount, lineRanges: d.lineRanges, lastPass: d.lastPass, passes: d.passes }
     },
     /** The published layout model (store `layout` slice). */
     layout: () => {
@@ -185,6 +215,24 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     /** Book settings without the settings UI (owned by the book settings ticket). */
     setTrimSize: (id: string) => useStore.getState().bookActions.setTrimSize(id),
     setBookView: (view: 'spread' | 'single') => useStore.getState().bookActions.setView(view),
+    /** Page navigation (app preference): Book (page turns, the default) or continuous scroll. */
+    setPageNavigation: (mode: 'book' | 'scroll') => useStore.getState().preferencesActions.set('pageNavigation', mode),
+    pageNavigation: () => useStore.getState().preferences.pageNavigation,
+    /** View > Next / Previous Spread (dir 1 / -1) and First / Last Spread. */
+    turnSpread: (dir: 1 | -1) => turnSpread(dir),
+    edgeSpread: (dir: 1 | -1) => goToEdgeSpread(dir),
+    /** Show the spread holding page `index` (view only; Book mode turns to it). */
+    showPage: (index: number) => showPage(index),
+    /** Bring an editor element's start into view (Book mode turns to its spread). */
+    revealElement: (el: Element) => {
+      const ed = getEditor()
+      if (!ed) return false
+      try {
+        return revealPosition(ed.view.posAtDOM(el, 0))
+      } catch {
+        return false
+      }
+    },
     /**
      * Emit `data-break-before` on top-level blocks, as style definitions will: `match` selects
      * blocks by node type (and heading level). Call with `null` to remove.
@@ -238,6 +286,46 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const schema = ed.schema
       ed.view.dispatch(ed.state.tr.insert(pos, schema.nodes.footnote.create(null, text ? schema.text(text) : null)))
     },
+    // ---- Track changes (Phase 3) ----
+    /** Turn recording on or off (the book setting the toolbar toggle writes). */
+    setTracking: (on: boolean) => setTracking(on),
+    /** View ▸ Markup. */
+    setMarkupView: (view: MarkupView) => setMarkupView(view),
+    /** Number of tracked changes in the document. */
+    countChanges: () => {
+      const ed = getEditor()
+      return ed ? countChanges(ed.state) : 0
+    },
+    /** Accept (or reject) every change, as one transaction. */
+    resolveAllChanges: (mode: 'accept' | 'reject') => {
+      const ed = getEditor()
+      if (!ed) return
+      const tr = mode === 'accept' ? acceptAll(ed.state) : rejectAll(ed.state)
+      if (tr) ed.view.dispatch(tr)
+    },
+    /**
+     * The first characters of text shown at the top of each page in the current markup view
+     * ('(blank)' for a blank page): compares page breaks between documents whose positions differ.
+     */
+    pageStarts: (chars = 24) => {
+      const ed = getEditor()
+      if (!ed) return []
+      const view = useStore.getState().trackChanges.markupView
+      const doc = ed.state.doc
+      return useStore.getState().layout.pages.map((pg) => {
+        if (pg.isBlank) return '(blank)'
+        let out = ''
+        doc.nodesBetween(pg.from, pg.to, (n, pos) => {
+          if (out.length >= chars || n.type.name === 'footnote') return false
+          if (n.isBlock && isBlockHidden(n, view)) return false
+          if (n.isText && !isInlineHidden(n, view)) out += n.text!.slice(Math.max(0, pg.from - pos))
+          return true
+        })
+        return out.slice(0, chars)
+      })
+    },
+    /** The document as saved (manuscript.json shape). */
+    docJSON: () => getDocJSON(),
     /** Editor document version (bumps on every document change; style edits must not bump it). */
     docVersion: () => useStore.getState().editor.docVersion,
     /**
@@ -248,6 +336,61 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     syncSelection: () => {
       const view = getEditor()?.view as unknown as { domObserver?: { flush(): void } } | undefined
       view?.domObserver?.flush()
+    },
+    // ---- Comments (Phase 3) ----
+    /** Start recording when each layoutVersion is published (performance.now()); returns the record. */
+    watchLayoutPublishes: () => {
+      const times: Record<number, number> = {}
+      useStore.subscribe((st, prev) => {
+        if (st.layout.layoutVersion !== prev.layout.layoutVersion) times[st.layout.layoutVersion] = performance.now()
+      })
+      ;(window as unknown as { __nvLayoutTimes: Record<number, number> }).__nvLayoutTimes = times
+    },
+    layoutPublishedAt: (version: number) => (window as unknown as { __nvLayoutTimes?: Record<number, number> }).__nvLayoutTimes?.[version] ?? null,
+    /** Select document positions `from..to` in the manuscript (as a mouse drag would). */
+    selectText: (from: number, to: number) => {
+      const view = getEditor()?.view
+      if (!view) return
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)))
+    },
+    /** Where the caret at `pos` is painted (ProseMirror coordsAtPos; side -1: the end of the line before). */
+    coordsAt: (pos: number, side: 1 | -1 = 1) => {
+      const view = getEditor()?.view
+      if (!view) return null
+      const c = view.coordsAtPos(pos, side)
+      return { left: c.left, top: c.top, bottom: c.bottom }
+    },
+    /** Selection of the manuscript. */
+    selection: () => {
+      const s = getEditor()?.state.selection
+      return s ? { from: s.from, to: s.to } : null
+    },
+    /** The comments mirror (threads, active thread) and the last margin-panel layout. */
+    comments: () => {
+      const c = useStore.getState().comments
+      return { threads: c.threads, activeId: c.activeId, showResolved: c.showResolved, layout: { ...commentsDebug } }
+    },
+    /** Re-writes in the store, the open one, and the comparison view's last open / layout timing. */
+    rewrite: () => {
+      const r = useStore.getState().rewrite
+      return {
+        rewrites: r.rewrites,
+        openId: r.openId,
+        activeVersionId: r.activeVersionId,
+        version: r.version,
+        caretIn: r.caretIn,
+        notice: r.notice,
+        debug: { mountedAt: rewriteDebug.mountedAt, readyAt: rewriteDebug.readyAt, layouts: rewriteDebug.layouts, rows: rewriteDebug.rows.map((x) => x.kind) },
+      }
+    },
+    /** Run a registered command as its menu item would (false when absent or disabled). */
+    runCommand: (id: string) => runCommand(id),
+    /** Start position of top-level block `index` of the manuscript. */
+    blockPos: (index: number) => {
+      const doc = getEditor()?.state.doc
+      let pos = 0
+      for (let k = 0; doc && k < index; k++) pos += doc.child(k).nodeSize
+      return pos
     },
     /** book.styles as stored (overrides only). */
     bookStyles: () => useStore.getState().book.styles,
@@ -260,6 +403,15 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       if (!view) return
       const doc = view.state.doc
       view.dispatch(view.state.tr.insert(doc.content.size, doc.child(index)))
+    },
+    /** Delete the whole top-level block `index` (its neighbours stay the same node instances). */
+    deleteBlock: (index: number) => {
+      const view = getEditor()?.view
+      if (!view) return
+      const doc = view.state.doc
+      let pos = 0
+      for (let k = 0; k < index; k++) pos += doc.child(k).nodeSize
+      view.dispatch(view.state.tr.delete(pos, pos + doc.child(index).nodeSize))
     },
   }
 }
@@ -286,6 +438,11 @@ export async function installE2EBackend(): Promise<void> {
   const config = window.__nvE2EConfig ?? {}
   core.state.failFonts = !!config.failFonts
   if (config.fonts) core.state.fonts = config.fonts
+  if (config.defaultAuthor !== undefined) core.state.defaultAuthor = config.defaultAuthor
+  // A preferences.json seed for this launch, when there is no file yet (e2e/helpers.ts
+  // seedPreferences: specs that need continuous scroll navigation).
+  const seed = (window as unknown as { __nvE2EPreferences?: string }).__nvE2EPreferences
+  if (seed !== undefined && core.state.preferences === null) core.state.preferences = seed
   mockWindows('main')
   mockIPC(
     async (cmd, args) => {

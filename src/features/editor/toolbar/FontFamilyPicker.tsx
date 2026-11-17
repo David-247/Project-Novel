@@ -4,13 +4,15 @@ import { Select } from '@/shared/ui'
 import { fontFamilyCss, loadSystemFonts } from '../fonts'
 import { TOOLBAR_CONTROLS } from './controls'
 import { markChain } from './mark-chain'
-import { useMountedEditor } from '../use-mounted-editor'
+import { useActiveEditor } from '../use-mounted-editor'
 import { useToolbarState } from './use-toolbar-state'
 
 export interface FontFamilyPickerProps
   extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'value' | 'onChange' | 'children'> {
   /** Font list source (must be a stable reference); defaults to the Tauri OS font enumeration. */
   loadFonts?: () => Promise<string[]>
+  /** Width class of the control (default w-44). */
+  wrapperClassName?: string
   ref?: Ref<HTMLSelectElement>
 }
 
@@ -42,9 +44,9 @@ function useSystemFonts(loadFonts: () => Promise<string[]>): { fonts: string[]; 
  * "System default" removes it. Falls back to only "System default" when the OS font list
  * is unavailable; if listing them failed, that option says so. Focus handling: see `markChain`.
  */
-export function FontFamilyPicker({ loadFonts = loadSystemFonts, disabled, ...rest }: FontFamilyPickerProps) {
+export function FontFamilyPicker({ loadFonts = loadSystemFonts, disabled, wrapperClassName = 'w-44', ...rest }: FontFamilyPickerProps) {
   const { fonts, failed } = useSystemFonts(loadFonts)
-  const editor = useMountedEditor()
+  const editor = useActiveEditor()
 
   const current = useToolbarState(editor).fontFamily
 
@@ -62,7 +64,7 @@ export function FontFamilyPicker({ loadFonts = loadSystemFonts, disabled, ...res
     <Select
       aria-label={TOOLBAR_CONTROLS.fontFamily.label}
       data-control-id={TOOLBAR_CONTROLS.fontFamily.id}
-      wrapperClassName="w-44"
+      wrapperClassName={wrapperClassName}
       options={options}
       value={current}
       disabled={disabled || !editor}

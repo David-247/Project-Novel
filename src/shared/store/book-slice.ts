@@ -35,6 +35,8 @@ export interface BookSlice {
     setFootnotes: (u: Updater<FootnoteSettings>) => void
     setSurface: (surface: PaperSurface) => void
     setView: (view: BookView) => void
+    /** Turn Track Changes recording on or off for this project (book.json `trackChanges`). */
+    setTrackChanges: (on: boolean) => void
     /** Replace all settings (project open / recovery restore). Not a user change: clears dirty. */
     loadBook: (settings: BookSettings) => void
     /** Replace all settings with unsaved ones (crash-recovery restore). Marks the project unsaved. */
@@ -62,6 +64,7 @@ export const createBookSlice: SliceCreator<BookSlice> = (set) => {
       setFootnotes: (u) => change((b) => ({ footnotes: apply(u, b.footnotes) })),
       setSurface: (surface) => change({ surface }),
       setView: (view) => change({ view }),
+      setTrackChanges: (on) => change({ trackChanges: on }),
       loadBook: (settings) =>
         set((s) => ({ book: { ...settings, settingsVersion: s.book.settingsVersion + 1, dirty: false } })),
       restoreBook: (settings) => change({ ...settings }),

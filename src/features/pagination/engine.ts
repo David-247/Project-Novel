@@ -1,5 +1,6 @@
-import type { Node as PMNode } from '@tiptap/pm/model'
+import { Mark, type Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection, type EditorState } from '@tiptap/pm/state'
+import { AddMarkStep, AddNodeMarkStep, AttrStep, Mapping, RemoveMarkStep, RemoveNodeMarkStep, StepMap, type Transform } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
 import { resolveStyleSheet, type BookView, type StyleSheetJSON } from '@/shared/book'
 import { useStore, type PageInfo } from '@/shared/store'
@@ -29,14 +30,57 @@ import { restyledIds } from './restyle'
  * (Replace All of a common word: 10,000 steps) changed the document: mapping every decoration
  * through every step costs O(steps x decorations), so the set is dropped instead, the editor root
  * hides its blocks (`nv-unmapped`) and the next pass, before the next paint, redraws the view first.
+ * `bulk` is set by a transaction that touched much of the book without moving it (Select All + Bold,
+ * a tracked formatting change on every block, Accept All of those): the decorations stay mapped, but
+ * the next pass draws progressively (the pages in view first, like a trim change). Both clear when a
+ * pass sets new decorations.
  */
 interface PaginationState {
   set: DecorationSet
   unmapped: boolean
+  bulk: boolean
 }
 
 /** Steps above which a transaction's decorations are not mapped but redrawn. */
 const MAP_STEP_LIMIT = 200
+/** Characters of mark / attribute steps above which a transaction is drawn progressively (`bulk`). */
+const BULK_MARK_CHARS = 20_000
+
+/**
+ * Block attributes that do not change how a block renders: a change of only these keeps the block's
+ * measurements (the re-write anchor `rewriteId`, set on every block of a passage when a re-write
+ * opens: rewrite/anchor.ts) and is not a bulk change.
+ */
+const NON_RENDERING_ATTRS = new Set(['rewriteId'])
+
+/** `b` renders as `a` did: same type, content and marks, attributes equal but for NON_RENDERING_ATTRS. */
+function sameRendering(a: PMNode, b: PMNode): boolean {
+  if (a.type !== b.type || !(a.content === b.content || a.content.eq(b.content)) || !Mark.sameSet(a.marks, b.marks)) return false
+  for (const k of Object.keys(a.attrs)) if (!NON_RENDERING_ATTRS.has(k) && a.attrs[k] !== b.attrs[k]) return false
+  for (const k of Object.keys(b.attrs)) if (!(k in a.attrs)) return false
+  return true
+}
+
+/**
+ * Characters covered by a transaction's mark and attribute steps (O(steps): typing pays nothing).
+ * Their step maps are empty, so they never trip MAP_STEP_LIMIT, yet one can restyle every block.
+ */
+export function markSpan(tr: Transform): number {
+  let n = 0
+  tr.steps.forEach((step, i) => {
+    if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) n += step.to - step.from
+    else if (step instanceof AttrStep && NON_RENDERING_ATTRS.has(step.attr)) return
+    else if (step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep || step instanceof AttrStep) n += tr.docs[i]?.nodeAt(step.pos)?.nodeSize ?? 1
+  })
+  return n
+}
+
+/** The transaction counts as bulk (see PaginationState). */
+export function isBulk(tr: Transform): boolean {
+  let steps = 0
+  for (const step of tr.steps) if (!(step instanceof AttrStep && NON_RENDERING_ATTRS.has(step.attr))) steps++
+  return steps > MAP_STEP_LIMIT || markSpan(tr) > BULK_MARK_CHARS
+}
 
 export const paginationKey = new PluginKey<PaginationState>('pagination')
 
@@ -92,6 +136,12 @@ function domSelectionPending(view: EditorView): boolean {
 const PROGRESSIVE_MIN = 160
 /** Off-screen blocks drawn per follow-up frame. */
 const CHUNK = 120
+/** A catch-up pass stops drawing after this long (ms since the pass began)... */
+const CATCH_UP_MS = 8
+/** ...once it has drawn this many blocks. */
+const CATCH_UP_MIN = 16
+/** Passes kept in `passLog`. */
+const PASS_LOG = 64
 
 interface DirtyBlock {
   /** Range of the block's decorations in the pass's list. */
@@ -169,6 +219,26 @@ export function getEngine(): PaginationEngine | null {
   return currentEngine
 }
 
+/**
+ * Pages shown on screen when the view decides them itself (Book mode: the one spread on the canvas),
+ * instead of the scroll viewport. The progressive draw draws these (±2) first. Null: use the scroller.
+ */
+let viewWindowProvider: (() => [number, number] | null) | null = null
+
+/**
+ * Pass listeners that outlive an engine: ProseMirror recreates plugin views (and so the engine)
+ * whenever a plugin is registered or unregistered. Returns unsubscribe.
+ */
+const anyPassListeners = new Set<SnapshotListener>()
+export function onAnyPass(cb: SnapshotListener): () => void {
+  anyPassListeners.add(cb)
+  return () => anyPassListeners.delete(cb)
+}
+
+export function setViewWindowProvider(fn: (() => [number, number] | null) | null): void {
+  viewWindowProvider = fn
+}
+
 export class PaginationEngine {
   private cache = new WeakMap<PMNode, BlockMetrics>()
   private epoch = 0
@@ -186,6 +256,10 @@ export class PaginationEngine {
   private lastDoc: PMNode | null = null
   /** Per block node: its stream top in the last pass. */
   private prevTops = new Map<PMNode, number>()
+  /** The top-level block nodes of the last pass, in order. */
+  private prevBlocks: PMNode[] = []
+  /** Per block node of the last pass: its index there (with prevBlocks: what sat above it). */
+  private prevIndex = new Map<PMNode, number>()
   private lastKey = ''
   private snapshot: LayoutSnapshot | null = null
   private listeners = new Set<SnapshotListener>()
@@ -298,6 +372,24 @@ export class PaginationEngine {
     this.flush()
   }
 
+  private windowOnly = false
+
+  /**
+   * A pending catch-up pass now, drawing only the blocks on the pages in view (Book mode: the spread
+   * just turned to), so they are drawn before the frame is painted. No-op unless catching up.
+   */
+  drawWindowNow() {
+    if (!this.catchingUp) return
+    this.windowOnly = true
+    try {
+      this.flush()
+    } finally {
+      this.windowOnly = false
+    }
+    // flush() cleared the frame; the remaining blocks follow in the next frames.
+    if (this.pendingNodes.size) this.schedule(false, true)
+  }
+
   /** Run a pending pass now (tests, and callers that need the model synchronously). */
   flush() {
     if (this.frame) cancelAnimationFrame(this.frame)
@@ -330,6 +422,8 @@ export class PaginationEngine {
 
   /** Pages to draw first: those in the scroll viewport (new placement), ±2. */
   private viewWindow(root: HTMLElement, scale: number, placement: Placement): [number, number] {
+    const fixed = viewWindowProvider?.()
+    if (fixed) return [fixed[0] - 2, fixed[1] + 2]
     let lo = 0
     let hi = 3
     let scroller: HTMLElement | null = root.parentElement
@@ -424,6 +518,13 @@ export class PaginationEngine {
     this.restyled = null
 
     const nextTops = new Map<PMNode, number>()
+    const nextIndex = new Map<PMNode, number>()
+    const prevIndex = key === this.lastKey ? this.prevIndex : new Map<PMNode, number>()
+    const prevBlocks = this.prevBlocks
+    // Per block of this pass: the node of the last pass whose top it stands for (itself, or the block
+    // it renders like). A remembered top holds only below the same block as last time: a block
+    // deleted above it, or a node another block already stood for, means reading its box.
+    const sources: PMNode[] = []
     let delta = 0
     let anchor = true
     let b = 0
@@ -449,6 +550,19 @@ export class PaginationEngine {
       if (!dom || dom.nodeType !== 1) return
       let m = this.cache.get(node)
       let fresh = false
+      // A new node that renders like the block at its place in the last pass (only a non-rendering
+      // attribute changed, e.g. a re-write's anchor): its measurements and stream top still hold.
+      let was: PMNode | undefined
+      if (!m) {
+        const prev = this.prevBlocks[b]
+        if (prev && prev !== node && sameRendering(prev, node)) {
+          m = this.cache.get(prev)
+          if (m) {
+            was = prev
+            this.cache.set(node, m)
+          }
+        }
+      }
       if (m && restyled && usesStyle(dom, restyled)) m = undefined
 
       if (!m || m.key !== key) {
@@ -457,7 +571,11 @@ export class PaginationEngine {
         measured++
         fresh = true
       }
-      const known = fresh || nextTops.has(node) ? undefined : prevTops.get(node)
+      const source = was && !fresh ? was : node
+      const at = prevIndex.get(source)
+      const sameAbove = at !== undefined && (b === 0 ? at === 0 : at > 0 && prevBlocks[at - 1] === sources[b - 1])
+      const known = fresh || nextTops.has(node) || !sameAbove ? undefined : prevTops.get(source)
+      sources.push(source)
       let top: number
       if (known !== undefined && !anchor) top = known + delta
       else {
@@ -474,6 +592,7 @@ export class PaginationEngine {
       // A node instance used twice in the document is never trusted for its top.
       if (nextTops.has(node)) nextTops.set(node, Number.NaN)
       else nextTops.set(node, top)
+      nextIndex.set(node, b)
       const bb = blockBreakBefore(node, dom)
       m.units.forEach((u, k) => {
         units.push({ firstLine: lines.length, lineCount: u.lines.length, breakBefore: k === 0 ? bb : null, keepWithNext: u.keepWithNext })
@@ -490,6 +609,8 @@ export class PaginationEngine {
     })
     for (const [n, t] of nextTops) if (Number.isNaN(t)) nextTops.delete(n)
     this.prevTops = nextTops
+    this.prevBlocks = blockNodes
+    this.prevIndex = nextIndex
 
     // Line index -> document position (relative to the doc), lazily.
     const lineToUnitLine = (li: number) => {
@@ -543,6 +664,16 @@ export class PaginationEngine {
     const caretPage = pageAt(pages, view.state.selection.head)
     const inWin = (p0: number, p1: number) => (p1 >= win[0] && p0 <= win[1]) || (p1 >= caretPage - 1 && p0 <= caretPage + 1)
     const allDirty = geometryChanged || unmapped
+    // A selection over many blocks (Select All) makes every frame that changes the DOM inside it
+    // expensive: the browser repaints the whole selection (profiled: ~100 ms a frame at 100k words in
+    // Chromium, against ~25 ms with a caret). Then one frame that draws everything is cheaper than a
+    // draw spread over a dozen frames.
+    const sel = view.state.selection
+    const bigSelection = !sel.empty && blocksBetween(blockPos, sel.from, sel.to) > PROGRESSIVE_MIN
+    // A transaction that touched much of the book (plugin state), or many blocks re-measured: draw
+    // the pages in view now and the rest progressively, as after a geometry change. Every block is
+    // still measured above, so the published model is exact; only the drawing is chunked.
+    const bulk = (!!pluginState?.bulk || measured > PROGRESSIVE_MIN) && !bigSelection
     const pureCatchUp = this.catchUpOnly && !allDirty && restyled === null && doc === this.lastDoc
     // Start positions of the blocks still hidden as stale (catch-up passes only).
     const staleAt = pureCatchUp
@@ -559,7 +690,7 @@ export class PaginationEngine {
       }
     }
     let chosen: Set<number> | null = null
-    if ((allDirty && blockNodes.length > PROGRESSIVE_MIN) || pureCatchUp) {
+    if (((allDirty || bulk) && blockNodes.length > PROGRESSIVE_MIN) || pureCatchUp) {
       const centre = (win[0] + win[1]) / 2
       const candidates: number[] = []
       blockNodes.forEach((node, bi) => {
@@ -568,31 +699,27 @@ export class PaginationEngine {
         candidates.push(bi)
       })
       candidates.sort((x, y) => Math.abs(spans[x][0] - centre) - Math.abs(spans[y][0] - centre))
-      chosen = new Set(candidates.slice(0, CHUNK))
+      // A catch-up pass for a page turn (drawWindowNow) draws only the pages shown: the turned-to
+      // spread is painted sooner; the rest keeps following in the next frames.
+      chosen = new Set(this.windowOnly && pureCatchUp ? [] : bigSelection ? candidates : candidates.slice(0, CHUNK))
     }
 
     // Blocks whose decorations differ from what is drawn.
     const dirty: DirtyBlock[] = []
     let lazy = 0
     let lineCursor = 0
-    for (let bi = 0; bi < blockNodes.length; bi++) {
+    const defer = (bi: number) => {
+      const node = blockNodes[bi]
+      // Redrawn in a later frame; hidden until then (below).
+      dirty.push({ a: 0, z: 0, pos: blockPos[bi], size: node.nodeSize, node, sig: '', p0: spans[bi][0], p1: spans[bi][1], lazy: true })
+      this.lastSigs.delete(node)
+      lazy++
+    }
+    const consider = (bi: number, first: number) => {
       const m = blockMetrics[bi]
       const node = blockNodes[bi]
       const pos = blockPos[bi]
-      const nLines = m.units.reduce((s, u) => s + u.lines.length, 0)
-      const first = lineCursor
-      lineCursor += nLines
       const [p0, p1] = spans[bi]
-      if (chosen) {
-        if (pureCatchUp && !pendingAt(node, pos)) continue
-        if (!inWin(p0, p1) && !chosen.has(bi)) {
-          // Redrawn in a later frame; hidden until then (below).
-          dirty.push({ a: 0, z: 0, pos, size: node.nodeSize, node, sig: '', p0, p1, lazy: true })
-          this.lastSigs.delete(node)
-          lazy++
-          continue
-        }
-      }
       const sigParts: string[] = []
       const start = decos.length
       this.decorateBlock(node, pos, first, m, pageOfLine, offsets, (li) => posOfLine(li), decos, sigParts)
@@ -607,6 +734,33 @@ export class PaginationEngine {
         this.lastSigs.delete(node)
       }
     }
+    // A catch-up pass draws its chosen blocks nearest first, and yields by time as well as by count:
+    // the rest stays pending once the frame's budget is spent (a slow engine keeps every catch-up
+    // frame short, so typing during one stays fast). At least CATCH_UP_MIN per pass: it always ends.
+    const lateFirst = new Map<number, number>()
+    for (let bi = 0; bi < blockNodes.length; bi++) {
+      const m = blockMetrics[bi]
+      const first = lineCursor
+      lineCursor += m.units.reduce((s, u) => s + u.lines.length, 0)
+      if (chosen) {
+        const [p0, p1] = spans[bi]
+        if (pureCatchUp && !pendingAt(blockNodes[bi], blockPos[bi])) continue
+        if (!inWin(p0, p1)) {
+          if (!chosen.has(bi)) defer(bi)
+          else if (pureCatchUp) lateFirst.set(bi, first)
+          else consider(bi, first)
+          continue
+        }
+      }
+      consider(bi, first)
+    }
+    if (lateFirst.size) {
+      const order = Array.from(chosen!).filter((bi) => lateFirst.has(bi))
+      order.forEach((bi, k) => {
+        if (!bigSelection && k >= CATCH_UP_MIN && performance.now() - t0 > CATCH_UP_MS) defer(bi)
+        else consider(bi, lateFirst.get(bi)!)
+      })
+    }
 
     const t3 = performance.now()
     const t4 = performance.now()
@@ -617,7 +771,7 @@ export class PaginationEngine {
       let apply = dirty.filter((d) => !d.lazy)
       deferred = lazy
       // Progressive also for a restyle that moved many blocks (all decorated, so pick by place).
-      const wholesale = restyled !== null || this.catchUpOnly
+      const wholesale = restyled !== null || this.catchUpOnly || bulk
       if (!chosen && wholesale && apply.length > PROGRESSIVE_MIN) {
         const near = apply.filter((d) => inWin(d.p0, d.p1))
         const rest = apply.filter((d) => !inWin(d.p0, d.p1))
@@ -680,6 +834,10 @@ export class PaginationEngine {
       if (this.scrollAfterPass && view.hasFocus()) tr.scrollIntoView()
       view.dispatch(tr)
       if (deferred) this.schedule(false, true)
+    } else if (pluginState?.bulk || pluginState?.unmapped) {
+      // Nothing to redraw (a mark-only change that moved nothing: Select All + Underline): the bulk
+      // flag is spent all the same, or the next keystroke would take the progressive path.
+      view.dispatch(view.state.tr.setMeta(paginationKey, current).setMeta('addToHistory', false))
     }
     const changed = dirty.length > 0
     this.scrollAfterPass = false
@@ -690,6 +848,7 @@ export class PaginationEngine {
     if (!samePages(store.layout.pages, pages)) store.layoutActions.setPages(pages)
     store.layoutActions.setCurrentPage(pageAt(pages, view.state.selection.head))
     this.listeners.forEach((l) => l(this.snapshot!))
+    anyPassListeners.forEach((l) => l(this.snapshot!))
     const t6 = performance.now()
     this.timings = {
       measuredBlocks: measured,
@@ -705,11 +864,16 @@ export class PaginationEngine {
       dirtyBlocks: dirty.length,
       deferredBlocks: deferred,
       geometryChanged,
+      bulk,
     }
+    this.passLog.push(this.timings)
+    if (this.passLog.length > PASS_LOG) this.passLog.shift()
   }
 
   /** Durations of the last pass (diagnostics, perf reports). */
   timings: Record<string, number | boolean> = {}
+  /** The last PASS_LOG passes' timings, oldest first (perf reports: every pass of one reflow). */
+  readonly passLog: Record<string, number | boolean>[] = []
 
   /**
    * Decorations for one top-level block whose lines are `[first, first + lines)`.
@@ -832,6 +996,21 @@ export class PaginationEngine {
   }
 }
 
+/** Top-level blocks starting in [from, to) (block starts ascending), plus the one holding `from`. */
+function blocksBetween(starts: readonly number[], from: number, to: number): number {
+  const upper = (p: number) => {
+    let lo = 0
+    let hi = starts.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (starts[mid] <= p) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+  return upper(to) - upper(from) + 1
+}
+
 export function pageAt(pages: readonly PageInfo[], pos: number): number {
   let lo = 0
   let hi = pages.length - 1
@@ -867,17 +1046,41 @@ export function selectionForPage(state: EditorState, page: PageInfo) {
 export function createPaginationPlugin(handlers: {
   keyDown?: (view: EditorView, e: KeyboardEvent) => boolean
   mouseDown?: (view: EditorView, e: MouseEvent) => boolean
+  /**
+   * ProseMirror is about to scroll the selection into view. True: the host handles it (Book mode
+   * turns to the spread holding the caret instead of scrolling).
+   */
+  scrollToSelection?: (view: EditorView) => boolean
+  /**
+   * The selection moved: without a document change (native caret moves, clicks, programmatic), or
+   * set by a transaction that also changed the document (typing, an insertion). The engine may still
+   * have that change's pass pending.
+   */
+  selectionMoved?: (view: EditorView) => void
 }) {
+  // A document change that also put the selection somewhere (typing, inserting a footnote): the
+  // host's caret follow runs for it once the change is laid out.
+  let caretMovedWithDoc = false
   return new Plugin<PaginationState>({
     key: paginationKey,
     state: {
-      init: () => ({ set: DecorationSet.empty, unmapped: false }),
+      init: () => ({ set: DecorationSet.empty, unmapped: false, bulk: false }),
       apply: (tr, value) => {
+        if (tr.docChanged && tr.selectionSet) caretMovedWithDoc = true
         const next = tr.getMeta(paginationKey) as DecorationSet | undefined
-        if (next) return { set: next, unmapped: false }
+        if (next) return { set: next, unmapped: false, bulk: false }
         if (!tr.docChanged) return value
-        if (tr.steps.length > MAP_STEP_LIMIT) return { set: DecorationSet.empty, unmapped: true }
-        return { set: value.set.map(tr.mapping, tr.doc), unmapped: value.unmapped }
+        // Steps that move nothing (AttrStep: a block attribute such as a re-write anchor) count for
+        // nothing: their maps are empty, so they are left out of the mapping too.
+        const maps = tr.mapping.maps.filter((m) => m !== StepMap.empty)
+        if (maps.length > MAP_STEP_LIMIT) return { set: DecorationSet.empty, unmapped: true, bulk: true }
+        // A Mapping built from the maps alone has no mirrors: fine, since `tr.mapping` never carries
+        // any (Transform.step appends maps without mirrors; only Mapping.appendMapping of a mapping
+        // that has them would add some).
+        const mapping = maps.length === tr.mapping.maps.length ? tr.mapping : new Mapping(maps)
+        // Mark-only bulk changes (Select All + Bold) move nothing, so the set stays mapped (no blank
+        // frame); `bulk` routes the next pass onto the progressive draw.
+        return { set: value.set.map(mapping, tr.doc), unmapped: value.unmapped, bulk: value.bulk || isBulk(tr) }
       },
     },
     props: {
@@ -886,6 +1089,7 @@ export function createPaginationPlugin(handlers: {
       // Scrolling to the selection while off-screen blocks are still being redrawn would use a stale
       // (hidden) position: finish the reflow first, then scroll.
       handleScrollToSelection: (view) => {
+        if (handlers.scrollToSelection?.(view)) return true
         const engine = getEngine()
         if (!engine?.catchingUp) return false
         queueMicrotask(() => {
@@ -903,9 +1107,13 @@ export function createPaginationPlugin(handlers: {
       const engine = new PaginationEngine(view)
       return {
         update: (v, prev) => {
-          if (v.state.doc !== prev.doc) engine.schedule(true)
-          else if (!v.state.selection.eq(prev.selection)) {
+          if (v.state.doc !== prev.doc) {
+            engine.schedule(true)
+            if (caretMovedWithDoc) handlers.selectionMoved?.(v)
+            caretMovedWithDoc = false
+          } else if (!v.state.selection.eq(prev.selection)) {
             engine.selectionChanged(v.state)
+            handlers.selectionMoved?.(v)
             // A caret moved natively (Mod-End, arrows) while off-screen blocks are still hidden at
             // their old place: the browser scrolled to that stale place. Finish and scroll again.
             if (engine.catchingUp && v.hasFocus())

@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { launch } from './helpers'
+import { launch, reveal } from './helpers'
 
 const html = (page: Page) => page.locator('html')
-const radio = (page: Page, value: string) => page.locator(`[data-control-id="book.surface.${value}"]`)
+const radio = (page: Page, value: string) => reveal(page, `book.surface.${value}`)
 // The first rendered page of the paginated view (the .nv-page contract element).
 const pageBg = (page: Page) =>
   page.locator('.nv-frames .nv-page').first().evaluate((el) => getComputedStyle(el).backgroundColor)
@@ -12,7 +12,7 @@ test('auto paper follows the OS light/dark mode live', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
   await launch(page)
   await expect(html(page)).toHaveAttribute('data-surface', 'white')
-  await expect(radio(page, 'auto')).toHaveAttribute('aria-checked', 'true')
+  await expect((await radio(page, 'auto'))).toHaveAttribute('aria-checked', 'true')
   expect(await pageBg(page)).toBe('rgb(255, 255, 255)')
 
   await page.emulateMedia({ colorScheme: 'dark' })
@@ -35,9 +35,9 @@ test('the picker switches paper instantly and book keeps its look in both OS mod
     })
   const before = await metrics()
 
-  await radio(page, 'book').click()
+  await (await radio(page, 'book')).click()
   await expect(html(page)).toHaveAttribute('data-surface', 'book')
-  await expect(radio(page, 'book')).toHaveAttribute('aria-checked', 'true')
+  await expect((await radio(page, 'book'))).toHaveAttribute('aria-checked', 'true')
   const bookLight = await pageBg(page)
   expect(bookLight).toBe('rgb(244, 234, 210)')
   expect(await deskBg(page)).toBe('rgb(191, 178, 154)')
@@ -47,19 +47,19 @@ test('the picker switches paper instantly and book keeps its look in both OS mod
   await expect(html(page)).toHaveAttribute('data-surface', 'book')
   await expect.poll(() => pageBg(page)).toBe('rgb(43, 37, 32)') // warm dark variant
 
-  await radio(page, 'white').click()
+  await (await radio(page, 'white')).click()
   await expect.poll(() => pageBg(page)).toBe('rgb(255, 255, 255)')
-  await radio(page, 'dark').click()
+  await (await radio(page, 'dark')).click()
   await expect.poll(() => pageBg(page)).toBe('rgb(32, 35, 39)')
-  await radio(page, 'auto').click()
+  await (await radio(page, 'auto')).click()
   await expect(html(page)).toHaveAttribute('data-surface', 'dark')
 })
 
 test('the picker is reachable and operable by keyboard', async ({ page }) => {
   await launch(page)
-  await radio(page, 'auto').focus()
+  await (await radio(page, 'auto')).focus()
   await page.keyboard.press('ArrowRight')
-  await expect(radio(page, 'book')).toBeFocused()
+  await expect((await radio(page, 'book'))).toBeFocused()
   // Keyboard focus shows the tooltip.
   await expect(page.locator('[data-tooltip-body]')).toContainText('Cream paper')
   await page.keyboard.press('Enter')

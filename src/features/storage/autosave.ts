@@ -8,6 +8,7 @@ import {
   onProjectOpened,
   onSaveLeftUnsaved,
   preserveUnansweredRecoveryUnlocked,
+  setRecoverySnapshotter,
 } from './project'
 import {
   RECOVERY_FORMAT,
@@ -16,6 +17,7 @@ import {
   snapshotsSuppressedAt,
   writeRecoveryFile,
 } from './recovery'
+import { flushSideFiles, sideFileGuardsForSnapshot, sideFilesForSnapshot } from './side-files'
 import { withWriteLock } from './write-lock'
 
 /**
@@ -108,6 +110,8 @@ async function snapshot(): Promise<AutosaveResult> {
       const p = getDocumentProvider()
       const meta = getCurrentProjectMeta()
       if (!p || !meta || getCurrentProjectPath() !== folder) return false
+      // Live side-file edits first: the change their flush makes belongs to this snapshot's version.
+      flushSideFiles()
       const version = p.getDocVersion()
       const bookVersion = getBookVersion()
       if (
@@ -117,6 +121,7 @@ async function snapshot(): Promise<AutosaveResult> {
       ) {
         return false
       }
+      const guards = sideFileGuardsForSnapshot()
       const text = serializeRecovery({
         format: RECOVERY_FORMAT,
         version: RECOVERY_VERSION,
@@ -126,6 +131,8 @@ async function snapshot(): Promise<AutosaveResult> {
         docVersion: version,
         doc: p.getDocJSON(),
         book: currentBookSettings(),
+        sideFiles: sideFilesForSnapshot(),
+        ...(Object.keys(guards).length ? { sideFileGuards: guards } : {}),
       })
       // A snapshot the user has not answered yet is moved aside, never overwritten.
       await preserveUnansweredRecoveryUnlocked(folder)
@@ -176,11 +183,35 @@ export function forceNextSnapshot(): void {
   arm(0)
 }
 
+/**
+ * A snapshot of everything unsaved (text, book settings, side files) now, even if the versions did
+ * not change since the last one; waits for a snapshot already in flight first. True once written.
+ */
+async function snapshotForPrompt(): Promise<boolean> {
+  clearTimer()
+  // Queued behind a snapshot in flight (autosaveNow chains), so it never overlaps or races one.
+  const pending = inFlight
+  if (pending) await pending
+  lastSnapshotVersion = null
+  lastSnapshotBookVersion = null
+  return (await autosaveNow()) === 'written'
+}
+
 /** Book settings changes arm the snapshot timer exactly like text edits. */
 function watchBook(): () => void {
   return useStore.subscribe((s, prev) => {
     if (s.book.settingsVersion !== prev.book.settingsVersion && s.book.dirty) onEdit()
   })
+}
+
+/**
+ * A side file changed outside the manuscript's text (a re-write's revision being typed, which the
+ * manuscript's own undo history does not see): the project has unsaved changes and the next snapshot
+ * is due. O(1).
+ */
+export function sideFileChanged(): void {
+  getDocumentProvider()?.markDirty()
+  onEdit()
 }
 
 /** Per keystroke: O(1), no serialization. Recovery for a never-saved document is out of scope. */
@@ -211,6 +242,8 @@ export function startAutosave(): () => void {
       failures = 0
     }),
     onSaveLeftUnsaved(forceNextSnapshot),
+    // The unsaved-changes prompt's "go on anyway" waits for this snapshot (project.ts).
+    (setRecoverySnapshotter(snapshotForPrompt), () => setRecoverySnapshotter(null)),
   ]
   // Work restored from a backup (or edited before autosave started) is protected too.
   rearmIfStillDirty()

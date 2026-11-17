@@ -16,6 +16,27 @@ export async function showError(title: string, err: unknown): Promise<void> {
   }
 }
 
+/** An information message (e.g. what Save a Copy left out). Never throws. */
+export async function showNotice(title: string, text: string): Promise<void> {
+  try {
+    await message(text, { title, kind: 'info' })
+  } catch (e) {
+    console.warn(title, text, e)
+  }
+}
+
+/**
+ * After a Save that left something unsaved (`detail` says which file and why): stay (Cancel), or go on
+ * with the changes kept only in the crash-recovery backup (`continueLabel`).
+ */
+export async function askLeftUnsaved(detail: string, continueLabel: string): Promise<'continue' | 'cancel'> {
+  const result = await message(
+    `${detail} Your other changes were saved. If you go on now, the unsaved changes are kept only in the automatic backup, which Novel offers to restore the next time you open the project.`,
+    { title: 'Some changes were not saved', kind: 'warning', buttons: { ok: continueLabel, cancel: 'Cancel' } },
+  )
+  return result === continueLabel || result === 'Ok' ? 'continue' : 'cancel'
+}
+
 export type UnsavedChoice = 'save' | 'discard' | 'cancel'
 
 /** Three-way unsaved-changes prompt. */
@@ -29,4 +50,23 @@ export async function askUnsavedChanges(projectTitle: string | null, action: str
   if (result === 'Yes' || result === 'Save') return 'save'
   if (result === 'No' || result === "Don't Save") return 'discard'
   return 'cancel'
+}
+
+/**
+ * A go-ahead / Cancel question with the native message dialog (Accept All Changes on a long
+ * manuscript): true when `confirmLabel` was chosen. Falls back to the webview's confirm when the
+ * dialog itself fails.
+ */
+export async function askConfirm(title: string, text: string, confirmLabel: string): Promise<boolean> {
+  try {
+    const result = await message(text, { title, kind: 'warning', buttons: { ok: confirmLabel, cancel: 'Cancel' } })
+    return result === confirmLabel || result === 'Ok'
+  } catch (e) {
+    console.error(title, e)
+    try {
+      return window.confirm(`${title}\n\n${text}`)
+    } catch {
+      return false
+    }
+  }
 }

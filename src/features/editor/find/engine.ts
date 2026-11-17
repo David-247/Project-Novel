@@ -5,6 +5,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { DecorationSet } from '@tiptap/pm/view'
 import { useStore } from '@/shared/store'
+import { currentMarkupView, type MarkupView } from '@/shared/track-changes'
 import { getEditor, subscribeEditor } from '../controller'
 import { FOOTNOTE_NODE } from '../footnote/name'
 import {
@@ -17,7 +18,8 @@ import {
   noteAround,
   setFindDecorations,
 } from './plugin'
-import { findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
+import { BULK_EDIT_META } from '@/shared/rewrite'
+import { deletedRange, findMatches, indexAtOrAfter, replaceAllRanges, replaceRange } from './search'
 import type { FindOptions, MatchRange } from './search'
 
 /**
@@ -58,10 +60,11 @@ function findState() {
   return useStore.getState().find
 }
 
-function searchParams(): { query: string; options: FindOptions; key: string } {
+function searchParams(): { query: string; options: FindOptions; key: string; markupView: MarkupView } {
   const f = findState()
   const options = { caseSensitive: f.caseSensitive, wholeWord: f.wholeWord }
-  return { query: f.query, options, key: `${f.caseSensitive ? 1 : 0}${f.wholeWord ? 1 : 0}:${f.query}` }
+  const markupView = currentMarkupView()
+  return { query: f.query, options, markupView, key: `${f.caseSensitive ? 1 : 0}${f.wholeWord ? 1 : 0}${markupView}:${f.query}` }
 }
 
 function publish() {
@@ -99,9 +102,9 @@ export function scanNow(opts: ScanOptions = {}): void {
     publish()
     return
   }
-  const { query, options, key } = searchParams()
+  const { query, options, key, markupView } = searchParams()
   const state = ed.state
-  matches = findMatches(state.doc, query, options)
+  matches = findMatches(state.doc, query, options, markupView)
   scannedDoc = state.doc
   scannedKey = key
   current = indexAtOrAfter(matches, opts.anchor ?? state.selection.from)
@@ -144,14 +147,15 @@ function selectMatch(tr: Transaction, m: MatchRange) {
   tr.setSelection(note ? NodeSelection.create(tr.doc, note[0]) : TextSelection.create(tr.doc, m.from, m.to)).scrollIntoView()
 }
 
-let beforeReveal: (() => void) | null = null
+let beforeReveal: ((el: Element | null) => boolean | void) | null = null
 
 /**
- * Hook run before the find panel scrolls the current match into view by its DOM position. A host
- * that lays the editor out (pagination) uses it to finish pending layout work first, so the match is
- * where it is painted. One hook; `null` removes it.
+ * Hook run before the find panel scrolls the current match (its highlight element, `el`) into view by
+ * its DOM position. A host that lays the editor out (pagination) uses it to finish pending layout work
+ * first, so the match is where it is painted; returning true means the host revealed it itself (Book
+ * mode turns to the match's spread) and the panel does not scroll. One hook; `null` removes it.
  */
-export function setFindRevealHook(hook: (() => void) | null): void {
+export function setFindRevealHook(hook: ((el: Element | null) => boolean | void) | null): void {
   beforeReveal = hook
 }
 
@@ -160,7 +164,7 @@ export function setFindRevealHook(hook: (() => void) | null): void {
  * is not the case while typing in the find field, so scroll the current highlight ourselves.
  */
 function revealCurrent(ed: Editor) {
-  beforeReveal?.()
+  if (beforeReveal?.(ed.view.dom.querySelector(`.${CURRENT_CLASS}`))) return
   const el = ed.view.dom.querySelector(`.${CURRENT_CLASS}`)
   if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center', inline: 'nearest' })
 }
@@ -236,35 +240,64 @@ export function findPrevious(): void {
 }
 
 /**
+ * Replace works in the current markup view. Not in Original: it shows deleted text as plain text
+ * (Find finds it, Replace skips it) and hides what a tracked Replace inserts, so a replacement would
+ * seem to do nothing. The panel disables Replace and Replace All there and says why.
+ */
+export const canReplaceInView = (view: MarkupView = currentMarkupView()): boolean => view !== 'original'
+/** The panel's note while Replace is off in the Original view. */
+export const REPLACE_IN_ORIGINAL_NOTE = 'Switch to All Markup to replace'
+
+/**
  * Replace the current match, then move to the next one. Returns true if something was replaced.
  * Each Replace is its own undo step (history is closed before and after), so undo walks back
  * one replacement at a time; Replace All is a single step.
  */
 export function replaceCurrent(): boolean {
   const ed = getEditor()
-  if (!ed) return false
+  if (!ed || !canReplaceInView()) return false
   if (!isFresh(ed)) scanNow()
-  const m = matches[current]
+  // Track changes: a match that is all deleted text (found in All Markup) cannot be replaced.
+  const at = replaceableFrom(ed.state.doc, current)
+  const m = matches[at]
   if (!m) return false
   const replacement = findState().replacement
   const tr = replaceRange(ed.state.tr, ed.schema, m, replacement)
   closeHistory(clearFindDecorations(tr))
   ed.view.dispatch(tr)
-  scanNow({ anchor: m.from + replacement.length, reveal: true, closeUndoGroup: true })
+  scanNow({ anchor: m.from + replacement.length, closeUndoGroup: true })
+  // With Track Changes on the replaced text stays (deleted): go on past it, to a match still there.
+  const next = replaceableFrom(ed.state.doc, current)
+  if (next >= 0) goTo(ed, next)
+  else if (current >= 0) goTo(ed, current)
   return true
+}
+
+/** The first match at or after `index` (wrapping) that is not all deleted text; -1 when none is. */
+function replaceableFrom(doc: PMNode, index: number): number {
+  if (index < 0 || matches.length === 0) return -1
+  for (let k = 0; k < matches.length; k++) {
+    const i = (index + k) % matches.length
+    if (!deletedRange(doc, matches[i])) return i
+  }
+  return -1
 }
 
 /**
  * Replace every match in a single transaction (one undo step restores all of them).
- * Returns the number of replacements.
+ * Returns the number of replacements (matches that are all deleted text are skipped).
  */
 export function replaceAll(): number {
   const ed = getEditor()
-  if (!ed) return 0
+  if (!ed || !canReplaceInView()) return 0
   if (!isFresh(ed)) scanNow()
-  const count = matches.length
+  const doc = ed.state.doc
+  const replaceable = matches.map((m) => !deletedRange(doc, m))
+  const count = replaceable.filter(Boolean).length
   if (count === 0) return 0
-  const tr = replaceAllRanges(ed.state.tr, ed.schema, matches, findState().replacement)
+  const tr = replaceAllRanges(ed.state.tr, ed.schema, matches, findState().replacement, replaceable)
+  // A bulk edit: it may change a passage locked by a re-write (which is then marked "original changed").
+  tr.setMeta(BULK_EDIT_META, true)
   closeHistory(clearFindDecorations(tr))
   ed.view.dispatch(tr)
   scanNow({ closeUndoGroup: true })
@@ -306,6 +339,9 @@ export function startFindEngine(): () => void {
       scheduleScan(QUERY_DEBOUNCE_MS, { reveal: true })
     } else if (s.editor.docVersion !== prev.editor.docVersion) {
       scheduleScan(DOC_DEBOUNCE_MS)
+    } else if (s.trackChanges.markupView !== prev.trackChanges.markupView) {
+      // Track changes: what can be found follows the markup view.
+      scheduleScan(0)
     }
   })
   const unsubEditor = subscribeEditor(() => {

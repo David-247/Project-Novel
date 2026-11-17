@@ -7,6 +7,9 @@ import {
   writeStyle,
   type StyleDef,
 } from '@/shared/book'
+import type { Transform } from '@tiptap/pm/transform'
+import { TRACK_SKIP_META } from '@/features/track-changes'
+import { BULK_EDIT_META } from '@/shared/rewrite'
 import { useStore } from '@/shared/store'
 import { getEditor } from '../controller'
 import { countBlocksWithStyle, remapStyleInDoc } from './block-styles'
@@ -103,8 +106,31 @@ export function countStyleUses(id: string): number {
 }
 
 /**
+ * Re-maps a deleted style in some document (a transform over it): every block using the style takes
+ * its replacement, and pending tracked style changes that would restore it restore the replacement.
+ * Returns the number of blocks re-mapped.
+ */
+export type StyleRemap = (tr: Transform) => number
+
+const deletedListeners = new Set<(styleId: string, remap: StyleRemap) => void>()
+
+/**
+ * Called when a style is deleted, before the manuscript is re-mapped, with a function re-mapping it in
+ * another document. For documents kept outside the manuscript (the re-writes' original, versions and
+ * kept copies, the open revision), so none of them brings the deleted style back. Returns unsubscribe.
+ */
+export function onStyleDeleted(fn: (styleId: string, remap: StyleRemap) => void): () => void {
+  deletedListeners.add(fn)
+  return () => void deletedListeners.delete(fn)
+}
+
+/**
  * Deletes a custom style: its blocks are re-mapped to its parent (or Body) in one document change
  * (not an undo step, since the definition is gone), and styles based on it inherit from its parent.
+ * The change is a bulk edit (BULK_EDIT_META): it applies to a passage locked by an open re-write too.
+ * It is never a tracked change (TRACK_SKIP_META: rejecting it could only bring back a style that no
+ * longer exists); pending tracked style changes that would restore the style restore its replacement
+ * instead. Documents outside the manuscript follow (onStyleDeleted).
  * Returns the number of blocks re-mapped, or null when the style cannot be deleted.
  */
 export function deleteStyle(id: string): number | null {
@@ -112,12 +138,20 @@ export function deleteStyle(id: string): number | null {
   const targetId = deleteTarget(id)
   const nextStored = removeStyle(book().styles, id, targetId)
   const target = resolveStyles(nextStored).get(targetId) ?? resolveStyles(nextStored).get(DEFAULT_STYLE_ID)!
+  const remap: StyleRemap = (tr) => remapStyleInDoc(tr, id, target)
+  for (const fn of [...deletedListeners]) {
+    try {
+      fn(id, remap)
+    } catch (err) {
+      console.error('[styles] a style-deleted listener failed', err)
+    }
+  }
   let remapped = 0
   const ed = getEditor()
   if (ed) {
     const tr = ed.state.tr
-    remapped = remapStyleInDoc(tr, id, target)
-    if (tr.docChanged) ed.view.dispatch(tr.setMeta('addToHistory', false))
+    remapped = remap(tr)
+    if (tr.docChanged) ed.view.dispatch(tr.setMeta('addToHistory', false).setMeta(BULK_EDIT_META, true).setMeta(TRACK_SKIP_META, true))
   }
   setStyles(nextStored)
   return remapped

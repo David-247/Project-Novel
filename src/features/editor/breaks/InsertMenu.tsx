@@ -3,7 +3,7 @@ import { NodeSelection } from '@tiptap/pm/state'
 import { useRef, useState } from 'react'
 import type { Ref } from 'react'
 import { Button, cn, focusRing, formatShortcut, detectPlatform, Tooltip } from '@/shared/ui'
-import { getEditor } from '../controller'
+import { getActiveEditor } from '../controller'
 import { getFootnoteEditing } from '../footnote/editing'
 import { setChaptersStartOn, type ChaptersStartOn } from './chapter-start'
 import { CHAPTER_START_CONTROLS, INSERT_ITEMS, INSERT_MENU_CONTROL, ORNAMENT_CONTROLS } from './controls'
@@ -12,6 +12,8 @@ import { useResolvedStyles } from '../styles/resolved'
 import { STYLE_IDS } from '@/shared/book'
 
 export interface InsertMenuProps {
+  /** Visible name and accessible name of the trigger (default "Insert"). */
+  label?: string
   /** Props from an asChild parent (a toolbar item) land on the trigger button. */
   [prop: string]: unknown
   ref?: Ref<HTMLButtonElement>
@@ -41,7 +43,7 @@ function Check() {
  * selects, Escape closes and returns focus to the button. Rows are 40px tall for touch. The ornament
  * applies to the selected scene break, if one is selected, and to scene breaks inserted afterwards.
  */
-export function InsertMenu({ ref, ...forwarded }: InsertMenuProps) {
+export function InsertMenu({ ref, label = INSERT_MENU_CONTROL.label, ...forwarded }: InsertMenuProps) {
   const styles = useResolvedStyles()
   const chaptersStartOn: ChaptersStartOn = styles.get(STYLE_IDS.chapterTitle)?.breakBefore === 'recto' ? 'recto' : 'page'
   const [ornament, setOrnament] = useState(getNewSceneBreakOrnament)
@@ -51,7 +53,7 @@ export function InsertMenu({ ref, ...forwarded }: InsertMenuProps) {
   const chooseOrnament = (value: string) => {
     setNewSceneBreakOrnament(value)
     setOrnament(value)
-    const ed = getEditor()
+    const ed = getActiveEditor()
     if (ed && ed.state.selection instanceof NodeSelection && ed.state.selection.node.type.name === 'sceneBreak') {
       ed.chain().focus().setSceneBreakOrnament(value).run()
     }
@@ -61,8 +63,8 @@ export function InsertMenu({ ref, ...forwarded }: InsertMenuProps) {
     <Menu.Root modal={false}>
       <Tooltip controlId={INSERT_MENU_CONTROL.id} {...forwarded} ref={ref as Ref<HTMLElement>}>
         <Menu.Trigger asChild>
-          <Button variant="ghost" data-control-id={INSERT_MENU_CONTROL.id} aria-label={INSERT_MENU_CONTROL.label} className="gap-2">
-            <span>{INSERT_MENU_CONTROL.label}</span>
+          <Button variant="ghost" data-control-id={INSERT_MENU_CONTROL.id} aria-label={label} className="gap-2">
+            <span>{label}</span>
             <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 text-text-muted">
               <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -80,7 +82,7 @@ export function InsertMenu({ ref, ...forwarded }: InsertMenuProps) {
             inserted.current = false
             e.preventDefault()
             // An inserted footnote has its own editor, which holds the focus.
-            if (!getFootnoteEditing()) getEditor()?.commands.focus()
+            if (!getFootnoteEditing()) getActiveEditor()?.commands.focus()
           }}
           className="z-40 min-w-64 max-w-[calc(100vw-1rem)] rounded-control border border-border bg-surface-raised p-1 text-text shadow-raised"
         >
@@ -90,7 +92,7 @@ export function InsertMenu({ ref, ...forwarded }: InsertMenuProps) {
                 data-control-id={item.id}
                 className={cn(itemClass, 'pl-2.5')}
                 onSelect={() => {
-                  const ed = getEditor()
+                  const ed = getActiveEditor()
                   inserted.current = Boolean(ed)
                   if (ed) item.run(ed)
                 }}

@@ -12,3 +12,19 @@ body,
 body {
   margin: 0;
 }
+
+/* Settings > Motion: 'Reduce motion' (or the OS setting, when set to follow it) stops CSS animation
+   and transitions app-wide. The attribute is set by src/features/settings (useReduceMotionAttribute).
+   It is the only app-wide motion switch: 'Allow motion' overrides the OS setting (no rule keyed on
+   prefers-reduced-motion alone; e2e/theme.spec.ts checks both).
+   `none`, not a tiny duration: a non-zero transition-duration with the default transition-property
+   (all) starts a transition on every changed property of every element, so a reflow that moves the
+   book's blocks (their page offsets) started thousands of transitions (trim reflow 8-10x slower in
+   WebKit). With no animation, Radix Presence unmounts closing menus and dialogs at once. */
+:root[data-reduce-motion='on'] *,
+:root[data-reduce-motion='on'] *::before,
+:root[data-reduce-motion='on'] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}

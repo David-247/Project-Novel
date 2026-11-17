@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, openRecent, pressTab, saveStatus, seedProject, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, openRecent, pressTab, saveStatus, seedProject, waitForLayout, reveal, ribbonTab } from './helpers'
 import { logFocusOnRetry } from './focus-log'
 
 /**
@@ -13,7 +13,7 @@ import { logFocusOnRetry } from './focus-log'
 const ctl = (page: Page, id: string) => page.locator(`[data-control-id="${id}"]`)
 const tip = (page: Page) => page.locator('[data-tooltip-body]')
 
-/** Phase 2 controls always present in the spread view (toolbar and status bar). */
+/** Phase 2 controls always present in the spread view (status bar, and the ribbon on their tab). */
 const PHASE2_CONTROLS = [
   'book.trimSize',
   'styles.picker',
@@ -34,7 +34,7 @@ const PHASE2_CONTROLS = [
 ]
 
 async function audit(page: Page, where: string, ids: string[] = []) {
-  for (const id of ids) await expect(ctl(page, id).first(), `${where}: ${id} rendered`).toBeVisible()
+  for (const id of ids) await expect((await reveal(page, id)).first(), `${where}: ${id} rendered`).toBeVisible()
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips()), where).toEqual([])
 }
 
@@ -75,32 +75,32 @@ test('spread view: every Phase 2 control has a wired tooltip, with each menu, di
   await expect(page.getByTestId('page-indicator')).toHaveText(/^Pages? \d/)
 
   // Trim size menu (one control per size).
-  await ctl(page, 'book.trimSize').click()
+  await (await reveal(page, 'book.trimSize')).click()
   await expect(page.getByRole('menuitemradio')).toHaveCount(9)
   await audit(page, 'trim size menu', ['book.trimSize.uk-a5', 'book.trimSize.us-6x9'])
   await escapeFrom(page, page.getByRole('menu'))
 
   // Insert menu: breaks, chapters start on, ornaments, footnote.
-  await ctl(page, 'insert.menu').click()
+  await (await reveal(page, 'insert.menu')).click()
   await audit(page, 'insert menu', ['insert.pageBreak', 'insert.newChapter', 'insert.sceneBreak', 'insert.chapterStart.page', 'insert.chapterStart.recto', 'footnote.insert'])
   await escapeFrom(page, page.getByRole('menu'))
 
   // Modify style (from a chapter title) and Manage styles.
   await clickBlockStart(page, editor(page).locator('h1').first())
-  await ctl(page, 'styles.edit').click()
+  await (await reveal(page, 'styles.edit')).click()
   const modify = page.getByRole('dialog', { name: /^Modify style/ })
   await expect(modify).toBeVisible()
   await audit(page, 'Modify style dialog', ['styles.field.fontSize', 'styles.field.breakBefore', 'styles.modify.save', 'styles.modify.cancel'])
   await ctl(page, 'styles.modify.cancel').click()
   await expect(modify).toHaveCount(0)
-  await ctl(page, 'styles.manage').click()
+  await (await reveal(page, 'styles.manage')).click()
   const manage = page.getByRole('dialog', { name: 'Manage styles' })
   await expect(manage).toBeVisible()
   await audit(page, 'Manage styles dialog', ['styles.manage.new', 'styles.manage.duplicate', 'styles.manage.modify'])
   await escapeFrom(page, manage)
 
   // Headers & page numbers, and Book details stacked on it.
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   const hf = page.getByRole('dialog', { name: 'Headers & page numbers' })
   await expect(hf).toBeVisible()
   await audit(page, 'Headers & page numbers dialog', [
@@ -129,7 +129,7 @@ test('spread view: every Phase 2 control has a wired tooltip, with each menu, di
   await expect(hf).toHaveCount(0)
 
   // Footnote options, and the footnote editor popover opened from the reference.
-  await ctl(page, 'footnote.options').click()
+  await (await reveal(page, 'footnote.options')).click()
   const fno = page.getByRole('dialog', { name: 'Footnote options' })
   await expect(fno).toBeVisible()
   await audit(page, 'Footnote options dialog', ['footnote.options.numbering', 'footnote.options.format', 'footnote.options.separator', 'footnote.options.done'])
@@ -155,27 +155,36 @@ test('Phase 2 toolbar and status bar controls show their tooltip on hover and on
   for (const id of PHASE2_CONTROLS) {
     await pointerAway(page)
     await expect(tip(page)).toHaveCount(0)
-    await ctl(page, id).hover()
+    await (await reveal(page, id)).hover()
     await expect(tip(page), `hover tooltip for ${id}`).toBeVisible()
     await expect(tip(page), `hover tooltip for ${id}`).toHaveText(/\w.{8,}/)
   }
   await pointerAway(page)
 
-  // Keyboard: the toolbar's roving focus (arrow keys) through the Phase 2 groups.
+  // Keyboard: the ribbon's roving focus (arrow keys) through the Phase 2 groups, tab by tab: from the
+  // tab list (the last tab) into the row, or from the control before a group.
   // (Clear direct formatting may be disabled with nothing to clear; roving focus then skips it.)
   const focusedId = () => page.evaluate(() => document.activeElement?.closest('[data-control-id]')?.getAttribute('data-control-id') ?? null)
-  await ctl(page, 'styles.picker').focus()
-  const targets = new Set(['styles.edit', 'styles.manage', 'insert.menu', 'footnote.options', 'book.headerFooter', 'book.trimSize'])
-  for (let i = 0; i < 16 && targets.size; i++) {
-    const before = await focusedId()
-    await page.keyboard.press('ArrowRight')
-    await expect.poll(focusedId, `roving focus moves on from ${before}`).not.toBe(before)
-    const id = (await focusedId())!
-    if (!targets.has(id)) continue
-    await expect(tip(page), `focus tooltip for ${id}`).toBeVisible()
-    targets.delete(id)
+  const walks: [string, string[]][] = [
+    ['styles.picker', ['styles.edit', 'styles.manage']],
+    ['ribbon.cmd.insert.sceneBreak', ['insert.menu', 'ribbon.cmd.footnote.insert', 'footnote.options']],
+    ['ribbon.tab.view', ['book.trimSize', 'book.headerFooter']],
+  ]
+  for (const [start, list] of walks) {
+    const targets = new Set(list)
+    if (start === 'ribbon.tab.view') await ribbonTab(page, 'layout')
+    await (await reveal(page, start)).focus()
+    for (let i = 0; i < 16 && targets.size; i++) {
+      const before = await focusedId()
+      await page.keyboard.press('ArrowRight')
+      await expect.poll(focusedId, `roving focus moves on from ${before}`).not.toBe(before)
+      const id = (await focusedId())!
+      if (!targets.has(id)) continue
+      await expect(tip(page), `focus tooltip for ${id}`).toBeVisible()
+      targets.delete(id)
+    }
+    expect([...targets], `Phase 2 ribbon controls reached with ArrowRight from ${start}`).toEqual([])
   }
-  expect([...targets], 'Phase 2 toolbar controls reached with ArrowRight').toEqual([])
   await page.keyboard.press('Escape')
 
   // Keyboard: Tab order in the status bar (spread toggle, zoom out, zoom, zoom in).
@@ -195,7 +204,7 @@ test('Phase 2 toolbar and status bar controls show their tooltip on hover and on
     ).toPass({ timeout: 15_000 })
   }
   // Paper picker: arrow keys move between options and show each tooltip.
-  await ctl(page, 'book.surface.auto').focus()
+  await (await reveal(page, 'book.surface.auto')).focus()
   for (const id of ['book.surface.book', 'book.surface.white', 'book.surface.dark']) {
     await page.keyboard.press('ArrowRight')
     await expect(ctl(page, id)).toBeFocused()

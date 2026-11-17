@@ -21,9 +21,13 @@ brightest, quietest plane on screen and everything else steps back.
 - **Shape.** Controls use a 6px radius and containers use 10px. The different radii make it easy to
   tell a control from a container at a glance.
 - **Motion.** There is one moment: a dialog fades and rises 4px when the user opens it. Nothing animates
-  without the user doing something, and everything is disabled under `prefers-reduced-motion`.
+  without the user doing something, and everything is disabled while motion is reduced: Settings >
+  Motion, whose 'Follow system' follows the OS `prefers-reduced-motion` and whose 'Allow motion'
+  overrides it. CSS keys on `<html data-reduce-motion="on|off">` (settings/motion.ts), never on the OS
+  query directly.
 - **Touch-tolerant.** Every control is at least 32×32 (`min-h-control min-w-control`). No action is
-  hover-only. The toolbar wraps instead of overflowing, and the dialog width is `min(28rem, 100vw - 2rem)`.
+  hover-only. The toolbar (the ribbon) keeps one fixed-height row and scales its groups down instead of
+  wrapping or scrolling (see "Ribbon"), and the dialog width is `min(28rem, 100vw - 2rem)`.
 
 ## Tokens: `src/shared/theme/tokens.css` (single source)
 
@@ -91,7 +95,7 @@ native props and `ref` (React 19 ref-as-prop), and each has a visible focus ring
 | `Button` | `variant: 'primary' \| 'secondary' \| 'ghost' \| 'danger'` (default secondary), `size: 'md' \| 'lg'` | Text actions. Defaults to `type="button"`. One primary per view. |
 | `IconButton` | `label` (required, becomes the accessible name), `children` (an SVG) | Icon-only toolbar actions |
 | `ToggleButton` | `pressed`, `onPressedChange(next)`, `label?` | Bold, italic and other on/off toolbar states. Sets `aria-pressed`. Pressed shows a fill and an underline bar, so it doesn't rely on colour alone. |
-| `ToolbarGroup` | `label` (required) | A `role="group"` cluster that wraps on narrow widths |
+| `ToolbarGroup` | `label` (required) | A `role="group"` cluster (the ribbon scales whole groups, see "Ribbon") |
 | `ToolbarSeparator` | none | A vertical `role="separator"` |
 | `TextInput` | native input props | Find field, rename field. Set `aria-invalid` to get a danger border. |
 | `Select` | `options: {value,label}[]`, `wrapperClassName?` (for layout on the wrapper span), plus native select props (`className` is applied to the `<select>`) | A native select with a themed chevron |
@@ -322,13 +326,39 @@ The writing surface is now a desk with book pages on it (`src/features/paginatio
 - **Book points.** The page surface sets `--nv-pt` to a true point (96/72 px); zoom is a transform on
   top, so style sizes (`calc(N * var(--nv-pt))`) are exact at 100 % and line breaks never depend on zoom.
 - **Status bar page controls** sit at the trailing end, after the project actions: the page indicator
-  ("Pages 12–13 of 384", tabular figures), the spread toggle (an open-book icon, pressed = two pages),
+  ("Pages 12–13 of 384", tabular figures; since Phase 3 a ghost button that opens Go to Page, with
+  its tooltip and the Go to Page shortcut; the button keeps the status bar's container-query shortening),
+  the spread toggle (an open-book icon, pressed = two pages),
   zoom out, the zoom select (Fit spread / Fit width / 50–200 %) and zoom in. All are standard
   `IconButton` / `ToggleButton` / `Select` controls: 32 px targets, tooltips from the registry, keyboard
   reachable in the footer's tab order, existing contrast pairs.
 - **Fit spread is the default zoom**: the whole spread fits the window, like holding the book open.
   Narrow windows fall back to single pages (touch-tolerant; no hover-only actions). A press on a margin
   or the desk puts the caret on the nearest line of that page.
+
+### Navigation modes: Book and Continuous Scroll (Phase 3)
+
+The user asked for the pages to behave "like an actual book instead of a goofy Word doc". So the
+default navigation is **Book**: one spread (or one page) on the desk, centred, with no scrolling between
+spreads. **Continuous Scroll** (the Phase 2 view, unchanged) is the alternative. The choice is an app
+preference (`pageNavigation` in preferences.json, Settings > Page navigation, View > Book / Continuous
+Scroll), not a book setting.
+
+- **Turning pages.** Click or tap the blank desk right of the spread for the next one, left for the
+  previous one. A press on the pages still places the caret. One wheel or trackpad gesture (a swipe and
+  its momentum, horizontal too) turns one spread. Page Up / Page Down and Ctrl+Home / Ctrl+End (Cmd+Up /
+  Cmd+Down on macOS) also turn, as does Go to Page.
+- **Turn controls** sit in a 48 px lane on each side of the spread, at the middle of the window. They are
+  small paper tabs: `--page-bg` with a 1 px border of `--page-fg` mixed 80 % into `--page-bg` (3:1 or more against the desk on every surface), a `--page-fg` chevron, and the
+  page shadow, so they read as part of the book on every surface. They are 36 × 64 px targets, always
+  visible (never hover-only), with tooltips, and reachable by Tab. A press does not take the focus from the
+  manuscript. At the first or last spread the control is dimmed to 40 % and marked `aria-disabled`; it stays
+  focusable, so its tooltip still explains it. They use `--page-focus-ring` for focus.
+- **Turn transition.** A 160 ms ease-in (opacity 0.55 to 1, 14 px slide from the turning side). It is
+  skipped when motion is reduced (Settings > Motion, or the OS setting). There is no page curl.
+- **The caret drives the view.** When the selection moves off the spread (typing onto the next page,
+  arrows, Find, Next Comment, a footnote), the view turns to it. Turning by hand leaves the caret where it
+  is, and the next keystroke turns back to it, as in a word processor.
 
 ## Headers, footers and page numbers (Phase 2)
 
@@ -357,3 +387,339 @@ running head is clipped (one line, `overflow: hidden`, ellipsis) and can never m
 - **Touch and keyboard**: the toolbar button is the keyboard route (no hover-only access); every field is a native
   select, text field or checkbox with a visible label and a registry tooltip.
 
+## Menus and commands (Phase 3)
+
+One **command registry** (`src/shared/commands`) holds every user-facing action: id, label, a one-line description,
+an optional shortcut (ProseMirror syntax, the only place a shortcut is declared), its menu place
+(`{ id, group, order, submenu? }`), live `isEnabled()` / `isChecked()` and `run()`. Slices register their commands
+through their public index (`registerStorageCommands`, `registerEditorCommands`, `registerPaginationCommands`,
+`registerSurfaceCommands`, `registerBookSettingsCommands`, `registerHeaderFooterCommands`,
+`registerFootnoteCommands`, `registerSettingsCommands`, `registerCommentsCommands`, `registerTrackChangesCommands`; the menu slice adds its own) and the composition root calls them. Ids reuse the matching
+control's `data-control-id`, so a menu item, its toolbar button and its tooltip share one copy. A duplicate id or
+shortcut, or a missing description, throws in development; `App.menus.test.tsx` checks the whole app's registry
+(one-line descriptions of at most 100 characters, no shortcut twice, the same shortcut on a command and on its
+control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
+
+- **Rendering** (decision 4ec247fc): the macOS desktop app shows the **native global menu bar**, built in Rust
+  (`src-tauri/src/menu.rs`, `menu_set`) from a serialized snapshot of the registry (ids, labels, accelerators,
+  enabled/checked state, structure). The snapshot is re-sent when the registry changes and, debounced, when
+  `notifyCommandStateChanged()` reports a state change; Rust updates enabled/checked in place when the structure is
+  unchanged. Every item emits `menu://command` with its id. Cut, Copy, Paste, Select All, Services and Hide are the
+  OS's own items there. Native macOS menu items cannot show tooltips: decision 4ec247fc exempts them; their
+  description surface is the label, the accelerator and Help > Keyboard Shortcuts. **Windows** has no native menu:
+  the themed **in-app menu bar** (Radix Menubar, menu slice) sits above the toolbar in the app shell. The web and e2e
+  builds render the in-app bar too (`menuBarKind()`), so Playwright covers it on both engines. Both are built by
+  `buildMenuModel`, so labels, order and shortcuts match. Menu `app` (About, Settings, Quit) is the macOS app menu;
+  elsewhere About moves to Help and the rest to the end of File. An empty menu is left out.
+- **Structure**: File (New Project…, Open Project…, Open Recent ▸, Close Project | Save, Save a Copy… | Book
+  Details…, Page Setup ▸ | Settings… | Quit Novel; on macOS Settings… and Quit are in the Novel menu), Edit (Undo, Redo | Cut, Copy, Paste, Paste as Plain Text, Select All | Find…,
+  Replace… | Go to Page…), View (Single Page, Two-Page Spread | Zoom In, Zoom Out, Fit Spread, Fit Width, Actual
+  Size | Paper ▸ | Markup ▸ (All Markup, Simple Markup, No Markup, Original) | Comments Panel | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote,
+  Comment), Format (Bold, Italic,
+  Underline | Font ▸ (System Default and the installed families, as in the picker), Font Size ▸ | Paragraph Style ▸, Alignment ▸, Lists ▸, Line Spacing ▸, Space After ▸, First-Line Indent ▸ | Clear Formatting | Modify Style…, Manage Styles… |
+  Headers & Page Numbers…, Footnote Options…), Review (Track Changes | New Comment | Next Comment, Previous Comment | Show Resolved
+  Comments), Help (Keyboard Shortcuts, Project Folder Format | About Novel).
+- **Keyboard** (one window listener, `installCommandShortcuts`): bubble phase, so a key the editor's keymap already
+  handled is not run again; Cut/Copy/Paste keep the webview's own handling (`nativeShortcut`). Each command has a
+  guard (`Command.guard`), applied to the key and to the native menu item alike: **manuscript** (Edit history and
+  clipboard, Insert, Format, and New Comment, which anchors at the caret): not while another text field (the find
+  field, a comment reply, the footnote popover) or a dialog has focus; **modal** (Track Changes, View > Markup): from
+  any field, the footnote popover included, but not behind a dialog; **none** (everything else, e.g. Next / Previous
+  Comment, Show Resolved Comments, Save): anywhere, so they work while typing in the comments panel. On macOS, a native menu event right after the same key press in the webview is ignored (`wasJustPressed`).
+- **In-app bar**: Alt alone or F10 moves focus to File (again: back to the text), Alt+underlined letter opens a menu
+  (not on macOS, where Option types characters), arrows move between menus and items, Enter/Space choose, Escape
+  closes. Closing gives focus back to where it was (normally the manuscript, through its view, so the selection is
+  exactly the one the user made) and only then runs the chosen command, as the toolbar does. Rows are 40px (touch),
+  titles 32px; colours are the chrome tokens, so it follows light/dark and stays AA. Every title, submenu title and
+  item has a tooltip (a registry entry, else its command's description) and is in the coverage audit.
+- **Help**: Keyboard Shortcuts is generated from the registry (searchable), followed by a "Navigation" section
+  for keys handled outside it (`EXTRA_SHORTCUTS` in `src/shared/commands`: PageUp/PageDown, the book's start and
+  end, Home/End on a page-turn control, Escape from the ribbon, Alt/F10 for the menu bar); Project Folder Format
+  renders the bundled `docs/project-format.md` (no network); About Novel shows the version from the app config
+  (`getVersion`).
+- **Layout-shifted keys**: a shortcut on a punctuation key (`Mod-=`, `Mod-/`) also matches when the keyboard layout
+  needs Shift to type that character (German: Ctrl+Shift+0 types "=", Ctrl+Shift+7 types "/"); letters still need
+  their exact Shift. `Command.altShortcuts` adds keys that run a command without being shown (Zoom In's `Mod-+`:
+  the numpad plus and US Ctrl+Shift+=); they collide like main shortcuts.
+- **Known limitation: Ctrl+Alt+Arrow on Windows.** Previous / Next Change (`Mod-Alt-ArrowUp/Down`) and the
+  re-write's Go to Left / Right Page (`Mod-Alt-ArrowLeft/Right`) are Ctrl+Alt+Arrow on Windows, the keys some Intel
+  graphics drivers once used to rotate the screen. Ruling (Phase 3 final review, UI #8): they stay, since those
+  hotkeys are off by default on most current drivers; where a driver still takes them, the app never sees the key
+  and the commands remain in the Review menu and the ribbon.
+
+## Ribbon: the toolbar (Phase 3, T6)
+
+The toolbar is a **ribbon modelled on Microsoft Word** (user decision on ticket ec20ef41: "follow how Word does it"):
+tabs over one row of groups. It never wraps and never changes height (77px including the tab row), down to the
+app's 480px minimum, and has no horizontal scrollbar.
+
+What Word does, and what we took from it:
+- **Tabs and groups.** Word's ribbon groups related commands under task tabs (Home, Insert, Layout, Review,
+  View); each group has a name. We use Word's tab names and order and its group names where they fit.
+- **Quick Access Toolbar.** Word keeps Undo/Redo outside the tabs so they are always one click away. Ours sit left of
+  the tabs on every tab (`<Ribbon quickAccess>`).
+- **Adaptive scaling.** As Word's window narrows, groups shrink one at a time, from large, to small, to icon only,
+  then to a single **group button** that keeps the group's icon and name and opens the group as a dropdown. The
+  order is set per group (the least used first, generally right to left). Ours: full → compact (where a group has
+  one) → collapsed group button, ordered by group priority, and collapsing counts as a bigger loss than compacting.
+- **Simplified ribbon overflow.** Word's single-line ribbon puts what does not fit behind a "…" button at the end
+  of the row. Ours: below the minimum width the collapsed group buttons move into **More** at the end of the row
+  (one flat menu, a titled section per group; submenus per group were tried and fell off the screen on narrow
+  windows). At 480px and up nothing needs More today; it is there for narrow tablets.
+- **Settings** is not on Word's ribbon (it is File > Options). Ours is File > Settings… (macOS: Novel > Settings…)
+  and Mod-, only; the gear left the toolbar.
+- Google Docs (one row, a "⋮" overflow on the right) and Pages (a small fixed toolbar with an inspector) show the
+  same rule: a constant-height bar, with what does not fit behind one obvious button.
+
+| Tab | Group (order) | Contents |
+| --- | --- | --- |
+| (all tabs) | Quick access | Undo, Redo |
+| Home | Font | Font family, Font size; Bold, Italic, Underline. Compact: narrower fields |
+| Home | Paragraph | Bulleted / numbered list; align left / center / right / justify; Line spacing, Space after, First-line indent; decrease / increase indent. Compact: the three fields move into a "Spacing" dropdown (registry submenus) |
+| Home | Styles | Paragraph style picker, Modify style, Manage styles, Clear direct formatting |
+| Home | Editing | Find, Replace |
+| Insert | Breaks | Chapter Break, Page Break, Scene Break; Break Options (the Insert menu: also "Chapters start on" and the scene-break ornament). Compact: Break Options only (it holds the three breaks); never collapses, since a registry dropdown could not offer the two book settings |
+| Insert | Footnotes | Footnote, Footnote options |
+| Insert | Comments | Comment |
+| Layout | Page Setup | Book size (trim size picker) |
+| Layout | Header & Footer | Headers & page numbers |
+| Layout | Paper | The paper surface picker |
+| Layout | Book | Book Details |
+| Review | Tracking | Track Changes, Markup |
+| Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
+| Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
+| Review | Re-write | Re-write Passage…, Re-writes…, Previous Re-write, Next Re-write (the group's own buttons: an icon on the first, short labels Re-write / Re-writes / Previous / Next; tooltips and the dropdown keep the full names); while a re-write is open, Keep Original / Keep Version; Discard Re-write in the dropdown |
+| View | Views | Single Page, Two-Page Spread; Book, Continuous Scroll (two radio pairs: page view, then navigation mode; Previous / Next Spread are the turn controls on the canvas edges and View menu items, not ribbon buttons) |
+| View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |
+| View | Show | Comments panel |
+| View | Window | Full Screen |
+
+Priorities (higher keeps its size longer): Home Font 90, Styles 80, Paragraph 75, Editing 60 (never collapses: two
+small buttons); Insert Breaks 90, Footnotes 80, Comments 70; Layout Page Setup 90, Header & Footer 80, Paper 70, Book
+60; Review Tracking 90, Changes 85, Comments 80, Re-write 70; View Views 90, Zoom 80, Show 70, Window 60. A group
+whose own controls are no wider than its group button (one icon) never collapses either; it only moves into More.
+
+**Model** (`src/shared/ribbon`, data only; any slice may use it):
+- `RIBBON_TABS` (fixed), `registerRibbonGroups([{ id: '<tab>.<name>', tab, label, order, priority, icon, Content?,
+  hasCompact?, compactMenu?, compactButtons?, menu?, collapsible?, buttons? }])`. `Content` is the slice's own controls (each focusable
+  one a Radix toolbar item, `ToolbarItem`), rendered with `size` 'full' or 'compact'. `menu` lists what the collapsed
+  group / More shows: registry commands (`{ cmd }`) and registry submenus (`{ submenu: { menu, label } }`), so labels,
+  shortcuts, enabled and checked state are the menu bar's. The app's groups are in `src/ribbon-groups.tsx`.
+- **A command joins a group by its `ribbon` field** (`@/shared/commands`):
+  `ribbon: { group: 'review.changes', order: 10 }` adds a labelled button for it to the group (and an item to the
+  group's dropdown); `display: 'menu'` adds only the dropdown item (when the group's `Content` already has a control
+  for it). Enabled and checked are read from the command on every render; renders follow the registry's
+  debounced state signal, so a change made elsewhere (a shortcut, the menu) shows on the button up to
+  `COMMAND_STATE_DEBOUNCE_MS` (120 ms) later, and a click on the button itself shows at once. The button's id is `ribbon.cmd.<command id>` (no clash with the menu item or another control for the same
+  command); its tooltip is the command's label, description and shortcut. **T5, T7 and T8 add their buttons this
+  way**: Review > Changes (Accept / Reject), Review > Re-write, View > Views (page-turn). A group with nothing to
+  show is hidden, so those groups are registered already. A new group with custom controls is one entry in
+  `src/ribbon-groups.tsx`.
+- **Split buttons** (Word's "Accept ▾"): `SplitCommandButton` (`@/features/ribbon`) in a group's `Content`. The
+  main half is the command's ribbon button (`ribbon.cmd.<id>`, an icon and a short label, "Accept"); the arrow is a
+  registry dropdown (`RegistryMenu`) with its own control id and tooltip entry (`review.accept.options`,
+  `review.reject.options`), listing commands and registry submenus. Both halves are 32px toolbar items. The command
+  has no `ribbon` placement (it would show twice); the group's `menu` lists it for the collapsed group and More.
+  Review > Changes: Previous / Next Change are placed by their commands (`buttons: 'before'`), the two split
+  buttons are the group's `Content`.
+- Each command id is shown once in the ribbon (inactive tabs stay mounted, hidden), so a `data-control-id` still
+  names one element.
+
+**Rendering and scaling** (`src/features/ribbon`): one Radix Toolbar holds the quick-access buttons, the tab list
+(`role="tablist"`, buttons `role="tab"`) and the active tab panel, so the arrow keys move through all of them
+(Home/End jump to the ends) and Escape on a control returns to the manuscript. A pointer press on a tab or a
+command button does not take focus from the manuscript. `ribbonSteps()` lists the reduction steps (pure data);
+the panel renders a step, measures the row's natural width (`offsetWidth` of a `w-max` row, before paint, with a
+ResizeObserver on the bar and on the row) and `chooseStep()` picks the smallest step that fits. Growing back needs
+24px to spare (hysteresis), so nothing flickers at a boundary width; unmeasured steps are tried before paint.
+Collapsed groups keep their controls mounted (hidden): their dialogs (Modify / Manage styles) and state survive.
+Group dropdowns and More come from the registry (`RegistryMenu`): opening reads the manuscript's pending selection,
+choosing gives focus back to the manuscript and then runs the command (the selection is kept), Escape returns
+focus to the button.
+
+**Selected tab**: kept for the session (`sessionStorage`); a new app start opens on Home.
+
+**Status bar**: one row as well (`h-statusbar`, no wrap, never clipped). The footer is a named container
+(`@container/statusbar`) and its items shrink with container queries, lowest priority first: below 800px the
+no-project buttons (Save as project…, New project…, Open project…) show icons (their names stay); below 760px the
+page indicator shortens to "12 / 384" and below 560px it hides; below 640px zoom keeps only its menu (every level and
+the fit modes; spread is on the View tab), "Backup available — Restore…" becomes "Restore…" and the tracked changes
+count ("12 changes", T7) shows just the number ("No changes" hides). The save status
+and warnings truncate (full text in the title). Hidden items are `display: none`, so they are out of the Tab order.
+
+**Tests**: `src/features/ribbon/layout.test.ts` (step order, hysteresis, stability),
+`src/features/editor/toolbar/use-toolbar-state.test.tsx` (one shared reading per transaction, detach / re-attach,
+editor swap), `src/features/editor/paragraph-spacing-commands.test.tsx`, `e2e/ribbon.spec.ts` (resizing in 20px steps
+from 1400 to 480 and back on all five tabs: one row, constant height, no canvas jump, monotone and stable placement,
+±2px jitter at each boundary; each group's commands reachable at 1100/800/600/480 on all five tabs, in the bar or
+through the group's menu, its collapsed button or More; keyboard access to collapsed groups and More; formatting from
+a dropdown keeps the selection; tab kept for the session; AA contrast on the four papers in light and dark at 1280,
+480 and 360, collapsed-group icons at 3:1, open group and More menus), `e2e/statusbar.spec.ts` (480/600/800 with and
+without a project, and with tracked changes: every visible control inside the footer, nothing hidden focusable), `e2e/toolbar.spec.ts`
+(control count, 32px targets).
+Screenshots: `scripts/capture-ribbon.mjs`.
+
+## Comments (Phase 3)
+
+Slice `src/features/comments/` (public interface `index.ts`). Format: docs/project-format.md, "comments.json".
+
+- **Anchor**: the inline `comment` mark (attr `id`; `excludes: ''`, so comments overlap each other and any other
+  mark, track changes included). A collapsed caret comments the word at the caret. The anchored text gets a soft
+  paper highlight (`--page-comment-bg`, comments.css, one value per paper surface); a thread with an author colour
+  gets that colour mixed into the paper, as strong as AA for the page text allows on the current paper
+  (`highlightFor`, checked in `comments/model.test.ts` for a palette on all four papers). The selected thread uses
+  `--page-comment-active-bg` and a `--page-comment-ring` underline (3:1). Resolved threads lose the highlight unless
+  Show Resolved is on. All of it is one generated style sheet: nothing changes per keystroke, and no box changes,
+  so the pagination measurement is untouched.
+- **Undo**: thread data lives in the editor's plugin state and changes only through a document step that leaves
+  the text as it is (`CommentThreadStep`), so create, reply, edit, resolve, reopen and delete are each one step of
+  the main undo history (with their marks, for create and delete). The store's `comments` slice mirrors it for the
+  panel and for comments.json.
+- **Margin panel**: to the right of the pages, on the desk (the pages fit into what is left). Cards hold the author,
+  a colour dot, a relative date, the messages, Reply, Resolve / Reopen, Go to text and Delete. Each card is level with
+  its anchor's line (painted position: page offsets and zoom included) and cards stack downward without overlap; the
+  selected card is pulled to its anchor and the ones above it stack upward (Word / Google Docs). Only the visible
+  spread's comments are shown (`layout.pages` + `visibleSpread`, never the scroll position), recomputed on every
+  published reflow, zoom and spread change. The panel takes room only while the manuscript has comments (resolved
+  ones included, so Show Resolved stays at hand).
+- **Connector, never hover alone**: the caret in an anchor, focusing a card and clicking it select the thread (card
+  ringed, anchor lit); hovering a card or its anchor text lights the other side too.
+- **Narrow windows**: when the pages at a readable size plus the panel do not fit, the comments become a toggleable
+  side drawer (a bottom sheet below 640 px) listing the threads in document order; Go to text jumps to the anchor.
+- **Commands**: New Comment (Mod-Alt-m; opens a focused composer, Mod-Enter adds, Escape cancels and returns to the
+  text), Next / Previous Comment (the anchor is centred so its spread is the one in view; both page views), Show
+  Resolved, Comments Panel toggle. Mod-z / Mod-Shift-z in the panel (outside its text fields) undo in the manuscript.
+  Toolbar: `comment.new`, `comment.panel`; every panel and card control has a registry tooltip. Menus (command
+  registry): Review > New Comment (Mod-Alt-m), Next / Previous Comment, Show Resolved Comments (check); Insert >
+  Comment (the same action; the shortcut is shown on Review's); View > Comments Panel (check). Next / Previous are
+  enabled while some shown thread (resolved ones only with Show Resolved) is anchored in the manuscript; hidden
+  threads (anchor text deleted) do not count.
+- **Author**: the Settings author (`getAuthor()`), "Unknown author" when no name is known. When no name is known
+  and the one-time question was never asked, New Comment asks it first and opens the composer after the answer.
+  Edit and Delete appear on one's own messages, matched by author name (a known limitation: two writers with the
+  same name share them). A user without a name owns no message, so "Unknown author" messages are not editable as
+  one's own (the comment author source marks such an author `anonymous`).
+- **Highlights**: two generated style sheets, the author colours (rebuilt when threads, Show Resolved or the paper
+  change) and a small one for the selected / hovered thread, so hovering never regenerates the colour rules.
+
+## Track changes: Review group (Phase 3)
+
+Toolbar group "Review": the Track Changes toggle (`review.track`, Mod-Shift-e; a toggle button with a pen icon,
+its label shown from the `xl` breakpoint, pressed while recording) and the Markup picker (`review.markup`, a
+dropdown whose trigger shows the current view, radio items All Markup / Simple Markup / No Markup / Original, 40 px
+rows). On the page, marks never recolour text, so text contrast is the page's own on every paper; insertions get a
+2 px underline, deletions a 2 px strike-through, formatting changes a dotted rule, and changed blocks / lines a 3 px
+bar 12 px into the inside margin, all in per-surface `--page-tc-*` colours with at least 3:1 against the paper (or
+the author's colour when settings give one). Details: docs/track-changes.md.
+
+## Re-write (Phase 3)
+
+Slice `src/features/rewrite/` (public interface `index.ts`). Format: docs/project-format.md, "rewrites.json".
+The signature feature: a passage rewritten beside its original, compared like two facing pages of the book.
+
+- **Open**: Review ▸ Re-write Passage… (Mod-Alt-w) on the selection widened to whole paragraphs, or the paragraph
+  at the caret; at most one chapter (a wider selection is refused with a notice). A selection inside a passage
+  already in re-write opens that re-write. The spec's selection context menu entry is deferred out of Phase 3:
+  the app has no context menus anywhere.
+- **Menus while the view is open**: one mechanism for the menu bar (pointer and keyboard), the native menu and
+  shortcuts. Text commands (formatting, styles, paragraph spacing, Edit history / clipboard, Insert breaks) act
+  through the editor slice's active editor (`getActiveEditor()`), which the view points at the revision while it
+  has the focus; with the focus elsewhere in the view they are disabled (Edit history / clipboard in the
+  version-name field act on that field). A registry command gate
+  (`setCommandGate`) disables what makes no sense on a revision: Insert Footnote, comments, Find / Replace, Track
+  Changes, Go to Page, page view and zoom. It is an allow-list for the Review menu (only the re-write's own groups
+  stay on) and lists the View groups about the pages and the comments pane (Markup, Paper and Full Screen stay);
+  its test runs over the real registry, so a new group must be placed. Opening a re-write closes Find & Replace.
+  Controls that act without running a command read `useCommandGateAllows(id)`. Copy stays available on both
+  pages. The pages behind the view do not scroll.
+- **The spread**: the comparison view lies over the pages (they stay mounted, laid out and scrolled where they
+  were, so opening re-breaks no pages; the passage's blocks, which take the anchor attribute, are redrawn by
+  ProseMirror behind the view but keep their pagination measurements, since `rewriteId` does not render: see
+  docs/pagination.md, the block cache; e2e/rewrite-perf.spec.ts). Two pages on the desk at the book's trim width, margins and paper surface
+  (`.nv-page`, verso / recto spine shading), typeset by the book style sheet with the manuscript's base face: the
+  original on the left (read-only, focusable to read and select), the revision on the right (an editor with the
+  manuscript's schema: `createEditorExtensions({ detached: true })`, which leaves out what belongs to the
+  manuscript's one view: comment threads, tracked-change recording, the footnote editor, the re-write lock). The
+  labels above the pages are set on the desk; the regions are announced as "Original" and "Revised version N". One
+  scroller holds both pages, so they always scroll together.
+- **Alignment**: the blocks of both sides are aligned (word-similarity global alignment, `align.ts`): paired
+  paragraphs start level, an inserted or removed paragraph leaves a gap opposite it. Levelling is `padding-top` on
+  the higher block (a node decoration; padding never changes margin collapsing), measured per frame after a
+  change; the pairing itself is redone 60 ms after a paragraph is added or removed (typing meanwhile never puts it
+  off), otherwise 150 ms after typing.
+- **The spine** (the one memorable element): the gutter between the pages carries one stitch per aligned row: a
+  ring for an unchanged paragraph, a filled ink stitch for a changed one, a short red or green dash for a paragraph
+  only the original or only the revision has. Decorative (aria-hidden); the differences themselves are in the text.
+- **Differences** (toggle, Mod-Shift-d, on by default): removed words on the original get a rose tint and a
+  strike-through, added words on the revision a green tint and an underline; whole unpaired paragraphs get the
+  tint and a bar in the margin. Word diff: jsdiff `diffWordsWithSpace` (BSD-3-Clause). Per-surface tokens
+  `--page-rw-*` (rewrite.css): page text keeps 4.5:1 on every tint, rules and stitches 3:1 (rewrite.test.tsx).
+- **Versions**: tabs above the pages (arrow keys move and select; double-click or the pen renames inline; New
+  version copies the version shown). Each version keeps its own undo history while the view is open (undo is local
+  to the revision). Flip Pages (Mod-Alt-k) swaps the sides; Go to Left / Right Page (Mod-Alt-ArrowLeft / Right)
+  moves the focus between them. Escape or Close returns to the manuscript; the re-write stays a draft (Escape
+  during an IME composition belongs to the composition). A version this build cannot read (saved by a newer
+  Novel) is shown empty and read-only with a banner, Keep This Version is off for it, and it is written back as it
+  was. Deleting a style while a re-write is open re-maps the hidden passage, the original page, every version
+  (the revision keeps its undo history) and kept copies, so no choice brings the deleted style back.
+- **Undo** is never blocked. When an undo or redo in the manuscript changes text in an open re-write's passage,
+  the re-write is marked "original changed" (the view offers Show current text) and a short notice says so
+  ("Undo changed text in a passage that is in re-write."), over the view too; it goes after a few seconds or when the
+  caret moves. An edit that removes the whole passage (undoing the paragraphs' insertion) or leaves it in pieces
+  says so instead ("The passage for this re-write was removed. Its versions are kept; reopen it to copy text
+  out."); the view shows the same in its banner and the Re-writes list marks it. When a redo or undo puts the same
+  blocks back where the passage was, they are anchored again (only blocks the undo or redo inserted itself) and the notice goes. The history
+  group is closed when a re-write starts, so typing from before is never merged with later edits. Comments can be added to and removed
+  from the passage.
+- **In the manuscript** an open re-write's passage is read-only and marked by a faint `--page-rw-lock-bg` tint and
+  a dashed "tacking stitch" bar in the left margin with a ring at its top (pseudo-elements: no box changes, so
+  pagination is untouched). A click on the bar reopens the re-write; so do the notice that floats over the pages
+  while the caret is in the passage (stronger after an edit there was refused), Review ▸ Re-writes… and Next /
+  Previous Re-write.
+- **Narrow windows** (two pages do not fit): one page at a time, with an Original / Revised toggle in the header;
+  the focus keys switch pages too.
+- **Ribbon**: Review ▸ Re-write group: Re-write Passage… (`rewrite.open`, with the re-write icon), Re-writes…
+  (`rewrite.list`), Previous / Next Re-write (`rewrite.prev`, `rewrite.next`). The group's `Content` shows them
+  as command buttons with short labels (Re-write, Re-writes, Previous, Next) so the group stays full at 1280px;
+  the commands' `ribbon` placements are `display: 'menu'` (the collapsed group and More list the full names).
+  While a re-write is open the group adds Keep Original and Keep Version (`rewrite.keepOriginal`,
+  `rewrite.keepVersion`): contextual, so the group keeps its width the rest of the time. Discard Re-write is in the
+  group's dropdown and the Review menu.
+- **The choice (T9)**: a large labelled button under each page: **Keep Original** (secondary) under the original,
+  **Keep This Version** (primary, accent; its accessible name includes the version's name) under the revision,
+  sticky at the bottom of the scroller while a page runs past it, so the decision is always one click away and sits
+  under the text it keeps. **No default shortcut** (review ruling): a chord that commits the manuscript is too easy
+  to fire by accident (AltGr is Ctrl+Alt on Windows: AltGr+Shift+O types Ó in Polish; Cmd+Opt+Shift+V is Paste and
+  Match Style on macOS); the buttons are in the Tab order and the commands in the Review menu and the ribbon. The
+  view's own keys skip any event with the AltGraph modifier, and match letters by character off macOS (by key code
+  on macOS, where Option changes the character), as the registry does. The header has a quiet Discard, which asks
+  nothing and says "Re-write discarded. Undo (Ctrl+Z) brings it back." (undo puts it back in its place in the
+  list). Both Keep buttons are disabled while the passage is missing or split. Keep This Version replaces the
+  passage with the smallest word-level edit (the pages' own alignment and jsdiff word diff, `apply.ts`), so
+  unchanged words keep their comments and formatting, a footnote's edited note is diffed inside the note, lists are
+  paired item by item and diffed the same way, and with Track Changes on the result is ordinary word-level
+  insertions / deletions for Accept / Reject (if recording fails, the recorder's own status-bar warning shows and
+  the edit is applied untracked). The kept passage is frozen into the record (`kept`), so a redo after the version
+  was edited still matches the record. A version that removes or adds a chapter opening asks first (the app's
+  message dialog). Openings are compared by position: as many openings at the same block positions is a rename,
+  however different the words; otherwise the paired blocks decide, so a version that demotes one title and promotes
+  another asks. After a choice the view closes and the caret is
+  at the start of the passage, brought into view through `revealPosition` (Book mode turns to its spread; continuous
+  scroll centres it); the pages reflow from there. Closing the view lifts the command gate, so page turns, the
+  wheel and PageUp / PageDown work again at once. **Undo**: the choice is
+  one manuscript transaction with a `RewriteStateStep` (like the comments' thread step), so one Mod-z puts the text
+  back and the re-write open again with every version; redo applies it again. Review ▸ Re-writes… lists re-writes in
+  progress, then the resolved ones with their choice ("Kept Version 2", "Kept the original") and a Reopen button:
+  the passage as it is now becomes the original, beside the saved versions (the manuscript behind the view is
+  revealed at the passage, so the choice comes back to it). Reopen takes the kept text if it is
+  the only word-for-word match in the book; otherwise it ranks the candidates by the saved location (neighbouring
+  paragraphs, the chapter by its title, the place in the chapter) and never guesses: a short paragraph such as
+  "He nodded." elsewhere in the book is not taken; a tie, or nothing matching where it was, gives a notice.
+- **While the view is open the ribbon follows the command gate**, like the menus: registry buttons read
+  `isCommandEnabled` (gate included); the slices' own controls for gated commands (Find, New Comment, Track
+  Changes) are disabled with their command (`GatedItem` in src/ribbon-groups.tsx); the formatting controls, Undo /
+  Redo and Break Options act on the active editor (`useActiveEditor`, the revision while it has the focus, else
+  off). The track changes review (Previous / Next Change, Show Change Details, Accept / Reject and their All / by
+  Author variants) is off while the view is open: it acts on the hidden manuscript. The re-write's editors are
+  `TrackChanges.configure({ detached: true, review: false })` (`detached` implies no review side), so the review
+  commands, popover and count always act on the manuscript.

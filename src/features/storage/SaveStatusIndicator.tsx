@@ -39,11 +39,12 @@ export function SaveStatusIndicator() {
   const text = saveStatusText({ path, title, dirty, saveStatus, lastBackupAt })
   return (
     <>
-      <span role="status" aria-live="polite" className="text-sm">
+      {/* One status-bar row: a long title truncates (full text on hover) instead of wrapping. */}
+      <span role="status" aria-live="polite" className="min-w-0 truncate text-sm" title={opening ? undefined : title ? `${title}: ${text}` : text}>
         {opening ? 'Opening…' : title ? `${title}: ${text}` : text}
       </span>
       {warning ? (
-        <StatusText tone="warning" live className="ml-3" data-testid="autosave-warning">
+        <StatusText tone="warning" live className="ml-3 min-w-0 truncate" data-testid="autosave-warning" title={warning}>
           {warning}
         </StatusText>
       ) : null}

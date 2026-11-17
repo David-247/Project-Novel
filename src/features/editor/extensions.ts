@@ -16,6 +16,9 @@ import { FindHighlight } from './find/plugin'
 import { BlockStyles } from './styles/block-styles'
 import { BookBreaks } from './breaks/nodes'
 import { Footnotes } from './footnote/node'
+import { CommentsExtension } from '@/features/comments'
+import { TrackChanges } from '@/features/track-changes'
+import { RewriteAnchor } from '@/features/rewrite'
 
 /**
  * Phase 1 base schema.
@@ -26,7 +29,16 @@ import { Footnotes } from './footnote/node'
 /** Undo history depth: effectively unlimited (see the task 4 block below). */
 export const HISTORY_DEPTH = Number.MAX_SAFE_INTEGER
 
-export function createEditorExtensions(): Extensions {
+export interface EditorExtensionOptions {
+  /**
+   * The same schema for another view (the re-write comparison pages): nothing that belongs to the
+   * manuscript's one view runs there. No comment thread plugin, no tracked-change recording, no
+   * footnote editor or footnote-area notifications, no re-write lock.
+   */
+  detached?: boolean
+}
+
+export function createEditorExtensions({ detached = false }: EditorExtensionOptions = {}): Extensions {
   return [
     Document,
     Paragraph,
@@ -43,10 +55,20 @@ export function createEditorExtensions(): Extensions {
     FontFamily,
 
     // --- Formatting toolbar (task 3): additive only ---
-    // textStyle.fontSize; paragraph/heading textAlign (Mod-Shift-l/e/r/j);
+    // textStyle.fontSize; paragraph/heading textAlign (Mod-Shift-l, Mod-e, Mod-Shift-r, Mod-Shift-j);
     // paragraph/heading lineHeight, paragraphSpacing, indent (Mod-] / Mod-[).
     FontSize,
-    TextAlign.configure({ types: [...BLOCK_FORMAT_TYPES], alignments: ['left', 'center', 'right', 'justify'] }),
+    // Center is Mod-e (as in Word): Mod-Shift-e is Track Changes (Phase 3).
+    TextAlign.extend({
+      addKeyboardShortcuts() {
+        return {
+          'Mod-Shift-l': () => this.editor.commands.setTextAlign('left'),
+          'Mod-e': () => this.editor.commands.setTextAlign('center'),
+          'Mod-Shift-r': () => this.editor.commands.setTextAlign('right'),
+          'Mod-Shift-j': () => this.editor.commands.setTextAlign('justify'),
+        }
+      },
+    }).configure({ types: [...BLOCK_FORMAT_TYPES], alignments: ['left', 'center', 'right', 'justify'] }),
     BlockFormat,
     // --- end formatting toolbar ---
 
@@ -58,7 +80,8 @@ export function createEditorExtensions(): Extensions {
     // Shortcuts (from UndoRedo): Mod-z undo; Mod-Shift-z and Mod-y redo.
     UndoRedo.configure({ depth: HISTORY_DEPTH }),
     // Search-result highlighting + Mod-f (open find) / Escape (close find).
-    FindHighlight,
+    // Detached views: the highlights only; Mod-f / Escape belong to the manuscript.
+    detached ? FindHighlight.extend({ addKeyboardShortcuts: () => ({}) }) : FindHighlight,
     // --- end task 4 -----------------------------------------------------------------------
 
     // --- Paragraph and chapter styles (Phase 2): additive only ----------------------------
@@ -74,6 +97,18 @@ export function createEditorExtensions(): Extensions {
     // --- Footnotes (Phase 2): additive only. The inline `footnote` atom (its content is the note
     // text), derived numbering (book.footnotes), Insert Footnote (Mod-Alt-f), Enter edits a selected
     // reference.
-    Footnotes,
+    detached ? Footnotes.configure({ detached: true }) : Footnotes,
+
+    // --- Comments (Phase 3): additive only. The inline `comment` mark (attr id; overlaps other
+    // comments and every other mark), the thread plugin (threads change through undoable steps) and
+    // Mod-Alt-m (New Comment).
+    detached ? CommentsExtension.extend({ addProseMirrorPlugins: () => [], addKeyboardShortcuts: () => ({}) }) : CommentsExtension,
+    // --- Track changes (Phase 3): additive only. insertion / deletion / formatChange marks, the
+    // trackedInsert / trackedDelete / trackedStyleChange block attrs, the recorder (dispatch hook),
+    // Mod-Shift-e and the markup view decorations (docs/track-changes.md).
+    detached ? TrackChanges.configure({ isEnabled: () => false, detached: true, review: false }) : TrackChanges,
+    // --- Re-write (Phase 3): additive only. The `rewriteId` block attribute (passage anchor), the
+    // read-only lock on passages in re-write and their side bar, Mod-Alt-w (Re-write Passage…).
+    RewriteAnchor.configure({ detached }),
   ]
 }

@@ -1,6 +1,6 @@
 # Novel project format
 
-A Novel project is an ordinary folder. Everything in it is readable without Novel: three JSON files and one SQLite
+A Novel project is an ordinary folder. Everything in it is readable without Novel: JSON files and one SQLite
 database. The folder name becomes the project title when the project is created.
 
 ```
@@ -8,6 +8,8 @@ My Novel/
 ├── project.json      metadata and schema version
 ├── manuscript.json   the manuscript as ProseMirror document JSON
 ├── book.json         book layout settings (trim size, margins, styles, ...); optional
+├── comments.json     comment threads (a side file, Phase 3); optional
+├── rewrites.json     re-writes of passages and their versions (a side file, Phase 3); optional
 ├── index.sqlite      index (revisions); can be rebuilt, never the only copy of text
 └── .recovery/        crash-recovery data
     ├── manuscript.json                 current snapshot (only while there are unsaved changes)
@@ -81,6 +83,35 @@ A footnote is an inline node at its reference point, inside a paragraph or headi
 
 An empty note is `{"type":"footnote"}`. Marks may sit on the footnote node itself and on its text.
 
+### Tracked changes in the manuscript
+
+Phase 3 (docs/track-changes.md). Tracked changes are ordinary marks and block attributes, so save, reopen and
+crash recovery keep them:
+
+- marks `insertion`, `deletion` (attrs `id`, `author`, `authorColor` (`"#rrggbb"` or `null`), `date`, ISO 8601)
+  and `formatChange` (attrs `id`, `author`, `date`, `before`: the earlier formatting marks as JSON). Deleted text
+  stays in the file with its `deletion` mark until the deletion is accepted;
+- on `paragraph`, `heading`, `pageBreak` and `sceneBreak`: `attrs.trackedInsert` / `attrs.trackedDelete`
+  (`{ id, author, authorColor?, date }`: the boundary before the block was inserted / deleted) and
+  `attrs.trackedStyleChange` (`{ id, author, date, beforeStyleId, beforeType, beforeAttrs }`). Written only when
+  set.
+
+```json
+{"type":"paragraph","content":[{"type":"text","text":"It was a "},{"type":"text","marks":[{"type":"deletion","attrs":{"id":"c1","author":"Ann","authorColor":null,"date":"2026-11-04T10:00:00.000Z"}}],"text":"dark"},{"type":"text","marks":[{"type":"insertion","attrs":{"id":"c2","author":"Ann","authorColor":null,"date":"2026-11-04T10:00:00.000Z"}}],"text":"bright"},{"type":"text","text":" night."}]}
+```
+
+A manuscript without them (every Phase 1 and 2 project) loads and saves unchanged.
+
+### Re-write anchors in the manuscript
+
+Phase 3 ("rewrites.json" below). The top-level blocks of a passage being re-written (`paragraph`, `heading`,
+`bulletList`, `orderedList`, `pageBreak`, `sceneBreak`) carry `attrs.rewriteId`: the re-write's `anchor`. Written only
+when set; a manuscript without it loads and saves unchanged.
+
+```json
+{"type":"paragraph","attrs":{"rewriteId":"rw-6f1c1f0e4f4e4c559d432d6f1e0f3a10"},"content":[{"type":"text","text":"The rain came at dusk."}]}
+```
+
 ### Paragraph and chapter styles in the manuscript
 
 Paragraphs and headings may carry `attrs.styleId`, the id of a style in `book.json` → `styles` (lowercase letters,
@@ -141,6 +172,7 @@ the file is created at the next save.
 | `footnotes`    | object  | Footnote options (below). Owned by the footnotes feature; default `{}`.                       |
 | `surface`      | string  | Paper surface: `"auto"` (default), `"book"`, `"white"` or `"dark"`.                           |
 | `view`         | string  | `"spread"` (default) or `"single"`.                                                           |
+| `trackChanges` | boolean | Track Changes is recording for this project (Phase 3). Written only while `true`; missing means off. Any other value is ignored with a warning. |
 
 ```json
 {
@@ -210,6 +242,12 @@ built-in Footnote Text style in `styles` (`footnote-text`).
     next save tries again. Because that save moved `updatedAt`, autosave takes a fresh snapshot at once (even with
     no further edits), so a crash still offers the unsaved settings. The same applies to any save that leaves
     the project unsaved.
+  - **Save in the unsaved-changes prompt** (close, quit, New Project, Open Project) that leaves the project
+    unsaved this way (book.json or a side file could not be read or copied, so it was not replaced) does not go
+    on as if saved. A second question names the file and the reason and offers **Cancel** (stay) or **Quit /
+    Close / Continue anyway (keep changes for recovery)**. Going on first writes a crash-recovery snapshot of
+    everything unsaved, side files included, and waits for it (and for any snapshot already being written); if
+    it cannot be written, Novel says so and stays. The snapshot is offered when the project is opened next.
   - Restoring a crash-recovery snapshot whose book settings equal the loaded ones changes no book setting, so a
     text-only restore never replaces a guarded book.json.
 - A `version` higher than this Novel's (an integer above `1`): the file was written by a newer Novel. Its fields are
@@ -230,6 +268,174 @@ built-in Footnote Text style in `styles` (`footnote-text`).
 
 Unsaved settings count as unsaved changes: the save status, the unsaved-changes prompts on close and quit, autosave
 and crash recovery treat them exactly like unsaved text.
+
+## Side files
+
+A side file is a JSON file beside manuscript.json that belongs to one feature: `comments.json` and `rewrites.json`
+(Phase 3). All side files follow the same rules, implemented once in the storage slice
+(`src/features/storage/side-files.ts`):
+
+- **Optional.** A missing file is empty. A project without it (every Phase 1 and 2 project) opens unchanged, and
+  saving it creates the file only once there is something to store.
+- **Saved with the manuscript.** Every save writes the side files in one batch with manuscript.json (see "Saving").
+  Unsaved side-file changes are unsaved changes of the project (prompts, autosave, crash recovery).
+- **In crash recovery.** Autosave snapshots carry their content (`sideFiles` in the snapshot), and Restore brings
+  it back together with the text. A guarded file (below) the user has not changed is left out of the snapshot:
+  what Novel holds for it is a stand-in, not the file, so Restore leaves the file as it is on disk then (it may be
+  readable again by then, with all its content).
+- **Live edits are flushed first.** A slice may hold an edit outside its content for a moment (the re-write view
+  copies the revision being typed into the store after a short pause). Storage asks every side file to flush such
+  edits before it takes a save, a snapshot or a copy, so they are in it and a save leaves the project saved.
+- **Unknown keys are kept**, at every level the feature documents, and written back unchanged.
+- **Damaged, unreadable or newer files are guarded** like book.json: the content is treated as empty (damaged,
+  unreadable) or used as far as this Novel understands it (a `version` above the one it knows), the status bar
+  says so, and saves leave the file alone until the user changes its content. Just before the first overwrite the
+  original is copied to `<name>.damaged-<timestamp>.json` or `<name>.newer-<timestamp>.json`. If that copy cannot be
+  written (the file stays unreadable, or the folder refuses the copy), only that side file is left out, as with
+  book.json: the manuscript and the other files are saved, the side-file changes stay unsaved (prompts and autosave
+  snapshots keep them), the status bar says so, and the next save retries; "Save" in a close / quit prompt then
+  asks before going on (see book.json, "Save in the unsaved-changes prompt"). Novel never deletes these copies. The rewritten file is at the
+  current version.
+- New Project refuses a folder that holds a side file without a project.json, like the other leftovers.
+
+## comments.json
+
+Comment threads (Phase 3). Pretty-printed UTF-8 JSON. The anchors are in the manuscript: an inline mark
+`{"type":"comment","attrs":{"id":"<thread id>"}}` on the commented text. Marks with different ids overlap, and a
+comment mark coexists with every other mark (formatting, track changes).
+
+| Field     | Type    | Notes |
+| --------- | ------- | ----- |
+| `version` | integer | Format version. Current: `1`. |
+| `threads` | array   | Threads, oldest first. |
+
+A thread:
+
+| Field         | Type    | Notes |
+| ------------- | ------- | ----- |
+| `id`          | string  | Letters, digits, `-`, `_` (at most 64); the `id` of its anchor mark. |
+| `createdAt`   | string  | ISO 8601. |
+| `author`      | string  | Name of the author of the comment. |
+| `authorColor` | string  | Optional `#rrggbb`: the anchor's highlight colour. Absent: the default highlight. |
+| `resolved`    | boolean | Resolved threads are hidden unless "Show Resolved" is on. |
+| `resolvedBy`, `resolvedAt` | string | Who resolved it and when (ISO 8601); only while resolved. |
+| `messages`    | array   | The comment, then the replies: `{ id, author, date, text, editedAt? }`. `text` is plain text; line breaks are `\n`. Never empty. |
+
+```json
+{
+  "version": 1,
+  "threads": [
+    {
+      "id": "c-6f1c1f0e4f4e4c559d432d6f1e0f3a10",
+      "createdAt": "2026-11-04T09:00:00.000Z",
+      "author": "Ada Quill",
+      "authorColor": "#c0392b",
+      "resolved": false,
+      "messages": [
+        { "id": "c-0b7d…", "author": "Ada Quill", "date": "2026-11-04T09:00:00.000Z", "text": "Too slow here?" },
+        { "id": "c-91aa…", "author": "Ada Quill", "date": "2026-11-04T09:05:00.000Z", "text": "Cut the second\nsentence.", "editedAt": "2026-11-04T09:06:00.000Z" }
+      ]
+    }
+  ]
+}
+```
+
+- **Unknown keys** at the top level, in threads and in messages are kept. A thread entry this version cannot use
+  (no valid `id`, no messages) is kept as it is and written back after the others. A `threads` value that is not a
+  list makes the whole file damaged (guarded, see "Side files").
+- **Deleted anchor text.** A thread whose anchor text is deleted is hidden, not destroyed: it stays in comments.json
+  on save, and undo brings the mark (and the thread with its replies) back. Such orphaned threads are **pruned when
+  the project is closed** while saved (quit, File > Close Project, or opening or creating another project after the
+  unsaved-changes prompt), not on save. They are also dropped when a project is opened: undo history never outlives the session, so
+  nothing could bring them back. A recovery snapshot is compared with what was loaded the same way (orphans
+  pruned), so a snapshot that differs only by those threads is not offered for Restore.
+- **Copy and paste.** A pasted copy of commented text whose thread is still anchored in the manuscript does not get
+  the mark (no duplicate thread); after a cut the thread is no longer anchored, so the paste keeps the mark (cut and
+  paste moves the comment). A comment mark without a thread (pasted from another manuscript) is dropped.
+- The SQLite index has no comments table yet (planned as an index only, rebuilt from comments.json; never the only
+  copy).
+
+## rewrites.json
+
+Re-writes (Phase 3): a passage of the manuscript (whole paragraphs, at most one chapter) with the snapshot of how it
+was and one or more revised versions, compared side by side in the re-write view. Pretty-printed UTF-8 JSON; a side
+file (see "Side files": optional, saved with the manuscript, in crash recovery, guarded when damaged or newer).
+
+| Field      | Type    | Notes |
+| ---------- | ------- | ----- |
+| `version`  | integer | Format version. Current: `1`. |
+| `rewrites` | array   | Re-writes, oldest first. |
+
+A re-write:
+
+| Field              | Type    | Notes |
+| ------------------ | ------- | ----- |
+| `id`               | string  | Letters, digits, `-`, `_` (at most 64). |
+| `createdAt`        | string  | ISO 8601. |
+| `anchor`           | string  | The `rewriteId` on the passage's blocks in manuscript.json (Novel uses the `id`). |
+| `original`         | object  | The passage when the re-write began: `{"type":"doc","content":[blocks]}`, ProseMirror JSON like manuscript.json (no `rewriteId`). |
+| `versions`         | array   | Never empty: `{ id, name, doc, updatedAt }`. `doc` is a passage like `original` (attributes at their default left out); `name` is the user's ("Version 1" by default). A `doc` this build cannot read (a node type from a newer Novel) is shown read-only and written back as it was. |
+| `currentVersionId` | string  | Optional: the version shown when the re-write is opened again (the last one viewed). |
+| `status`           | string  | `"open"`: in progress; the passage is read-only in the manuscript. `"resolved"`: a version was chosen; no lock. |
+| `originalChanged`  | boolean | Optional, `true` once a bulk edit (Replace All, accepting or rejecting a tracked change, undo) changed the passage after the snapshot. |
+| `choice`           | string  | Optional, resolved re-writes only (Phase 3, T9): `"original"` (Keep Original) or the `id` of the version kept (Keep This Version). Read only when `status` is not `"open"` and it names `"original"`, an existing version, or a version whose `kept` copy is present (see `kept`); otherwise dropped. |
+| `resolvedAt`       | string  | Optional, resolved re-writes only: ISO 8601 time of the choice. |
+| `kept`             | object  | Optional, Keep This Version only: a frozen copy of the passage kept (a passage doc like `original`), so the record stays true to the manuscript when the version is edited later. **Written only when it differs from the chosen version's `doc`** (usually it is that doc: no second copy); a resolved re-write without it reads it from the chosen version. A `choice` whose version no longer exists is kept when `kept` is there. |
+| `location`         | object  | Optional, resolved re-writes only: where the passage was, Reopen's hint. `{ block, chapter, before, after, chapterTitle?, offset? }`: the top-level index of its first block, the chapter index there (`-1` before the first chapter), the first 60 characters (plain text) of the paragraph before and after it (`""` at an edge), the chapter's title (60 characters; `""` before the first chapter) and the block index counted from the chapter's start. `chapterTitle` and `offset` may be missing (then `chapter` and `block` are used). |
+
+```json
+{
+  "version": 1,
+  "rewrites": [
+    {
+      "id": "rw-6f1c1f0e4f4e4c559d432d6f1e0f3a10",
+      "createdAt": "2026-11-05T09:00:00.000Z",
+      "anchor": "rw-6f1c1f0e4f4e4c559d432d6f1e0f3a10",
+      "original": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "The rain came at dusk." }] }] },
+      "versions": [
+        { "id": "v-0b7d…", "name": "Version 1", "updatedAt": "2026-11-05T09:12:00.000Z",
+          "doc": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Rain came with the dusk." }] }] } }
+      ],
+      "currentVersionId": "v-0b7d…",
+      "status": "open"
+    }
+  ]
+}
+```
+
+- **Unknown keys** at the top level, in re-writes and in versions are kept. An entry this version cannot use (no valid
+  `id` or `anchor`, no `original`, no versions) is kept as it is and written back after the others; an unknown
+  `status` is kept and treated as not locking. A `rewrites` value that is not a list makes the whole file damaged.
+- **The lock.** While a re-write is `open`, typing, pasting, dropping or deleting inside its passage is refused in the
+  manuscript. Replace All, accepting or rejecting tracked changes, and undo / redo (never blocked) still apply,
+  and set `originalChanged`. Comments can be added to and removed from the passage. The
+  anchor is not part of the undo history and never a tracked change; a block of an open re-write that loses it
+  (rejecting a style change made before the re-write) gets it back.
+- **Removed by undo.** The anchor is not in the undo history. If an undo removes the passage's blocks, the re-write
+  stays (with `originalChanged`) and the app says the passage is gone; a redo or undo that puts equal blocks back at
+  the same place anchors them again (only blocks that undo or redo itself inserted, and only while the re-write is
+  open; a block typed or pasted there is never anchored). Otherwise the versions stay readable in the re-write view.
+- **One run.** Pasted, dropped and drag-copied blocks never carry `rewriteId`. If the blocks carrying an anchor are
+  not one contiguous run (a file edited by hand), the passage counts as damaged: it is not shown or replaced.
+- **The choice.** Keep This Version replaces the passage with the version (the smallest word-level edit; tracked
+  changes when Track Changes records) and sets `status` `"resolved"`, `choice` and `resolvedAt`; Keep Original sets
+  them without changing the text; Discard Re-write removes the entry. Each also removes the passage's `rewriteId`
+  from manuscript.json: a resolved re-write leaves no anchor (an undo or redo that would put a stale one back has it
+  removed). The choice is part of the manuscript's undo history: one undo restores the text, the anchor and
+  `status` `"open"` (with every version) at once, and redo applies the choice again; the file follows. Reopening a
+  resolved re-write (Review ▸ Re-writes…) looks for its text in the manuscript (`kept`, else the chosen version or the
+  original; word for word, else the most similar runs of paragraphs). A word-for-word match that is the only one in
+  the book is taken wherever it is now (edits elsewhere move it). Otherwise `location` ranks the candidates: each
+  matching neighbouring paragraph, then the chapter (by its title, so chapters added or removed before it do not
+  matter), then the place in the chapter (`offset`, within a few blocks). The single best is taken; a tie, or no
+  candidate matching anything of `location`, reopens nothing and the app says so (it never guesses). Without
+  `location` (an older file) the match must be the only one. Found, it is anchored again, becomes the new `original`, and `status` goes back to
+  `"open"`, also in one undo step. Projects without these keys open unchanged.
+- **Deleting a style** (Format ▸ Manage Styles) re-maps its blocks in the manuscript, the passage of an open
+  re-write included (a bulk edit: the lock lets it through and `originalChanged` is set), and in every re-write's
+  `original`, versions and `kept`, so no block of manuscript.json or rewrites.json keeps the deleted id.
+- **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the
+  version being typed is written into the side file at every save and every recovery snapshot.
 
 ## index.sqlite
 
@@ -277,7 +483,18 @@ Safety rules enforced in Rust:
 - **Known limitation:** `index.sqlite` is opened through the Tauri SQL plugin, which has no path scope. The webview
   could open a SQLite file anywhere. Only the JSON files go through the confined commands.
 
-Save order: `manuscript.json`, then `book.json`, then `project.json` (`updatedAt`), then a `revisions` row. After a save that leaves
+**Manuscript and side files: one batch.** `manuscript.json` and the side files (`comments.json`, `rewrites.json`) are written by one
+Rust command, `storage_write_files_atomic`, as close to all-or-nothing as a file system allows. First every file is
+staged (temp file written and fsynced, as above); a failure there (disk full, permissions) deletes every temp file
+and changes nothing. Only then are the temp files renamed over their targets, back to back, side files first and
+manuscript.json last. A crash or failure inside that rename phase (a few milliseconds) can leave a newer side file
+beside the older manuscript; each file on its own is still wholly old or wholly new, and a thread whose anchor is
+not in the manuscript is simply hidden. Guarded side files are copied aside before the batch (a side file whose copy
+fails is left out of it; see "Side files"). After a failed batch every side file in it counts as present on disk
+(it may have been renamed before the failure), so the next save replaces it even when it is empty by then. An error
+names the file that failed.
+
+Save order: `manuscript.json` with its side files, then `book.json`, then `project.json` (`updatedAt`), then a `revisions` row. After a save that leaves
 the document clean, `.recovery/manuscript.json` is deleted.
 
 All writes to a project (saves, autosave snapshots, recovery cleanup) go through one queue in the frontend, so they
@@ -303,13 +520,15 @@ write). The file is written atomically, like the other project files. Compact UT
 | Field           | Type    | Notes                                                                      |
 | --------------- | ------- | -------------------------------------------------------------------------- |
 | `format`        | string  | Always `"novel-recovery"`.                                                 |
-| `version`       | integer | Recovery format version. Current: `2`. A newer version is ignored.         |
+| `version`       | integer | Recovery format version. Current: `3`. A newer version is ignored.         |
 | `projectId`     | string  | `id` from project.json.                                                    |
 | `savedAt`       | string  | ISO 8601 time of the snapshot.                                             |
 | `baseUpdatedAt` | string  | project.json `updatedAt` (the last real save) when the snapshot was taken. |
 | `docVersion`    | integer | Editor document version (diagnostic only).                                 |
 | `doc`           | object  | The whole document, same shape as manuscript.json.                         |
 | `book`          | object  | Book settings at snapshot time, same shape as book.json. Added in version 2; a version 1 snapshot has none and restores only the text. |
+| `sideFiles`     | object  | Side files at snapshot time: file name to content (`{"comments.json": {...}}`), each in its file's shape. Added in version 3; an older snapshot has none and leaves the side files as saved. |
+| `sideFileGuards` | object  | Optional: the side files in `sideFiles` that were guarded (damaged, unreadable or from a newer Novel) when the snapshot was taken, file name to `"damaged"` or `"newer"`. Restore then copies the file on disk aside (`<name>.<kind>-<timestamp>.json`) before the first save replaces it, even when it reads fine by then. |
 
 ```json
 {"format":"novel-recovery","version":1,"projectId":"6f1c…","savedAt":"2026-11-03T10:16:12.004Z","baseUpdatedAt":"2026-11-03T10:15:42.120Z","docVersion":312,"doc":{"type":"doc","content":[…]}}
@@ -319,7 +538,7 @@ write). The file is written atomically, like the other project files. Compact UT
 
 1. `projectId` differs from project.json `id`: the snapshot belongs to another project. It is not offered and is
    moved aside.
-2. `doc` is identical to manuscript.json, and `book` (if present, stored in book.json shape with unknown keys at top level) equals the settings loaded from book.json: nothing
+2. `doc` is identical to manuscript.json, `sideFiles` (if present) equal the side files loaded, and `book` (if present, stored in book.json shape with unknown keys at top level) equals the settings loaded from book.json: nothing
    to recover. The snapshot is deleted.
 3. `baseUpdatedAt` equals project.json `updatedAt`: the snapshot was taken on top of the current save. It is offered.
 4. `baseUpdatedAt` is something else: the snapshot was taken on top of a different save. It is not offered and is
@@ -381,7 +600,8 @@ the rest.
 
 - after a save that leaves the document clean (manual save, or Save in the unsaved-changes prompt);
 - on a clean quit: closing the window when there are no unsaved changes, or after saving;
-- when the user chooses **Don't Save** in the unsaved-changes prompt (on quit, New Project or Open Project). The user
+- when the user chooses **Don't Save** in the unsaved-changes prompt (on quit, File > Close Project, New Project or
+  Open Project). The user
   explicitly threw those changes away, so Novel also stops snapshotting that content. Snapshots resume with the next
   edit;
 - when the user chooses **Discard Backup**.
@@ -409,3 +629,64 @@ Only Rust writes this file (`storage_remember_recent` records the open project's
 the display name and timestamp), because an entry here is what lets Open Recent reopen a folder without a dialog.
 Most recent first, de-duplicated by folder, at most 10 entries. Folders that no longer contain a `project.json` are
 shown as "(missing)" and disabled in File > Open Recent. A damaged file is treated as an empty list.
+
+## App preferences (outside the project)
+
+Not part of a project, and never written into a project folder. Per-user settings live in the same app config
+directory as the recent-projects list, as `preferences.json` (written atomically by `preferences_write` in
+`src-tauri/src/preferences.rs`, like every file Novel writes). They apply to every project on this computer and are edited
+in **Settings** (File > Settings… on Windows, Novel > Settings… on macOS, or Ctrl+, on
+Windows and Cmd+, on macOS).
+
+```json
+{
+  "version": 1,
+  "authorName": "Ada Lovelace",
+  "authorColor": null,
+  "pageNavigation": "book",
+  "defaultPaper": "auto",
+  "defaultTrimSize": "us-5.5x8.5",
+  "reduceMotion": "system",
+  "authorPrompted": false
+}
+```
+
+| Key | Values | Meaning |
+|---|---|---|
+| `authorName` | text, at most 120 characters | Attributes tracked changes and comments. Absent: the OS user's full name (else the account name) is used. `""` means no name is known; the app then asks once, on the first tracked change or comment. |
+| `authorColor` | `"#rrggbb"` or `null` | Colour of the author's changes and comments. `null`: automatic. |
+| `pageNavigation` | `"book"` or `"scroll"` | How the writing view moves between pages. Default `"book"`. |
+| `defaultPaper` | `"auto"`, `"book"`, `"white"`, `"dark"` | Paper surface a **new** project starts with (its `book.json` `surface`). Existing projects keep theirs. |
+| `defaultTrimSize` | a trim size id from the catalog | Trim size a **new** project starts with, with that size's default margins. Existing projects keep theirs. |
+| `reduceMotion` | `"system"`, `"on"`, `"off"` | Reduce animation (`"system"` follows the OS setting). |
+| `authorPrompted` | `true`/`false` | The one-time "who is writing?" question has been asked (answered or dismissed); it is never asked again. |
+
+Rules:
+
+- **No credentials.** This file holds no API keys, tokens or other secrets. AI provider keys and OAuth tokens are
+  stored only in the OS keychain.
+- **Versioned.** `version` is 1. An older or unversioned file is migrated when read; a newer file is read for the keys
+  this Novel knows.
+- **Unknown keys are kept.** Keys this Novel does not know (written by a newer Novel) are preserved when preferences
+  are saved.
+- **Never fails to start.** A missing, unreadable or damaged file, or a wrongly typed value, falls back to the default
+  (per key for a single bad value, wholly for a file that is not a JSON object or is larger than 256 KB, which is not
+  read). Reading never writes; the next change made in Settings rewrites a missing or damaged file in the current
+  format, which repairs it. A file that could not be read (locked by another program) is never replaced by defaults:
+  it is read again before the first write, its values and unknown keys are kept with the session's changes on top,
+  and nothing is written while it stays unreadable. A change made before the file was read at startup is kept over
+  the value read.
+- **Saved as you change.** Changes apply immediately (no OK button) and are written about 300 ms after the last one.
+- Not in a project: Save As, backups and recovery never include it.
+
+## Save a Copy
+
+File > Save a Copy… writes the open project, as it is in the window (unsaved changes included), into another
+folder chosen in the folder dialog, and keeps working in the open project (which stays unsaved if it was). It goes
+through the same confined storage commands as a save: the chosen folder is granted for the copy, the open project's
+folder is granted again afterwards. The copy has `manuscript.json`, `book.json` and a `project.json` with the same
+title and a new `id` (unknown keys are kept), and each side file (`comments.json`, ...) as it is in the window; a
+side file with nothing in it is not written. Other top-level text files of the project are copied unchanged (a
+damaged side file the user has not changed, too).
+`index.sqlite` and `.recovery/` are not copied (a new index is created when the copy is first opened). A folder that already
+holds a project, or the open project's own folder, is refused.

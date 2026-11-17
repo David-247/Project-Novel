@@ -18,6 +18,76 @@
   position: relative;
   margin: 0 auto;
 }
+
+/* ---- Book mode (page-turn navigation, docs/pagination.md "Navigation modes") ---------------
+   One spread on the desk, centred, no scrolling between spreads. The sizer is a one-row window onto
+   the same canvas (translated to the row shown); `overflow: clip` (not hidden) so nothing, not even
+   a programmatic or caret scroll, can scroll the rest of the stream into it. Lanes on both sides
+   hold the turn controls; a press on the blank desk beside the spread turns the page. */
+.nv-desk[data-navigation='book'] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 0 var(--nv-turn-lane);
+  --nv-turn-lane: 48px;
+}
+.nv-desk[data-navigation='book'] > .nv-sizer {
+  flex: none;
+  overflow: clip;
+}
+.nv-turn-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  width: var(--nv-turn-lane);
+  pointer-events: none;
+}
+.nv-turn-lane--prev {
+  left: 0;
+}
+.nv-turn-lane--next {
+  right: 0;
+}
+/* Sticky: stays at the middle of the window when a zoomed-in spread is taller than it. */
+.nv-turn {
+  position: sticky;
+  top: calc(50% - 32px);
+  bottom: calc(50% - 32px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 64px;
+  border-radius: 8px;
+  /* Boundary at 3:1 or more against the desk on every surface (WCAG 1.4.11). */
+  border: 1px solid color-mix(in srgb, var(--page-fg) 80%, var(--page-bg));
+  background: var(--page-bg);
+  color: var(--page-fg);
+  box-shadow: var(--page-shadow);
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+  outline: none;
+}
+.nv-turn:hover:not([aria-disabled]) {
+  background: color-mix(in srgb, var(--page-bg) 88%, var(--page-fg));
+}
+.nv-turn:focus-visible {
+  outline: 2px solid var(--page-focus-ring);
+  outline-offset: 2px;
+}
+.nv-turn[aria-disabled] {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+}
 .nv-canvas {
   position: absolute;
   top: 0;

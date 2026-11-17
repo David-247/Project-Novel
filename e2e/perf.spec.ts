@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { budget } from './budget'
+import { installLatencyProbe, report } from './perf-helpers'
 import { clickBlockStart, editor, launch, lineEnd, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
@@ -69,29 +69,6 @@ async function openEpic(page: Page, folder: string, doc: unknown, blocks = 'p, h
   return openMs
 }
 
-/** Input-to-paint probe: keydown -> next animation frame -> a task after that frame. */
-async function installLatencyProbe(page: Page) {
-  await page.evaluate(() => {
-    const w = window as unknown as { __perf: number[] }
-    w.__perf = []
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        const now = performance.now()
-        // Event creation time when it is in the same clock (includes input queueing), else handler time.
-        const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 1000 ? e.timeStamp : now
-        requestAnimationFrame(() => {
-          // A task queued from rAF runs after that frame's style/layout/paint.
-          const ch = new MessageChannel()
-          ch.port1.onmessage = () => w.__perf.push(performance.now() - t0)
-          ch.port2.postMessage(null)
-        })
-      },
-      true,
-    )
-  })
-}
-
 /**
  * Put the caret at the end of paragraph 500 (mid-manuscript), type WARMUP + MEASURED characters one
  * at a time (each waits for its own paint), and summarize the measured ones. `beforeKey(i)` runs just
@@ -119,14 +96,6 @@ async function measureTyping(page: Page, beforeKey?: (i: number) => Promise<void
     p95Ms: +pct(sorted, 95).toFixed(2),
     maxMs: +sorted[sorted.length - 1].toFixed(2),
   }
-}
-
-async function report(testInfo: TestInfo, name: string, result: Record<string, unknown>) {
-  const full = { scenario: name, browser: testInfo.project.name, platform: process.platform, ...result, measuredAt: new Date().toISOString() }
-  console.info(`[perf] ${JSON.stringify(full)}`)
-  mkdirSync('perf-results', { recursive: true })
-  writeFileSync(`perf-results/${name}-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(full, null, 2))
-  await testInfo.attach(`${name}.json`, { body: JSON.stringify(full, null, 2), contentType: 'application/json' })
 }
 
 const findPanel = (page: Page) => page.getByRole('region', { name: 'Find and replace' })
@@ -235,7 +204,7 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
   const titles = page.locator('main [contenteditable="true"] h1[data-style="chapter-title"]')
   await expect(titles).toHaveCount(chapters)
 
-  await titles.nth(chapters - 1).click()
+  await clickBlockStart(page, titles.nth(chapters - 1))
   await page.locator('[data-control-id="styles.edit"]').click()
   const dialog = page.getByRole('dialog', { name: 'Modify style: Chapter Title' })
   await dialog.locator('[data-control-id="styles.field.fontSize"]').fill('28')
@@ -394,4 +363,191 @@ test('100k-word manuscript, paginated combined hot path: spread view + 200 footn
 
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
   budget(testInfo, 'typing median ms (paginated combined hot path)', typing.medianMs, 50)
+})
+
+/**
+ * Track changes: the 100k-word manuscript with 2,000 tracked changes (a deleted and an inserted run
+ * in every block: 960 paragraphs and 40 headings).
+ */
+function buildTrackedManuscript() {
+  const built = buildManuscript()
+  const stamp = (id: string) => ({ id, author: 'Ann', date: '2026-01-01T00:00:00.000Z', authorColor: null })
+  let changes = 0
+  const content = (built.doc.content as Array<{ type: string; content: Array<{ type: string; text: string }> }>).map((b, i) => {
+    const last = b.content[b.content.length - 1]
+    const words = last.text.split(' ')
+    const cut = Math.min(8, words.length - 4)
+    changes += 2
+    return {
+      ...b,
+      content: [
+        ...b.content.slice(0, -1),
+        { type: 'text', text: words.slice(0, cut).join(' ') + ' ' },
+        { type: 'text', marks: [{ type: 'deletion', attrs: stamp(`d${i}`) }], text: words.slice(cut, cut + 3).join(' ') + ' ' },
+        { type: 'text', marks: [{ type: 'insertion', attrs: stamp(`i${i}`) }], text: 'fresh words here ' },
+        { type: 'text', text: words.slice(cut + 3).join(' ') },
+      ],
+    }
+  })
+  return { ...built, doc: { type: 'doc', content }, changes }
+}
+
+test('100k-word manuscript with 2,000 tracked changes: typing with tracking on, and markup view switches', async ({ page }, testInfo) => {
+  test.setTimeout(240_000)
+  const { doc, words, changes } = buildTrackedManuscript()
+  expect(changes).toBe(2000)
+  const openMs = await openEpic(page, '/projects/Tracked', doc)
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBe(2000)
+  await page.evaluate(() => window.__nvE2E.setTracking(true))
+  await installLatencyProbe(page)
+  const typing = await measureTyping(page)
+  // Every typed character went in as (one) tracked insertion.
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBe(2001)
+
+  // View switches: "reflow complete" (the new page model published, the pages in view drawn).
+  const switchTo = (view: string) =>
+    page.evaluate(async (v) => {
+      const before = window.__nvE2E.layout()
+      const t0 = performance.now()
+      window.__nvE2E.setMarkupView(v as 'all' | 'simple' | 'none' | 'original')
+      await new Promise<void>((resolve) => {
+        const check = () =>
+          window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > before.layoutVersion ? resolve() : requestAnimationFrame(check)
+        requestAnimationFrame(check)
+      })
+      const pass = window.__nvE2E.paginationLines().lastPass as Record<string, number>
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+      const ms = performance.now() - t0
+      await new Promise<void>((resolve) => {
+        const check = () => (window.__nvE2E.paginationSettled() ? resolve() : requestAnimationFrame(check))
+        check()
+      })
+      const passStartMs = +(pass.startedAt - t0).toFixed(1)
+      return { ms, allDrawnMs: performance.now() - t0, pagesBefore: before.pageCount, pagesAfter: window.__nvE2E.layout().pageCount, passStartMs, passMs: +pass.totalMs.toFixed(1) }
+    }, view)
+  const toNone = await switchTo('none')
+  const toOriginal = await switchTo('original')
+  const toAll = await switchTo('all')
+  expect(toNone.pagesAfter).not.toBe(toNone.pagesBefore)
+  const worst = Math.max(toNone.ms, toOriginal.ms, toAll.ms)
+
+  // Typing in No Markup and Simple Markup (the break decorations follow the view on every keystroke).
+  const typingIn = async (view: 'none' | 'simple') => {
+    await page.evaluate((v) => window.__nvE2E.setMarkupView(v), view)
+    await waitForLayout(page)
+    return measureTyping(page)
+  }
+  const typingNone = await typingIn('none')
+  const typingSimple = await typingIn('simple')
+  await page.evaluate(() => window.__nvE2E.setMarkupView('all'))
+  await waitForLayout(page)
+
+  // Replace All with tracking on: every replaced "the" stays as a deletion, "a" goes in after it.
+  const the = Math.ceil(words / THE_EVERY)
+  await findThe(page, the)
+  await findPanel(page).getByRole('textbox', { name: 'Replace with' }).fill('a')
+  const changesBefore = await page.evaluate(() => window.__nvE2E.countChanges())
+  const replaceAllRun = await page.evaluate(async () => {
+    const btn = document.querySelector<HTMLButtonElement>('[data-control-id="find.replaceAll"]')!
+    const status = document.querySelector('[data-testid="find-status"]')!
+    const t0 = performance.now()
+    btn.click()
+    const clickMs = performance.now() - t0
+    await new Promise<void>((resolve) => {
+      const check = () => (status.textContent?.startsWith('Replaced') ? resolve() : requestAnimationFrame(check))
+      check()
+    })
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    return { ms: performance.now() - t0, clickMs, pass: window.__nvE2E.paginationLines().lastPass }
+  })
+  console.info(`[perf] tracked Replace All: ${JSON.stringify(replaceAllRun)}`)
+  const replaceAllMs = replaceAllRun.ms
+  const replacedText = await page.getByTestId('find-status').textContent()
+  const replaced = Number(/Replaced (\d+)/.exec(replacedText ?? '')?.[1] ?? 0)
+  expect(replaced).toBeGreaterThan(9000)
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBeGreaterThan(changesBefore)
+
+  await report(testInfo, 'perf-track-changes', {
+    manuscript: { words, blocks: doc.content.length, changes },
+    openMs,
+    typing,
+    typingNoMarkup: typingNone,
+    typingSimpleMarkup: typingSimple,
+    replaceAll: { replaced, ms: +replaceAllMs.toFixed(1) },
+    markupSwitch: {
+      toNoMarkupMs: +toNone.ms.toFixed(1),
+      toOriginalMs: +toOriginal.ms.toFixed(1),
+      toAllMarkupMs: +toAll.ms.toFixed(1),
+      allDrawnWorstMs: +Math.max(toNone.allDrawnMs, toOriginal.allDrawnMs, toAll.allDrawnMs).toFixed(1),
+      pages: [toNone.pagesBefore, toNone.pagesAfter, toOriginal.pagesAfter, toAll.pagesAfter],
+      // When the engine's pass started after the switch (style recalc, first frame) and how long it took.
+      passes: [toNone, toOriginal, toAll].map((s) => ({ startMs: s.passStartMs, totalMs: s.passMs })),
+    },
+    budgets: { typingMedianMs: 50, markupSwitchMs: 1000, replaceAllMs: 2000 },
+    ciAdvisory: ['typing', 'typingNoMarkup', 'typingSimpleMarkup'],
+  })
+
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  // CI-advisory (decision a187e880, extending f040009b): on GitHub's free Windows runner tracked typing
+  // reads at or above 50 ms even on code without the change under test (T5 bisect: T8 base 56 ms
+  // there, 31 ms on a desktop). Reported in CI; blocking locally. Plain hot-path typing still blocks.
+  const advisory = { ciAdvisory: true }
+  budget(testInfo, 'typing median ms (tracking on, 2,000 changes)', typing.medianMs, 50, advisory)
+  budget(testInfo, 'typing median ms (tracking on, No Markup)', typingNone.medianMs, 50, advisory)
+  budget(testInfo, 'typing median ms (tracking on, Simple Markup)', typingSimple.medianMs, 50, advisory)
+  budget(testInfo, 'markup view switch reflow complete ms', worst, 1000)
+  budget(testInfo, 'Replace All ms (tracking on)', replaceAllMs, 2000)
+})
+
+/**
+ * Track changes review: Accept All (and Reject All) of the 2,000 changes on the 100k-word manuscript,
+ * from the Review menu through the confirmation, until the book is repaginated: the new page model
+ * published and the pages in view drawn (the Replace All class, < 2 s).
+ */
+test('100k-word manuscript with 2,000 tracked changes: Accept All and Reject All, including repagination', async ({ page }, testInfo) => {
+  test.setTimeout(240_000)
+  const { doc, words, changes } = buildTrackedManuscript()
+  await openEpic(page, '/projects/Review', doc)
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBe(changes)
+  await editor(page).click()
+
+  const resolveAll = async (id: 'review.acceptAll' | 'review.rejectAll', confirm: string) => {
+    const menuBar = page.getByRole('menubar', { name: 'Menu bar' })
+    await menuBar.locator('[data-control-id="menu.review"]').click()
+    await page.locator(`[role="menu"] [data-control-id="${id}"]`).click()
+    await expect(page.getByTestId('native-dialog')).toContainText('2,000 changes')
+    return page.evaluate(async (label) => {
+      const before = window.__nvE2E.layout().layoutVersion
+      const btn = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="native-dialog"] button')].find((b) => b.textContent === label)!
+      const t0 = performance.now()
+      btn.click()
+      await new Promise<void>((resolve) => {
+        const check = () =>
+          window.__nvE2E.countChanges() === 0 && window.__nvE2E.paginationModelSettled() && window.__nvE2E.layout().layoutVersion > before
+            ? resolve()
+            : requestAnimationFrame(check)
+        requestAnimationFrame(check)
+      })
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+      return { ms: performance.now() - t0, pages: window.__nvE2E.layout().pageCount }
+    }, confirm)
+  }
+
+  const accept = await resolveAll('review.acceptAll', 'Accept All')
+  await waitForLayout(page)
+  // One undo step brings every change back.
+  await editor(page).click()
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.countChanges())).toBe(changes)
+  await waitForLayout(page)
+  const reject = await resolveAll('review.rejectAll', 'Reject All')
+
+  await report(testInfo, 'perf-track-changes-review', {
+    manuscript: { words, blocks: doc.content.length, changes },
+    acceptAll: { ms: +accept.ms.toFixed(1), pages: accept.pages },
+    rejectAll: { ms: +reject.ms.toFixed(1), pages: reject.pages },
+    budgets: { acceptAllMs: 2000, rejectAllMs: 2000 },
+  })
+  budget(testInfo, 'Accept All of 2,000 changes ms (incl. repagination)', accept.ms, 2000)
+  budget(testInfo, 'Reject All of 2,000 changes ms (incl. repagination)', reject.ms, 2000)
 })

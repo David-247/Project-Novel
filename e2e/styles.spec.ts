@@ -51,7 +51,7 @@ test('style picker, shortcuts, Enter chaining, undo and Clear direct formatting'
   await expect(ed.locator('h1')).toHaveCount(1)
 
   // Direct formatting wins over the style; Clear direct formatting restores the style.
-  await page.keyboard.press('ControlOrMeta+Shift+e')
+  await page.keyboard.press('ControlOrMeta+e')
   await expect(body).toHaveCSS('text-align', 'center')
   await ctl(page, 'styles.clearFormatting').click()
   // No direct formatting left inline. The paginated view's left/top page offsets are view state, not

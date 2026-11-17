@@ -29,6 +29,9 @@ export {
   type SaveOptions,
 } from './project'
 
+// The native go-ahead / Cancel question, for other slices (Accept All Changes); injected at the root.
+export { askConfirm } from './dialogs'
+
 // Autosave + crash recovery (.recovery/manuscript.json; see docs/project-format.md)
 export { startAutosave, stopAutosave, autosaveNow, AUTOSAVE_INTERVAL_MS, AUTOSAVE_RETRY_DELAYS_MS } from './autosave'
 export {
@@ -41,7 +44,16 @@ export {
 } from './recovery'
 
 // Low-level file helpers (Rust commands; atomic temp-file + fsync + rename)
-export { writeFileAtomic, readTextFile, MENU_EVENTS } from './ipc'
+export { writeFileAtomic, writeFilesAtomic, readTextFile, MENU_EVENTS } from './ipc'
+export type { BatchFile } from './ipc'
+
+// Project side files: named JSON files beside manuscript.json owned by a slice (comments.json, ...),
+// saved in one batch with the manuscript, snapshotted for crash recovery, guarded when damaged or
+// newer (see side-files.ts and docs/project-format.md, "Side files").
+export { registerSideFile } from './side-files'
+// A side file changed without a manuscript edit (re-write revisions): unsaved changes + autosave due.
+export { sideFileChanged } from './autosave'
+export type { ProjectSideFile } from './side-files'
 
 // Book settings file (book.json; see docs/project-format.md)
 export { BOOK_FILE, BOOK_FORMAT, BOOK_VERSION, parseBook, serializeBook, type BookParseResult } from './book-file'
@@ -64,6 +76,9 @@ export { REVISION_KINDS, INDEX_SCHEMA_VERSION, type RevisionKind } from './schem
 
 // App wiring
 export { useStorageIntegration } from './integration'
+// File menu commands (New, Open, Open Recent, Close Project, Save, Save a Copy, Quit): shared registry.
+export { registerStorageCommands, recentCommandId } from './commands'
+export { closeProjectInteractive, saveProjectCopy } from './project'
 export { SaveStatusIndicator } from './SaveStatusIndicator'
 export { RecoveryDialog } from './RecoveryDialog'
 export { NoProjectActions, RecoveryStatus } from './ProjectStatusControls'

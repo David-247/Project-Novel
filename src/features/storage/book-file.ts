@@ -21,7 +21,7 @@ const VIEWS: readonly BookView[] = ['spread', 'single']
 /** Margins above this (points, 100 in) are treated as damaged values. */
 const MAX_MARGIN_PT = 7200
 /** Keys this version owns; every other top-level key is kept in `extra`. */
-const KNOWN_KEYS = new Set(['format', 'version', 'trimSize', 'margins', 'styles', 'headerFooter', 'footnotes', 'surface', 'view'])
+const KNOWN_KEYS = new Set(['format', 'version', 'trimSize', 'margins', 'styles', 'headerFooter', 'footnotes', 'surface', 'view', 'trackChanges'])
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
@@ -87,6 +87,11 @@ export function normalizeBook(data: unknown): BookParseResult {
     if (VIEWS.includes(data.view as BookView)) settings.view = data.view as BookView
     else warnings.push('the page view')
   }
+  if (data.trackChanges !== undefined) {
+    if (typeof data.trackChanges === 'boolean') {
+      if (data.trackChanges) settings.trackChanges = true
+    } else warnings.push('the Track Changes setting')
+  }
   const extra: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(data)) if (!KNOWN_KEYS.has(k)) extra[k] = v
   if (Object.keys(extra).length > 0) settings.extra = extra
@@ -144,6 +149,8 @@ export function bookToJSON(b: BookSettings): Record<string, unknown> {
     footnotes: known.footnotes,
     surface: known.surface,
     view: known.view,
+    // Written only while on, so a book that never tracked changes keeps its book.json unchanged.
+    ...(known.trackChanges ? { trackChanges: true } : {}),
   }
 }
 

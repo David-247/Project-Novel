@@ -19,7 +19,7 @@ export function detectPlatform(): Platform {
   return /mac|iphone|ipad|ipod/i.test(ua) ? 'mac' : 'other'
 }
 
-type Modifier = 'mod' | 'ctrl' | 'alt' | 'shift' | 'meta'
+export type Modifier = 'mod' | 'ctrl' | 'alt' | 'shift' | 'meta'
 
 const MODIFIERS: Record<string, Modifier> = {
   mod: 'mod',
@@ -118,19 +118,40 @@ type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftK
  * True when a key event is exactly `spec` on `platform`: the same key (letters case-insensitive)
  * and exactly the spec's modifiers ("Mod-s" is Cmd+S on macOS, Ctrl+S elsewhere; Ctrl+Shift+S or
  * Cmd+S on Windows do not match).
+ *
+ * With `loose`, a punctuation key (not a letter, digit or named key) also matches when the layout
+ * needs Shift to type it and the spec has no Shift: "Mod-=" is Ctrl+Shift+0 on a German keyboard
+ * (`e.key` "=", Shift down), "Mod-/" is Ctrl+Shift+7. The event's `key` must still be the spec's.
  */
-export function matchesShortcut(spec: ShortcutSpec, e: ShortcutEvent, platform: Platform = detectPlatform()): boolean {
+export function matchesShortcut(spec: ShortcutSpec, e: ShortcutEvent, platform: Platform = detectPlatform(), loose = false): boolean {
   const { modifiers, key } = parse(spec)
   const mods = resolveMods(modifiers, platform)
-  if (
-    e.ctrlKey !== mods.has('ctrl') ||
-    e.metaKey !== mods.has('meta') ||
-    e.altKey !== mods.has('alt') ||
-    e.shiftKey !== mods.has('shift')
-  ) {
-    return false
-  }
+  const shiftOk = e.shiftKey === mods.has('shift') || (loose && e.shiftKey && isPunctuation(key) && e.key === key)
+  if (e.ctrlKey !== mods.has('ctrl') || e.metaKey !== mods.has('meta') || e.altKey !== mods.has('alt') || !shiftOk) return false
   return e.key.length === 1 && key.length === 1 ? e.key.toLowerCase() === key.toLowerCase() : e.key === key
+}
+
+/** One printable character that is not a letter or a digit ("=", "/", "+", "-"). */
+function isPunctuation(key: string): boolean {
+  return key.length === 1 && !/[\p{L}\p{N}\s]/u.test(key)
+}
+
+/**
+ * The keys a spec means on `platform`, independent of how they are written or shown: modifiers as
+ * pressed (Mod resolved) in a fixed order, then the key ("Mod-Shift-Z" on macOS: "meta+shift+z").
+ * Unlike the display string, Mod-Backspace and Mod-Delete stay distinct on macOS (both show "⌘Delete").
+ */
+export function shortcutSignature(spec: ShortcutSpec, platform: Platform = detectPlatform()): string {
+  const { modifiers, key } = parse(spec)
+  const mods = resolveMods(modifiers, platform)
+  const k = key.toLowerCase()
+  return [...OTHER_ORDER.filter((m) => mods.has(m)), k === 'esc' ? 'escape' : k].join('+')
+}
+
+/** A spec's modifiers (`mod` unresolved) and key: "Mod-Shift-z" -> { modifiers: ['mod', 'shift'], key: 'z' }. */
+export function shortcutParts(spec: ShortcutSpec): { modifiers: Modifier[]; key: string } {
+  const { modifiers, key } = parse(spec)
+  return { modifiers: [...modifiers], key }
 }
 
 /** Normalizes one-or-many specs to an array. */

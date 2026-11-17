@@ -20,7 +20,7 @@ export const TOOLBAR_CONTROLS = {
   bulletList: { id: 'toolbar.bulletList', label: 'Bulleted list', shortcut: 'Mod-Shift-8' },
   orderedList: { id: 'toolbar.orderedList', label: 'Numbered list', shortcut: 'Mod-Shift-7' },
   alignLeft: { id: 'toolbar.alignLeft', label: 'Align left', shortcut: 'Mod-Shift-l' },
-  alignCenter: { id: 'toolbar.alignCenter', label: 'Align center', shortcut: 'Mod-Shift-e' },
+  alignCenter: { id: 'toolbar.alignCenter', label: 'Align center', shortcut: 'Mod-e' },
   alignRight: { id: 'toolbar.alignRight', label: 'Align right', shortcut: 'Mod-Shift-r' },
   alignJustify: { id: 'toolbar.alignJustify', label: 'Justify', shortcut: 'Mod-Shift-j' },
   lineSpacing: { id: 'toolbar.lineSpacing', label: 'Line spacing' },

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { budget } from './budget'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, saveStatus, waitForLayout } from './helpers'
+import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, saveStatus, isBookMode, showPage, turnSettled, waitForLayout, reveal } from './helpers'
 
 /**
  * Phase 2 acceptance (Book Layout), end to end through the UI, in chromium and webkit:
@@ -89,7 +89,7 @@ async function timeReflow(page: Page, selector: string): Promise<{ ms: number; s
 }
 
 async function chooseTrim(page: Page, id: string, label: RegExp) {
-  await ctl(page, 'book.trimSize').click()
+  await (await reveal(page, 'book.trimSize')).click()
   await expect(page.getByRole('menuitemradio', { name: label })).toBeVisible()
   const before = (await layout(page)).pageCount
   const r = await timeReflow(page, `[data-control-id="book.trimSize.${id}"]`)
@@ -134,12 +134,23 @@ async function pageOfRef(page: Page, k: number): Promise<number> {
 /** Footer page number shown on each rendered page frame (virtualised: the pages near the view). */
 async function footerNumbers(page: Page): Promise<Map<number, string>> {
   await waitForLayout(page)
-  const rows = await page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page')).map((f) => [
-      Number(f.dataset.pageIndex),
-      f.querySelector('[data-hf-region="footer"] [data-hf="number"]')?.textContent ?? '',
-    ]),
-  )
+  const read = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page')).map((f) => [
+        Number(f.dataset.pageIndex),
+        f.querySelector('[data-hf-region="footer"] [data-hf="number"]')?.textContent ?? '',
+      ]),
+    )
+  const rows = await read()
+  // Book mode renders the spread shown only: also read the next one, then turn back.
+  if (await isBookMode(page)) {
+    if (await page.evaluate(() => window.__nvE2E.turnSpread(1))) {
+      await turnSettled(page)
+      rows.push(...(await read()))
+      await page.evaluate(() => window.__nvE2E.turnSpread(-1))
+      await turnSettled(page)
+    }
+  }
   return new Map(rows as [number, string][])
 }
 
@@ -152,7 +163,7 @@ async function snapshot(page: Page) {
     pages: l.pages,
     effectiveView: l.effectiveView,
     surface: await page.locator('html').getAttribute('data-surface'),
-    trimLabel: (await ctl(page, 'book.trimSize').textContent())?.trim(),
+    trimLabel: (await (await reveal(page, 'book.trimSize')).textContent())?.trim(),
     chapterTitleSize: await editor(page).locator('h1[data-style="chapter-title"]').first().evaluate((el) => getComputedStyle(el).fontSize),
     footnotes: await page.evaluate(() => window.__nvE2E.footnotes().map((f) => ({ label: f.label, text: f.text }))),
     styles: await page.evaluate(() => window.__nvE2E.bookStyles()),
@@ -201,13 +212,13 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
   // Smaller pages hold less: the page count follows the trim, and coming back gives the same book.
   expect(counts['us-mass-market']).toBeGreaterThan(counts['us-6x9'])
   expect(counts['us-5.5x8.5']).toBe(l0.pageCount)
-  await expect(ctl(page, 'book.trimSize')).toContainText('Trade')
+  await expect((await reveal(page, 'book.trimSize'))).toContainText('Trade')
 
   // ---- 3. Edit the Chapter Title style: every chapter updates (no document change).
   const sizes = () => titles.evaluateAll((els) => els.map((el) => parseFloat(getComputedStyle(el).fontSize)))
   const sizeBefore = await sizes()
   await clickBlockStart(page, titles.nth(3))
-  await ctl(page, 'styles.edit').click()
+  await (await reveal(page, 'styles.edit')).click()
   const modify = page.getByRole('dialog', { name: 'Modify style: Chapter Title' })
   await expect(modify).toBeVisible()
   await modify.locator('[data-control-id="styles.field.fontSize"]').fill('28')
@@ -232,7 +243,7 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
   const target = editor(page).locator(':scope > p').nth(Math.floor((blocks.length - fx.chapters) / 2))
   await clickBlockStart(page, target)
   await lineEnd(page)
-  await ctl(page, 'insert.menu').click()
+  await (await reveal(page, 'insert.menu')).click()
   await ctl(page, 'footnote.insert').click()
   const box = page.getByTestId('footnote-editor')
   await expect(box).toBeFocused()
@@ -247,20 +258,22 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
   await expect(page.locator(`.nv-frames .nv-page[data-page-index="${refPage}"] .nv-fn-area`)).toHaveText('1 Acceptance note.')
   for (const other of [refPage - 1, refPage + 1]) {
     // The neighbour is rendered (so this looks at a real page); it may rightly have no footnote area.
+    // (Book mode: a neighbour on the other spread is turned to first.)
+    await showPage(page, other)
     await expect(page.locator(`.nv-frames .nv-page[data-page-index="${other}"]`)).toHaveCount(1)
     const areas = await page.locator(`.nv-frames .nv-page[data-page-index="${other}"] .nv-fn-area`).allTextContents()
     expect(areas.join(' '), `footnote area of page ${other}`).not.toContain('Acceptance note.')
   }
 
   // ---- 5. Page numbers: off, then on (outside corner of the footer); read them on specific pages.
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   const hf = page.getByRole('dialog', { name: 'Headers & page numbers' })
   await expect(hf).toBeVisible()
   await ctl(page, 'book.headerFooter.numberPosition').selectOption('none')
   await ctl(page, 'book.headerFooter.done').click()
   await expect(hf).toHaveCount(0)
   expect([...(await footerNumbers(page)).values()].every((n) => n === '')).toBe(true)
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.numberPosition').selectOption('footer-outside')
   await ctl(page, 'book.headerFooter.done').click()
   await expect(hf).toHaveCount(0)
@@ -285,6 +298,7 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
     }
     expect(checked, `numbered pages checked after chapter ${ch + 1} opens`).toBeGreaterThan(0)
     // The number sits in the outside corner: right on a recto, left on a verso.
+    await showPage(page, open + 1)
     const pos = await page.evaluate((i) => {
       const f = document.querySelector(`.nv-frames .nv-page[data-page-index="${i}"]`)!
       const n = f.querySelector('[data-hf-region="footer"] [data-hf="number"]')!
@@ -294,7 +308,9 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
     }, open + 1)
     expect(pos.side === 'recto' ? pos.centre > pos.width / 2 : pos.centre < pos.width / 2, JSON.stringify(pos)).toBe(true)
   }
-  // Navigation: PageDown moves to the next spread, and the indicator follows.
+  // Navigation: PageDown moves to the next spread, and the indicator follows. (Back to the caret's
+  // spread first: the checks above turned the view without moving the caret.)
+  await showPage(page, (await layout(page)).currentPage)
   const indicator = page.getByTestId('page-indicator')
   const before = await indicator.textContent()
   await page.keyboard.press('PageDown')
@@ -308,12 +324,12 @@ test('Phase 2 acceptance: paste, trims, chapter style, footnote, page numbers, s
     ['dark', 'dark', 'rgb(32, 35, 39)'],
     ['auto', 'white', 'rgb(255, 255, 255)'],
   ] as const) {
-    await ctl(page, `book.surface.${value}`).click()
-    await expect(ctl(page, `book.surface.${value}`)).toHaveAttribute('aria-checked', 'true')
+    await (await reveal(page, `book.surface.${value}`)).click()
+    await expect((await reveal(page, `book.surface.${value}`))).toHaveAttribute('aria-checked', 'true')
     await expect(page.locator('html')).toHaveAttribute('data-surface', surface)
     await expect.poll(pageBg).toBe(bg)
   }
-  await ctl(page, 'book.surface.book').click()
+  await (await reveal(page, 'book.surface.book')).click()
   expect((await layout(page)).pages).toEqual(l2.pages)
 
   // ---- 7. Save, reopen: identical settings and layout.

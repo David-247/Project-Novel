@@ -162,3 +162,32 @@ describe('replace', () => {
     expect(tr.steps).toHaveLength(3)
   })
 })
+
+describe('findMatches and the track changes markup view', () => {
+  const del = { type: 'deletion', attrs: { id: 'd', author: 'A' } }
+  const ins = { type: 'insertion', attrs: { id: 'i', author: 'A' } }
+  const doc = schema.nodeFromJSON({
+    type: 'doc',
+    content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'cat ' }, { type: 'text', text: 'cat ', marks: [del] }, { type: 'text', text: 'cat', marks: [ins] }] },
+      { type: 'paragraph', attrs: { trackedDelete: { id: 'd2', author: 'A' } }, content: [{ type: 'text', text: 'cat', marks: [del] }] },
+    ],
+  })
+  const count = (view: 'all' | 'simple' | 'none' | 'original') => findMatches(doc, 'cat', ci, view).length
+
+  it('All Markup finds everything; Simple / No Markup skip deleted text; Original skips inserted text', () => {
+    expect(count('all')).toBe(4)
+    expect(count('simple')).toBe(2)
+    expect(count('none')).toBe(2)
+    expect(count('original')).toBe(3)
+    // Positions stay 1:1: the visible matches are the same ranges as in All Markup.
+    expect(findMatches(doc, 'cat', ci, 'none').map((m) => m.from)).toEqual([1, 9])
+    expect(findMatches(doc, 'cat', ci, 'all').map((m) => m.from)).toEqual([1, 5, 9, 14])
+  })
+
+  it('a match in deleted text is never replaced', () => {
+    const tr = EditorState.create({ schema, doc }).tr
+    replaceRange(tr, schema, { from: 5, to: 8 }, 'dog')
+    expect(tr.docChanged).toBe(false)
+  })
+})

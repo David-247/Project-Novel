@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { docEnd, docStart, editor, launch, lineEnd, menu, MENU, newProject, openRecent, readFile, saveStatus, seedProject, waitForLayout } from './helpers'
+import { docEnd, docStart, editor, launch, lineEnd, menu, MENU, newProject, openRecent, readFile, saveStatus, seedProject, seedProjectNavigation, showPage, waitForLayout, reveal } from './helpers'
+
+// Book mode (default) and, in the *-scroll projects, continuous scroll (playwright.config.ts BOTH_MODES).
+test.beforeEach(async ({ page }, testInfo) => seedProjectNavigation(page, testInfo))
 
 /**
  * Footnotes (Phase 2): the reference in the text, the note at the bottom of the page it falls on,
@@ -71,6 +74,7 @@ async function pageOfRef(page: Page, k: number): Promise<number> {
  * page (text client rects inside the frame). Body text must end above the area.
  */
 async function overlap(page: Page, p: number) {
+  await showPage(page, p) // Book mode shows one spread: turn to the page's
   return page.evaluate((idx) => {
     const frame = document.querySelector(`.nv-frames .nv-page[data-page-index="${idx}"]`)!.getBoundingClientRect()
     const area = document.querySelector(`.nv-frames .nv-page[data-page-index="${idx}"] .nv-fn-area`)
@@ -95,7 +99,7 @@ test('Insert > Footnote: superscript number in the text, the note at the bottom 
   await setup(page)
   await docStart(page)
   await lineEnd(page)
-  await page.locator('[data-control-id="insert.menu"]').click()
+  await (await reveal(page, 'insert.menu')).click()
   await page.locator('[data-control-id="footnote.insert"]').click()
   const box = page.getByTestId('footnote-editor')
   await expect(box).toBeFocused()
@@ -165,7 +169,7 @@ test('Mod-Alt-f inserts; numbers follow document order and update live; the sele
   await waitForLayout(page)
   await expect(area.locator('.nv-fn-note')).toHaveText(['1 Second note.'])
   // Footnote options: symbols.
-  await page.locator('[data-control-id="footnote.options"]').click()
+  await (await reveal(page, 'footnote.options')).click()
   await page.locator('[data-control-id="footnote.options.format"]').selectOption('symbols')
   await escapeDialog(page, 'Footnote options')
   await waitForLayout(page)
@@ -182,6 +186,7 @@ test('a long note continues in the footnote area of the next page; body text nev
   const first = placement[0][0].count
   expect(placement[1][0]).toEqual({ ordinal: 0, start: first, count: expect.any(Number) })
   // Drawn: page 1 shows the following lines, under a full-width continuation rule.
+  await showPage(page, 1)
   await expect(page.locator('.nv-frames .nv-page[data-page-index="1"] .nv-fn-note')).toHaveAttribute('data-start', String(first))
   await expect(page.locator('.nv-frames .nv-page[data-page-index="1"] .nv-fn-rule--continued')).toHaveCount(1)
   for (const p of [0, 1]) {
@@ -190,10 +195,15 @@ test('a long note continues in the footnote area of the next page; body text nev
     expect(o.bodyBottom, `page ${p}`).toBeLessThanOrEqual(o.areaTop + 0.5)
   }
   // The lines drawn on both pages are consecutive: page 0's area ends where page 1's continues.
-  const tops = await page.evaluate(() => {
-    const notes = Array.from(document.querySelectorAll<HTMLElement>('.nv-fn-note'))
-    return notes.map((n) => ({ start: Number(n.dataset.start), h: n.getBoundingClientRect().height, inner: (n.firstElementChild as HTMLElement).style.marginTop }))
-  })
+  // (Pages 0 and 1 are on different spreads in Book mode: read each on its own.)
+  const noteOn = async (p: number) => {
+    await showPage(page, p)
+    return page.evaluate((idx) => {
+      const n = document.querySelector<HTMLElement>(`.nv-frames .nv-page[data-page-index="${idx}"] .nv-fn-note`)!
+      return { start: Number(n.dataset.start), h: n.getBoundingClientRect().height, inner: (n.firstElementChild as HTMLElement).style.marginTop }
+    }, p)
+  }
+  const tops = [await noteOn(0), await noteOn(1)]
   expect(tops[1].inner).toBe(`-${first * (tops[0].h / first)}px`)
 })
 
@@ -212,6 +222,7 @@ test('REGRESSION: a reference on the last line of a page whose note pushes that 
   expect(await page.evaluate(() => window.__nvE2E.paginationSettled())).toBe(true)
   expect((await layout(page)).layoutVersion).toBe(l.layoutVersion)
   // The note is on the page of its reference, which moved to page 1 with its line.
+  await showPage(page, 1)
   const p = await pageOfRef(page, 0)
   expect(p).toBe(1)
   const { placement } = await areas(page)
@@ -236,7 +247,7 @@ test('footnotes survive save and reopen, and the book.json footnote options too'
   await page.keyboard.type('Smith, 1999, p. 4.')
   await page.keyboard.press('Escape')
   await page.keyboard.type(' and more.')
-  await page.locator('[data-control-id="footnote.options"]').click()
+  await (await reveal(page, 'footnote.options')).click()
   await page.locator('[data-control-id="footnote.options.separator"]').uncheck()
   await page.locator('[data-control-id="footnote.options.done"]').click()
   await page.keyboard.press('ControlOrMeta+s')
@@ -328,9 +339,9 @@ test('footnote controls: keyboard reachable dialog, tooltips, 32 px reference ta
     })
   expect(target.w).toBeGreaterThanOrEqual(32)
   expect(target.h).toBeGreaterThanOrEqual(32)
-  const btn = page.locator('[data-control-id="footnote.options"]')
-  // Keyboard: roving focus from the Insert menu button to Footnotes; keyboard focus shows the tooltip.
-  await page.locator('[data-control-id="insert.menu"]').focus()
+  const btn = (await reveal(page, 'footnote.options'))
+  // Keyboard: roving focus from the Footnote button to Footnote options; keyboard focus shows the tooltip.
+  await (await reveal(page, 'ribbon.cmd.footnote.insert')).focus()
   await page.keyboard.press('ArrowRight')
   await expect(btn).toBeFocused()
   await expect(page.locator('[data-tooltip-body]')).toContainText('numbered')
@@ -409,6 +420,7 @@ test('a note too long for the last page shows a "continued" marker', async ({ pa
   await page.evaluate((t) => window.__nvE2E.insertFootnoteAt(5, t), words(1500))
   await waitForLayout(page)
   const last = (await layout(page)).pageCount - 1
+  await showPage(page, last)
   const marker = page.locator(`.nv-frames .nv-page[data-page-index="${last}"] [data-footnote-clipped]`)
   await expect(marker).toHaveText('continued…')
   // The marker has a line of its own at the bottom of the area: it never covers a line of the note.

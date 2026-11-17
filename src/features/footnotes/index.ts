@@ -10,7 +10,9 @@
 // - FOOTNOTE_OPTION_CONTROLS: control ids + copy, for the tooltips registry.
 // - footnoteAreaHeights() / footnotePlacement(): the published areas (diagnostics, e2e).
 export { useFootnotePagination, installFootnotePagination } from './integration'
-export { FootnoteOptionsButton, FootnoteOptionsDialog } from './FootnoteOptions'
+export { FootnoteOptionsButton, FootnoteOptionsDialog, openFootnoteOptions } from './FootnoteOptions'
+// Format > Footnote Options… (shared command registry). Returns unregister.
+export { registerFootnoteCommands } from './commands'
 export type { FootnoteOptionsButtonProps } from './FootnoteOptions'
 export { FOOTNOTE_OPTION_CONTROLS } from './controls'
 export type { FootnoteControlMeta } from './controls'

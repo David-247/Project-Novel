@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, type BrowserContext, type Locator, type Page, type TestInfo } from '@playwright/test'
 
 /**
  * Helpers for driving the app through the e2e fake Tauri backend
@@ -40,6 +40,43 @@ export async function newProject(page: Page, folder: string): Promise<void> {
   await menu(page, MENU.newProject)
   const name = folder.split('/').pop()!
   await expect(saveStatus(page)).toContainText(`${name}:`)
+}
+
+/** Save the open project (Mod-s from the manuscript) and wait for "<title>: Saved". */
+export async function saveProject(page: Page, title: string): Promise<void> {
+  await editor(page).focus()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(saveStatus(page)).toHaveText(`${title}: Saved`, { timeout: 30_000 })
+}
+
+/** Close this window and open `folder` again from Open Recent (a plain reopen, no crash); the new page. */
+export async function reopenProject(context: BrowserContext, page: Page, folder: string, title: string): Promise<Page> {
+  await page.close()
+  const next = await context.newPage()
+  await launch(next)
+  await openRecent(next, folder)
+  await expect(saveStatus(next)).toHaveText(`${title}: All changes saved`, { timeout: 60_000 })
+  await waitForLayout(next)
+  return next
+}
+
+/**
+ * Back up the unsaved work now (as the 30 s autosave would), force-kill the window, relaunch, and
+ * restore the backup from the recovery prompt; the new page, with the restored work unsaved.
+ */
+export async function crashAndRestore(context: BrowserContext, page: Page, title: string): Promise<Page> {
+  await expect(saveStatus(page)).toContainText('Unsaved changes')
+  expect(await page.evaluate(() => window.__nvE2E.autosaveNow())).toBe('written')
+  await expect(saveStatus(page)).toHaveText(new RegExp(`^${title}: Unsaved changes · backed up \\d`))
+  await page.close({ runBeforeUnload: false })
+  const next = await context.newPage()
+  await launch(next)
+  await recoveryControl(next, 'reopen').click()
+  await expect(next.getByRole('dialog', { name: 'Restore unsaved changes?' })).toBeVisible()
+  await recoveryControl(next, 'restore').click()
+  await expect(saveStatus(next)).toContainText(`${title}: Unsaved changes`, { timeout: 60_000 })
+  await waitForLayout(next)
+  return next
 }
 
 /** File > Open Recent > `folder` (must be in the Rust-owned recent list). */
@@ -96,6 +133,11 @@ export async function clickBlockStart(page: Page, block: Locator): Promise<void>
       return { x: rc.left + Math.min(2, rc.width / 2), y: rc.top + rc.height / 2 }
     })
   const main = page.getByRole('main', { name: 'Editor' })
+  // Book mode (the default) shows one spread: turn to the block's spread first.
+  if (await isBookMode(page)) {
+    await block.evaluate((el) => window.__nvE2E.revealElement(el))
+    await turnSettled(page)
+  }
   const box = (await main.boundingBox())!
   let p = await point()
   if (p.y < box.y + 40 || p.y > box.y + box.height - 40) {
@@ -105,6 +147,83 @@ export async function clickBlockStart(page: Page, block: Locator): Promise<void>
   }
   await page.mouse.click(p.x, p.y)
   await page.evaluate(() => window.__nvE2E?.syncSelection())
+}
+
+/** The writing view is in Book mode (page turns; the default): one spread shown, no scrolling between spreads. */
+export async function isBookMode(page: Page): Promise<boolean> {
+  return page.evaluate(() => !!document.querySelector('.nv-desk[data-navigation="book"]'))
+}
+
+/**
+ * Show page `index` in either navigation mode: Book mode turns to its spread, continuous scroll
+ * scrolls its row to the top. The caret does not move. Resolves once that spread is painted.
+ */
+export async function showPage(page: Page, index: number): Promise<void> {
+  await page.evaluate((i) => window.__nvE2E.showPage(i), index)
+  await turnSettled(page)
+  await expect(page.locator(`.nv-frames .nv-page[data-page-index="${index}"]`)).toBeAttached()
+}
+
+/**
+ * Run `read` on the rendered page frames of the first `rows` spreads and concatenate the results. In
+ * continuous scroll the frames near the viewport are rendered at once (read once); in Book mode one
+ * spread is, so turn through them (then back to the spread shown before).
+ */
+export async function acrossSpreads<T>(page: Page, read: () => Promise<T[]>, rows = 4): Promise<T[]> {
+  if (!(await isBookMode(page))) return read()
+  const start = await page.evaluate(() => window.__nvE2E.layout().visibleSpread.first)
+  const out: T[] = []
+  await page.evaluate(() => window.__nvE2E.edgeSpread(-1))
+  for (let r = 0; r < rows; r++) {
+    await turnSettled(page)
+    out.push(...(await read()))
+    if (!(await page.evaluate(() => window.__nvE2E.turnSpread(1)))) break
+  }
+  await page.evaluate((i) => window.__nvE2E.showPage(i), start)
+  await turnSettled(page)
+  return out
+}
+
+/** After a page turn: painted, and the turn transition (a short ease-in of the spread) finished. */
+export async function turnSettled(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+    await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))
+  })
+}
+
+/**
+ * Continuous scroll (the Phase 2 view) for a spec that scrolls through the pages: set the app
+ * preference, as Settings > Page navigation would.
+ */
+export async function chooseScrollNavigation(page: Page): Promise<void> {
+  await page.evaluate(() => window.__nvE2E.setPageNavigation('scroll'))
+  await expect(page.locator('.nv-desk[data-navigation="scroll"]')).toBeAttached()
+}
+
+/**
+ * Seed preferences.json for every launch of this page (before the app boots; a file the app wrote
+ * since wins). Specs written for continuous scroll, the Phase 2 view, call
+ * `seedPreferences(page, { pageNavigation: 'scroll' })` in a beforeEach.
+ */
+export async function seedPreferences(page: Page, values: Record<string, unknown>): Promise<void> {
+  const text = JSON.stringify({ version: 1, ...values })
+  await page.addInitScript((t) => {
+    ;(window as unknown as { __nvE2EPreferences?: string }).__nvE2EPreferences = t
+  }, text)
+}
+
+/** The page navigation a Playwright project runs in: 'scroll' for the *-scroll projects, else 'book' (the default). */
+export function projectNavigation(testInfo: TestInfo): 'book' | 'scroll' {
+  return (testInfo.project.metadata as { pageNavigation?: string } | undefined)?.pageNavigation === 'scroll' ? 'scroll' : 'book'
+}
+
+/**
+ * For specs that run in both navigation modes (playwright.config.ts BOTH_MODES): call in a
+ * beforeEach; the *-scroll projects seed continuous scroll before the app boots.
+ */
+export async function seedProjectNavigation(page: Page, testInfo: TestInfo): Promise<void> {
+  if (projectNavigation(testInfo) === 'scroll') await seedPreferences(page, { pageNavigation: 'scroll' })
 }
 
 /** Wait until the pagination engine has laid out the current document (no reflow pending) and painted. */
@@ -166,4 +285,54 @@ export async function docStart(page: Page): Promise<void> {
 export async function docEnd(page: Page): Promise<void> {
   await page.keyboard.press(IS_MAC ? 'Meta+ArrowDown' : 'Control+End')
   await page.evaluate(() => window.__nvE2E?.syncSelection())
+}
+
+/** Ribbon tab ids (the toolbar shows one tab's controls at a time). */
+export type RibbonTab = 'home' | 'insert' | 'layout' | 'review' | 'view'
+
+/**
+ * Select a ribbon tab. A click event without moving the pointer: focus, selection and hover stay where
+ * the test put them (a real pointer would leave the tab's tooltip open over the row below it).
+ */
+export async function ribbonTab(page: Page, tab: RibbonTab): Promise<void> {
+  const button = page.locator(`[data-control-id="ribbon.tab.${tab}"]`)
+  if ((await button.getAttribute('aria-selected')) !== 'true') await button.dispatchEvent('click')
+  await expect(button).toHaveAttribute('aria-selected', 'true')
+}
+
+/**
+ * The ribbon control `id`, with its tab selected first (a control on another tab is mounted but
+ * hidden). For controls outside the ribbon it is just the locator.
+ */
+export async function reveal(page: Page, id: string): Promise<Locator> {
+  const tab = await page.evaluate(
+    (cid) => document.querySelector(`[data-ribbon-panel] [data-control-id="${cid}"]`)?.closest('[data-ribbon-panel]')?.getAttribute('data-ribbon-panel') ?? null,
+    id,
+  )
+  if (tab) await ribbonTab(page, tab as RibbonTab)
+  const control = page.locator(`[data-control-id="${id}"]`)
+  if (!tab) return control
+  // The panel's size step is chosen in layout effects, but a ResizeObserver (fonts loading, a style
+  // name changing width) can re-step it a frame later: decide only once it held for two frames.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (t) =>
+          new Promise<boolean>((resolve) => {
+            const step = () => document.querySelector(`[data-ribbon-panel="${t}"]`)?.getAttribute('data-ribbon-step') ?? null
+            const s0 = step()
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve(step() === s0)))
+          }),
+        tab,
+      ),
+    )
+    .toBe(true)
+  if (await control.isVisible()) return control
+  // The window is too narrow for its group (e.g. Review on macOS at 1280px, whose fonts are wider):
+  // open the collapsed group, or More, and return the same command's item in that dropdown.
+  const group = await control.evaluate((el) => el.closest('[data-ribbon-group]')?.getAttribute('data-ribbon-group') ?? null)
+  const panel = page.locator(`[data-ribbon-panel="${tab}"]`)
+  const collapsed = panel.locator(`[data-control-id="ribbon.group.${group}"]`)
+  await ((await collapsed.isVisible()) ? collapsed : panel.locator('[data-control-id="ribbon.more"]')).click()
+  return page.getByRole('menu').locator(`[data-control-id="${id}"]`)
 }

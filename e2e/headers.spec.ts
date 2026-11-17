@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, recoveryControl, saveStatus, seedProject, waitForLayout } from './helpers'
+import { acrossSpreads, isBookMode, clickBlockStart, editor, launch, lineEnd, newProject, openRecent, readFile, recoveryControl, saveStatus, seedPreferences, seedProject, seedProjectNavigation, showPage, waitForLayout, reveal } from './helpers'
+
+// Book mode (default) and, in the *-scroll projects, continuous scroll (playwright.config.ts BOTH_MODES).
+test.beforeEach(async ({ page }, testInfo) => seedProjectNavigation(page, testInfo))
 
 /**
  * Running headers, footers and page numbers (Phase 2, headers/footers ticket). They are drawn in the
@@ -22,7 +25,8 @@ interface Shown {
 /** What every rendered page frame shows in its margins. */
 async function shown(page: Page): Promise<Shown[]> {
   await waitForLayout(page)
-  return page.evaluate(() =>
+  // Book mode shows one spread at a time: read the first spreads in turn.
+  return acrossSpreads(page, () => page.evaluate(() =>
     Array.from(document.querySelectorAll<HTMLElement>('.nv-frames .nv-page')).map((f) => {
       const text = (sel: string) => f.querySelector(sel)?.textContent ?? ''
       return {
@@ -32,7 +36,7 @@ async function shown(page: Page): Promise<Shown[]> {
         footerNumber: text('[data-hf-region="footer"] [data-hf="number"]'),
       }
     }),
-  )
+  ))
 }
 
 /** Doc: one front matter paragraph, then three chapters (level-1 headings start a page). */
@@ -53,7 +57,7 @@ async function openBook(page: Page, name: string, author = 'Ada Quill', words = 
 }
 
 async function setDetails(page: Page, d: { title?: string; author?: string }) {
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.details').click()
   const dlg = detailsDialog(page)
   await expect(dlg).toBeVisible()
@@ -146,7 +150,7 @@ test('settings change the pages at once: roman front matter, custom text, chapte
   await openBook(page, 'Settings')
   const l = await layout(page)
   const first = l.pages.find((p) => p.startsBlockType === 'heading')!.index
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await expect(dialog(page)).toBeVisible()
 
   await ctl(page, 'book.headerFooter.frontMatter').selectOption('roman')
@@ -191,7 +195,7 @@ test('headers and numbers do not change body pagination: identical page breaks a
     })
   }
   const on = await snapshot()
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.verso').selectOption('none')
   await ctl(page, 'book.headerFooter.recto').selectOption('none')
   await ctl(page, 'book.headerFooter.numberPosition').selectOption('none')
@@ -203,12 +207,14 @@ test('headers and numbers do not change body pagination: identical page breaks a
   expect(off.version).toEqual(on.version)
   expect(off.firstLines).toEqual(on.firstLines)
   // The head sits inside the margin: never taller than the top margin, clipped by it.
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.verso').selectOption('custom')
   await ctl(page, 'book.headerFooter.versoText').fill('An exceedingly long running head '.repeat(30))
   await ctl(page, 'book.headerFooter.recto').selectOption('custom')
   await ctl(page, 'book.headerFooter.rectoText').fill('An exceedingly long running head '.repeat(30))
   await ctl(page, 'book.headerFooter.done').click()
+  const book = await isBookMode(page)
+  if (book) await showPage(page, 2) // (continuous scroll: in view already)
   const clipped = await page.evaluate(() => {
     const f = document.querySelector<HTMLElement>('.nv-frames .nv-page[data-page-index="2"]')!
     const slot = f.querySelector<HTMLElement>('.nv-slot-header')!
@@ -216,18 +222,23 @@ test('headers and numbers do not change body pagination: identical page breaks a
     return { slot: slot.getBoundingClientRect().height, line: line ? line.getBoundingClientRect().height : 0, overflow: getComputedStyle(slot).overflow }
   })
   expect(clipped.line).toBeLessThanOrEqual(clipped.slot + 0.5)
+  if (book) await showPage(page, 0) // the first lines are compared where they were painted
   const long = await snapshot()
   expect(long.pages).toEqual(on.pages)
   expect(long.firstLines).toEqual(on.firstLines)
 })
 
 test('a chapter title edit updates only the heads that show it: other pages keep their DOM nodes, and nothing reflows', async ({ page }) => {
+  // Continuous scroll (Phase 2 behaviour): several rows rendered at once, so a page of chapter 2 stays
+  // mounted while chapter 1's title is edited. (Book mode renders one spread; its heads are covered by
+  // the other tests here and e2e/page-turn.spec.ts.)
+  await seedPreferences(page, { pageNavigation: 'scroll' })
   // Tall window: more rows are rendered (frames are virtualised), so chapter 2's pages sit next to chapter 1's title.
   await page.setViewportSize({ width: 1400, height: 2000 })
   // Short chapters, so chapter 2's pages are rendered (frames are virtualised) next to chapter 1's title.
   await openBook(page, 'Titles', 'Ada Quill', 1800)
   const versionBefore = (await layout(page)).layoutVersion
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.verso').selectOption('chapter')
   await ctl(page, 'book.headerFooter.recto').selectOption('chapter')
   await ctl(page, 'book.headerFooter.done').click()
@@ -278,14 +289,14 @@ test('a chapter title edit updates only the heads that show it: other pages keep
 test('REGRESSION: a Duplicate of Chapter Title opens chapters (running head, number restart), and a footnote in a title is not in the head', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await openBook(page, 'Copies', 'Ada Quill', 1800)
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.verso').selectOption('chapter')
   await ctl(page, 'book.headerFooter.recto').selectOption('chapter')
   await ctl(page, 'book.headerFooter.done').click()
   await expect(dialog(page)).toHaveCount(0)
 
   // Manage styles > Duplicate Chapter Title, then give chapter 1's title that style.
-  await ctl(page, 'styles.manage').click()
+  await (await reveal(page, 'styles.manage')).click()
   const manage = page.getByRole('dialog', { name: 'Manage styles' })
   await manage.locator('[data-style-row="chapter-title"]').click()
   await manage.locator('[data-control-id="styles.manage.duplicate"]').click()
@@ -296,7 +307,7 @@ test('REGRESSION: a Duplicate of Chapter Title opens chapters (running head, num
   const title1 = (await titles.nth(0).textContent())!
   const title2 = (await titles.nth(1).textContent())!
   await clickBlockStart(page, titles.nth(0))
-  await ctl(page, 'styles.picker').selectOption({ label: 'Chapter Title copy' })
+  await (await reveal(page, 'styles.picker')).selectOption({ label: 'Chapter Title copy' })
   await expect(editor(page).locator('h1[data-style="custom-1"]')).toHaveText(title1)
 
   // Chapter 1 still opens the body: its pages show its title, and its second page is number 2.
@@ -315,7 +326,7 @@ test('REGRESSION: a Duplicate of Chapter Title opens chapters (running head, num
   // A footnote at the end of chapter 2's title: the heads show the title only.
   await clickBlockStart(page, titles.nth(1))
   await lineEnd(page)
-  await ctl(page, 'insert.menu').click()
+  await (await reveal(page, 'insert.menu')).click()
   await ctl(page, 'footnote.insert').click()
   await expect(page.getByTestId('footnote-editor')).toBeFocused()
   await page.keyboard.type('First published in 1902.')
@@ -338,7 +349,7 @@ test('REGRESSION: Chapter Number then a Duplicate of Chapter Title break once: t
   await seedProject(page, '/projects/Numbered', 'Numbered', doc)
   await openRecent(page, '/projects/Numbered')
   await expect(saveStatus(page)).toHaveText('Numbered: All changes saved')
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.verso').selectOption('chapter')
   await ctl(page, 'book.headerFooter.recto').selectOption('chapter')
   await ctl(page, 'book.headerFooter.done').click()
@@ -351,7 +362,7 @@ test('REGRESSION: Chapter Number then a Duplicate of Chapter Title break once: t
   expect(before.pages.filter((p) => p.startsBlockType === 'heading')).toHaveLength(3)
 
   // Give the title a Duplicate of Chapter Title (identical look): the pages must not change.
-  await ctl(page, 'styles.manage').click()
+  await (await reveal(page, 'styles.manage')).click()
   const manage = page.getByRole('dialog', { name: 'Manage styles' })
   await manage.locator('[data-style-row="chapter-title"]').click()
   await manage.locator('[data-control-id="styles.manage.duplicate"]').click()
@@ -361,7 +372,7 @@ test('REGRESSION: Chapter Number then a Duplicate of Chapter Title break once: t
   const title = editor(page).locator('h1[data-style="chapter-title"]').first()
   const titleText = (await title.textContent())!
   await clickBlockStart(page, title)
-  await ctl(page, 'styles.picker').selectOption({ label: 'Chapter Title copy' })
+  await (await reveal(page, 'styles.picker')).selectOption({ label: 'Chapter Title copy' })
   await expect(editor(page).locator('h1[data-style="custom-1"]')).toHaveText(titleText)
   // The title does not break again after the number.
   await expect(editor(page).locator('h1[data-style="custom-1"]')).not.toHaveAttribute('data-break-before', /./)
@@ -383,7 +394,7 @@ test('running heads are not document content: find, select-all + copy and the do
   await page.setViewportSize({ width: 1400, height: 900 })
   await openBook(page, 'NotContent', 'Ada Quill', 1500)
   const HEAD = 'Zephyr-Quokka-Head'
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.verso').selectOption('custom')
   await ctl(page, 'book.headerFooter.versoText').fill(HEAD)
   await ctl(page, 'book.headerFooter.recto').selectOption('custom')
@@ -423,7 +434,7 @@ test('running heads are not document content: find, select-all + copy and the do
 test('the dialog opens from the toolbar button with the keyboard and from a double-click on a header or footer; every control has a tooltip', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await openBook(page, 'Open')
-  const btn = ctl(page, 'book.headerFooter')
+  const btn = (await reveal(page, 'book.headerFooter'))
   await btn.hover()
   await expect(page.locator('[data-tooltip-body]')).toContainText('Set the page headers and page numbers')
   await btn.focus()
@@ -469,7 +480,7 @@ test('settings and details persist across save, reopen and crash recovery', asyn
   // The project title in the status bar follows Book details.
   await expect(saveStatus(page)).toContainText('Persistent Book:')
 
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.verso').selectOption('custom')
   await ctl(page, 'book.headerFooter.versoText').fill('Left head')
   await ctl(page, 'book.headerFooter.numberPosition').selectOption('footer-outside')
@@ -501,7 +512,7 @@ test('settings and details persist across save, reopen and crash recovery', asyn
   const first = l.pages.find((p) => p.startsBlockType === 'heading')!.index
   expect(got.find((g) => g.index === 0)!.footerNumber).toBe('i')
   expect(got.find((g) => g.index === first + 1)).toMatchObject({ header: (first + 1) % 2 === 1 ? 'Left head' : 'Persistent Book', footerNumber: '6' })
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await expect(ctl(page, 'book.headerFooter.verso')).toHaveValue('custom')
   await expect(ctl(page, 'book.headerFooter.versoText')).toHaveValue('Left head')
   await expect(ctl(page, 'book.headerFooter.numberStart')).toHaveValue('5')
@@ -509,7 +520,7 @@ test('settings and details persist across save, reopen and crash recovery', asyn
 
   // Crash recovery: change a setting, let autosave snapshot it, kill the page, restore.
   await page.clock.install()
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   await ctl(page, 'book.headerFooter.numberFormat').selectOption('lower-roman')
   await ctl(page, 'book.headerFooter.done').click()
   await expect(saveStatus(page)).toContainText('Unsaved changes')
@@ -525,14 +536,14 @@ test('settings and details persist across save, reopen and crash recovery', asyn
   got = await shown(relaunched)
   // Body numbers are Roman now: start 5 -> v, vi.
   expect(got.find((g) => g.index === first + 1)!.footerNumber).toBe('vi')
-  await ctl(relaunched, 'book.headerFooter').click()
+  await (await reveal(relaunched, 'book.headerFooter')).click()
   await expect(ctl(relaunched, 'book.headerFooter.numberFormat')).toHaveValue('lower-roman')
   await expect(ctl(relaunched, 'book.headerFooter.versoText')).toHaveValue('Left head')
 })
 
 test('the dialog has a live mini preview that follows the settings', async ({ page }) => {
   await newProjectWithText(page)
-  await ctl(page, 'book.headerFooter').click()
+  await (await reveal(page, 'book.headerFooter')).click()
   const preview = page.getByTestId('hf-preview')
   await expect(preview).toBeVisible()
   await expect(preview.locator('[data-preview-page="3"] [data-hf="text"]')).toHaveText('Author Name')

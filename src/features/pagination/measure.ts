@@ -54,7 +54,16 @@ export function scaleOf(root: HTMLElement): number {
   return s > 0 ? s : 1
 }
 
-const range = () => document.createRange()
+/**
+ * One Range for all measuring. Every Range a page creates stays live (the browser updates it on each
+ * DOM change) until it is garbage collected: one per measured block made each later DOM change cost
+ * O(blocks) (a tracked Replace All spent ~200 ms in ProseMirror's appendChild calls).
+ */
+let shared: { doc: Document; range: Range } | null = null
+const range = (): Range => {
+  if (shared?.doc !== document) shared = { doc: document, range: document.createRange() }
+  return shared.range
+}
 
 interface Fragment {
   top: number

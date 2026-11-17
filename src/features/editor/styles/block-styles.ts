@@ -3,6 +3,7 @@ import { closeHistory } from '@tiptap/pm/history'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
+import type { Transform } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import {
   chapterRoleSignature,
@@ -14,6 +15,7 @@ import {
   type ResolvedStyles,
 } from '@/shared/book'
 import { useStore } from '@/shared/store'
+import { currentMarkupView, isBlockHidden, MARKUP_VIEW_META, TRACKED_STYLE_ATTR, type MarkupView } from '@/shared/track-changes'
 import { inListItem } from '../toolbar/block-format'
 import { getResolvedStyles, resolveStyles } from './resolved'
 
@@ -63,7 +65,7 @@ export function effectiveStyleId(node: PMNode): string {
  * stored as null) and optionally drops direct block formatting. Returns false when the block cannot
  * take the style here (a chapter style inside a list item).
  */
-export function restyleBlock(tr: Transaction, pos: number, style: ResolvedStyle, clearDirect = false): boolean {
+export function restyleBlock(tr: Transform, pos: number, style: ResolvedStyle, clearDirect = false): boolean {
   const node = tr.doc.nodeAt(pos)
   if (!node || !isStyledType(node)) return false
   const schema = tr.doc.type.schema
@@ -103,13 +105,30 @@ function forSelectedBlocks(tr: Transaction, fn: (node: PMNode, pos: number) => b
  * Restyles every block whose effective style is `fromId` to `to` in one transaction (O(document);
  * used when a style is deleted). Returns the number of blocks changed.
  */
-export function remapStyleInDoc(tr: Transaction, fromId: string, to: ResolvedStyle): number {
+export function remapStyleInDoc(tr: Transform, fromId: string, to: ResolvedStyle): number {
   const positions: number[] = []
+  const stamps: number[] = []
   tr.doc.descendants((node, pos) => {
     if (!isStyledType(node)) return true
     if (validId(node.attrs.styleId) === fromId || effectiveStyleId(node) === fromId) positions.push(pos)
+    const stamp = node.attrs[TRACKED_STYLE_ATTR] as { beforeStyleId?: unknown; beforeAttrs?: Record<string, unknown> } | null | undefined
+    if (stamp && (stamp.beforeStyleId === fromId || stamp.beforeAttrs?.styleId === fromId)) stamps.push(pos)
     return false
   })
+  // A pending tracked style change from the deleted style: rejecting it restores the replacement.
+  // (setNodeMarkup never moves positions, so the restyle below still finds its blocks.)
+  const styleId = to.kind !== 'chapter' && to.id === DEFAULT_STYLE_ID ? null : to.id
+  for (const pos of stamps) {
+    const node = tr.doc.nodeAt(pos)!
+    const stamp = node.attrs[TRACKED_STYLE_ATTR] as { beforeStyleId?: unknown; beforeType?: string; beforeAttrs?: Record<string, unknown> }
+    const beforeAttrs = { ...(stamp.beforeAttrs ?? {}) }
+    if (beforeAttrs.styleId === fromId) {
+      beforeAttrs.styleId = styleId
+      if (stamp.beforeType === 'heading' && to.kind === 'chapter') beforeAttrs.level = to.outlineLevel ?? beforeAttrs.level ?? 1
+    }
+    const next = { ...stamp, beforeAttrs, ...(stamp.beforeStyleId === fromId ? { beforeStyleId: styleId } : {}) }
+    tr.setNodeMarkup(pos, undefined, { ...node.attrs, [TRACKED_STYLE_ATTR]: next }, node.marks)
+  }
   for (const pos of positions) {
     if (!restyleBlock(tr, pos, to)) {
       const node = tr.doc.nodeAt(pos)!
@@ -175,7 +194,10 @@ function computeBreaks(doc: PMNode, styles: ResolvedStyles): DecorationSet {
   const decos: Decoration[] = []
   let prev: string | null = null
   let afterPageBreak = false
+  // Track changes: a block (or page break) the markup view hides is not there for breaking.
+  const view = currentMarkupView()
   doc.forEach((node, offset) => {
+    if (view !== 'all' && isBlockHidden(node, view)) return
     if (node.type.name === 'pageBreak') {
       // A manual page break makes the block after it start a page (recto, when its style says so).
       afterPageBreak = true
@@ -187,11 +209,30 @@ function computeBreaks(doc: PMNode, styles: ResolvedStyles): DecorationSet {
     let value: 'page' | 'recto' | undefined =
       id && (b === 'page' || b === 'recto') && !continuesHeadingGroup(prev, id, styles) ? b : undefined
     if (afterPageBreak && value !== 'recto') value = 'page'
-    if (value) decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': value }))
+    if (value) decos.push(Decoration.node(offset, offset + node.nodeSize, { 'data-break-before': value }, { nvBreak: value }))
     afterPageBreak = false
     prev = id
   })
   return DecorationSet.create(doc, decos)
+}
+
+/** Same data-break-before decorations at the same places. */
+function sameBreaks(a: DecorationSet, b: DecorationSet): boolean {
+  const x = a.find()
+  const y = b.find()
+  if (x.length !== y.length) return false
+  return x.every((d, i) => d.from === y[i].from && d.to === y[i].to && d.spec.nvBreak === y[i].spec.nvBreak)
+}
+
+/** A top-level block that changed between `a` and `b` (same shape) became hidden or visible in `view`. */
+function hiddenFlipped(a: PMNode, b: PMNode, view: MarkupView): boolean {
+  if (view === 'all') return false
+  for (let i = 0; i < a.childCount; i++) {
+    const x = a.child(i)
+    const y = b.child(i)
+    if (x !== y && isBlockHidden(x, view) !== isBlockHidden(y, view)) return true
+  }
+  return false
 }
 
 /** True when both docs have the same top-level block types and attrs (typing inside a block). */
@@ -218,8 +259,15 @@ function breaksPlugin(): Plugin<BreakState> {
       apply: (tr, value, oldState, newState) => {
         const meta = tr.getMeta(STYLES_META) as ResolvedStyles | undefined
         if (meta) return { decorations: computeBreaks(newState.doc, meta), signature: breakSignature(meta) }
+        if (tr.getMeta(MARKUP_VIEW_META) !== undefined) {
+          // Keep the same set when the view hides no block that breaks (no decoration work in the view).
+          const next = computeBreaks(newState.doc, getResolvedStyles())
+          return sameBreaks(next, value.decorations) ? value : { ...value, decorations: next }
+        }
         if (!tr.docChanged) return value
-        if (sameTopLevelShape(oldState.doc, newState.doc)) {
+        // Outside All Markup a text edit can hide or show a whole block (track changes): recompute only
+        // when one of the edited blocks did (typing stays a mapping, as in All Markup).
+        if (sameTopLevelShape(oldState.doc, newState.doc) && !hiddenFlipped(oldState.doc, newState.doc, currentMarkupView())) {
           return { ...value, decorations: value.decorations.map(tr.mapping, tr.doc) }
         }
         return { ...value, decorations: computeBreaks(newState.doc, getResolvedStyles()) }
