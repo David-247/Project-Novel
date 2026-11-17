@@ -174,7 +174,11 @@ size / margin / view change, a font load, or `invalidatePagination()`.
    boxes, in "stream px" (unscaled, page offsets subtracted). Cached by node identity; a new node
    that renders like the block at its place in the last pass (same type, content and marks, attributes
    equal but for non-rendering ones: `rewriteId`, the re-write anchor) keeps the cached metrics, so
-   opening a chapter re-write re-measures nothing (and such attribute steps are never `bulk`). A change to
+   opening a chapter re-write re-measures nothing (and such attribute steps are never `bulk`). Stream tops
+   are kept the same way (a block's top in the last pass plus the shift of the changed blocks above),
+   but a kept top is trusted only below the same block as in the last pass, compared by the node each
+   block stands for: after a block deleted above it, or below a node another block already stood for
+   (Enter before an empty paragraph), the block's box is read instead. A change to
    `book.styles` re-measures only the blocks whose `data-style` resolves differently. Unchanged
    blocks keep their last stream top plus the shift of changed blocks above them (moves under
    0.1 px are box snapping, not moves).

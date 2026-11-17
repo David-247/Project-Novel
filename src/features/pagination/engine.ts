@@ -258,6 +258,8 @@ export class PaginationEngine {
   private prevTops = new Map<PMNode, number>()
   /** The top-level block nodes of the last pass, in order. */
   private prevBlocks: PMNode[] = []
+  /** Per block node of the last pass: its index there (with prevBlocks: what sat above it). */
+  private prevIndex = new Map<PMNode, number>()
   private lastKey = ''
   private snapshot: LayoutSnapshot | null = null
   private listeners = new Set<SnapshotListener>()
@@ -516,6 +518,13 @@ export class PaginationEngine {
     this.restyled = null
 
     const nextTops = new Map<PMNode, number>()
+    const nextIndex = new Map<PMNode, number>()
+    const prevIndex = key === this.lastKey ? this.prevIndex : new Map<PMNode, number>()
+    const prevBlocks = this.prevBlocks
+    // Per block of this pass: the node of the last pass whose top it stands for (itself, or the block
+    // it renders like). A remembered top holds only below the same block as last time: a block
+    // deleted above it, or a node another block already stood for, means reading its box.
+    const sources: PMNode[] = []
     let delta = 0
     let anchor = true
     let b = 0
@@ -562,7 +571,11 @@ export class PaginationEngine {
         measured++
         fresh = true
       }
-      const known = fresh || nextTops.has(node) ? undefined : prevTops.get(was && !fresh ? was : node)
+      const source = was && !fresh ? was : node
+      const at = prevIndex.get(source)
+      const sameAbove = at !== undefined && (b === 0 ? at === 0 : at > 0 && prevBlocks[at - 1] === sources[b - 1])
+      const known = fresh || nextTops.has(node) || !sameAbove ? undefined : prevTops.get(source)
+      sources.push(source)
       let top: number
       if (known !== undefined && !anchor) top = known + delta
       else {
@@ -579,6 +592,7 @@ export class PaginationEngine {
       // A node instance used twice in the document is never trusted for its top.
       if (nextTops.has(node)) nextTops.set(node, Number.NaN)
       else nextTops.set(node, top)
+      nextIndex.set(node, b)
       const bb = blockBreakBefore(node, dom)
       m.units.forEach((u, k) => {
         units.push({ firstLine: lines.length, lineCount: u.lines.length, breakBefore: k === 0 ? bb : null, keepWithNext: u.keepWithNext })
@@ -596,6 +610,7 @@ export class PaginationEngine {
     for (const [n, t] of nextTops) if (Number.isNaN(t)) nextTops.delete(n)
     this.prevTops = nextTops
     this.prevBlocks = blockNodes
+    this.prevIndex = nextIndex
 
     // Line index -> document position (relative to the doc), lazily.
     const lineToUnitLine = (li: number) => {
@@ -819,6 +834,10 @@ export class PaginationEngine {
       if (this.scrollAfterPass && view.hasFocus()) tr.scrollIntoView()
       view.dispatch(tr)
       if (deferred) this.schedule(false, true)
+    } else if (pluginState?.bulk || pluginState?.unmapped) {
+      // Nothing to redraw (a mark-only change that moved nothing: Select All + Underline): the bulk
+      // flag is spent all the same, or the next keystroke would take the progressive path.
+      view.dispatch(view.state.tr.setMeta(paginationKey, current).setMeta('addToHistory', false))
     }
     const changed = dirty.length > 0
     this.scrollAfterPass = false

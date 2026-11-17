@@ -404,6 +404,15 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const doc = view.state.doc
       view.dispatch(view.state.tr.insert(doc.content.size, doc.child(index)))
     },
+    /** Delete the whole top-level block `index` (its neighbours stay the same node instances). */
+    deleteBlock: (index: number) => {
+      const view = getEditor()?.view
+      if (!view) return
+      const doc = view.state.doc
+      let pos = 0
+      for (let k = 0; k < index; k++) pos += doc.child(k).nodeSize
+      view.dispatch(view.state.tr.delete(pos, pos + doc.child(index).nodeSize))
+    },
   }
 }
 
