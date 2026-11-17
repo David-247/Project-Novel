@@ -178,6 +178,11 @@ function sameRanges(a: readonly LockedRange[], b: readonly LockedRange[]): boole
   return a.length === b.length && a.every((r, i) => r.id === b[i].id && r.from === b[i].from && r.to === b[i].to)
 }
 
+/** The same runs (ids in order), wherever they are. */
+function sameIds(a: readonly LockedRange[], b: readonly LockedRange[]): boolean {
+  return a.length === b.length && a.every((r, i) => r.id === b[i].id)
+}
+
 function buildDecorations(doc: PMNode, ranges: readonly LockedRange[]): DecorationSet {
   if (!ranges.length) return DecorationSet.empty
   const decos: Decoration[] = []
@@ -441,12 +446,20 @@ function createAnchorPlugin(): Plugin<AnchorState> {
             }
           }
         }
-        const decorations = sameRanges(ranges, value.ranges)
+        const same = sameRanges(ranges, value.ranges)
+        // Ranges an edit elsewhere only moved (typing before a chapter-long passage): the decorations are
+        // mapped, not rebuilt block by block on every keystroke. An edit inside a passage rebuilds them.
+        const moved =
+          !same &&
+          tr.docChanged &&
+          sameRanges(ranges, value.ranges.map((r) => ({ id: r.id, from: tr.mapping.map(r.from, 1), to: tr.mapping.map(r.to, -1) }))) &&
+          !touchedRange(tr, value.ranges)
+        const decorations = same || moved
           ? tr.docChanged
             ? value.decorations.map(tr.mapping, tr.doc)
             : value.decorations
           : buildDecorations(state.doc, ranges)
-        return { ranges: sameRanges(ranges, value.ranges) ? value.ranges : ranges, decorations, lost, events, overrides, stateSteps }
+        return { ranges: same ? value.ranges : ranges, decorations, lost, events, overrides, stateSteps }
       },
     },
     filterTransaction(tr, state) {
@@ -581,7 +594,8 @@ function createAnchorPlugin(): Plugin<AnchorState> {
           // Keep / Discard / Reopen, their undo and redo: rewrites.json follows the document.
           if (now && now.stateSteps !== before?.stateSteps && now.stateSteps.length) mirrorStateSteps(now.stateSteps)
           if (now?.events !== before?.events && now?.events.length) report(now.events)
-          if (before?.ranges !== now?.ranges) syncProblems(v.state)
+          // Which passages are missing or split changes only with the ids of the runs, not their positions.
+          if (before?.ranges !== now?.ranges && !sameIds(before?.ranges ?? [], now?.ranges ?? [])) syncProblems(v.state)
           if (!v.state.selection.eq(prevState.selection) || before?.ranges !== now?.ranges) syncCaret(v.state)
         },
         destroy() {

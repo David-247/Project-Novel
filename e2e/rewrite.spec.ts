@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { editor, launch, newProject, openRecent, recoveryControl, saveStatus, waitForLayout } from './helpers'
+import { editor, launch, newProject, openRecent, recoveryControl, saveStatus, seedProject, waitForLayout, writeFile } from './helpers'
 
 /**
  * Re-write (Phase 3): original and revision side by side. Opening on a selection (whole paragraphs),
@@ -407,4 +407,60 @@ test('narrow window: one page at a time with a toggle', async ({ page }) => {
   await expect(revision(page)).toBeVisible()
   await expect(revision(page)).toBeFocused()
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
+})
+
+test('a version from a newer Novel is shown read-only and never written back; versions are saved compact; Escape while composing stays', async ({ page }) => {
+  await launch(page)
+  const at = '2026-11-05T09:00:00.000Z'
+  const anchored = { ...p('The rain came at dusk.'), attrs: { rewriteId: 'rw-new' } }
+  await seedProject(page, '/projects/Newer', 'Newer', { type: 'doc', content: [h('The Storm'), anchored, p('Nobody spoke.')] })
+  const newer = { type: 'doc', content: [{ type: 'hologram', attrs: { depth: 3 }, content: [{ type: 'text', text: 'From the future.' }] }] }
+  const file = {
+    version: 1,
+    rewrites: [
+      {
+        id: 'rw-new',
+        anchor: 'rw-new',
+        createdAt: at,
+        original: { type: 'doc', content: [p('The rain came at dusk.')] },
+        versions: [
+          { id: 'v-1', name: 'Version 1', doc: { type: 'doc', content: [p('The rain came at dusk.')] }, updatedAt: at },
+          { id: 'v-2', name: 'Version 2', doc: newer, updatedAt: at },
+        ],
+        currentVersionId: 'v-2',
+        status: 'open',
+      },
+    ],
+  }
+  await writeFile(page, '/projects/Newer/rewrites.json', JSON.stringify(file, null, 2))
+  await openRecent(page, '/projects/Newer')
+  await waitForLayout(page)
+  await page.evaluate(() => window.__nvE2E.runCommand('rewrite.next'))
+  await expect(view(page)).toBeVisible()
+  // Version 2 cannot be shown here: a notice, no editing, no Keep.
+  await expect(view(page).getByTestId('rewrite-unreadable')).toBeVisible()
+  await expect(revision(page)).toHaveAttribute('contenteditable', 'false')
+  await expect(ctl(page, 'rewrite.keepVersion')).toBeDisabled()
+  // Escape during an IME composition cancels the conversion, not the view.
+  await revision(page).dispatchEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true })
+  await expect(view(page)).toBeVisible()
+
+  // Version 1 is ordinary: edit it and save.
+  await view(page).getByRole('tab', { name: 'Version 1' }).click()
+  await expect(view(page).getByTestId('rewrite-unreadable')).toHaveCount(0)
+  await revision(page).click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type(' Then night.')
+  // (Switching versions copies the revision into the store; saving within 400 ms of typing is the
+  // storage area's fix.)
+  await view(page).getByRole('tab', { name: 'Version 2' }).click()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(saveStatus(page)).toHaveText('Newer: Saved')
+  const saved = JSON.parse((await page.evaluate(() => window.__nvE2E.readFile('/projects/Newer/rewrites.json')))!)
+  const [v1, v2] = saved.rewrites[0].versions
+  expect(JSON.stringify(v1.doc)).toContain('Then night.')
+  // Compact, as the original: no attribute at its default.
+  expect(JSON.stringify(v1.doc)).not.toMatch(/:null/)
+  // The newer version is kept exactly as it was.
+  expect(v2.doc).toEqual(newer)
 })

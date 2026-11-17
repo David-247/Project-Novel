@@ -3,6 +3,7 @@ import { closeHistory } from '@tiptap/pm/history'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
+import type { Transform } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import {
   chapterRoleSignature,
@@ -14,7 +15,7 @@ import {
   type ResolvedStyles,
 } from '@/shared/book'
 import { useStore } from '@/shared/store'
-import { currentMarkupView, isBlockHidden, MARKUP_VIEW_META, type MarkupView } from '@/shared/track-changes'
+import { currentMarkupView, isBlockHidden, MARKUP_VIEW_META, TRACKED_STYLE_ATTR, type MarkupView } from '@/shared/track-changes'
 import { inListItem } from '../toolbar/block-format'
 import { getResolvedStyles, resolveStyles } from './resolved'
 
@@ -64,7 +65,7 @@ export function effectiveStyleId(node: PMNode): string {
  * stored as null) and optionally drops direct block formatting. Returns false when the block cannot
  * take the style here (a chapter style inside a list item).
  */
-export function restyleBlock(tr: Transaction, pos: number, style: ResolvedStyle, clearDirect = false): boolean {
+export function restyleBlock(tr: Transform, pos: number, style: ResolvedStyle, clearDirect = false): boolean {
   const node = tr.doc.nodeAt(pos)
   if (!node || !isStyledType(node)) return false
   const schema = tr.doc.type.schema
@@ -104,13 +105,30 @@ function forSelectedBlocks(tr: Transaction, fn: (node: PMNode, pos: number) => b
  * Restyles every block whose effective style is `fromId` to `to` in one transaction (O(document);
  * used when a style is deleted). Returns the number of blocks changed.
  */
-export function remapStyleInDoc(tr: Transaction, fromId: string, to: ResolvedStyle): number {
+export function remapStyleInDoc(tr: Transform, fromId: string, to: ResolvedStyle): number {
   const positions: number[] = []
+  const stamps: number[] = []
   tr.doc.descendants((node, pos) => {
     if (!isStyledType(node)) return true
     if (validId(node.attrs.styleId) === fromId || effectiveStyleId(node) === fromId) positions.push(pos)
+    const stamp = node.attrs[TRACKED_STYLE_ATTR] as { beforeStyleId?: unknown; beforeAttrs?: Record<string, unknown> } | null | undefined
+    if (stamp && (stamp.beforeStyleId === fromId || stamp.beforeAttrs?.styleId === fromId)) stamps.push(pos)
     return false
   })
+  // A pending tracked style change from the deleted style: rejecting it restores the replacement.
+  // (setNodeMarkup never moves positions, so the restyle below still finds its blocks.)
+  const styleId = to.kind !== 'chapter' && to.id === DEFAULT_STYLE_ID ? null : to.id
+  for (const pos of stamps) {
+    const node = tr.doc.nodeAt(pos)!
+    const stamp = node.attrs[TRACKED_STYLE_ATTR] as { beforeStyleId?: unknown; beforeType?: string; beforeAttrs?: Record<string, unknown> }
+    const beforeAttrs = { ...(stamp.beforeAttrs ?? {}) }
+    if (beforeAttrs.styleId === fromId) {
+      beforeAttrs.styleId = styleId
+      if (stamp.beforeType === 'heading' && to.kind === 'chapter') beforeAttrs.level = to.outlineLevel ?? beforeAttrs.level ?? 1
+    }
+    const next = { ...stamp, beforeAttrs, ...(stamp.beforeStyleId === fromId ? { beforeStyleId: styleId } : {}) }
+    tr.setNodeMarkup(pos, undefined, { ...node.attrs, [TRACKED_STYLE_ATTR]: next }, node.marks)
+  }
   for (const pos of positions) {
     if (!restyleBlock(tr, pos, to)) {
       const node = tr.doc.nodeAt(pos)!

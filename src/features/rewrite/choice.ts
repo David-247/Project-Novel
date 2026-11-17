@@ -148,6 +148,12 @@ function toNode(ed: Editor, json: DocNodeJSON): PMNode | null {
   }
 }
 
+/** `node`; when null (the version does not fit the schema) the notice says why Keep did nothing. */
+function unreadableNotice(node: PMNode | null): PMNode | null {
+  if (!node) actions().setNotice({ kind: 'unreadable', seq: nextSeq() })
+  return node
+}
+
 /** The version Keep This Version keeps: `versionId`, else the one on the revised page. */
 function chosenVersion(record: RewriteRecord, versionId?: string): string {
   const shown = store().rewrite.openId === record.id ? store().rewrite.activeVersionId : null
@@ -166,7 +172,7 @@ export async function keepVersion(versionId?: string, id?: string): Promise<bool
   const vid = chosenVersion(t.record, versionId)
   const left = toNode(t.ed, currentPassageDoc(t.record) ?? t.record.original)
   const json = versionDoc(t.record, vid)
-  const right = json ? toNode(t.ed, json) : null
+  const right = json ? unreadableNotice(toNode(t.ed, json)) : null
   if (!left || !right) return false
   // Which chapter openings the version removes or adds, by position (a demoted title and a promoted one both count).
   const { removed, added } = chapterChanges(left, right, chapterOpenings)
@@ -193,7 +199,7 @@ export function keepVersionNow(versionId: string, id?: string): boolean {
   const { ed, record, range } = t
   const json = versionDoc(record, versionId)
   const left = toNode(ed, currentPassageDoc(record) ?? record.original)
-  const right = json ? toNode(ed, json) : null
+  const right = json ? unreadableNotice(toNode(ed, json)) : null
   if (!left || !right) return false
   const state = ed.state
   let tr = state.tr
@@ -381,15 +387,16 @@ export function reopenRewrite(id: string): boolean {
   const record = getRewrite(id)
   const ed = getEditor()
   if (!record || record.status === 'open' || !ed || ed.isDestroyed) return false
-  if (store().rewrite.openId) closeRewrite({ restore: false })
   const kept = toNode(ed, keptText(record))
   const found = kept ? locatePassage(ed.state.doc, kept, openAnchorsIn(ed.state), record.location) : null
   if (!found || 'ambiguous' in found) {
-    // The list closes, so the notice can be read.
+    // The list closes, so the notice can be read; an open view stays open (nothing was reopened).
     actions().setListOpen(false)
     actions().setNotice({ kind: 'notFound', ...(found ? { ambiguous: true } : {}), seq: nextSeq() })
     return false
   }
+  // Found: the view open on another re-write closes only now.
+  if (store().rewrite.openId) closeRewrite({ restore: false })
   const blocks: DocNodeJSON[] = []
   const tr = ed.state.tr.setMeta(TRACK_SKIP_META, true)
   ed.state.doc.nodesBetween(found.from, found.to, (node, pos) => {

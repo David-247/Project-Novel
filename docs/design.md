@@ -612,10 +612,14 @@ The signature feature: a passage rewritten beside its original, compared like tw
   has the focus; with the focus elsewhere in the view they are disabled (Edit history / clipboard in the
   version-name field act on that field). A registry command gate
   (`setCommandGate`) disables what makes no sense on a revision: Insert Footnote, comments, Find / Replace, Track
-  Changes, Go to Page, page view and zoom. Copy stays available on both pages. The pages behind the view do not
-  scroll.
+  Changes, Go to Page, page view and zoom. It is an allow-list for the Review menu (only the re-write's own groups
+  stay on) and lists the View groups about the pages and the comments pane (Markup, Paper and Full Screen stay);
+  its test runs over the real registry, so a new group must be placed. Opening a re-write closes Find & Replace.
+  Controls that act without running a command read `useCommandGateAllows(id)`. Copy stays available on both
+  pages. The pages behind the view do not scroll.
 - **The spread**: the comparison view lies over the pages (they stay mounted, laid out and scrolled where they
-  were, so opening costs no reflow). Two pages on the desk at the book's trim width, margins and paper surface
+  were, so opening re-breaks no pages; the passage's blocks, which take the anchor attribute, are redrawn and
+  re-measured behind the view, part of the open time for a chapter-long passage; e2e/rewrite-perf.spec.ts). Two pages on the desk at the book's trim width, margins and paper surface
   (`.nv-page`, verso / recto spine shading), typeset by the book style sheet with the manuscript's base face: the
   original on the left (read-only, focusable to read and select), the revision on the right (an editor with the
   manuscript's schema: `createEditorExtensions({ detached: true })`, which leaves out what belongs to the
@@ -625,7 +629,8 @@ The signature feature: a passage rewritten beside its original, compared like tw
 - **Alignment**: the blocks of both sides are aligned (word-similarity global alignment, `align.ts`): paired
   paragraphs start level, an inserted or removed paragraph leaves a gap opposite it. Levelling is `padding-top` on
   the higher block (a node decoration; padding never changes margin collapsing), measured per frame after a
-  change; the pairing itself is redone at once when a paragraph is added or removed, otherwise 150 ms after typing.
+  change; the pairing itself is redone 60 ms after a paragraph is added or removed (typing meanwhile never puts it
+  off), otherwise 150 ms after typing.
 - **The spine** (the one memorable element): the gutter between the pages carries one stitch per aligned row: a
   ring for an unchanged paragraph, a filled ink stitch for a changed one, a short red or green dash for a paragraph
   only the original or only the revision has. Decorative (aria-hidden); the differences themselves are in the text.
@@ -636,7 +641,11 @@ The signature feature: a passage rewritten beside its original, compared like tw
 - **Versions**: tabs above the pages (arrow keys move and select; double-click or the pen renames inline; New
   version copies the version shown). Each version keeps its own undo history while the view is open (undo is local
   to the revision). Flip Pages (Mod-Alt-k) swaps the sides; Go to Left / Right Page (Mod-Alt-ArrowLeft / Right)
-  moves the focus between them. Escape or Close returns to the manuscript; the re-write stays a draft.
+  moves the focus between them. Escape or Close returns to the manuscript; the re-write stays a draft (Escape
+  during an IME composition belongs to the composition). A version this build cannot read (saved by a newer
+  Novel) is shown empty and read-only with a banner, Keep This Version is off for it, and it is written back as it
+  was. Deleting a style while a re-write is open re-maps the hidden passage, the original page, every version
+  (the revision keeps its undo history) and kept copies, so no choice brings the deleted style back.
 - **Undo** is never blocked. When an undo or redo in the manuscript changes text in an open re-write's passage,
   the re-write is marked "original changed" (the view offers Show current text) and a short notice says so
   ("Undo changed text in a passage that is in re-write."), over the view too; it goes after a few seconds or when the

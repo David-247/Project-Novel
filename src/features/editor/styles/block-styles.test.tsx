@@ -8,7 +8,12 @@ import { renderedStyleId, styleIdsKey } from './block-styles'
 import { getResolvedStyles } from './resolved'
 import type { Editor, JSONContent } from '../index'
 import { installLayoutPolyfills } from '../jsdom-polyfills.test-util'
-import { createStyle, deleteStyle, duplicateStyle, renameStyle, saveStyle, getStyleDefinition, ownDef } from './actions'
+import { createStyle, deleteStyle, duplicateStyle, onStyleDeleted, renameStyle, saveStyle, getStyleDefinition, ownDef } from './actions'
+import { Transform } from '@tiptap/pm/transform'
+import { Editor as TiptapEditor } from '@tiptap/core'
+import { createEditorExtensions, setActiveEditorSource } from '../index'
+import { getStyleDialogs as styleDialogState, modifyStyle, openModifyStyle } from './dialog-state'
+import { listChanges, rejectAll, setTracking } from '@/features/track-changes'
 
 beforeAll(installLayoutPolyfills)
 afterEach(() => {
@@ -388,5 +393,62 @@ describe('custom styles', () => {
     // The duplicate (also based on block-quote) is untouched; built-ins cannot be deleted.
     expect(getStyleDefinition(copy!)).toBeDefined()
     expect(deleteStyle('body')).toBeNull()
+  })
+
+  it('delete while tracking: the remap is not a tracked change, and a pending style change restores the parent, never the deleted style', () => {
+    const ed = mount([p('A'), p('B')])
+    let id = ''
+    run(() => (id = createStyle('block-quote', 'Letter')))
+    // Block 0 uses Letter; block 1 had Letter when Track Changes recorded a change to Body.
+    caretAtEndOf(ed, 0)
+    run(() => ed.commands.setBlockStyle(id))
+    caretAtEndOf(ed, 1)
+    run(() => ed.commands.setBlockStyle(id))
+    run(() => setTracking(true))
+    run(() => ed.commands.setBlockStyle('body'))
+    expect(ed.state.doc.child(1).attrs.trackedStyleChange).toMatchObject({ beforeStyleId: id })
+    const changesBefore = listChanges(ed.state.doc).length
+    run(() => deleteStyle(id))
+    expect(ed.state.doc.child(0).attrs.styleId).toBe('block-quote')
+    // Not recorded: no new change, and block 0 has no style change pending.
+    expect(listChanges(ed.state.doc)).toHaveLength(changesBefore)
+    expect(ed.state.doc.child(0).attrs.trackedStyleChange).toBeNull()
+    // The pending change now restores the parent.
+    expect(ed.state.doc.child(1).attrs.trackedStyleChange).toMatchObject({ beforeStyleId: 'block-quote', beforeAttrs: { styleId: 'block-quote' } })
+    run(() => ed.view.dispatch(rejectAll(ed.state)!))
+    expect(ed.state.doc.child(1).attrs.styleId).toBe('block-quote')
+    run(() => setTracking(false))
+  })
+
+  it('Modify Style… opens on the style at the caret of the active editor (a re-write revision), not the manuscript', () => {
+    mount([p('Manuscript text.')])
+    const mountEl = document.createElement('div')
+    document.body.append(mountEl)
+    const other = new TiptapEditor({ element: mountEl, extensions: createEditorExtensions({ detached: true }), content: { type: 'doc', content: [p('Revision text.', { styleId: 'block-quote' })] } })
+    const off = setActiveEditorSource(() => other)
+    run(() => openModifyStyle())
+    expect(styleDialogState()).toMatchObject({ modifying: 'block-quote', sample: 'Revision text.' })
+    off()
+    run(() => openModifyStyle())
+    expect(styleDialogState()).toMatchObject({ modifying: 'body', sample: 'Manuscript text.' })
+    run(() => modifyStyle(null))
+    other.destroy()
+    mountEl.remove()
+  })
+
+  it('tells the documents kept outside the manuscript (onStyleDeleted) how to re-map', () => {
+    mount([p('A')])
+    let id = ''
+    run(() => (id = createStyle('block-quote', 'Letter')))
+    const seen: string[] = []
+    const off = onStyleDeleted((styleId, remap) => {
+      const ed = getEditor()!
+      const other = ed.schema.nodeFromJSON({ type: 'doc', content: [p('X', { styleId })] })
+      const tr = new Transform(other)
+      seen.push(`${styleId}:${remap(tr)}:${tr.doc.child(0).attrs.styleId}`)
+    })
+    run(() => deleteStyle(id))
+    off()
+    expect(seen).toEqual([`${id}:1:block-quote`])
   })
 })
