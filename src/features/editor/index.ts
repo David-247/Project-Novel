@@ -72,10 +72,12 @@ export {
   deleteStyle,
   duplicateStyle,
   getStyleDefinition,
+  onStyleDeleted,
   renameStyle,
   resetStyle,
   saveStyle,
 } from './styles/actions'
+export type { StyleRemap } from './styles/actions'
 // Chapter, page and scene breaks (Phase 2).
 // getChapters(doc, styles?) -> [{ index, title, from, to }] from chapter title blocks (see below; 0-based;
 // content before the first chapter is front matter, chapter index FRONT_MATTER_INDEX = -1;
