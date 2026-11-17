@@ -157,3 +157,32 @@ describe('shortcut dispatcher and the native menu (one press, one run)', () => {
     expect(runs['file.save']).toBe(0)
   })
 })
+
+describe('layout-shifted punctuation (review UI #9)', () => {
+  beforeEach(() => {
+    command('pagination.zoomIn', 'Mod-=', { id: 'view', group: 'zoom', order: 1 }, { altShortcuts: ['Mod-+'] })
+    command('help.shortcuts', 'Mod-/', { id: 'help', group: 'help', order: 1 })
+  })
+
+  it('Mod-= on a German keyboard (Ctrl+Shift+0 gives "=") and Mod-/ (Ctrl+Shift+7) run outside the editor', () => {
+    press(document.body, '=', { shiftKey: true })
+    expect(runs['pagination.zoomIn']).toBe(1)
+    press(document.body, '/', { shiftKey: true })
+    expect(runs['help.shortcuts']).toBe(1)
+  })
+
+  it('the numpad plus (and Ctrl+Shift+= on US, "+") zooms in through the alternative Mod-+', () => {
+    press(document.body, '+')
+    press(document.body, '+', { shiftKey: true })
+    expect(runs['pagination.zoomIn']).toBe(2)
+  })
+
+  it('letters still need their exact Shift: Ctrl+Shift+S is not Mod-s', () => {
+    press(document.body, 'S', { shiftKey: true })
+    expect(runs['file.save']).toBe(0)
+  })
+
+  it('an alternative key collides like a main one', () => {
+    expect(() => registerCommand({ id: 'x.plus', label: 'x', description: 'Does x.', shortcut: 'Mod-+', run: () => {} })).toThrow(/already bound to "pagination.zoomIn"/)
+  })
+})

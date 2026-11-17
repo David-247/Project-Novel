@@ -118,19 +118,22 @@ type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftK
  * True when a key event is exactly `spec` on `platform`: the same key (letters case-insensitive)
  * and exactly the spec's modifiers ("Mod-s" is Cmd+S on macOS, Ctrl+S elsewhere; Ctrl+Shift+S or
  * Cmd+S on Windows do not match).
+ *
+ * With `loose`, a punctuation key (not a letter, digit or named key) also matches when the layout
+ * needs Shift to type it and the spec has no Shift: "Mod-=" is Ctrl+Shift+0 on a German keyboard
+ * (`e.key` "=", Shift down), "Mod-/" is Ctrl+Shift+7. The event's `key` must still be the spec's.
  */
-export function matchesShortcut(spec: ShortcutSpec, e: ShortcutEvent, platform: Platform = detectPlatform()): boolean {
+export function matchesShortcut(spec: ShortcutSpec, e: ShortcutEvent, platform: Platform = detectPlatform(), loose = false): boolean {
   const { modifiers, key } = parse(spec)
   const mods = resolveMods(modifiers, platform)
-  if (
-    e.ctrlKey !== mods.has('ctrl') ||
-    e.metaKey !== mods.has('meta') ||
-    e.altKey !== mods.has('alt') ||
-    e.shiftKey !== mods.has('shift')
-  ) {
-    return false
-  }
+  const shiftOk = e.shiftKey === mods.has('shift') || (loose && e.shiftKey && isPunctuation(key) && e.key === key)
+  if (e.ctrlKey !== mods.has('ctrl') || e.metaKey !== mods.has('meta') || e.altKey !== mods.has('alt') || !shiftOk) return false
   return e.key.length === 1 && key.length === 1 ? e.key.toLowerCase() === key.toLowerCase() : e.key === key
+}
+
+/** One printable character that is not a letter or a digit ("=", "/", "+", "-"). */
+function isPunctuation(key: string): boolean {
+  return key.length === 1 && !/[\p{L}\p{N}\s]/u.test(key)
 }
 
 /**

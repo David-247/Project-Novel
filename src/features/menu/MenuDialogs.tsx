@@ -3,7 +3,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { goToPage } from '@/features/pagination'
-import { MENU_LABELS, useCommands, type Command, type MenuId } from '@/shared/commands'
+import { EXTRA_SHORTCUTS, MENU_LABELS, useCommands, type Command, type MenuId } from '@/shared/commands'
 import { useStore } from '@/shared/store'
 import { Button, detectPlatform, Dialog, formatShortcut, TextInput, Tooltip } from '@/shared/ui'
 import projectFormatDoc from '../../../docs/project-format.md?raw'
@@ -30,7 +30,11 @@ const giveFocusBack = (e: Event) => {
 
 const MENU_ORDER: MenuId[] = ['file', 'edit', 'view', 'insert', 'format', 'review', 'help', 'app']
 
-/** Help > Keyboard Shortcuts: every registry command with a shortcut, by menu, searchable. */
+/**
+ * Help > Keyboard Shortcuts: every registry command with a shortcut, by menu, then the keys handled
+ * outside the registry (EXTRA_SHORTCUTS: page turns, the book's start and end, the ribbon's Escape,
+ * the menu bar), searchable.
+ */
 function ShortcutsDialog({ open }: { open: boolean }) {
   const commands = useCommands()
   const [query, setQuery] = useState('')
@@ -43,6 +47,11 @@ function ShortcutsDialog({ open }: { open: boolean }) {
       .filter(({ c, keys }) => !q || `${c.label} ${c.description} ${keys}`.toLowerCase().includes(q))
   }, [commands, query, platform])
   const groups = MENU_ORDER.map((m) => ({ m, rows: rows.filter((r) => (r.c.menu?.id ?? 'app') === m) })).filter((g) => g.rows.length)
+  const extra = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return EXTRA_SHORTCUTS.map((x) => ({ x, keys: x.keys(platform).map((k) => formatShortcut(k, platform)).join(' / ') }))
+      .filter(({ x, keys }) => keys && (!q || `${x.label} ${x.description} ${keys}`.toLowerCase().includes(q)))
+  }, [query, platform])
   const C = MENU_DIALOG_CONTROLS.shortcutsSearch
   return (
     <Dialog
@@ -65,7 +74,7 @@ function ShortcutsDialog({ open }: { open: boolean }) {
           />
         </Tooltip>
         <div data-testid="shortcuts-list" className="grid gap-3">
-          {groups.length === 0 ? <p className="text-text-muted">No shortcut matches “{query}”.</p> : null}
+          {groups.length === 0 && extra.length === 0 ? <p className="text-text-muted">No shortcut matches “{query}”.</p> : null}
           {groups.map(({ m, rows }) => (
             <section key={m} aria-label={MENU_LABELS[m].label}>
               <h3 className="pb-1 text-ui-xs font-semibold uppercase tracking-wide text-text-muted">
@@ -90,6 +99,28 @@ function ShortcutsDialog({ open }: { open: boolean }) {
               </table>
             </section>
           ))}
+          {extra.length ? (
+            <section aria-label="Navigation">
+              <h3 className="pb-1 text-ui-xs font-semibold uppercase tracking-wide text-text-muted">Navigation</h3>
+              <table className="w-full border-collapse text-ui-sm">
+                <tbody>
+                  {extra.map(({ x, keys }) => (
+                    <tr key={x.id} data-extra-shortcut={x.id} className="border-t border-border align-top">
+                      <th scope="row" className="py-1.5 pr-3 text-left font-medium">
+                        {x.label}
+                        <div className="font-normal text-text-muted">{x.description}</div>
+                      </th>
+                      <td className="whitespace-nowrap py-1.5 text-right">
+                        <kbd data-testid="shortcut-keys" className="rounded-control border border-border px-1.5 py-0.5 font-sans">
+                          {keys}
+                        </kbd>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
         </div>
       </div>
     </Dialog>
