@@ -230,7 +230,7 @@ function trackedReplacement(state: EditorState, base: number, left: PMNode, righ
   const tr = state.tr
   replacePassage(tr, base, left, right)
   if (!tr.docChanged) return tr
-  const tracked = trackTransaction(state, tr, currentTrackAuthor())
+  const tracked = trackTransaction(state, tr, currentTrackAuthor(), undefined, { sharedIds: true })
   if (tracked.getMeta(TRACK_FAILED_META)) useStore.getState().trackChangesActions.setNotice(TRACK_FAILED_NOTICE)
   return tracked
 }
