@@ -1051,7 +1051,7 @@ export async function restoreRecovery(): Promise<boolean> {
     const p = provider()
     loadDocument(p, pending.snapshot.doc)
     // Side files (comments) come back with the text they refer to.
-    restoreSideFiles(pending.snapshot.sideFiles)
+    restoreSideFiles(pending.snapshot.sideFiles, pending.snapshot.sideFileGuards)
     p.markDirty()
     // Unsaved book settings come back with the text (snapshots from before book settings have none).
     // Only when they differ: restoring equal settings would mark the book unsaved, and the next save would

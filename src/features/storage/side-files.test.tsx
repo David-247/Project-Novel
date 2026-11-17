@@ -359,6 +359,33 @@ describe('project side files', () => {
     expect(onDisk().items).toEqual(['on disk'])
   })
 
+  it('a guarded file changed before the snapshot: Restore in a later session copies the readable file aside before replacing it', async () => {
+    await createProject()
+    side.change(['on disk'])
+    expect(await saveProject()).toBe(true)
+    const original = backend.files.get(NOTES)!
+    await launch()
+    backend.failRead = (p) => (p === NOTES ? { kind: 'permission_denied', message: 'locked' } : null)
+    await reopen()
+    expect(warning()).toMatch(/notes.json is damaged or could not be read/)
+    side.change(['typed while locked'])
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    const snap = parseRecovery(backend.files.get(RECOVERY)!)!
+    expect(snap.sideFiles).toHaveProperty(['notes.json'])
+    expect(snap.sideFileGuards).toEqual({ 'notes.json': 'damaged' })
+    await launch() // crash; the lock is gone at the next open
+    backend.failRead = null
+    await reopen()
+    expect(side.items()).toEqual(['on disk'])
+    expect(await restoreRecovery()).toBe(true)
+    expect(side.items()).toEqual(['typed while locked'])
+    expect(await saveProject()).toBe(true)
+    expect(onDisk().items).toEqual(['typed while locked'])
+    const copies = [...backend.files.keys()].filter((k) => k.startsWith(`${ROOT}/notes.damaged-`))
+    expect(copies).toHaveLength(1)
+    expect(backend.files.get(copies[0])).toBe(original)
+  })
+
   it('a snapshot from before side files restores only the text', async () => {
     await createProject()
     side.change(['saved'])

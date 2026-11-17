@@ -343,6 +343,20 @@ export function sideFilesForSnapshot(): Record<string, unknown> {
 }
 
 /**
+ * The guard of each guarded side file `sideFilesForSnapshot` includes (the user changed it): recorded
+ * in the snapshot, so a Restore in a later session, where the file may read fine again, still copies
+ * the file on disk aside before the restored content replaces it.
+ */
+export function sideFileGuardsForSnapshot(): Record<string, 'damaged' | 'newer'> {
+  const out: Record<string, 'damaged' | 'newer'> = {}
+  for (const entry of entries.values()) {
+    if (!entry.guard || entry.file.getVersion() === entry.guard.loadedVersion) continue
+    out[entry.file.name] = entry.guard.kind
+  }
+  return out
+}
+
+/**
  * Comparable form of the loaded side files (crash recovery: is a snapshot identical to the save?). A file
  * the snapshot leaves out compares as loaded: Restore leaves it as it is.
  */
@@ -372,7 +386,10 @@ export function sideFilesKey(snapshot?: Record<string, unknown>): string {
  * loaded is loaded from the snapshot. A snapshot without side files (older Novel) changes nothing.
  * Returns true when something changed.
  */
-export function restoreSideFiles(snapshot: Record<string, unknown> | undefined): boolean {
+export function restoreSideFiles(
+  snapshot: Record<string, unknown> | undefined,
+  guards?: Record<string, 'damaged' | 'newer'>,
+): boolean {
   if (!snapshot) return false
   let changed = false
   for (const entry of entries.values()) {
@@ -382,6 +399,11 @@ export function restoreSideFiles(snapshot: Record<string, unknown> | undefined):
     safeLoad(entry.file, data && typeof data === 'object' ? data : null)
     // Restored content is a change of the file (a guarded one may now be replaced).
     if (entry.guard) entry.guard.loadedVersion = Number.NaN
+    // Guarded when the snapshot was taken, readable now: the file on disk is still copied aside (read
+    // again then) before the first save replaces it, as it would have been in that session.
+    else if (guards?.[entry.file.name] && entry.present) {
+      entry.guard = { kind: guards[entry.file.name], original: null, loadedVersion: Number.NaN }
+    }
     changed = true
   }
   return changed

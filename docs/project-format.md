@@ -528,6 +528,7 @@ write). The file is written atomically, like the other project files. Compact UT
 | `doc`           | object  | The whole document, same shape as manuscript.json.                         |
 | `book`          | object  | Book settings at snapshot time, same shape as book.json. Added in version 2; a version 1 snapshot has none and restores only the text. |
 | `sideFiles`     | object  | Side files at snapshot time: file name to content (`{"comments.json": {...}}`), each in its file's shape. Added in version 3; an older snapshot has none and leaves the side files as saved. |
+| `sideFileGuards` | object  | Optional: the side files in `sideFiles` that were guarded (damaged, unreadable or from a newer Novel) when the snapshot was taken, file name to `"damaged"` or `"newer"`. Restore then copies the file on disk aside (`<name>.<kind>-<timestamp>.json`) before the first save replaces it, even when it reads fine by then. |
 
 ```json
 {"format":"novel-recovery","version":1,"projectId":"6f1c…","savedAt":"2026-11-03T10:16:12.004Z","baseUpdatedAt":"2026-11-03T10:15:42.120Z","docVersion":312,"doc":{"type":"doc","content":[…]}}

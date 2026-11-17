@@ -33,6 +33,11 @@ export interface RecoverySnapshot {
   book?: BookSettings
   /** Side files (file name -> JSON content) at snapshot time (version 3+); absent in older snapshots. */
   sideFiles?: Record<string, unknown>
+  /**
+   * Side files in `sideFiles` that were guarded (damaged / newer) when the snapshot was taken: name to
+   * kind. Optional (version 3); Restore copies such a file aside before replacing it.
+   */
+  sideFileGuards?: Record<string, 'damaged' | 'newer'>
 }
 
 export const recoveryDirPath = (folder: string) => joinPath(folder, RECOVERY_DIR)
@@ -61,6 +66,11 @@ export function parseRecovery(text: string): RecoverySnapshot | null {
   const side = d.sideFiles
   const sideFiles =
     typeof side === 'object' && side !== null && !Array.isArray(side) ? (side as Record<string, unknown>) : undefined
+  const sideFileGuards: Record<string, 'damaged' | 'newer'> = {}
+  const g = d.sideFileGuards
+  if (typeof g === 'object' && g !== null && !Array.isArray(g)) {
+    for (const [name, kind] of Object.entries(g)) if (kind === 'damaged' || kind === 'newer') sideFileGuards[name] = kind
+  }
   return {
     format: RECOVERY_FORMAT,
     version: d.version,
@@ -71,6 +81,7 @@ export function parseRecovery(text: string): RecoverySnapshot | null {
     doc: d.doc,
     ...(book ? { book } : {}),
     ...(sideFiles ? { sideFiles } : {}),
+    ...(Object.keys(sideFileGuards).length ? { sideFileGuards } : {}),
   }
 }
 
