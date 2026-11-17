@@ -605,6 +605,8 @@ test('Chapters start on right-hand page: a New chapter lands on a recto, with a 
   l = await layout(page)
   expect(l.pages.map((p) => (p.isBlank ? 'blank' : `${p.side}:${p.chapterIndex}`))).toEqual(['recto:-1', 'blank', 'recto:0'])
   expect(l.pages[2].startsBlockType).toBe('heading')
+  // Book mode draws one spread; whether the caret has already turned to page 2 is timing, so turn there.
+  if (await isBookMode(page)) await showPage(page, 2)
   const h = (await editor(page).locator('h1').boundingBox())!
   const f2 = (await frame(page, 2).boundingBox())!
   expect(h.x).toBeGreaterThan(f2.x)
