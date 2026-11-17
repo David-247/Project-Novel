@@ -114,6 +114,11 @@
 :root[data-nv-markup='original'] .nv-tc-gone-original * {
   display: none !important;
 }
+/* A list item with nothing shown: no bullet, and not counted in an ordered list's numbers. */
+:root:is([data-nv-markup='simple'], [data-nv-markup='none']) li.nv-tc-gone-final,
+:root[data-nv-markup='original'] li.nv-tc-gone-original {
+  display: none !important;
+}
 :root:is([data-nv-markup='simple'], [data-nv-markup='none']) :is(.nv-tc-gone-final::before, .nv-tc-gone-final::after),
 :root[data-nv-markup='original'] :is(.nv-tc-gone-original::before, .nv-tc-gone-original::after) {
   display: none !important;

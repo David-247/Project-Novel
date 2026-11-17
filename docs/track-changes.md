@@ -72,6 +72,15 @@ Rules, per step of the transaction:
      gets it on its node. Text already deleted is left as it is. **Your own insertion** (an `insertion`
      mark with your author name) **is really removed**. A block whose opening lies in the range gets
      `trackedDelete`, or, when its `trackedInsert` is your own, the boundary is really removed (joined).
+   - **The boundary before a block** runs from the previous textblock in document order to the block's
+     opening, whatever the nesting: for the paragraph of a list item it starts at the end of the last
+     paragraph of the item before (or of the paragraph before the list). The file format is unchanged:
+     the attributes stay on the textblock. So a range holding only structure (Backspace at the start of
+     a list item, Delete at the end of the one before: ProseMirror deletes `</li><li>`) deletes the
+     boundary before the next textblock (`trackedDelete`; your own new item or split is really joined
+     back), and the caret is left before it (Backspace) or after it (Delete): never a lost keystroke.
+   - A deletion the step fitter turns into a ReplaceAroundStep (from the end of a paragraph to the end of
+     a list's last item) is recorded as the text and boundaries in it deleted, the structure kept.
    - The inserted content is cleaned of tracking marks and attributes, inserted **after** the kept deleted
      text, and gets an `insertion` mark; every block it opens gets `trackedInsert`.
    - New text next to your own change of this session takes the same mark (same id and date): typing
@@ -81,7 +90,10 @@ Rules, per step of the transaction:
 2. **Mark steps** (bold, italic, underline, fonts…): each run gets a `formatChange` holding its earlier
    marks; a run that already has one keeps it, and loses it when its formatting is back to `before`.
    Formatting your own insertion, or deleted text, is not a change of its own. Comment marks are never
-   tracked.
+   tracked. Consecutive mark steps are recorded together: neighbouring runs with the same earlier marks
+   become one AddMarkStep spanning many paragraphs (Select All + Bold on uniform text: the user's step
+   per paragraph plus one, not two per paragraph); a span breaks at your own insertion, deleted text, a
+   footnote reference (its note text gets spans of its own) and a change of earlier marks.
 3. **Block attribute changes** (setNodeMarkup, and AttrStep, which is converted to setNodeMarkup so the
    styles plugin sees it): the first change records `trackedStyleChange` with the earlier type and
    attributes; changing back clears it. Not recorded on a block you inserted yourself.
@@ -95,7 +107,10 @@ textblock: each match becomes one ReplaceStep covering only the match (its text,
 the replacement, marked inserted), so positions outside the matches (a comment draft, decorations)
 map exactly. Matches that touch, a match over anything but text, or an IME composition fall back to
 the step-by-step rewrite, as does the whole edit if a batched step cannot be applied. The result is the
-same either way (record.test.ts compares them). The selection is mapped onto the result:
+same either way (record.test.ts compares them). **Each Replace All match is a change of its own** (its
+deletion and its insertion, as in Word), so accepting or rejecting one replaced word leaves the others;
+Next Change goes match by match. The re-write Keep opts out (`TrackOptions.sharedIds`, below). The
+selection is mapped onto the result:
 **Backspace** leaves the caret before the text it marked, **Delete** and typing after it.
 **Backspace / Delete across a deletion:** when the character (or paragraph boundary) next to the caret
 is already deleted, the caret first moves over the deleted run and the key acts on the text beyond it.
@@ -107,13 +122,11 @@ Changes is turned off or on again.
 word-level edit (descending ReplaceSteps, mark steps for formatting, setNodeMarkup for a paragraph
 style), and the rewrite slice records it itself before adding the re-write's own steps (anchor
 attributes, the `RewriteStateStep`): those are never recorded as style changes. It is one recorder pass
-(`trackTransaction`) over the whole edit, as for an edit typed in the manuscript: a replaced word is the
-deleted word followed by the new one, and the Keep is one deletion change and one insertion change by the
-current author; one undo reverts it. Reviewed with Accept / Reject like any other change.
-**Known limitation: list items.** A list item is not a tracked block (`TRACKED_BLOCK_TYPES`: its paragraph
-is). An item deleted while recording keeps its (deleted) paragraph; accepting the deletion leaves the
-item empty, and rejecting an inserted item leaves an empty item. Words inside items are tracked as
-usual. Making list items tracked blocks belongs to the recorder and the review, not the re-write.
+(`trackTransaction` with `sharedIds: true`) over the whole edit, as for an edit typed in the manuscript:
+a replaced word is the deleted word followed by the new one, and the Keep is one deletion change and one
+insertion change by the current author; one undo reverts it. Reviewed with Accept / Reject like any
+other change. List items in a version are tracked through their paragraphs (the boundary rule above):
+accepting a deleted item removes it, rejecting an inserted item removes it, with no empty item left.
 
 **IME composition.** While the view is composing, the composed text is inserted **without** its
 insertion mark: wrapping the composing text node in a mark span mid-composition cancels or doubles the
@@ -127,7 +140,8 @@ footnote editor forwards its compositions the same way: its steps carry `COMPOSI
 is composing and the note's composition id; it calls `flushComposedText` on the note's
 `compositionend`, and while composing it mirrors the manuscript back only for text differences, never
 for marks alone. Closing the note mid-composition (Escape, Done, blur) flushes first
-(`flushComposedText(view, { force: true })`). Pending text is kept per composition id and each
+(`flushComposedText(view, { force: true })`). Pending text is kept per composition id (the
+extension's `pending` ranges carry it) and each
 composition is marked in its own transaction, so leftovers never join a later composition's undo step;
 if Track Changes was turned off before the composition ended, the text stays unmarked.
 
@@ -140,6 +154,10 @@ the two differ after a forwarded edit (deleting already-deleted text changes not
 **Author.** `TrackChanges.configure({ getAuthor })`: `() => ({ name, color? })`, default
 `currentTrackAuthor()`: the source set with `setTrackChangesAuthorSource` (the composition root wires the
 Settings author), else "Unknown author" (no source, an empty name, or a source that throws).
+**Known limitation: ownership is the author name.** "Your own" change (really removed when you delete
+it, extended when you type next to it) is decided by the name alone: two people with the same name, or
+two without one ("Unknown author"), count as one author, so deleting the other's pending insertion
+removes it with no deletion recorded. An author id needs a file-format change; kept as is for Phase 3.
 
 ## Markup views
 
@@ -160,8 +178,9 @@ non-text graphics with at least 3:1 against each paper (`--page-tc-*` tokens per
 the view hides entirely (`isBlockHidden`: a `trackedDelete` block whose content is all deleted, in
 Simple / No Markup; a `trackedInsert` block whose content is all inserted, and inserted breaks, in
 Original) gets a node decoration (`nv-tc-gone-final` / `nv-tc-gone-original`) that collapses it to zero
-height with everything inside it `display: none`. It is exactly what accepting (rejecting) all would
-remove.
+height with everything inside it `display: none`. A list item whose blocks are all hidden, and a list
+whose items all are, get the same class (an item is `display: none`: no bullet, and not counted in an
+ordered list's numbers). It is exactly what accepting (rejecting) all would remove.
 
 **Known limitation.** A pending paragraph join (`trackedDelete` on a paragraph that keeps visible text) and
 a pending split whose second half holds original text stay two paragraphs in No Markup and Original until
@@ -211,9 +230,18 @@ change) or `null` when there is nothing to do.
 Inline changes are resolved first (marks, then removed text from last to first), then blocks: first
 attributes and the blocks that go away whole (breaks, empty blocks), last to first; then the joins.
 The order matters for a break inserted mid-paragraph (Mod-Enter in "abcd" gives `ab | +¶[pageBreak] |
-+¶cd`): the break goes before "cd" can join "ab", so rejecting gives "abcd" back. **Removing a boundary:** a break is deleted; an empty block is deleted (unless it is its
-parent's only child); otherwise the block is joined to the textblock before it when they can join, and
-left as it is when they cannot (the first block, after a list).
++¶cd`): the break goes before "cd" can join "ab", so rejecting gives "abcd" back. **Removing a boundary:** a break is deleted; an empty block is deleted
+with `deleteRange`, which also takes the parents it would leave empty (an empty list item, then the
+list once it has no items), never the document's only textblock; otherwise the block is joined to the
+previous textblock in document order (the boundary rule of the recorder: the last paragraph of the item
+before, or the paragraph before the list), by deleting the structure between them, as deleting a
+selection across two items does: a nested list of the joined item moves along. So rejecting a pasted
+two-item list inside "x|y" removes the list and gives "xy" back. Each accept / reject is one
+transaction with the history closed before it (`closeHistory`): never merged into the typing just
+before it, so undo after a quick Reject brings the typed text back. Marks are removed in as few steps as
+possible: neighbouring text losing the same mark is one RemoveMarkStep, across paragraphs. A
+`formatChange` whose `before` holds a mark type this build does not know (a project saved by a newer
+one) is rejected without it.
 
 ## Review
 
@@ -260,7 +288,8 @@ bar (below 640px, the `statusbar` container query) it shows just the number ("12
 the full text) and "No changes" hides.
 
 **Ribbon** (Review > Changes): Previous Change, Next Change, then Accept ▾ and Reject ▾ split buttons (the
-main half is Accept / Reject Change; the arrow lists and Move to Next, All Changes and All by Author ▸).
+main half is Accept / Reject Change; the arrow lists Accept / Reject and Move to Next, All Changes and
+All by Author ▸).
 See docs/design.md, "Ribbon".
 
 **Page navigation.** The default reveal is the pagination slice's `revealPosition`: in Book mode (the
@@ -319,7 +348,9 @@ change, so creating one per measured block made each later DOM change cost O(blo
   everything. Replace never replaces a match that is all deleted text: Replace goes on to the next match
   still there, Replace All counts only what it replaced (and its summary shows until the document
   changes, since All Markup still finds the deleted originals). Replacement text never inherits
-  tracking marks.
+  tracking marks. In the **Original** view Replace and Replace All are off, with the note "Switch to All
+  Markup to replace": Original shows deleted text as plain text (Find finds it, Replace skips it) and
+  hides what a tracked Replace inserts, so a replacement there would seem to do nothing.
 - **Word count**: none exists yet; when it does, it should count `isInlineHidden(node, 'none')`-visible text.
 - **Storage**: the marks and attributes are ordinary manuscript.json content: save, reopen and crash
   recovery keep them. `trackChanges` is in book.json.

@@ -188,8 +188,6 @@ the project. Crash recovery restores the ones that were not saved yet, together 
 - A pending paragraph join or split, while it is still tracked, shows as two paragraphs in No Markup and Original
   until the change is accepted or rejected (decision 5a4f5103; see [docs/track-changes.md](docs/track-changes.md)).
 - There are no context menus (right-click). Every action is in the menu bar, the ribbon or a shortcut.
-- Accepting or rejecting a tracked list item (an inserted or deleted bullet) can leave an empty list item behind.
-  Delete it by hand.
 - Revision marks are not exported, and there are no AI suggestions or collaboration. These are later phases.
 
 Projects are plain folders (`project.json`, `manuscript.json`, `index.sqlite`); see [docs/project-format.md](docs/project-format.md).

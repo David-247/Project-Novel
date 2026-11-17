@@ -524,6 +524,33 @@ describe('replace with Track Changes on (All Markup finds deleted text)', () => 
     }
   })
 
+  it('in the Original view Replace and Replace All are off, with a note saying why', async () => {
+    act(() => useStore.getState().bookActions.setTrackChanges(true))
+    try {
+      const ed = mountAll({ type: 'doc', content: [para(t('a cat and a cat'))] })
+      act(() => useStore.getState().findActions.openPanel('cat'))
+      await waitFor(() => expect(status()).toBe('1 of 2'))
+      expect(screen.getByRole('button', { name: 'Replace' })).toBeEnabled()
+      expect(screen.queryByTestId('find-replace-note')).toBeNull()
+      act(() => useStore.getState().trackChangesActions.setMarkupView('original'))
+      expect(screen.getByRole('button', { name: 'Replace' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Replace all' })).toBeDisabled()
+      expect(screen.getByTestId('find-replace-note').textContent).toBe('Switch to All Markup to replace')
+      // The engine refuses too (Enter in the replace field, a shortcut).
+      const before = ed.state.doc
+      let r = true
+      act(() => void (r = replaceCurrent()))
+      expect(r).toBe(false)
+      expect(replaceAll()).toBe(0)
+      expect(ed.state.doc).toBe(before)
+      act(() => useStore.getState().trackChangesActions.setMarkupView('all'))
+      expect(screen.getByRole('button', { name: 'Replace all' })).toBeEnabled()
+    } finally {
+      act(() => useStore.getState().trackChangesActions.setMarkupView('all'))
+      act(() => useStore.getState().bookActions.resetBook())
+    }
+  })
+
   it('Replace All counts only what it replaced; the replacement never inherits tracking marks', () => {
     act(() => useStore.getState().bookActions.setTrackChanges(true))
     try {

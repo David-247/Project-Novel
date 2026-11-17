@@ -3,7 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useStore } from '@/shared/store'
 import { Button, Checkbox, IconButton, Panel, StatusText, TextInput, Tooltip, cn } from '@/shared/ui'
 import { FIND_CONTROLS } from './controls'
-import { closeFind, findNext, findPrevious, replaceAll, replaceCurrent, startFindEngine } from './engine'
+import { canReplaceInView, closeFind, findNext, findPrevious, REPLACE_IN_ORIGINAL_NOTE, replaceAll, replaceCurrent, startFindEngine } from './engine'
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from './icons'
 import './find.css'
 
@@ -47,6 +47,8 @@ function OpenPanel({ className }: FindReplacePanelProps) {
   // (deleted) and All Markup still finds it: the summary then shows until the document changes.
   const [replaced, setReplaced] = useState<{ count: number; key: string; version: number } | null>(null)
   const docVersion = useStore((s) => s.editor.docVersion)
+  // Track changes: no Replace in the Original view (engine.canReplaceInView).
+  const canReplace = canReplaceInView(useStore((s) => s.trackChanges?.markupView ?? 'all'))
   const searchKey = `${caseSensitive}|${wholeWord}|${query}`
 
   useEffect(() => startFindEngine(), [])
@@ -174,16 +176,19 @@ function OpenPanel({ className }: FindReplacePanelProps) {
           />
         </Tooltip>
         <Tooltip>
-          <Button aria-label={FIND_CONTROLS.replace.label} data-control-id={FIND_CONTROLS.replace.id} disabled={!hasMatches} onClick={() => act(replaceCurrent)}>
+          <Button aria-label={FIND_CONTROLS.replace.label} data-control-id={FIND_CONTROLS.replace.id} disabled={!hasMatches || !canReplace} onClick={() => act(replaceCurrent)}>
             Replace
           </Button>
         </Tooltip>
         <Tooltip>
-          <Button aria-label={FIND_CONTROLS.replaceAll.label} data-control-id={FIND_CONTROLS.replaceAll.id} disabled={!hasMatches} onClick={() => setReplaced({ count: act(replaceAll), key: searchKey, version: useStore.getState().editor.docVersion })}>
+          <Button aria-label={FIND_CONTROLS.replaceAll.label} data-control-id={FIND_CONTROLS.replaceAll.id} disabled={!hasMatches || !canReplace} onClick={() => setReplaced({ count: act(replaceAll), key: searchKey, version: useStore.getState().editor.docVersion })}>
             Replace all
           </Button>
         </Tooltip>
       </div>
+      {!canReplace && (
+        <StatusText data-testid="find-replace-note">{REPLACE_IN_ORIGINAL_NOTE}</StatusText>
+      )}
       <div className="flex flex-wrap items-center gap-x-4">
         <Tooltip wrap>
           <Checkbox

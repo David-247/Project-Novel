@@ -7,7 +7,7 @@ import { STYLE_IDS } from '@/shared/book'
 import { useStore } from '@/shared/store'
 import { createEditorExtensions, blockPlainText, collectFootnotes } from '@/features/editor'
 import { resolveFootnoteOptions } from '@/shared/book'
-import { acceptAll, rejectAll, acceptChange, listChanges } from './review'
+import { acceptAll, rejectAll, acceptChange, rejectChange, listChanges } from './review'
 import { resetTrackingSession, TRACK_SKIP_META, trackTransaction } from './record'
 import { TrackChanges, TRACK_FAILED_NOTICE } from './extension'
 import { setTracking } from './commands'
@@ -326,9 +326,21 @@ describe('IME composition', () => {
   })
 
   it('composing over untracked text deletes it and inserts after it', () => {
-    const ed = make([p(t('ab'))])
+    const ed = make([p(t('abc'))])
+    const composing = composingFlag(ed)
+    composing(true)
+    // The IME replaces the selected "b": the deletion mark goes on at once, the composed text stays unmarked.
     ed.view.dispatch(ed.state.tr.insertText('ア', 2, 3).setMeta('composition', 2))
-    expect(show(ed.state.doc)).toBe('a{-b}{+ア}')
+    expect(show(ed.state.doc)).toBe('a{-b}アc')
+    expect(ed.view.dom.querySelector('.nv-del')?.textContent).toBe('b')
+    expect(ed.view.dom.querySelector('.nv-ins')).toBeNull()
+    ed.view.dispatch(ed.state.tr.insertText('アイ', 3, 4).setMeta('composition', 2))
+    expect(show(ed.state.doc)).toBe('a{-b}アイc')
+    composing(false)
+    ed.view.dispatch(ed.state.tr.insertText('愛', 3, 5).setMeta('composition', 2))
+    expect(show(ed.state.doc)).toBe('a{-b}{+愛}c')
+    undo(ed.state, ed.view.dispatch)
+    expect(show(ed.state.doc)).toBe('abc')
   })
 })
 
@@ -391,6 +403,173 @@ describe('paragraphs', () => {
     expect(show(ed.state.doc)).toBe('one | -¶{-two} | three')
     apply(ed, acceptAll(ed.state))
     expect(show(ed.state.doc)).toBe('one | three')
+  })
+})
+
+describe('list items (the boundary before a textblock runs from the previous textblock, whatever the nesting)', () => {
+  const li = (...content: JSONContent[]): JSONContent => ({ type: 'listItem', content })
+  const ul = (...items: JSONContent[]): JSONContent => ({ type: 'bulletList', content: items })
+  const item = (text: string) => li(p(t(text)))
+  /** The structure: `ul[A, B]`, an item's paragraphs joined by " / ", top-level blocks by " | ". */
+  function tree(n: PMNode): string {
+    if (n.isTextblock) return n.textContent
+    const kids: string[] = []
+    n.forEach((c) => kids.push(tree(c)))
+    if (n.type.name === 'doc') return kids.join(' | ')
+    if (n.type.name === 'listItem') return kids.join(' / ')
+    return `${n.type.name === 'bulletList' ? 'ul' : n.type.name}[${kids.join(', ')}]`
+  }
+  /** Position just after the first occurrence of `s` in the document's text. */
+  function after(ed: Editor, s: string): number {
+    let found = -1
+    ed.state.doc.descendants((n, pos) => {
+      if (found >= 0) return false
+      if (n.isText && n.text!.includes(s)) found = pos + n.text!.indexOf(s) + s.length
+      return true
+    })
+    if (found < 0) throw new Error(`no ${s}`)
+    return found
+  }
+  const before = (ed: Editor, s: string) => after(ed, s) - s.length
+
+  it('Enter at the end of an item, Reject All: the new empty item goes', () => {
+    const ed = make([ul(item('Apple'), item('Pear'))])
+    at(ed, after(ed, 'Apple'))
+    key(ed, 'Enter')
+    expect(show(ed.state.doc)).toBe('Apple | +¶ | Pear')
+    expect(tree(ed.state.doc)).toBe('ul[Apple, , Pear]')
+    apply(ed, rejectAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('ul[Apple, Pear]')
+  })
+
+  it('Enter inside an item, Reject All: the halves join again; Accept All keeps the split', () => {
+    const ed = make([ul(item('ApPle'), item('Pear'))])
+    at(ed, after(ed, 'Ap'))
+    key(ed, 'Enter')
+    expect(show(ed.state.doc)).toBe('Ap | +¶Ple | Pear')
+    const s0 = ed.state
+    apply(ed, rejectAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('ul[ApPle, Pear]')
+    ed.view.updateState(s0)
+    apply(ed, acceptAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('ul[Ap, Ple, Pear]')
+    expect(listChanges(ed.state.doc)).toHaveLength(0)
+  })
+
+  it('a deleted item (end of the one before to its end), Accept All: the item goes; Reject All keeps it', () => {
+    const ed = make([ul(item('Apple'), item('Pear'), item('Plum'))])
+    ed.view.dispatch(ed.state.tr.delete(after(ed, 'Apple'), after(ed, 'Pear')))
+    expect(show(ed.state.doc)).toBe('Apple | -¶{-Pear} | Plum')
+    const s0 = ed.state
+    apply(ed, acceptAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('ul[Apple, Plum]')
+    ed.view.updateState(s0)
+    apply(ed, rejectAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('ul[Apple, Pear, Plum]')
+  })
+
+  it('a pasted two-item list inside a paragraph, Reject All: the list goes and the paragraph is whole again', () => {
+    const ed = make([p(t('xy'))])
+    at(ed, 2)
+    const s = ed.schema
+    const list = s.nodes.bulletList.create(null, [
+      s.nodes.listItem.create(null, s.nodes.paragraph.create(null, s.text('P'))),
+      s.nodes.listItem.create(null, s.nodes.paragraph.create(null, s.text('Q'))),
+    ])
+    ed.view.dispatch(ed.state.tr.replaceSelection(new Slice(Fragment.from(list), 0, 0)))
+    expect(tree(ed.state.doc)).toBe('x | ul[P, Q] | y')
+    expect(show(ed.state.doc)).toBe('x | +¶{+P} | +¶{+Q} | +¶y')
+    const s0 = ed.state
+    apply(ed, rejectAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('xy')
+    ed.view.updateState(s0)
+    apply(ed, acceptAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('x | ul[P, Q] | y')
+  })
+
+  it('a whole list deleted, Accept All: the list goes; Reject All: it is back', () => {
+    const ed = make([p(t('Intro')), ul(item('Apple'), item('Pear')), p(t('Outro'))])
+    ed.view.dispatch(ed.state.tr.delete(after(ed, 'Intro'), after(ed, 'Pear')))
+    expect(show(ed.state.doc)).toBe('Intro | -¶{-Apple} | -¶{-Pear} | Outro')
+    const s0 = ed.state
+    apply(ed, acceptAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('Intro | Outro')
+    ed.view.updateState(s0)
+    apply(ed, rejectAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('Intro | ul[Apple, Pear] | Outro')
+  })
+
+  it('Backspace at the start of an item records a deleted boundary (never a lost keystroke); accept joins, reject keeps', () => {
+    const ed = make([ul(item('Apple'), item('Pear'))])
+    at(ed, before(ed, 'Pear'))
+    key(ed, 'Backspace')
+    expect(show(ed.state.doc)).toBe('Apple | -¶Pear')
+    expect(ed.state.selection.head).toBe(after(ed, 'Apple')) // before the deleted boundary
+    key(ed, 'Backspace') // goes on before it
+    expect(show(ed.state.doc)).toBe('Appl{-e} | -¶Pear')
+    const s0 = ed.state
+    apply(ed, acceptAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('ul[ApplPear]')
+    ed.view.updateState(s0)
+    apply(ed, rejectAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('ul[Apple, Pear]')
+  })
+
+  it('Delete at the end of an item records the boundary before the next one and moves past it', () => {
+    const ed = make([ul(item('Apple'), item('Pear'))])
+    at(ed, after(ed, 'Apple'))
+    key(ed, 'Delete')
+    expect(show(ed.state.doc)).toBe('Apple | -¶Pear')
+    expect(ed.state.selection.head).toBe(before(ed, 'Pear'))
+    apply(ed, acceptAll(ed.state))
+    expect(tree(ed.state.doc)).toBe('ul[ApplePear]')
+  })
+
+  it('Backspace in an item you just made removes it for real; so does Delete before it', () => {
+    const ed = make([ul(item('Apple'), item('Pear'))])
+    at(ed, after(ed, 'Apple'))
+    key(ed, 'Enter')
+    key(ed, 'Backspace')
+    expect(tree(ed.state.doc)).toBe('ul[Apple, Pear]')
+    expect(listChanges(ed.state.doc)).toHaveLength(0)
+    expect(ed.state.selection.head).toBe(after(ed, 'Apple'))
+    key(ed, 'Enter')
+    at(ed, after(ed, 'Apple'))
+    key(ed, 'Delete')
+    expect(tree(ed.state.doc)).toBe('ul[Apple, Pear]')
+    expect(listChanges(ed.state.doc)).toHaveLength(0)
+  })
+
+  it('a split you made inside an item, then Backspace: joined again, no change left', () => {
+    const ed = make([ul(item('ApPle'))])
+    at(ed, after(ed, 'Ap'))
+    key(ed, 'Enter')
+    key(ed, 'Backspace')
+    expect(tree(ed.state.doc)).toBe('ul[ApPle]')
+    expect(listChanges(ed.state.doc)).toHaveLength(0)
+  })
+
+  it('selecting your own new item and deleting it removes it for real', () => {
+    const ed = make([ul(item('Apple'), item('Pear'))])
+    at(ed, after(ed, 'Apple'))
+    key(ed, 'Enter')
+    type(ed, 'Fig')
+    expect(show(ed.state.doc)).toBe('Apple | +¶{+Fig} | Pear')
+    ed.view.dispatch(ed.state.tr.delete(after(ed, 'Apple'), after(ed, 'Fig')))
+    expect(tree(ed.state.doc)).toBe('ul[Apple, Pear]')
+    expect(listChanges(ed.state.doc)).toHaveLength(0)
+  })
+
+  it('one undo step for each accept and reject of a list change', () => {
+    const ed = make([ul(item('Apple'), item('Pear'))])
+    at(ed, after(ed, 'Apple'))
+    key(ed, 'Enter')
+    const id = ids(ed)[0]
+    const s1 = ed.state.doc
+    apply(ed, rejectChange(ed.state, id))
+    expect(tree(ed.state.doc)).toBe('ul[Apple, Pear]')
+    undo(ed.state, ed.view.dispatch)
+    expect(ed.state.doc.eq(s1)).toBe(true)
   })
 })
 
@@ -483,6 +662,73 @@ describe('formatting', () => {
     expect(ed.state.doc.firstChild!.content.toJSON()).toEqual([t('one', [{ type: 'italic' }]), t(' two')])
   })
 
+  it('Select All + Bold over many paragraphs: one formatChange step spanning them, not one per paragraph', () => {
+    const ed = make(Array.from({ length: 50 }, (_, i) => p(t(`Paragraph ${i} text.`))))
+    const before = ed.state.doc
+    const tr = ed.state.tr
+    tr.addMark(0, ed.state.doc.content.size, ed.schema.marks.bold.create())
+    const userSteps = tr.steps.length
+    expect(userSteps).toBe(50)
+    const out = trackTransaction(ed.state, tr, { name: author }, '2026-01-01T00:00:00.000Z')
+    expect(out.steps.length).toBe(userSteps + 1)
+    ed.view.dispatch(out)
+    expect(listChanges(ed.state.doc)).toHaveLength(1)
+    ed.state.doc.descendants((n) => {
+      if (n.isText) expect(n.marks.map((m) => m.type.name).sort()).toEqual(['bold', 'formatChange'])
+    })
+    const rejected = rejectAll(ed.state)!
+    expect(rejected.doc.eq(before)).toBe(true)
+    const accepted = acceptAll(ed.state)!
+    // Accept All removes the formatChange marks in one step across the paragraphs too.
+    expect(accepted.steps.length).toBe(1)
+    accepted.doc.descendants((n) => {
+      if (n.isText) expect(n.marks.map((m) => m.type.name)).toEqual(['bold'])
+    })
+  })
+
+  it('a formatChange span breaks at your own insertion, deleted text, a footnote and a different earlier formatting', () => {
+    const ed = make([
+      p(t('one '), t('two', [{ type: 'italic' }]), t(' three')),
+      p(t('four '), { type: 'footnote', content: [t('note')] }, t(' five')),
+      p(t('six seven')),
+    ])
+    at(ed, 4) // inside "one"
+    type(ed, 'X') // your own insertion
+    ed.view.dispatch(ed.state.tr.delete(ed.state.doc.firstChild!.nodeSize + 2, ed.state.doc.firstChild!.nodeSize + 3)) // a deleted letter in "four"
+    const before = ed.state.doc
+    ed.commands.selectAll()
+    ed.commands.toggleBold()
+    // The footnote reference itself is not marked; its text is.
+    let noteMarked = false
+    let noteText = false
+    ed.state.doc.descendants((n) => {
+      if (n.type.name === 'footnote') noteMarked = n.marks.some((m) => m.type.name === 'formatChange')
+      // The note's text: a formatChange exactly where its formatting changed.
+      if (n.isText && n.text === 'note') noteText = n.marks.some((m) => m.type.name === 'formatChange') === n.marks.some((m) => m.type.name === 'bold')
+      if (n.isText && n.marks.some((m) => m.type.name === 'insertion' || m.type.name === 'deletion'))
+        expect(n.marks.some((m) => m.type.name === 'formatChange'), n.text!).toBe(false)
+    })
+    expect(noteMarked).toBe(false)
+    expect(noteText).toBe(true)
+    const fcs = new Set<string>()
+    ed.state.doc.descendants((n) => {
+      for (const m of n.marks) if (m.type.name === 'formatChange') fcs.add(JSON.stringify(m.attrs.before))
+    })
+    expect([...fcs].sort()).toEqual(['[]', '[{"type":"italic"}]'])
+    // One edit: one change id.
+    expect(listChanges(ed.state.doc).filter((c) => c.kinds.includes('formatChange'))).toHaveLength(1)
+    const rejected = rejectAll(ed.state)!
+    // Reject restores the formatting (and rejects the insertion and the deletion as well).
+    const plain = (d: PMNode) => {
+      const out: string[] = []
+      d.descendants((n) => void (n.isText && out.push(`${n.text}:${n.marks.map((m) => m.type.name).filter((x) => x !== 'bold').join(',')}`)))
+      return out.join(' ')
+    }
+    expect(rejected.doc.textContent).toBe('one two threefour note fivesix seven')
+    expect(plain(rejected.doc)).not.toContain('formatChange')
+    expect(before.textContent).toContain('X')
+  })
+
   it('formatting your own insertion is not a separate change', () => {
     const ed = make([p(t('a'))])
     at(ed, 2)
@@ -552,6 +798,16 @@ describe('undo', () => {
     expect(useStore.getState().trackChanges.notice).toBe(TRACK_FAILED_NOTICE)
     setTracking(false) // turning Track Changes off (or on) clears it
     expect(useStore.getState().trackChanges.notice).toBeNull()
+  })
+
+  it('a Reject right after typing is its own undo step: undo brings the typed text back', () => {
+    const ed = make([p(t('abc'))])
+    at(ed, 4)
+    type(ed, 'd')
+    apply(ed, rejectChange(ed.state, ids(ed)[0]))
+    expect(show(ed.state.doc)).toBe('abc')
+    undo(ed.state, ed.view.dispatch)
+    expect(show(ed.state.doc)).toBe('abc{+d}')
   })
 
   it('transactions marked to be skipped are applied as they are', () => {
@@ -682,6 +938,31 @@ describe('Replace All recorded in one pass (batch)', () => {
     compare(ed, 'e', 'E')
   })
 
+  it('a batch that fails after applying some steps starts again per match: the same result', () => {
+    const ed = make([p(t(Array.from({ length: 20 }, (_, i) => `the w${i} `).join(''))), p(t('and the end'))])
+    const { tr } = replaceAllTr(ed, 'the', 'a')
+    const date = '2026-01-01T00:00:00.000Z'
+    const perMatch = trackTransaction(ed.state, tr, { name: author }, date, { batch: false })
+    // The third ReplaceStep the batch tries fails (as a step that does not fit would).
+    const proto = Object.getPrototypeOf(ed.state.tr) as { maybeStep: (s: unknown) => { failed: string | null } }
+    const real = proto.maybeStep
+    let calls = 0
+    proto.maybeStep = function (this: unknown, step: unknown) {
+      if (++calls === 3) return { failed: 'test' }
+      return real.call(this, step)
+    }
+    let batched
+    try {
+      batched = trackTransaction(ed.state, tr, { name: author }, date, { batch: true })
+    } finally {
+      proto.maybeStep = real
+    }
+    expect(calls).toBeGreaterThan(3) // it went on, per match
+    expect(batched.getMeta('nvTrackFailed')).toBeUndefined()
+    expect(normal(batched.doc)).toBe(normal(perMatch.doc))
+    expect(batched.selection.toJSON()).toEqual(perMatch.selection.toJSON())
+  })
+
   it('falls back to the per-match path when matches touch', () => {
     const ed = make([p(t('aaaa and aa'))])
     const { tr } = replaceAllTr(ed, 'a', 'b')
@@ -696,8 +977,33 @@ describe('Replace All recorded in one pass (batch)', () => {
     expect(count).toBe(60)
     ed.view.dispatch(tr)
     expect(show(ed.state.doc).split(' | ')[0]).toBe('Line 0: {-the}{+a} fox and {-the}{+a} hound.')
-    expect(listChanges(ed.state.doc).length).toBe(2)
+    // Each match its own deletion and insertion (as in Word): 60 matches, 120 changes.
+    expect(listChanges(ed.state.doc).length).toBe(120)
     undo(ed.state, ed.view.dispatch)
     expect(ed.state.doc.eq(before)).toBe(true)
+  })
+
+  it('each replaced match is a change of its own: rejecting one leaves the others (batch and per-match)', () => {
+    for (const batch of [true, false]) {
+      resetTrackingSession()
+      const ed = make([p(t('the cat and the dog')), p(t('by the sea'))])
+      const { tr } = replaceAllTr(ed, 'the', 'a')
+      ed.view.dispatch(trackTransaction(ed.state, tr, { name: author }, undefined, { batch }))
+      expect(show(ed.state.doc)).toBe('{-the}{+a} cat and {-the}{+a} dog | by {-the}{+a} sea')
+      const changes = listChanges(ed.state.doc)
+      expect(changes).toHaveLength(6)
+      // Each change covers one match only.
+      for (const c of changes) expect(c.to - c.from, `batch ${batch}`).toBeLessThanOrEqual(3)
+      const firstIns = changes.find((c) => c.kinds.includes('insertion'))!
+      apply(ed, rejectChange(ed.state, firstIns.id))
+      expect(show(ed.state.doc)).toBe('{-the} cat and {-the}{+a} dog | by {-the}{+a} sea')
+    }
+  })
+
+  it('sharedIds (the re-write Keep): one deletion change and one insertion change for the whole edit', () => {
+    const ed = make([p(t('the cat and the dog')), p(t('by the sea'))])
+    const { tr } = replaceAllTr(ed, 'the', 'a')
+    ed.view.dispatch(trackTransaction(ed.state, tr, { name: author }, undefined, { sharedIds: true }))
+    expect(listChanges(ed.state.doc)).toHaveLength(2)
   })
 })

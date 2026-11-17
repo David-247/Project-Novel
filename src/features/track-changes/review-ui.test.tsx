@@ -532,6 +532,16 @@ describe('change popover and status bar', () => {
 })
 
 describe('the manuscript view only', () => {
+  it('a view mounted before the root names it the manuscript gets its summary once it is (remount with restored content)', async () => {
+    let named: Editor | null = null
+    setReviewViewSource(() => named?.view)
+    const ed = make(sample())
+    expect(getChangeSummary().count).toBe(0) // not the manuscript yet: no summary
+    named = ed // attachEditor, after the view exists
+    await new Promise((r) => setTimeout(r, 20))
+    expect(getChangeSummary().count).toBe(5)
+  })
+
   it('another editor with TrackChanges never takes the review commands (source set by the root)', async () => {
     const manuscript = make(sample())
     setReviewViewSource(() => manuscript.view)

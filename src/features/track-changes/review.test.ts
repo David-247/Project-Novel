@@ -166,6 +166,16 @@ describe('markup views: hidden text', () => {
 
 })
 
+describe('a formatChange from a newer build', () => {
+  it('reject drops the mark types this schema does not know instead of throwing', () => {
+    const fc = { type: 'formatChange', attrs: { ...stamp('f1'), before: [{ type: 'italic' }, { type: 'sparkle', attrs: { level: 2 } }] } }
+    const s = state([p([t('Bold', [{ type: 'bold' }, fc])])])
+    const out = apply(s, rejectAll(s))
+    expect(out.doc.firstChild!.firstChild!.marks.map((m) => m.type.name)).toEqual(['italic'])
+    expect(hasTracking(out.doc)).toBe(false)
+  })
+})
+
 describe('markup view switch', () => {
   it('decorates hidden blocks, sets <html data-nv-markup>, recomputes and asks for repagination', () => {
     const el = document.createElement('div')
@@ -193,6 +203,50 @@ describe('markup view switch', () => {
       expect(changedBlockPositions(state([p([t('plain')])]).doc)).toEqual([])
     } finally {
       off()
+      ed.destroy()
+    }
+  })
+})
+
+describe('hidden list items and lists', () => {
+  const li = (...content: JSONContent[]): JSONContent => ({ type: 'listItem', content })
+  const ul = (...items: JSONContent[]): JSONContent => ({ type: 'bulletList', content: items })
+  const gone = (el: Element | null | undefined, cls: string) => !!el && el.classList.contains(cls)
+
+  it('a list item whose paragraphs are all hidden is hidden too (no bullet left), and a list whose items all are', () => {
+    const el = document.createElement('div')
+    const ed = new Editor({
+      element: el,
+      extensions: createEditorExtensions(),
+      content: {
+        type: 'doc',
+        content: [
+          p([t('Intro')]),
+          ul(li(p([t('Kept')])), li(p([t('Gone', [del('d1')])], { trackedDelete: stamp('d1') })), li(p([t('New', [ins('i1')])], { trackedInsert: stamp('i1') }))),
+          ul(li(p([t('All new', [ins('i2')])], { trackedInsert: stamp('i2') }))),
+        ],
+      },
+    })
+    try {
+      const items = () => Array.from(ed.view.dom.querySelectorAll('li'))
+      expect(gone(items()[0], 'nv-tc-gone-final')).toBe(false)
+      expect(gone(items()[1], 'nv-tc-gone-final')).toBe(true)
+      expect(gone(items()[2], 'nv-tc-gone-original')).toBe(true)
+      const lists = () => Array.from(ed.view.dom.querySelectorAll('ul'))
+      expect(gone(lists()[0], 'nv-tc-gone-final')).toBe(false)
+      expect(gone(lists()[1], 'nv-tc-gone-original')).toBe(true)
+      // Incremental: accepting the deletion in the list item removes it, rejecting the new list removes that.
+      ed.view.dispatch(acceptAll(ed.state)!)
+      expect(items().map((x) => x.textContent)).toEqual(['Kept', 'New', 'All new'])
+      expect(items().some((x) => gone(x, 'nv-tc-gone-final') || gone(x, 'nv-tc-gone-original'))).toBe(false)
+      // A typed edit inside an item updates the item's class (the item is no longer all inserted).
+      const s2 = state([ul(li(p([t('New', [ins('i3')])], { trackedInsert: stamp('i3') })))])
+      ed.view.updateState(EditorState.create({ schema: ed.schema, doc: s2.doc, plugins: ed.state.plugins }))
+      expect(gone(items()[0], 'nv-tc-gone-original')).toBe(true)
+      ed.view.dispatch(ed.state.tr.insertText('x', 3).setMeta('nvTrackChangesSkip', true))
+      expect(gone(items()[0], 'nv-tc-gone-original')).toBe(false)
+      expect(gone(lists()[0], 'nv-tc-gone-original')).toBe(false)
+    } finally {
       ed.destroy()
     }
   })

@@ -70,6 +70,13 @@ interface Ctx {
   /** Unmarked text this author is composing (doc positions of the state): counts as own insertion. */
   pending: readonly (readonly [number, number])[]
   deferred: { from: number; to: number; step: number }[]
+  /** One change id pair for every step of a multi-step edit (TrackOptions.sharedIds). */
+  shared: boolean
+  /**
+   * A deleted (or removed) boundary between two textblocks in different containers (list items):
+   * where Backspace (`back`) or Delete (`fwd`) leaves the caret, in the result's coordinates.
+   */
+  caret: { back: number; fwd: number } | null
 }
 
 function stamp(ctx: Ctx, id = newChangeId()): ChangeStamp {
@@ -142,13 +149,33 @@ function setBlockAttr(tr: Transaction, pos: number, attr: string, value: unknown
   tr.setNodeMarkup(pos, undefined, { ...node.attrs, [attr]: value }, node.marks)
 }
 
+/**
+ * The end of the textblock before the block at `pos` in document order, whatever the nesting (the
+ * last paragraph of the previous list item, the paragraph before a list), when only structure lies
+ * between the two (no other textblock or leaf block): "the boundary before a block" runs from there
+ * to the block's opening. Null when there is none (the first textblock of the document).
+ */
+export function boundaryStart(doc: PMNode, pos: number): number | null {
+  const prev = Selection.findFrom(doc.resolve(pos), -1, true)
+  if (!prev || !prev.$head.parent.isTextblock) return null
+  const end = prev.$head.end()
+  if (end > pos) return null
+  let clean = true
+  doc.nodesBetween(end, pos, (n, p) => {
+    if (!clean || n.isInline) return false
+    if (p >= end && (n.isTextblock || n.isLeaf)) clean = false
+    return clean
+  })
+  return clean ? end : null
+}
+
 interface ReplaceResult {
   /** Size of the content kept (deletion-marked) between the range start and the insertion. */
   retained: number
 }
 
 /** Marks [F, T) deleted (really removing the author's own insertions), then inserts `slice` after it. */
-function trackReplace(tr: Transaction, F: number, T: number, slice: Slice, ctx: Ctx): ReplaceResult {
+function trackReplace(tr: Transaction, F: number, T: number, slice: Slice, ctx: Ctx, structural = true): ReplaceResult {
   let at = T
   if (F < T) {
     const doc = tr.doc
@@ -160,11 +187,13 @@ function trackReplace(tr: Transaction, F: number, T: number, slice: Slice, ctx: 
       const ins = node.attrs[TRACKED_INSERT_ATTR] as ChangeStamp | null
       if (ins && ins.author === ctx.author) {
         if (node.isLeaf) return void removals.push([pos, pos + node.nodeSize])
-        const before = doc.resolve(pos).nodeBefore
-        if (before?.isTextblock) return void removals.push([pos - 1, pos + 1])
+        // The boundary before it, whatever the nesting (a list item's paragraph has nothing before it in its item).
+        const start = boundaryStart(doc, pos)
+        if (start !== null) return void removals.push([start, pos + 1])
       }
       if (!node.attrs[TRACKED_DELETE_ATTR] && TRACKED_DELETE_ATTR in node.attrs) blockDeletes.push(pos)
     }
+    let sawBlock = false
     doc.nodesBetween(F, T, (node, pos) => {
       if (node.isInline) {
         const a = Math.max(F, pos)
@@ -181,13 +210,34 @@ function trackReplace(tr: Transaction, F: number, T: number, slice: Slice, ctx: 
         return false
       }
       if (node.isBlock && node.isLeaf) {
-        if (F <= pos && T >= pos + node.nodeSize) blockOp(node, pos)
+        if (F <= pos && T >= pos + node.nodeSize) {
+          sawBlock = true
+          blockOp(node, pos)
+        }
         return false
       }
       // A textblock whose opening lies inside the range: the boundary before it is deleted.
-      if (node.isTextblock && F <= pos && T >= pos + 1) blockOp(node, pos)
+      if (node.isTextblock && F <= pos && T >= pos + 1) {
+        sawBlock = true
+        blockOp(node, pos)
+      }
       return true
     })
+    // Only structure in the range (Backspace at the start of a list item, Delete at the end of the
+    // one before: `</li><li>`): the boundary before the next textblock is deleted.
+    let boundary: [number, number] | null = null
+    if (structural && !sawBlock && !removals.length && !markRanges.length && !nodeMarks.length && slice.size === 0) {
+      const next = Selection.findFrom(doc.resolve(T), 1, true)
+      const nextStart = next && next.$head.parent.isTextblock ? next.$head.start() : -1
+      const prevEnd = nextStart > 0 ? boundaryStart(doc, nextStart - 1) : null
+      if (prevEnd !== null && prevEnd <= F && T <= nextStart) {
+        const node = doc.nodeAt(nextStart - 1)!
+        const ins = node.attrs[TRACKED_INSERT_ATTR] as ChangeStamp | null
+        if (ins && ins.author === ctx.author) removals.push([prevEnd, nextStart])
+        else if (!node.attrs[TRACKED_DELETE_ATTR] && TRACKED_DELETE_ATTR in node.attrs) blockDeletes.push(nextStart - 1)
+        boundary = [prevEnd, nextStart]
+      }
+    }
     if (markRanges.length || nodeMarks.length) {
       const before = doc.resolve(F).nodeBefore
       const after = doc.resolve(T).nodeAfter
@@ -202,7 +252,9 @@ function trackReplace(tr: Transaction, F: number, T: number, slice: Slice, ctx: 
     }
     const first = tr.steps.length
     for (const [a, b] of mergeRanges(removals).reverse()) tr.delete(a, b)
-    at = new StepMapping(tr, first).map(T, -1)
+    const m = new StepMapping(tr, first)
+    at = m.map(T, -1)
+    if (boundary) ctx.caret = { back: m.map(boundary[0], -1), fwd: m.map(boundary[1], 1) }
   }
   const retained = at - F
   if (slice.size > 0) insertTracked(tr, at, cleanSlice(slice), ctx)
@@ -329,8 +381,8 @@ export function markComposed(tr: Transaction, ranges: readonly (readonly [number
   }
 }
 
-function newCtx(schema: Schema, author: Author, date: string, composing = false, pending: Ctx['pending'] = []): Ctx {
-  return { schema, author: author.name, color: author.color ?? null, date, ins: null, del: null, fmtId: null, composing, pending, deferred: [] }
+function newCtx(schema: Schema, author: Author, date: string, composing = false, pending: Ctx['pending'] = [], shared = false): Ctx {
+  return { schema, author: author.name, color: author.color ?? null, date, ins: null, del: null, fmtId: null, composing, pending, deferred: [], shared, caret: null }
 }
 
 // ---- Block attributes (paragraph styles and formatting) --------------------------------------------
@@ -379,6 +431,32 @@ function trackBlockMarkup(tr: Transaction, pos: number, type: NodeType, attrs: R
   return true
 }
 
+/**
+ * A ReplaceAroundStep that deletes content (text, or the opening of a textblock or a break) around its
+ * gap, inserting only structure: not a wrap or a lift (which remove or add wrappers only).
+ */
+function deletesAround(doc: PMNode, step: ReplaceAroundStep): boolean {
+  if (isSetNodeMarkup(step)) return false
+  let inline = false
+  step.slice.content.descendants((n) => {
+    if (n.isInline) inline = true
+    return !inline
+  })
+  if (inline) return false
+  let content = false
+  const scan = (a: number, b: number) => {
+    if (a >= b) return
+    doc.nodesBetween(a, b, (n, pos) => {
+      if (content) return false
+      if (n.isInline || ((n.isTextblock || n.isLeaf) && pos >= a)) content = true
+      return !content
+    })
+  }
+  scan(step.from, step.gapFrom)
+  scan(step.gapTo, step.to)
+  return content
+}
+
 function isSetNodeMarkup(step: ReplaceAroundStep): boolean {
   return (
     step.insert === 1 &&
@@ -395,40 +473,101 @@ function isSetNodeMarkup(step: ReplaceAroundStep): boolean {
 const formatMarks = (marks: readonly Mark[]) => marks.filter((m) => !UNTRACKED_FORMAT_MARKS.has(m.type.name)).map((m) => m.toJSON())
 const sameMarks = (a: unknown, b: unknown) => JSON.stringify(a ?? []) === JSON.stringify(b ?? [])
 
-function trackMarkStep(tr: Transaction, step: AddMarkStep | RemoveMarkStep, ctx: Ctx) {
-  const { from, to, mark } = step
-  if (UNTRACKED_FORMAT_MARKS.has(mark.type.name)) {
-    tr.maybeStep(step)
-    return
+type MarkOp = { add: string; before: unknown[] } | { remove: Mark }
+const sameOp = (x: MarkOp, y: MarkOp) => ('add' in x ? 'add' in y && x.add === y.add : 'remove' in y && x.remove === y.remove)
+
+/**
+ * Records consecutive mark steps (positions never move): replays them, then compares each piece of
+ * text in the touched ranges before and after. Text whose formatting changed gets a `formatChange`
+ * holding the earlier marks (one per distinct earlier set, one id per edit); text back to its earlier
+ * formatting loses its `formatChange`. Your own insertions and deleted text are not changes of their
+ * own. Neighbouring pieces with the same outcome are merged into one AddMarkStep / RemoveMarkStep
+ * across paragraphs (Select All + Bold on uniform text: one step for the whole book, not one per
+ * paragraph). A span breaks at any inline node with another outcome and at a footnote (an atom the
+ * step would mark itself; its text gets spans of its own).
+ */
+function trackMarkSteps(tr: Transaction, steps: readonly (AddMarkStep | RemoveMarkStep)[], ctx: Ctx) {
+  const before = tr.doc
+  const ranges: [number, number][] = []
+  for (const step of steps) {
+    if (tr.maybeStep(step).failed) continue
+    if (!UNTRACKED_FORMAT_MARKS.has(step.mark.type.name) && step.from < step.to) ranges.push([step.from, step.to])
   }
-  const segs: { a: number; b: number; before: unknown[]; fc: Mark | undefined }[] = []
-  tr.doc.nodesBetween(from, to, (node, pos) => {
-    if (!node.isText && !node.isLeaf) return true
-    if (!node.isInline) return false
-    const a = Math.max(from, pos)
-    const b = Math.min(to, pos + node.nodeSize)
+  if (!ranges.length) return
+  const touched = mergeRanges(ranges)
+  const after = tr.doc
+  const spans: { a: number; b: number; op: MarkOp }[] = []
+  let open: { a: number; b: number; op: MarkOp } | null = null
+  const close = () => {
+    if (open) spans.push(open)
+    open = null
+  }
+  const piece = (a: number, b: number, op: MarkOp | null) => {
+    if (!op) return close()
+    if (open && sameOp(open.op, op)) open.b = b
+    else {
+      close()
+      open = { a, b, op }
+    }
+  }
+  const opFor = (was: PMNode, now: PMNode): MarkOp | null => {
     // Formatting your own insertion (or deleted text) is not a change of its own.
-    if (a < b && !ownInsertion(node, ctx) && !markOf(node, DELETION_MARK))
-      segs.push({ a, b, before: formatMarks(node.marks), fc: markOf(node, FORMAT_CHANGE_MARK) })
+    if (ownInsertion(was, ctx) || markOf(was, DELETION_MARK)) return null
+    const nowMarks = formatMarks(now.marks)
+    const fc = markOf(was, FORMAT_CHANGE_MARK)
+    if (fc) return sameMarks(nowMarks, fc.attrs.before) ? { remove: fc } : null
+    const wasMarks = formatMarks(was.marks)
+    return sameMarks(nowMarks, wasMarks) ? null : { add: JSON.stringify(wasMarks), before: wasMarks }
+  }
+  let k = 0
+  let noteEnd = -1
+  after.nodesBetween(touched[0][0], touched[touched.length - 1][1], (node, pos) => {
+    if (noteEnd >= 0 && pos >= noteEnd) {
+      close()
+      noteEnd = -1
+    }
+    if (!node.isInline) return true
+    if (!node.isText && !node.isLeaf) {
+      // A footnote: spans stop at it and start again after it; its text is walked on its own.
+      close()
+      noteEnd = pos + node.nodeSize
+      return true
+    }
+    const end = pos + node.nodeSize
+    while (k < touched.length && touched[k][1] <= pos) k++
+    let at = pos
+    for (let j = k; j < touched.length && touched[j][0] < end; j++) {
+      const a = Math.max(at, touched[j][0])
+      const b = Math.min(end, touched[j][1])
+      if (a > at) close() // text between two touched ranges
+      if (a >= b) continue
+      // The pieces of the text as it was (the step may have merged differently formatted runs).
+      before.nodesBetween(a, b, (was, wpos) => {
+        if (!was.isInline || (!was.isText && !was.isLeaf)) return true
+        const x = Math.max(a, wpos)
+        const y = Math.min(b, wpos + was.nodeSize)
+        if (x < y) piece(x, y, opFor(was, node))
+        return false
+      })
+      at = b
+    }
+    if (at < end) close()
     return false
   })
-  if (tr.maybeStep(step).failed) return
+  close()
   const byBefore = new Map<string, Mark>()
-  for (const s of segs) {
-    const after = formatMarks(tr.doc.nodeAt(s.a)?.marks ?? [])
-    if (s.fc) {
-      if (sameMarks(after, s.fc.attrs.before)) tr.removeMark(s.a, s.b, s.fc)
+  for (const s of spans) {
+    if ('remove' in s.op) {
+      tr.maybeStep(new RemoveMarkStep(s.a, s.b, s.op.remove))
       continue
     }
-    if (sameMarks(after, s.before)) continue
-    const key = JSON.stringify(s.before)
-    let fc = byBefore.get(key)
+    let fc = byBefore.get(s.op.add)
     if (!fc) {
       ctx.fmtId ??= newChangeId()
-      fc = ctx.schema.marks[FORMAT_CHANGE_MARK].create({ ...stamp(ctx, ctx.fmtId), before: s.before })
-      byBefore.set(key, fc)
+      fc = ctx.schema.marks[FORMAT_CHANGE_MARK].create({ ...stamp(ctx, ctx.fmtId), before: s.op.before })
+      byBefore.set(s.op.add, fc)
     }
-    tr.addMark(s.a, s.b, fc)
+    tr.maybeStep(new AddMarkStep(s.a, s.b, fc))
   }
 }
 
@@ -566,6 +705,8 @@ function trackReplaceBatch(out: Transaction, steps: readonly ReplaceStep[], ctx:
     const nodeAfter = (pos: number) => (pos - start >= parent.content.size ? null : parent.child(childAt(offsets, pos - start)))
     for (let mi = run.matches.length - 1; mi >= 0; mi--) {
       const m = run.matches[mi]
+      // Each match its own change (TrackOptions.sharedIds), as on the per-match path.
+      if (!ctx.shared) ctx.ins = ctx.del = null
       const content: PMNode[] = []
       for (let c = childAt(offsets, m.F - start); c < parent.childCount; c++) {
         const cs = start + offsets[c]
@@ -684,6 +825,12 @@ export interface TrackOptions {
   pending?: readonly (readonly [number, number])[]
   /** Record a Replace All-shaped transaction run by run (default: from BATCH_MIN_STEPS steps). */
   batch?: boolean
+  /**
+   * Every step of the edit shares one deletion change and one insertion change (the re-write Keep:
+   * one version replacing another). Default false: in a multi-step Replace All each match is a
+   * change of its own (a deletion and an insertion), as in Word.
+   */
+  sharedIds?: boolean
 }
 
 export function trackTransaction(
@@ -696,15 +843,25 @@ export function trackTransaction(
   if (!shouldTrack(tr) || tr.before !== state.doc) return tr
   let out = state.tr
   try {
-    const ctx = newCtx(state.schema, author, date, options.composing === true, options.pending ?? [])
+    const ctx = newCtx(state.schema, author, date, options.composing === true, options.pending ?? [], options.sharedIds === true)
     let runs: Run[] = []
     if (descendingReplaces(tr.steps)) {
       // Fast path (one step; Replace All): every step's positions are valid in `out` as it goes.
       const steps = tr.steps as ReplaceStep[]
       const batch = (options.batch ?? steps.length >= BATCH_MIN_STEPS) ? trackReplaceBatch(out, steps, ctx) : null
       // The batch gave up part way: record per match, from the start.
-      if (!batch && out.steps.length) out = state.tr
-      const retained: number[] = batch ?? steps.map((s) => trackReplace(out, s.from, s.to, s.slice, ctx).retained)
+      if (!batch && out.steps.length) {
+        out = state.tr
+        ctx.ins = ctx.del = null
+      }
+      const perMatch = steps.length > 1 && !ctx.shared
+      const retained: number[] =
+        batch ??
+        steps.map((s) => {
+          // Each match its own change (sessionIds still joins it to your adjacent changes).
+          if (perMatch) ctx.ins = ctx.del = null
+          return trackReplace(out, s.from, s.to, s.slice, ctx).retained
+        })
       let shift = 0
       for (let i = tr.steps.length - 1; i >= 0; i--) {
         const s = tr.steps[i] as ReplaceStep
@@ -712,10 +869,32 @@ export function trackTransaction(
         shift += s.slice.size - (s.to - s.from)
       }
     } else {
-      for (const step of tr.steps) runs = applyStep(out, step, runs, ctx)
+      // Consecutive mark steps (Select All + Bold: one per textblock) are recorded together, so the
+      // formatting changes go in as a few steps spanning many paragraphs (trackMarkSteps).
+      let marks: (AddMarkStep | RemoveMarkStep)[] = []
+      const flush = () => {
+        if (marks.length) trackMarkSteps(out, marks, ctx)
+        marks = []
+      }
+      for (const step of tr.steps) {
+        if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) {
+          // A mark step moves nothing: the retained runs stay where they are.
+          const mapped = step.map(runsMap(runs))
+          if (mapped) marks.push(mapped as AddMarkStep | RemoveMarkStep)
+          continue
+        }
+        flush()
+        runs = applyStep(out, step, runs, ctx)
+      }
+      flush()
     }
     copyMeta(tr, out)
     mapSelection(tr, out, runs, backspaceLike(state, tr) ? -1 : 1)
+    if (ctx.caret && tr.steps.length === 1 && state.selection.empty) {
+      // Backspace (the caret was after the boundary) stays before it; Delete moves past it.
+      const back = state.selection.head >= (tr.steps[0] as ReplaceStep).to
+      out.setSelection(TextSelection.create(out.doc, back ? ctx.caret.back : ctx.caret.fwd))
+    }
     if (ctx.deferred.length)
       out.setMeta(
         DEFERRED_INSERT_META,
@@ -757,6 +936,18 @@ function applyStep(out: Transaction, step: Step, runs: Run[], ctx: Ctx): Run[] {
     return next.sort((a, b) => a.pos - b.pos)
   }
   const mapped = step.map(runsMap(runs))
+  if (mapped instanceof ReplaceAroundStep && step instanceof ReplaceAroundStep && deletesAround(out.doc, mapped)) {
+    // A deletion the step fitter made into a ReplaceAroundStep (from the end of a paragraph to the
+    // end of a list's last item): recorded as the text and boundaries in it deleted, the structure kept.
+    const size = out.doc.content.size
+    trackReplace(out, mapped.gapTo, mapped.to, Slice.empty, ctx, false)
+    trackReplace(out, mapped.from, mapped.gapFrom, Slice.empty, ctx, false)
+    const kept = out.doc.content.size - size - (step.slice.size - (step.gapFrom - step.from) - (step.to - step.gapTo))
+    const map = step.getMap()
+    const next = runs.map((r) => ({ pos: map.map(r.pos, 1), len: r.len }))
+    if (kept > 0) next.push({ pos: map.map(step.from, -1), len: kept })
+    return next.sort((a, b) => a.pos - b.pos)
+  }
   if (mapped) {
     if (mapped instanceof ReplaceAroundStep && isSetNodeMarkup(mapped)) {
       const node = mapped.slice.content.firstChild!
@@ -764,8 +955,7 @@ function applyStep(out: Transaction, step: Step, runs: Run[], ctx: Ctx): Run[] {
     } else if (mapped instanceof AttrStep) {
       const node = out.doc.nodeAt(mapped.pos)
       if (!node || !trackBlockMarkup(out, mapped.pos, node.type, { ...node.attrs, [mapped.attr]: mapped.value }, node.marks, ctx)) out.maybeStep(mapped)
-    } else if (mapped instanceof AddMarkStep || mapped instanceof RemoveMarkStep) trackMarkStep(out, mapped, ctx)
-    else out.maybeStep(mapped)
+    } else out.maybeStep(mapped)
   }
   const map = step.getMap()
   return runs.map((r) => ({ pos: map.map(r.pos, 1), len: r.len }))

@@ -6,6 +6,9 @@ import { closeChangePopover, getChangePopover, getReviewView, isReviewView, refr
 
 export const reviewKey = new PluginKey('nvTrackReview')
 const POPOVER_SELECTOR = '[data-testid="change-popover"]'
+/** How long a new view waits to be named the manuscript before giving up (another editor: never). */
+const ATTACH_TRIES = 20
+const ATTACH_RETRY_MS = 50
 
 /** The popover's change is gone, or the caret left it (a click elsewhere, arrow keys). */
 function caretLeft(view: EditorView): boolean {
@@ -57,6 +60,18 @@ export function reviewPlugin(): Plugin {
     view: (view) => {
       setReviewView(view)
       if (isReviewView(view)) refreshChangeSummary(view.state.doc)
+      else {
+        // Mounted before the composition root names it the manuscript (attachEditor runs after the
+        // view exists): compute the summary once it is, so a remount with restored content does not
+        // show "No changes" until the first edit.
+        let tries = 0
+        const check = () => {
+          if ((view as unknown as { isDestroyed?: boolean }).isDestroyed) return
+          if (isReviewView(view)) return void refreshChangeSummary(view.state.doc)
+          if (++tries < ATTACH_TRIES) setTimeout(check, ATTACH_RETRY_MS)
+        }
+        setTimeout(check, 0)
+      }
       return {
         update: (v, prev) => {
           if (!isReviewView(v)) return
