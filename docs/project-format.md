@@ -368,11 +368,11 @@ A re-write:
 | `createdAt`        | string  | ISO 8601. |
 | `anchor`           | string  | The `rewriteId` on the passage's blocks in manuscript.json (Novel uses the `id`). |
 | `original`         | object  | The passage when the re-write began: `{"type":"doc","content":[blocks]}`, ProseMirror JSON like manuscript.json (no `rewriteId`). |
-| `versions`         | array   | Never empty: `{ id, name, doc, updatedAt }`. `doc` is a passage like `original`; `name` is the user's ("Version 1" by default). |
+| `versions`         | array   | Never empty: `{ id, name, doc, updatedAt }`. `doc` is a passage like `original` (attributes at their default left out); `name` is the user's ("Version 1" by default). A `doc` this build cannot read (a node type from a newer Novel) is shown read-only and written back as it was. |
 | `currentVersionId` | string  | Optional: the version shown when the re-write is opened again (the last one viewed). |
 | `status`           | string  | `"open"`: in progress; the passage is read-only in the manuscript. `"resolved"`: a version was chosen; no lock. |
 | `originalChanged`  | boolean | Optional, `true` once a bulk edit (Replace All, accepting or rejecting a tracked change, undo) changed the passage after the snapshot. |
-| `choice`           | string  | Optional, resolved re-writes only (Phase 3, T9): `"original"` (Keep Original) or the `id` of the version kept (Keep This Version). Read only when `status` is not `"open"` and it names `"original"` or an existing version; otherwise dropped. |
+| `choice`           | string  | Optional, resolved re-writes only (Phase 3, T9): `"original"` (Keep Original) or the `id` of the version kept (Keep This Version). Read only when `status` is not `"open"` and it names `"original"`, an existing version, or a version whose `kept` copy is present (see `kept`); otherwise dropped. |
 | `resolvedAt`       | string  | Optional, resolved re-writes only: ISO 8601 time of the choice. |
 | `kept`             | object  | Optional, Keep This Version only: a frozen copy of the passage kept (a passage doc like `original`), so the record stays true to the manuscript when the version is edited later. **Written only when it differs from the chosen version's `doc`** (usually it is that doc: no second copy); a resolved re-write without it reads it from the chosen version. A `choice` whose version no longer exists is kept when `kept` is there. |
 | `location`         | object  | Optional, resolved re-writes only: where the passage was, Reopen's hint. `{ block, chapter, before, after, chapterTitle?, offset? }`: the top-level index of its first block, the chapter index there (`-1` before the first chapter), the first 60 characters (plain text) of the paragraph before and after it (`""` at an edge), the chapter's title (60 characters; `""` before the first chapter) and the block index counted from the chapter's start. `chapterTitle` and `offset` may be missing (then `chapter` and `block` are used). |
@@ -425,6 +425,9 @@ A re-write:
   candidate matching anything of `location`, reopens nothing and the app says so (it never guesses). Without
   `location` (an older file) the match must be the only one. Found, it is anchored again, becomes the new `original`, and `status` goes back to
   `"open"`, also in one undo step. Projects without these keys open unchanged.
+- **Deleting a style** (Format ▸ Manage Styles) re-maps its blocks in the manuscript, the passage of an open
+  re-write included (a bulk edit: the lock lets it through and `originalChanged` is set), and in every re-write's
+  `original`, versions and `kept`, so no block of manuscript.json or rewrites.json keeps the deleted id.
 - **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the
   version being typed is written into the side file at every save and every recovery snapshot.
 

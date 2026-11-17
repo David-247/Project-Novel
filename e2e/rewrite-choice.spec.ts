@@ -292,6 +292,8 @@ test('the choice and the history survive save, reopen and crash recovery', async
   const saved = JSON.parse((await page.evaluate(() => window.__nvE2E.readFile('/projects/Saved/rewrites.json')))!)
   expect(saved.rewrites[0]).toMatchObject({ status: 'resolved', choice: saved.rewrites[0].versions[0].id })
   expect(saved.rewrites[0].resolvedAt).toBeTruthy()
+  // Where the passage was (Reopen's hint) is on disk too.
+  expect(saved.rewrites[0].location).toMatchObject({ block: 1, chapter: 0, chapterTitle: 'The Storm', offset: 1 })
   // Resolved: no anchor left in manuscript.json.
   expect((await page.evaluate(() => window.__nvE2E.readFile('/projects/Saved/manuscript.json')))!).not.toContain('rewriteId')
 
@@ -327,6 +329,17 @@ test('the choice and the history survive save, reopen and crash recovery', async
   const list = third.getByRole('dialog', { name: 'Re-writes' })
   await expect(list.getByTestId('rewrite-list-resolved').locator('li')).toHaveCount(2)
   await expect(list.getByTestId('rewrite-list-resolved')).toContainText('Kept Version 1')
+  // The history after a reopen of the project: Reopen finds the kept text from the saved location,
+  // one undo resolves it again (the choice as it was saved), redo opens it again.
+  await ctl(list.getByTestId('rewrite-list-resolved').locator('li').filter({ hasText: 'Kept Version 1' }), 'rewrite.listReopen').click()
+  await expect(view(third)).toBeVisible()
+  await expect(original(third)).toContainText('Kept words. The rain came')
+  await ctl(third, 'rewrite.closeButton').click()
+  await expect(view(third)).toHaveCount(0)
+  await third.keyboard.press('ControlOrMeta+z')
+  await expect.poll(async () => (await rw(third)).rewrites.map((r) => r.status)).toEqual(['resolved', 'resolved'])
+  await third.keyboard.press('ControlOrMeta+Shift+z')
+  await expect.poll(async () => (await rw(third)).rewrites.map((r) => r.status)).toEqual(['open', 'resolved'])
 })
 
 test('AltGr chords type characters in the view: they never keep, discard or flip', async ({ page }) => {
@@ -462,4 +475,57 @@ test("Book mode: Keep and Reopen show the passage's spread; after Keep or Discar
   await expect(view(page)).toHaveCount(0)
   await expect.poll(caretShown).toBe(true)
   await turnsWork()
+})
+
+test('Delete Style while a re-write is open: the passage, the original and the versions follow; Keep never brings the style back', async ({ page }) => {
+  // A custom style "Letter" (custom-1, based on Block Quote) on the paragraph to re-write.
+  const styled = { ...DOC, content: DOC.content.map((b, i) => (i === 2 ? { ...b, attrs: { styleId: 'custom-1' } } : b)) }
+  await project(page, 'DeleteStyle', styled)
+  await page.evaluate(() => window.__nvE2E.runCommand('styles.manage'))
+  const dialog = page.getByRole('dialog', { name: 'Manage styles' })
+  await dialog.locator('[data-style-row="block-quote"]').click()
+  await dialog.locator('[data-control-id="styles.manage.new"]').click()
+  await dialog.locator('[data-control-id="styles.manage.renameField"]').fill('Letter')
+  await page.keyboard.press('Enter')
+  await expect(dialog.locator('[data-style-row="custom-1"]')).toHaveText(/Letter/)
+  await dialog.locator('[data-control-id="dialog.close"]').click()
+  await expect(dialog).toBeHidden()
+  await expect(editor(page).locator('p[data-style="custom-1"]')).toHaveCount(1)
+
+  await openOn(page, 2, 2)
+  await page.keyboard.type('Quietly, ')
+  await expect(revision(page).locator('p[data-style="custom-1"]')).toHaveCount(1)
+  // Find & Replace never stays open over the view.
+  expect(await page.evaluate(() => window.__nvE2E.runCommand('find.open'))).toBe(false)
+  // Format > Manage Styles… from the view: delete Letter (its blocks switch to Block Quote).
+  await page.evaluate(() => window.__nvE2E.runCommand('styles.manage'))
+  await dialog.locator('[data-style-row="custom-1"]').click()
+  await dialog.locator('[data-control-id="styles.manage.delete"]').click()
+  await dialog.locator('[data-control-id="styles.manage.deleteConfirm"]').click()
+  await expect(dialog.locator('[data-style-row="custom-1"]')).toHaveCount(0)
+  await dialog.locator('[data-control-id="dialog.close"]').click()
+  await expect(dialog).toBeHidden()
+  // Not refused by the lock: the hidden manuscript, the original page and the revision all follow.
+  expect((await rw(page)).notice?.kind).not.toBe('locked')
+  // (A deleted id renders as Body: the model, not the DOM, says whether it is gone.)
+  expect(JSON.stringify(await page.evaluate(() => window.__nvE2E.docJSON()))).not.toContain('custom-1')
+  await expect(original(page).locator('p[data-style="block-quote"]')).toHaveCount(1)
+  await expect(revision(page).locator('p[data-style="block-quote"]')).toHaveCount(1)
+  await expect(revision(page)).toContainText('Quietly, She closed the window')
+
+  await ctl(page, 'rewrite.keepVersion').click()
+  await expect(view(page)).toHaveCount(0)
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(saveStatus(page)).toHaveText('DeleteStyle: Saved')
+  const manuscript = (await page.evaluate(() => window.__nvE2E.readFile('/projects/DeleteStyle/manuscript.json')))!
+  expect(manuscript).not.toContain('custom-1')
+  expect(manuscript).toContain('Quietly, She closed the window')
+  expect((await page.evaluate(() => window.__nvE2E.readFile('/projects/DeleteStyle/rewrites.json')))!).not.toContain('custom-1')
+  // Reopen and Keep Original: still no deleted style.
+  await page.evaluate(() => window.__nvE2E.runCommand('rewrite.list'))
+  await ctl(page.getByRole('dialog', { name: 'Re-writes' }), 'rewrite.listReopen').click()
+  await expect(view(page)).toBeVisible()
+  await ctl(page, 'rewrite.keepOriginal').click()
+  await expect(view(page)).toHaveCount(0)
+  expect(JSON.stringify(await page.evaluate(() => window.__nvE2E.docJSON()))).not.toContain('custom-1')
 })
