@@ -155,10 +155,27 @@ export async function writeFilesAtomic(files: readonly BatchFile[]): Promise<voi
   try {
     await invoke(COMMANDS.writeFilesAtomic, { files: files.map(({ path, contents }) => ({ path, contents })) })
   } catch (e) {
-    // Rust names the file in its message; the label of the first one is the friendliest fallback.
-    const named = files.find((f) => typeof (e as { message?: unknown })?.message === 'string' && (e as { message: string }).message.includes(f.path))
-    throw toProjectError(e, (named ?? files[files.length - 1]).label)
+    // Rust names the file in its message, as its canonical path (`\\?\C:\...` on Windows), so match on
+    // the file name; the manuscript (last) is the fallback.
+    throw toProjectError(e, (failedBatchFile(files, e) ?? files[files.length - 1]).label)
   }
+}
+
+/** The batch file a Rust error message names: by its file name, ending a path component. */
+export function failedBatchFile(files: readonly BatchFile[], e: unknown): BatchFile | undefined {
+  const message = (e as { message?: unknown } | null)?.message
+  if (typeof message !== 'string') return undefined
+  const named = (f: BatchFile) => {
+    const name = f.path.split(/[\\/]/).pop()!
+    return ['\\', '/'].some((sep) => {
+      for (let i = message.indexOf(sep + name); i >= 0; i = message.indexOf(sep + name, i + 1)) {
+        const next = message.charAt(i + sep.length + name.length)
+        if (next === '' || next === ':' || next === ' ') return true
+      }
+      return false
+    })
+  }
+  return files.find((f) => message.includes(f.path)) ?? files.find(named)
 }
 
 export async function readTextFile(path: string, fileLabel = path): Promise<string> {

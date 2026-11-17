@@ -22,6 +22,11 @@ export function newCommentId(): string {
 export interface Author {
   name: string
   color?: string | null
+  /**
+   * No name is known (`name` is a stand-in such as "Unknown author"): messages under that name are
+   * nobody's own, so they cannot be edited or deleted as one's own.
+   */
+  anonymous?: boolean
 }
 
 const THREAD_KEYS = ['id', 'createdAt', 'author', 'authorColor', 'resolved', 'resolvedBy', 'resolvedAt', 'messages'] as const

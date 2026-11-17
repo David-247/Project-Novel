@@ -577,9 +577,15 @@ Slice `src/features/comments/` (public interface `index.ts`). Format: docs/proje
   Toolbar: `comment.new`, `comment.panel`; every panel and card control has a registry tooltip. Menus (command
   registry): Review > New Comment (Mod-Alt-m), Next / Previous Comment, Show Resolved Comments (check); Insert >
   Comment (the same action; the shortcut is shown on Review's); View > Comments Panel (check). Next / Previous are
-  enabled while some thread is shown (resolved ones only with Show Resolved).
+  enabled while some shown thread (resolved ones only with Show Resolved) is anchored in the manuscript; hidden
+  threads (anchor text deleted) do not count.
 - **Author**: the Settings author (`getAuthor()`), "Unknown author" when no name is known. When no name is known
   and the one-time question was never asked, New Comment asks it first and opens the composer after the answer.
+  Edit and Delete appear on one's own messages, matched by author name (a known limitation: two writers with the
+  same name share them). A user without a name owns no message, so "Unknown author" messages are not editable as
+  one's own (the comment author source marks such an author `anonymous`).
+- **Highlights**: two generated style sheets, the author colours (rebuilt when threads, Show Resolved or the paper
+  change) and a small one for the selected / hovered thread, so hovering never regenerates the colour rules.
 
 ## Track changes: Review group (Phase 3)
 

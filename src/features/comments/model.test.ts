@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { contrastRatio } from '@/shared/theme'
 import { parseSurfaceTokens, SURFACE_SETS } from '@/shared/theme/contrast'
-import { buildHighlightCss, highlightFor } from './highlight'
+import { buildActiveCss, buildHighlightCss, buildHighlightSheets, highlightFor } from './highlight'
 import { inRange, needsDrawer, spreadRange, stackCards } from './layout'
 import {
   createThread,
@@ -144,5 +144,16 @@ describe('anchor highlight contrast (AA on all four papers)', () => {
     expect(css).toMatch(/\.nv-comment:is\(\[data-comment-id="a"\],\[data-comment-id="b"\]\)\{background-color:#[0-9a-f]{6}\}/)
     expect(css).toContain(':root .nv-comment[data-comment-id="r"]{background-color:transparent}')
     expect(css).toContain(':root .nv-comment[data-comment-id="n"][data-comment-id]{background-color:var(--page-comment-active-bg)')
+  })
+
+  it('a hover changes only the small active sheet: the colour sheet does not depend on it', () => {
+    const threads = Array.from({ length: 500 }, (_, i) => createThread(`c${i}`, { name: 'A', color: '#c0392b' }, 'x'))
+    const base = { threads, activeId: null, showResolved: false, pageBg: '#ffffff', pageFg: '#1b1d1f' }
+    const a = buildHighlightSheets({ ...base, hoverId: 'c1' })
+    const b = buildHighlightSheets({ ...base, hoverId: 'c2' })
+    expect(a.colors).toBe(b.colors)
+    expect(b.active).toBe(':root .nv-comment[data-comment-id="c2"][data-comment-id]{background-color:var(--page-comment-active-bg);box-shadow:inset 0 -2px 0 var(--page-comment-ring)}')
+    // A resolved thread hidden by Show Resolved off is not lit.
+    expect(buildActiveCss({ threads: [{ ...threads[0], resolved: true }], activeId: 'c0', hoverId: null, showResolved: false })).toBe('')
   })
 })

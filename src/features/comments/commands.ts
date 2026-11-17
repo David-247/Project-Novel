@@ -214,7 +214,13 @@ export function deleteThread(threadId: string): boolean {
 }
 
 export function isOwnMessage(t: CommentThread, messageId: string): boolean {
-  return t.messages.find((m) => m.id === messageId)?.author === currentAuthor().name
+  return isOwnAuthor(t.messages.find((m) => m.id === messageId)?.author)
+}
+
+/** A message by `author` is the current user's (by name; a nameless user owns no message). */
+export function isOwnAuthor(author: string | undefined): boolean {
+  const me = currentAuthor()
+  return !me.anonymous && author === me.name
 }
 
 /** The threads shown: anchored in the document, and not resolved unless Show Resolved is on. */

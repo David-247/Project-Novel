@@ -39,10 +39,26 @@ function fakeSideFile() {
   let data: Record<string, unknown> | null = null
   let version = 0
   const loads: unknown[] = []
-  const file: ProjectSideFile & { change(items: string[]): void; items(): unknown; loads: unknown[]; closing: unknown } = {
+  const file: ProjectSideFile & {
+    change(items: string[]): void
+    items(): unknown
+    loads: unknown[]
+    closing: unknown
+    pending: string[] | null
+  } = {
     name: 'notes.json',
     loads,
     closing: null,
+    // A live edit not yet copied into the slice (the re-write view's debounce): flush() copies it in,
+    // which is a change of its own (the version bumps), as in the app.
+    pending: null,
+    flush() {
+      if (file.pending) {
+        const items = file.pending
+        file.pending = null
+        file.change(items)
+      }
+    },
     load(d) {
       loads.push(d)
       data = d ? structuredClone(d as Record<string, unknown>) : null
@@ -166,6 +182,30 @@ describe('project side files', () => {
     expect(onDisk().items).toEqual(['a'])
   })
 
+  it('after a failed batch the side file counts as on disk: a later save replaces it even when empty', async () => {
+    await createProject()
+    side.change(['a'])
+    backend.failWrite = (p) => (p === MANUSCRIPT ? { kind: 'disk_full', message: 'full' } : null)
+    expect(await saveProject({ silent: true })).toBe(false)
+    backend.failWrite = null
+    // Rust may have renamed notes.json before the manuscript rename failed.
+    backend.files.set(NOTES, JSON.stringify({ version: 1, items: ['a'] }))
+    side.change([])
+    expect(await saveProject()).toBe(true)
+    expect(onDisk().items).toEqual([])
+  })
+
+  it('a batch failure names the file that failed, even with a canonical Windows path in the Rust message', async () => {
+    await createProject()
+    side.change(['a'])
+    editor.update(textDoc('new text'))
+    backend.failWrite = (p) =>
+      p === NOTES ? { kind: 'permission_denied', message: '\\\\?\\C:\\books\\novel\\notes.json: Access is denied. (os error 5)' } : null
+    expect(await saveProject({ silent: true })).toBe(false)
+    expect(useStore.getState().project.saveError).toMatch(/could not write notes\.json\./)
+    backend.failWrite = null
+  })
+
   it('a damaged file loads empty, is not overwritten until a real change, then is copied aside first', async () => {
     await createProject()
     backend.files.set(NOTES, '{ not json')
@@ -260,6 +300,63 @@ describe('project side files', () => {
     expect(side.items()).toEqual(['unsaved'])
     expect(await saveProject()).toBe(true)
     expect(onDisk().items).toEqual(['unsaved'])
+  })
+
+  it('a pending live edit is flushed before the save reads the version: Save leaves the project clean', async () => {
+    await createProject()
+    // Like the re-write view: the change is already "unsaved", its content is copied in on flush.
+    side.pending = ['typed']
+    editor.update(textDoc('anchor'))
+    expect(await saveProject()).toBe(true)
+    expect(onDisk().items).toEqual(['typed'])
+    expect(editor.isDirty()).toBe(false)
+  })
+
+  it('Save in the quit prompt with a pending live edit quits without the "could not be saved" question', async () => {
+    await createProject()
+    side.pending = ['typed']
+    editor.update(textDoc('anchor'))
+    backend.answer = 'Save'
+    expect(await prepareToExit('quitting')).toBe(true)
+    expect(backend.messages).toHaveLength(1)
+    expect(onDisk().items).toEqual(['typed'])
+    backend.answer = 'Cancel'
+  })
+
+  it('autosave and Save a Copy flush a pending live edit first', async () => {
+    await createProject()
+    side.pending = ['typed']
+    editor.update(textDoc('anchor'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(parseRecovery(backend.files.get(RECOVERY)!)!.sideFiles).toEqual({ 'notes.json': { version: 1, items: ['typed'] } })
+    side.pending = ['copied']
+    backend.dirs.add('/books/copy')
+    backend.pick = '/books/copy'
+    expect(await saveProjectCopy()).toBe(true)
+    expect(JSON.parse(backend.files.get('/books/copy/notes.json')!).items).toEqual(['copied'])
+  })
+
+  it('a snapshot taken while the file was unreadable leaves it out: Restore keeps the threads on disk', async () => {
+    await createProject()
+    side.change(['on disk'])
+    expect(await saveProject()).toBe(true)
+    await launch()
+    backend.failRead = (p) => (p === NOTES ? { kind: 'permission_denied', message: 'locked' } : null)
+    await reopen()
+    expect(warning()).toMatch(/notes.json is damaged or could not be read/)
+    editor.update(textDoc('typed while locked'))
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    const snap = parseRecovery(backend.files.get(RECOVERY)!)!
+    expect(snap.sideFiles).toEqual({})
+    await launch() // crash; the lock is gone at the next open
+    backend.failRead = null
+    await reopen()
+    expect(side.items()).toEqual(['on disk'])
+    expect(await restoreRecovery()).toBe(true)
+    expect(editor.getDocJSON()).toEqual(textDoc('typed while locked'))
+    expect(side.items()).toEqual(['on disk'])
+    expect(await saveProject()).toBe(true)
+    expect(onDisk().items).toEqual(['on disk'])
   })
 
   it('a snapshot from before side files restores only the text', async () => {

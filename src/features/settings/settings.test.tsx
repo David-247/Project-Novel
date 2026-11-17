@@ -85,6 +85,64 @@ describe('loading preferences.json', () => {
   })
 })
 
+describe('a preferences.json that could not be read, or a change made before it loaded', () => {
+  const SAVED = { version: 1, authorName: 'Pen Name', authorColor: '#aa0000', pageNavigation: 'scroll', future: { a: 1 } }
+  afterEach(() => {
+    backend.failRead = null
+  })
+
+  it('a read error (locked file) never lets the next change overwrite the real file: it is read again first', async () => {
+    vi.useFakeTimers()
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    backend.defaultAuthor = 'Account'
+    backend.preferences = JSON.stringify(SAVED)
+    backend.failRead = (p) => (p === 'preferences.json' ? { kind: 'permission_denied', message: 'locked' } : null)
+    const stop = startPreferencesWriter()
+    await loadPreferences()
+    expect(prefs()).toMatchObject({ authorName: 'Account', loaded: true })
+    // Still locked at the first change: nothing is written.
+    act(() => actions().set('defaultTrimSize', 'uk-a5'))
+    await vi.advanceTimersByTimeAsync(WRITE_DEBOUNCE_MS + 10)
+    expect(JSON.parse(backend.preferences)).toEqual(SAVED)
+    // Readable again: the saved values and unknown keys are kept, with the change on top.
+    backend.failRead = null
+    act(() => actions().set('reduceMotion', 'on'))
+    await vi.advanceTimersByTimeAsync(WRITE_DEBOUNCE_MS + 10)
+    expect(JSON.parse(backend.preferences!)).toMatchObject({
+      authorName: 'Pen Name',
+      authorColor: '#aa0000',
+      pageNavigation: 'scroll',
+      reduceMotion: 'on',
+      defaultTrimSize: 'uk-a5',
+      future: { a: 1 },
+    })
+    expect(prefs()).toMatchObject({ authorName: 'Pen Name', pageNavigation: 'scroll', reduceMotion: 'on', defaultTrimSize: 'uk-a5' })
+    stop()
+    spy.mockRestore()
+  })
+
+  it('a change made before the file loaded is kept over the loaded value, and written', async () => {
+    vi.useFakeTimers()
+    backend.preferences = JSON.stringify(SAVED)
+    const stop = startPreferencesWriter()
+    act(() => actions().set('reduceMotion', 'off'))
+    await loadPreferences()
+    expect(prefs()).toMatchObject({ authorName: 'Pen Name', pageNavigation: 'scroll', reduceMotion: 'off', loaded: true })
+    await vi.advanceTimersByTimeAsync(WRITE_DEBOUNCE_MS + 10)
+    expect(JSON.parse(backend.preferences!)).toMatchObject({ authorName: 'Pen Name', pageNavigation: 'scroll', reduceMotion: 'off', future: { a: 1 } })
+    stop()
+  })
+
+  it('ensureAuthorName does not ask while the file is still loading after the wait: the file may say it was asked', async () => {
+    vi.useFakeTimers()
+    render(<SettingsDialog />)
+    const name = ensureAuthorName()
+    await act(() => vi.advanceTimersByTimeAsync(2500))
+    expect(await name).toBe('')
+    expect(screen.queryByRole('dialog', { name: 'Who is writing?' })).toBeNull()
+  })
+})
+
 describe('writing preferences.json', () => {
   it('debounces a burst of changes into one write, keeping unknown keys', async () => {
     vi.useFakeTimers()

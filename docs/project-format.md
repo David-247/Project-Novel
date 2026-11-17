@@ -280,7 +280,12 @@ A side file is a JSON file beside manuscript.json that belongs to one feature: `
 - **Saved with the manuscript.** Every save writes the side files in one batch with manuscript.json (see "Saving").
   Unsaved side-file changes are unsaved changes of the project (prompts, autosave, crash recovery).
 - **In crash recovery.** Autosave snapshots carry their content (`sideFiles` in the snapshot), and Restore brings
-  it back together with the text.
+  it back together with the text. A guarded file (below) the user has not changed is left out of the snapshot:
+  what Novel holds for it is a stand-in, not the file, so Restore leaves the file as it is on disk then (it may be
+  readable again by then, with all its content).
+- **Live edits are flushed first.** A slice may hold an edit outside its content for a moment (the re-write view
+  copies the revision being typed into the store after a short pause). Storage asks every side file to flush such
+  edits before it takes a save, a snapshot or a copy, so they are in it and a save leaves the project saved.
 - **Unknown keys are kept**, at every level the feature documents, and written back unchanged.
 - **Damaged, unreadable or newer files are guarded** like book.json: the content is treated as empty (damaged,
   unreadable) or used as far as this Novel understands it (a `version` above the one it knows), the status bar
@@ -340,9 +345,10 @@ A thread:
   list makes the whole file damaged (guarded, see "Side files").
 - **Deleted anchor text.** A thread whose anchor text is deleted is hidden, not destroyed: it stays in comments.json
   on save, and undo brings the mark (and the thread with its replies) back. Such orphaned threads are **pruned when
-  the project is closed** while saved (quit, or opening or creating another project after the unsaved-changes
-  prompt), not on save. They are also dropped when a project is opened: undo history never outlives the session, so
-  nothing could bring them back.
+  the project is closed** while saved (quit, File > Close Project, or opening or creating another project after the
+  unsaved-changes prompt), not on save. They are also dropped when a project is opened: undo history never outlives the session, so
+  nothing could bring them back. A recovery snapshot is compared with what was loaded the same way (orphans
+  pruned), so a snapshot that differs only by those threads is not offered for Restore.
 - **Copy and paste.** A pasted copy of commented text whose thread is still anchored in the manuscript does not get
   the mark (no duplicate thread); after a cut the thread is no longer anchored, so the paste keeps the mark (cut and
   paste moves the comment). A comment mark without a thread (pasted from another manuscript) is dropped.
@@ -474,14 +480,16 @@ Safety rules enforced in Rust:
 - **Known limitation:** `index.sqlite` is opened through the Tauri SQL plugin, which has no path scope. The webview
   could open a SQLite file anywhere. Only the JSON files go through the confined commands.
 
-**Manuscript and side files: one batch.** `manuscript.json` and the side files (`comments.json`) are written by one
+**Manuscript and side files: one batch.** `manuscript.json` and the side files (`comments.json`, `rewrites.json`) are written by one
 Rust command, `storage_write_files_atomic`, as close to all-or-nothing as a file system allows. First every file is
 staged (temp file written and fsynced, as above); a failure there (disk full, permissions) deletes every temp file
 and changes nothing. Only then are the temp files renamed over their targets, back to back, side files first and
 manuscript.json last. A crash or failure inside that rename phase (a few milliseconds) can leave a newer side file
 beside the older manuscript; each file on its own is still wholly old or wholly new, and a thread whose anchor is
 not in the manuscript is simply hidden. Guarded side files are copied aside before the batch (a side file whose copy
-fails is left out of it; see "Side files").
+fails is left out of it; see "Side files"). After a failed batch every side file in it counts as present on disk
+(it may have been renamed before the failure), so the next save replaces it even when it is empty by then. An error
+names the file that failed.
 
 Save order: `manuscript.json` with its side files, then `book.json`, then `project.json` (`updatedAt`), then a `revisions` row. After a save that leaves
 the document clean, `.recovery/manuscript.json` is deleted.
@@ -588,7 +596,8 @@ the rest.
 
 - after a save that leaves the document clean (manual save, or Save in the unsaved-changes prompt);
 - on a clean quit: closing the window when there are no unsaved changes, or after saving;
-- when the user chooses **Don't Save** in the unsaved-changes prompt (on quit, New Project or Open Project). The user
+- when the user chooses **Don't Save** in the unsaved-changes prompt (on quit, File > Close Project, New Project or
+  Open Project). The user
   explicitly threw those changes away, so Novel also stops snapshotting that content. Snapshots resume with the next
   edit;
 - when the user chooses **Discard Backup**.
@@ -657,8 +666,12 @@ Rules:
 - **Unknown keys are kept.** Keys this Novel does not know (written by a newer Novel) are preserved when preferences
   are saved.
 - **Never fails to start.** A missing, unreadable or damaged file, or a wrongly typed value, falls back to the default
-  (per key for a single bad value, wholly for a file that is not a JSON object). Reading never writes; the next change
-  made in Settings rewrites the file in the current format, which repairs it.
+  (per key for a single bad value, wholly for a file that is not a JSON object or is larger than 256 KB, which is not
+  read). Reading never writes; the next change made in Settings rewrites a missing or damaged file in the current
+  format, which repairs it. A file that could not be read (locked by another program) is never replaced by defaults:
+  it is read again before the first write, its values and unknown keys are kept with the session's changes on top,
+  and nothing is written while it stays unreadable. A change made before the file was read at startup is kept over
+  the value read.
 - **Saved as you change.** Changes apply immediately (no OK button) and are written about 300 ms after the last one.
 - Not in a project: Save As, backups and recovery never include it.
 
