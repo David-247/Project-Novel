@@ -182,6 +182,19 @@ describe('project side files', () => {
     expect(onDisk().items).toEqual(['a'])
   })
 
+  it('after a failed batch the side file counts as on disk: a later save replaces it even when empty', async () => {
+    await createProject()
+    side.change(['a'])
+    backend.failWrite = (p) => (p === MANUSCRIPT ? { kind: 'disk_full', message: 'full' } : null)
+    expect(await saveProject({ silent: true })).toBe(false)
+    backend.failWrite = null
+    // Rust may have renamed notes.json before the manuscript rename failed.
+    backend.files.set(NOTES, JSON.stringify({ version: 1, items: ['a'] }))
+    side.change([])
+    expect(await saveProject()).toBe(true)
+    expect(onDisk().items).toEqual([])
+  })
+
   it('a batch failure names the file that failed, even with a canonical Windows path in the Rust message', async () => {
     await createProject()
     side.change(['a'])

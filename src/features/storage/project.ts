@@ -57,6 +57,7 @@ import {
   skippedFileReason,
   type SkipReason,
   type SkippedFile,
+  sideFilesMaybeWritten,
   sideFilesSaved,
   writeSideFilesOnClose,
 } from './side-files'
@@ -363,6 +364,8 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
     }
   }
   if (!doc) flushSideFiles()
+  // Files a save of the previous project left out are not this project's (the left-unsaved prompt).
+  lastSkipped = []
   const version = p.getDocVersion()
   const content = doc ?? p.getDocJSON()
   const meta = newProjectMeta(baseName(folder))
@@ -500,7 +503,14 @@ async function writeProject(
       // The manuscript and its side files (comments.json, ...) in one batch: all staged before any
       // is replaced, the manuscript renamed last (docs/project-format.md, "Saving").
       const side = await sideFilesForSave(folder)
-      await writeFilesAtomic([...side.files, { path: joinPath(folder, MANUSCRIPT_FILE), contents: text, label: MANUSCRIPT_FILE }])
+      try {
+        await writeFilesAtomic([...side.files, { path: joinPath(folder, MANUSCRIPT_FILE), contents: text, label: MANUSCRIPT_FILE }])
+      } catch (e) {
+        // A rename that failed after the side files were renamed leaves them on disk: a later save
+        // must replace them even when they are empty then.
+        sideFilesMaybeWritten(side.written)
+        throw e
+      }
       sideFilesSaved(side.written)
       // A guarded side file whose copy could not be kept was left out: its changes stay unsaved.
       skipped.push(...side.skipped)

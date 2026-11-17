@@ -51,6 +51,13 @@ export const commentsSideFile: ProjectSideFile = {
     const pruned = withoutOrphans(currentThreads())
     return pruned ? serializeCommentsFile({ threads: pruned, extra: fileExtra, unreadable }) : null
   },
+  // A recovery snapshot holds the threads hidden in its session, which the open just pruned: compare
+  // both sides pruned the same way, or an otherwise identical snapshot is offered for Restore.
+  comparable(data) {
+    const parsed = parseCommentsFile(data)
+    const threads = withoutOrphans(parsed.threads) ?? parsed.threads
+    return serializeCommentsFile({ threads, extra: parsed.extra, unreadable: parsed.unreadable })
+  },
 }
 
 /** Register comments.json with the storage slice (once, at app start). Returns unregister. */

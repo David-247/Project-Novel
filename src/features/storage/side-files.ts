@@ -40,6 +40,12 @@ export interface ProjectSideFile {
    * session (comments: threads whose anchor text is gone are pruned on close).
    */
   closeData?(): unknown | null
+  /**
+   * `data` (this file's content in a recovery snapshot, or `serialize().data`) as `load` would leave it
+   * against the manuscript now, for comparing a snapshot with what is loaded (comments: orphans pruned,
+   * as on open). Optional: compared as is. Must not throw or change anything.
+   */
+  comparable?(data: unknown): unknown
 }
 
 /** A damaged / unreadable / newer side file: not replaced until a real change, copied aside first. */
@@ -280,6 +286,17 @@ export function sideFilesSaved(names: readonly string[]): void {
   }
 }
 
+/**
+ * The batch holding these side files failed: some may have been renamed into place before the failure
+ * (they are renamed before the manuscript), so treat each as present. Guards stay.
+ */
+export function sideFilesMaybeWritten(names: readonly string[]): void {
+  for (const name of names) {
+    const entry = entries.get(name)
+    if (entry) entry.present = true
+  }
+}
+
 /** True while any side file is guarded (its warning stays up). */
 export function hasGuardedSideFile(): boolean {
   return [...entries.values()].some((e) => e.guard !== null)
@@ -333,10 +350,19 @@ export function sideFilesKey(snapshot?: Record<string, unknown>): string {
   const names = [...entries.keys()].sort()
   return JSON.stringify(
     names.map((n) => {
-      if (snapshot && n in snapshot) return snapshot[n]
       const entry = entries.get(n)!
+      const comparable = (data: unknown) => {
+        if (data === null || !entry.file.comparable) return data
+        try {
+          return entry.file.comparable(data)
+        } catch (e) {
+          console.warn(`Comparing ${n} failed:`, e)
+          return data
+        }
+      }
+      if (snapshot && n in snapshot) return comparable(snapshot[n])
       const { data, empty } = entry.file.serialize()
-      return empty && !entry.present ? null : data
+      return empty && !entry.present ? null : comparable(data)
     }),
   )
 }
