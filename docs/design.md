@@ -21,7 +21,10 @@ brightest, quietest plane on screen and everything else steps back.
 - **Shape.** Controls use a 6px radius and containers use 10px. The different radii make it easy to
   tell a control from a container at a glance.
 - **Motion.** There is one moment: a dialog fades and rises 4px when the user opens it. Nothing animates
-  without the user doing something, and everything is disabled under `prefers-reduced-motion`.
+  without the user doing something, and everything is disabled while motion is reduced: Settings >
+  Motion, whose 'Follow system' follows the OS `prefers-reduced-motion` and whose 'Allow motion'
+  overrides it. CSS keys on `<html data-reduce-motion="on|off">` (settings/motion.ts), never on the OS
+  query directly.
 - **Touch-tolerant.** Every control is at least 32×32 (`min-h-control min-w-control`). No action is
   hover-only. The toolbar (the ribbon) keeps one fixed-height row and scales its groups down instead of
   wrapping or scrolling (see "Ribbon"), and the dialog width is `min(28rem, 100vw - 2rem)`.
@@ -630,8 +633,9 @@ The signature feature: a passage rewritten beside its original, compared like tw
   Controls that act without running a command read `useCommandGateAllows(id)`. Copy stays available on both
   pages. The pages behind the view do not scroll.
 - **The spread**: the comparison view lies over the pages (they stay mounted, laid out and scrolled where they
-  were, so opening re-breaks no pages; the passage's blocks, which take the anchor attribute, are redrawn and
-  re-measured behind the view, part of the open time for a chapter-long passage; e2e/rewrite-perf.spec.ts). Two pages on the desk at the book's trim width, margins and paper surface
+  were, so opening re-breaks no pages; the passage's blocks, which take the anchor attribute, are redrawn by
+  ProseMirror behind the view but keep their pagination measurements, since `rewriteId` does not render: see
+  docs/pagination.md, the block cache; e2e/rewrite-perf.spec.ts). Two pages on the desk at the book's trim width, margins and paper surface
   (`.nv-page`, verso / recto spine shading), typeset by the book style sheet with the manuscript's base face: the
   original on the left (read-only, focusable to read and select), the revision on the right (an editor with the
   manuscript's schema: `createEditorExtensions({ detached: true })`, which leaves out what belongs to the
