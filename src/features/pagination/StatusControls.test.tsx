@@ -46,6 +46,26 @@ describe('page indicator', () => {
     expect(run).toHaveBeenCalledTimes(1)
     off()
   })
+
+  it('its accessible name holds the visible label, the narrow "2 / 5" form included (WCAG 2.5.3)', () => {
+    render(
+      <TooltipProvider>
+        <PageIndicator />
+      </TooltipProvider>,
+    )
+    act(() => {
+      const a = useStore.getState().layoutActions
+      a.setPages(Array.from({ length: 5 }, (_, i) => ({ index: i, side: i % 2 ? 'verso' : 'recto', from: i, to: i + 1, isBlank: false, startsBlockType: null, chapterIndex: 0 })))
+      a.setVisibleSpread({ index: 1, first: 1, last: 2 })
+    })
+    const btn = screen.getByTestId('page-indicator').closest('button')!
+    // No aria-label overriding the content: the name comes from what is shown (jsdom applies no
+    // container queries, so both forms count here; a browser leaves the hidden one out).
+    expect(btn.hasAttribute('aria-label')).toBe(false)
+    expect(screen.getByTestId('page-indicator-short').closest('[aria-hidden="true"]')).toBeNull()
+    expect(screen.getByRole('button', { name: /Pages 2–3 of 5/ })).toBe(btn)
+    expect(screen.getByRole('button', { name: /2 \/ 5\. Go to page$/ })).toBe(btn)
+  })
 })
 
 describe('zoom controls', () => {

@@ -16,7 +16,8 @@ export function pageIndicatorText(first: number, last: number, count: number): s
  * Status-bar page indicator: the spread in view ("Pages 12–13 of 384"). It is also a button that
  * opens Edit > Go to Page (the command registry's `edit.go_to_page`), which jumps to the spread
  * holding the page asked for. No live region: it changes on every turn or scroll.
- * In a narrow status bar (`statusbar` container) it shortens to "12 / 384", then hides.
+ * In a narrow status bar (`statusbar` container) it shortens to "12 / 384", then hides. Its accessible
+ * name follows: "Pages 12–13 of 384. Go to page", or "12 / 384. Go to page" when narrow.
  */
 export function PageIndicator() {
   const count = useStore((s) => s.layout.pageCount)
@@ -28,17 +29,20 @@ export function PageIndicator() {
     <Tooltip>
       <Button
         variant="ghost"
-        className="shrink-0 tabular-nums whitespace-nowrap px-2 text-ui-xs font-normal @max-[560px]/statusbar:hidden"
+        className="relative shrink-0 tabular-nums whitespace-nowrap px-2 text-ui-xs font-normal @max-[560px]/statusbar:hidden"
         data-control-id={C.pageIndicator.id}
-        aria-label={`${full}. ${C.pageIndicator.label}`}
         onClick={() => runCommand('edit.go_to_page')}
       >
+        {/* The accessible name is the visible label plus a hidden ". Go to page" (no aria-label), so
+            it always contains the words shown (WCAG 2.5.3): the full or the short form, whichever
+            the status bar's width displays (the other is display:none, left out of the name). */}
         <span className="@max-[760px]/statusbar:hidden" data-testid="page-indicator">
           {full}
         </span>
-        <span className="@min-[760px]/statusbar:hidden" aria-hidden="true">
+        <span className="@min-[760px]/statusbar:hidden" data-testid="page-indicator-short">
           {`${Math.min(first, count - 1) + 1} / ${count}`}
         </span>
+        <span className="sr-only">{`. ${C.pageIndicator.label}`}</span>
       </Button>
     </Tooltip>
   )
