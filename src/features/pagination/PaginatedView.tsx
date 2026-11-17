@@ -183,14 +183,20 @@ export function PaginatedView({ children }: PaginatedViewProps) {
   // ---- Book: a turned-to spread is fully drawn before it is painted, then (optionally) eased in.
   const shownRow = useRef<number | null>(null)
   const caretScrollPending = useRef(false)
+  /** The row a turn (showRow) already drew the spread of, outside React's commit. */
+  const drawnByTurn = useRef<number | null>(null)
   useLayoutEffect(() => {
     const prev = shownRow.current
     shownRow.current = book ? bookRow : null
     if (!book) return
     // Blocks still waiting for their offsets after a reflow are hidden (.nv-stale): draw the ones on
-    // this spread now, in this task, so the spread is never shown half drawn.
+    // this spread now, in this task, so the spread is never shown half drawn. A turn (pointer, keys,
+    // caret follow) has already done it right after setting the spread, outside the commit (a
+    // ProseMirror dispatch and store updates inside a layout effect make React render again
+    // synchronously); only a row change from elsewhere in the store is drawn here.
     const engine = getEngine()
-    if (prev !== bookRow) engine?.drawWindowNow()
+    if (prev !== bookRow && drawnByTurn.current !== bookRow) engine?.drawWindowNow()
+    drawnByTurn.current = null
     if (prev !== null && prev !== bookRow) {
       const sizer = sizerRef.current
       if (sizer && typeof sizer.animate === 'function' && !prefersReducedMotion()) {
@@ -236,12 +242,17 @@ export function PaginatedView({ children }: PaginatedViewProps) {
       const [first, last] = p.pagesInRow(r)
       const count = Math.max(1, useStore.getState().layout.pageCount)
       const apply = () => actions.setVisibleSpread({ index: r, first, last: Math.min(last, count - 1) })
-      if (r !== live.current.bookRow) {
+      const turned = r !== live.current.bookRow
+      if (turned) {
         const scroller = scrollerRef.current
         if (scroller) scroller.scrollTop = atEnd ? scroller.scrollHeight : 0
+        drawnByTurn.current = r
       }
       if (sync) flushSync(apply)
       else apply()
+      // The turned-to spread's blocks still hidden by a progressive reflow: drawn now (the engine's
+      // view window reads the spread just set), in this task, before the frame is painted.
+      if (turned) getEngine()?.drawWindowNow()
     }
     const scrollToRow = (row: number, atEnd = false) => {
       // Rendered before returning: the caret-follow that a selection change queues compares with it.
