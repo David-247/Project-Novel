@@ -68,10 +68,11 @@ interface PendingComposed {
 }
 
 interface TrackChangesStorage {
-  /** Composed text not marked yet (positions in the current doc): marked when the IME composition ends. */
+  /**
+   * Composed text not marked yet (positions in the current doc), per composition id: marked when that
+   * IME composition ends, in its undo step.
+   */
   pending: PendingComposed[]
-  /** ProseMirror's id of that composition (transaction meta 'composition'): keeps the marking in its undo step. */
-  composition: unknown
 }
 
 // ---- Markup view on the page -------------------------------------------------------------------
@@ -123,10 +124,24 @@ export function changedBlockPositions(doc: PMNode): number[] {
 
 // ---- Hidden-block decorations --------------------------------------------------------------------
 
+const isUnit = (n: PMNode) => n.isTextblock || (n.isBlock && n.isLeaf)
+
+/**
+ * A block `view` does not show at all: a textblock or break (isBlockHidden), or a container (a list
+ * item, a list) whose blocks are all hidden, so no empty bullet is left where accepting or rejecting
+ * leaves nothing. Stops at the first block that is shown.
+ */
+function hiddenIn(node: PMNode, view: MarkupView): boolean {
+  if (isUnit(node)) return isBlockHidden(node, view)
+  if (node.childCount === 0 || !hasTrackedChanges(node)) return false
+  for (let i = 0; i < node.childCount; i++) if (!hiddenIn(node.child(i), view)) return false
+  return true
+}
+
 function decoFor(node: PMNode, pos: number): Decoration | null {
   const classes: string[] = []
-  if (isBlockHidden(node, 'none')) classes.push('nv-tc-gone-final')
-  if (isBlockHidden(node, 'original')) classes.push('nv-tc-gone-original')
+  if (hiddenIn(node, 'none')) classes.push('nv-tc-gone-final')
+  if (hiddenIn(node, 'original')) classes.push('nv-tc-gone-original')
   if (node.isTextblock) {
     let del = false
     node.forEach((c) => {
@@ -137,18 +152,14 @@ function decoFor(node: PMNode, pos: number): Decoration | null {
   return classes.length ? Decoration.node(pos, pos + node.nodeSize, { class: classes.join(' ') }, { nvTc: true }) : null
 }
 
-const isUnit = (n: PMNode) => n.isTextblock || (n.isBlock && n.isLeaf)
-
 function computeDecos(doc: PMNode): DecorationSet {
   const decos: Decoration[] = []
   doc.descendants((node, pos) => {
     if (node.isInline) return false
-    if (isUnit(node)) {
-      const d = hasTrackedChanges(node) ? decoFor(node, pos) : null
-      if (d) decos.push(d)
-      return false
-    }
-    return hasTrackedChanges(node)
+    if (!hasTrackedChanges(node)) return false
+    const d = decoFor(node, pos)
+    if (d) decos.push(d)
+    return !isUnit(node)
   })
   return DecorationSet.create(doc, decos)
 }
@@ -167,12 +178,13 @@ function updateDecos(tr: Transaction, set: DecorationSet): DecorationSet {
       const b = Math.max(a, Math.min(size, rest.map(to, 1)))
       tr.doc.nodesBetween(a, b, (node, pos) => {
         if (node.isInline) return false
-        if (!isUnit(node)) return true
-        const old = next.find(pos, pos + node.nodeSize, (spec) => (spec as { nvTc?: boolean }).nvTc === true).filter((d) => d.from === pos)
+        // Textblocks and breaks in the range, and the containers holding them (a list item or list
+        // may now be all hidden, or no longer).
+        const old = next.find(pos, pos + node.nodeSize, (spec) => (spec as { nvTc?: boolean }).nvTc === true).filter((d) => d.from === pos && d.to === pos + node.nodeSize)
         if (old.length) next = next.remove(old)
         const d = decoFor(node, pos)
         if (d) next = next.add(tr.doc, [d])
-        return false
+        return !isUnit(node)
       })
     })
   })
@@ -261,7 +273,7 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
 
   addExtensions: () => [InsertionMark, DeletionMark, FormatChangeMark, TrackedBlockAttributes],
 
-  addStorage: () => ({ pending: [], composition: undefined }),
+  addStorage: () => ({ pending: [] }),
 
   dispatchTransaction({ transaction, next }) {
     const storage = this.storage
@@ -284,7 +296,6 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
     if (deferred) {
       const composition = out.getMeta('composition')
       storage.pending = [...storage.pending, ...deferred.map(([from, to]) => ({ from, to, composition }))]
-      storage.composition = composition
     }
     // The composition is over and this is its last transaction (same composition id): the composed
     // text gets its insertion mark here, in the composition's undo step. Any other transaction leaves
@@ -294,7 +305,6 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
     if (!composing && own.length && !out.getMeta('history$') && this.options.isEnabled()) {
       markComposed(out, own.map((p) => [p.from, p.to] as const), this.options.getAuthor())
       storage.pending = storage.pending.filter((p) => p.composition !== id)
-      if (storage.composition === id) storage.composition = undefined
     }
     next(out)
   },
@@ -356,7 +366,6 @@ export const TrackChanges = Extension.create<TrackChangesOptions, TrackChangesSt
             if (view.isDestroyed || (!force && view.composing) || storage.pending.length === 0) return
             const pending = storage.pending
             storage.pending = []
-            storage.composition = undefined
             if (!this.options.isEnabled()) return
             // One transaction per composition, with its id: each stays in its own undo step.
             const ids = [...new Set(pending.map((p) => p.composition))]
