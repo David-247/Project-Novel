@@ -43,8 +43,7 @@
 .nv-comment-slot {
   transition: transform 120ms ease-out;
 }
-@media (prefers-reduced-motion: reduce) {
-  .nv-comment-slot {
-    transition: none;
-  }
+/* Settings > Motion, not the OS query: 'Allow motion' overrides the OS setting (settings/motion.ts). */
+:root[data-reduce-motion='on'] .nv-comment-slot {
+  transition: none;
 }

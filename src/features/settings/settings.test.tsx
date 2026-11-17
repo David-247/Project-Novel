@@ -378,7 +378,8 @@ describe('Settings dialog', () => {
       defaultPaper: 'auto',
       defaultTrimSize: 'us-5.5x8.5',
     })
-    expect(document.documentElement.dataset.reduceMotion).toBeUndefined()
+    // Written explicitly: 'off' while motion is allowed (jsdom: the OS does not reduce motion).
+    expect(document.documentElement.dataset.reduceMotion).toBe('off')
   })
 
   it('closes with Escape and Done, giving focus back to the gear', async () => {
