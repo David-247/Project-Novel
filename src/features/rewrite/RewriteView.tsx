@@ -231,8 +231,11 @@ function Comparison({ record }: { record: RewriteRecord }) {
       tabindex: '0',
     })
     const readable = fits(orig.schema, version.doc)
-    if (!readable) unreadable.current.add(version.id)
-    setShownUnreadable(!readable)
+    // (Set only when needed: a state change here would render the view a second time on every open.)
+    if (!readable) {
+      unreadable.current.add(version.id)
+      setShownUnreadable(true)
+    }
     const rev = makeEditor(rm, readable ? version.doc : EMPTY_DOC, readable, {
       role: 'textbox',
       'aria-multiline': 'true',
