@@ -279,3 +279,49 @@ describe('copy', () => {
     expect(copiedSlice(plain, 'all')).toBe(plain)
   })
 })
+
+describe('undo of a resolve never touches the paragraphs it skipped (re-review A)', () => {
+  /** Apply `tr`, then its inverse (what undo does), and return the state after the undo. */
+  function undone(s: EditorState, tr: NonNullable<ReturnType<typeof acceptAll>>): EditorState {
+    let out = s.apply(tr)
+    const inv = out.tr
+    for (let i = tr.steps.length - 1; i >= 0; i--) inv.step(tr.steps[i].invert(tr.docs[i]))
+    out = out.apply(inv)
+    return out
+  }
+  /** The mark steps of `tr` that reach into top-level block `block` of `doc`. */
+  const stepsOverBlock = (doc: PMNode, tr: NonNullable<ReturnType<typeof acceptAll>>, block: number) => {
+    let from = 0
+    for (let i = 0; i < block; i++) from += doc.child(i).nodeSize
+    const to = from + doc.child(block).nodeSize
+    return tr.steps
+      .map((st) => st.toJSON() as { stepType: string; from: number; to: number })
+      .filter((j) => j.stepType.endsWith('Mark') && j.from < to - 1 && j.to > from + 1)
+  }
+  const marksOf = (doc: PMNode, block: number) => {
+    const out: string[][] = []
+    doc.child(block).forEach((n) => out.push(n.marks.map((m) => m.type.name).sort()))
+    return out
+  }
+
+  it('an insertion with a shared id around an unchanged paragraph (re-write Keep): undo gives P2 no mark', () => {
+    const s = state([p([t('One.', [ins('k')])]), p([t('Unchanged.')]), p([t('Three.', [ins('k')])])])
+    const tr = acceptAll(s)!
+    expect(stepsOverBlock(s.doc, tr, 1)).toEqual([])
+    expect(s.apply(tr).doc.child(1)).toBe(s.doc.child(1)) // untouched: the same node
+    expect(marksOf(s.apply(tr).doc, 1)).toEqual([[]])
+    const back = undone(s, tr)
+    expect(back.doc.eq(s.doc)).toBe(true)
+    expect(marksOf(back.doc, 1)).toEqual([[]])
+  })
+
+  it('a format change around a paragraph that was already bold: undo gives P2 no formatChange', () => {
+    const fc = { type: 'formatChange', attrs: { ...stamp('f'), before: [] } }
+    const s = state([p([t('One.', [{ type: 'bold' }, fc])]), p([t('Bold already.', [{ type: 'bold' }])]), p([t('Three.', [{ type: 'bold' }, fc])])])
+    const tr = acceptAll(s)!
+    expect(stepsOverBlock(s.doc, tr, 1)).toEqual([])
+    const back = undone(s, tr)
+    expect(back.doc.eq(s.doc)).toBe(true)
+    expect(marksOf(back.doc, 1)).toEqual([['bold']])
+  })
+})

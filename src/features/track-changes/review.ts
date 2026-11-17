@@ -197,7 +197,13 @@ function resolve(state: EditorState, filter: Filter, mode: Mode, clip?: { from: 
     removals.push({ a, b, mark, last: inlineIndex })
   }
   doc.descendants((node, pos) => {
-    if (!node.isInline) return hasTrackedChanges(node)
+    if (!node.isInline) {
+      if (hasTrackedChanges(node)) return true
+      // A skipped subtree breaks a run: a merged step never spans a paragraph it leaves alone (it
+      // would rebuild that paragraph, a new node to pagination, and its undo would cover it).
+      inlineIndex++
+      return false
+    }
     inlineIndex++
     let a = pos
     let b = pos + node.nodeSize
