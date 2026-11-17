@@ -362,10 +362,18 @@ test('comments margin panel shows the shown spread\'s comments; Next Comment tur
   await ctl(page, 'comment.next').click()
   await expect(panel).toContainText('Late note')
   await expect(panel).not.toContainText('Early note')
-  const anchor = page.locator('.novel-editor-content [data-comment-id="c30"], .novel-editor-content span[class*="comment"]').last()
-  void anchor
-  // The card sits level with its anchor, inside the spread shown.
+  // The card sits level with its anchor (the first line of the commented text, on the spread shown),
+  // inside the spread. The anchor is the one of the card's own thread (its slot's data-slot).
   const card = panel.locator('.nv-comment-slot').first()
+  await expect(card).toHaveAttribute('data-slot', 'c30')
+  await expect
+    .poll(() =>
+      card.evaluate((slot) => {
+        const anchor = document.querySelector(`.novel-editor-content [data-comment-id="${(slot as HTMLElement).dataset.slot}"]`)!.getClientRects()[0]
+        return Math.round(Math.abs(slot.getBoundingClientRect().top - anchor.top))
+      }),
+    )
+    .toBeLessThanOrEqual(2)
   const cardBox = (await card.boundingBox())!
   const sizer = (await page.locator('.nv-sizer').boundingBox())!
   expect(cardBox.y).toBeGreaterThanOrEqual(sizer.y - 2)
