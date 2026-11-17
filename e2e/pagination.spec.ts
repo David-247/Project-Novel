@@ -792,6 +792,26 @@ test('Select All + Bold draws the whole book in one pass (a big selection makes 
   expect(await page.evaluate(() => document.querySelectorAll('.nv-stale, .nv-unmapped').length)).toBe(0)
 })
 
+test('opening a re-write (its anchor attribute on every passage block) re-measures no block', async ({ page }) => {
+  test.setTimeout(90_000)
+  await paste(page, paragraphs(300, 60))
+  await editor(page).focus()
+  await page.evaluate(() => {
+    const e = window.__nvE2E
+    e.selectText(e.blockPos(20) + 2, e.blockPos(219) + 2)
+    ;(window as unknown as { __nvT0: number }).__nvT0 = performance.now()
+    if (!e.runCommand('rewrite.open')) throw new Error('rewrite.open disabled')
+  })
+  await expect(page.getByTestId('rewrite-view')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.paginationSettled())).toBe(true)
+  // rewriteId does not render: the 200 rebuilt blocks keep their measurements (rewrite review #13).
+  const measured = await page.evaluate(() => {
+    const t0 = (window as unknown as { __nvT0: number }).__nvT0
+    return (window.__nvE2E.paginationLines().passes as Record<string, number>[]).filter((p) => p.startedAt >= t0).reduce((n, p) => n + p.measuredBlocks, 0)
+  })
+  expect(measured).toBeLessThan(5)
+})
+
 test('Replace All (unmapped decorations) never paints a block at a stale place', async ({ page }) => {
   test.setTimeout(90_000)
   await page.setViewportSize({ width: 1400, height: 900 })

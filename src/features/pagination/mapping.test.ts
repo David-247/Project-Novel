@@ -10,7 +10,7 @@ import { createPaginationPlugin, isBulk, markSpan, paginationKey } from './engin
 const schema = new Schema({
   nodes: {
     doc: { content: 'paragraph+' },
-    paragraph: { content: 'text*', attrs: { mark: { default: null } }, toDOM: () => ['p', 0] },
+    paragraph: { content: 'text*', attrs: { mark: { default: null }, rewriteId: { default: null } }, toDOM: () => ['p', 0] },
     text: {},
   },
   marks: { strong: { toDOM: () => ['strong', 0] } },
@@ -97,5 +97,14 @@ describe('the bulk signal', () => {
     state.doc.forEach((_, pos) => void tr.setNodeAttribute(pos, 'mark', 'x'))
     expect(markSpan(tr)).toBe(state.doc.content.size)
     expect(isBulk(tr)).toBe(true)
+  })
+
+  it('the re-write anchor (rewriteId, not rendered) on a whole chapter is not bulk', () => {
+    const state = setup(400, long)
+    const tr = state.tr
+    state.doc.forEach((_, pos) => void tr.setNodeAttribute(pos, 'rewriteId', 'rw1'))
+    expect(markSpan(tr)).toBe(0)
+    // 400 steps, but none that changes how a block looks.
+    expect(isBulk(tr)).toBe(false)
   })
 })

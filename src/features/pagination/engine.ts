@@ -1,4 +1,4 @@
-import type { Node as PMNode } from '@tiptap/pm/model'
+import { Mark, type Node as PMNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection, type EditorState } from '@tiptap/pm/state'
 import { AddMarkStep, AddNodeMarkStep, AttrStep, Mapping, RemoveMarkStep, RemoveNodeMarkStep, StepMap, type Transform } from '@tiptap/pm/transform'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
@@ -47,6 +47,21 @@ const MAP_STEP_LIMIT = 200
 const BULK_MARK_CHARS = 20_000
 
 /**
+ * Block attributes that do not change how a block renders: a change of only these keeps the block's
+ * measurements (the re-write anchor `rewriteId`, set on every block of a passage when a re-write
+ * opens: rewrite/anchor.ts) and is not a bulk change.
+ */
+const NON_RENDERING_ATTRS = new Set(['rewriteId'])
+
+/** `b` renders as `a` did: same type, content and marks, attributes equal but for NON_RENDERING_ATTRS. */
+function sameRendering(a: PMNode, b: PMNode): boolean {
+  if (a.type !== b.type || !(a.content === b.content || a.content.eq(b.content)) || !Mark.sameSet(a.marks, b.marks)) return false
+  for (const k of Object.keys(a.attrs)) if (!NON_RENDERING_ATTRS.has(k) && a.attrs[k] !== b.attrs[k]) return false
+  for (const k of Object.keys(b.attrs)) if (!(k in a.attrs)) return false
+  return true
+}
+
+/**
  * Characters covered by a transaction's mark and attribute steps (O(steps): typing pays nothing).
  * Their step maps are empty, so they never trip MAP_STEP_LIMIT, yet one can restyle every block.
  */
@@ -54,6 +69,7 @@ export function markSpan(tr: Transform): number {
   let n = 0
   tr.steps.forEach((step, i) => {
     if (step instanceof AddMarkStep || step instanceof RemoveMarkStep) n += step.to - step.from
+    else if (step instanceof AttrStep && NON_RENDERING_ATTRS.has(step.attr)) return
     else if (step instanceof AddNodeMarkStep || step instanceof RemoveNodeMarkStep || step instanceof AttrStep) n += tr.docs[i]?.nodeAt(step.pos)?.nodeSize ?? 1
   })
   return n
@@ -61,7 +77,9 @@ export function markSpan(tr: Transform): number {
 
 /** The transaction counts as bulk (see PaginationState). */
 export function isBulk(tr: Transform): boolean {
-  return tr.steps.length > MAP_STEP_LIMIT || markSpan(tr) > BULK_MARK_CHARS
+  let steps = 0
+  for (const step of tr.steps) if (!(step instanceof AttrStep && NON_RENDERING_ATTRS.has(step.attr))) steps++
+  return steps > MAP_STEP_LIMIT || markSpan(tr) > BULK_MARK_CHARS
 }
 
 export const paginationKey = new PluginKey<PaginationState>('pagination')
@@ -238,6 +256,8 @@ export class PaginationEngine {
   private lastDoc: PMNode | null = null
   /** Per block node: its stream top in the last pass. */
   private prevTops = new Map<PMNode, number>()
+  /** The top-level block nodes of the last pass, in order. */
+  private prevBlocks: PMNode[] = []
   private lastKey = ''
   private snapshot: LayoutSnapshot | null = null
   private listeners = new Set<SnapshotListener>()
@@ -521,6 +541,19 @@ export class PaginationEngine {
       if (!dom || dom.nodeType !== 1) return
       let m = this.cache.get(node)
       let fresh = false
+      // A new node that renders like the block at its place in the last pass (only a non-rendering
+      // attribute changed, e.g. a re-write's anchor): its measurements and stream top still hold.
+      let was: PMNode | undefined
+      if (!m) {
+        const prev = this.prevBlocks[b]
+        if (prev && prev !== node && sameRendering(prev, node)) {
+          m = this.cache.get(prev)
+          if (m) {
+            was = prev
+            this.cache.set(node, m)
+          }
+        }
+      }
       if (m && restyled && usesStyle(dom, restyled)) m = undefined
 
       if (!m || m.key !== key) {
@@ -529,7 +562,7 @@ export class PaginationEngine {
         measured++
         fresh = true
       }
-      const known = fresh || nextTops.has(node) ? undefined : prevTops.get(node)
+      const known = fresh || nextTops.has(node) ? undefined : prevTops.get(was && !fresh ? was : node)
       let top: number
       if (known !== undefined && !anchor) top = known + delta
       else {
@@ -562,6 +595,7 @@ export class PaginationEngine {
     })
     for (const [n, t] of nextTops) if (Number.isNaN(t)) nextTops.delete(n)
     this.prevTops = nextTops
+    this.prevBlocks = blockNodes
 
     // Line index -> document position (relative to the doc), lazily.
     const lineToUnitLine = (li: number) => {
