@@ -737,6 +737,61 @@ test('progressive restyle never paints a block at a stale place (Body font size)
   })
 })
 
+/** The first pagination pass that started after `window.__nvT0` (set by the test in the page). */
+const firstPassSinceT0 = (page: Page) =>
+  page.evaluate(() => {
+    const t0 = (window as unknown as { __nvT0: number }).__nvT0
+    return (window.__nvE2E.paginationLines().passes as Record<string, number>[]).find((p) => p.startedAt >= t0)!
+  })
+
+test('a mark-only bulk change (Reject All of formatting on every block) draws the pages in view first and never paints a block at a stale place', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(1000, 60))
+  // A tracked formatting change on every block (Select All + Bold, recording on), then the caret
+  // back in the text: Reject All removes the bold from the whole book in mark steps only (their step
+  // maps are empty: nothing trips the mapping limit; review UI #1).
+  await page.evaluate(() => window.__nvE2E.setTracking(true))
+  await editor(page).focus()
+  await page.keyboard.press('ControlOrMeta+a')
+  expect(await page.evaluate(() => window.__nvE2E.runCommand('toolbar.bold'))).toBe(true)
+  await waitForLayout(page)
+  await clickBlockStart(page, editor(page).locator('p').nth(3))
+  await waitForLayout(page)
+  await expectNoStalePaint(page, () =>
+    page.evaluate(() => {
+      window.__nvArm!()
+      ;(window as unknown as { __nvT0: number }).__nvT0 = performance.now()
+      window.__nvE2E.resolveAllChanges('reject')
+    }),
+  )
+  expect(await editor(page).locator('strong').count()).toBe(0)
+  // The first pass measured every block (the model is exact) but drew only the pages in view and the
+  // nearest chunk; the rest followed in later frames (not all 1,000 blocks in one frame).
+  const first = await firstPassSinceT0(page)
+  expect(first.measuredBlocks).toBeGreaterThanOrEqual(1000)
+  expect(first.deferredBlocks).toBeGreaterThan(500)
+  expect(first.dirtyBlocks - first.deferredBlocks).toBeLessThan(400)
+})
+
+test('Select All + Bold draws the whole book in one pass (a big selection makes every extra frame cost a repaint of it)', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(1000, 60))
+  await editor(page).focus()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.evaluate(() => {
+    ;(window as unknown as { __nvT0: number }).__nvT0 = performance.now()
+    if (!window.__nvE2E.runCommand('toolbar.bold')) throw new Error('bold disabled')
+  })
+  await waitForLayout(page)
+  expect(await editor(page).locator('strong').count()).toBeGreaterThan(900)
+  const first = await firstPassSinceT0(page)
+  expect(first.measuredBlocks).toBeGreaterThanOrEqual(1000)
+  expect(first.deferredBlocks).toBe(0)
+  expect(await page.evaluate(() => document.querySelectorAll('.nv-stale, .nv-unmapped').length)).toBe(0)
+})
+
 test('Replace All (unmapped decorations) never paints a block at a stale place', async ({ page }) => {
   test.setTimeout(90_000)
   await page.setViewportSize({ width: 1400, height: 900 })
