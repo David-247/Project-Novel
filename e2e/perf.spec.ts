@@ -256,12 +256,14 @@ test('100k-word manuscript: changing the Chapter Title font size restyles every 
     // The style sheet swap keeps the styles budget; the reflow it causes in the paginated view
     // (every page break can move) gets the reflow budget, like a trim change (docs/pagination.md).
     budgets: { restyleMs: 100, repaginatedMs: 1000, allDrawnMs: 3000 },
+    // Decision f15842e5: the sheet swap reads ~100-106 ms on the free Windows runner (~50 ms locally).
+    ciAdvisory: ['restyleMs'],
   })
 
   expect(result.swapped).toBe(true)
   expect(result.changed).toBe(chapters)
   expect(versionAfter).toBe(versionBefore)
-  budget(testInfo, 'restyle style sheet swap ms', result.cssMs, 100)
+  budget(testInfo, 'restyle style sheet swap ms', result.cssMs, 100, { ciAdvisory: true })
   budget(testInfo, 'restyle reflow complete ms', result.repaginatedMs, 1000)
   budget(testInfo, 'restyle all drawn ms', result.allDrawnMs, 3000)
 })

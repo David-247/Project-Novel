@@ -60,6 +60,22 @@ describe('perf summary', () => {
     expect(md).toMatch(/\| perf-hotpath \| chromium \/ win32 \(shipping\) \| \*\*54\*\* \(MISS\) \|/)
   })
 
+  it('the style sheet swap is CI-advisory; the repagination it causes still blocks (decision f15842e5)', () => {
+    const md = toMarkdown([
+      {
+        scenario: 'perf-styles',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        restyleMs: 100.4,
+        repaginatedMs: 1200,
+        allDrawnMs: 1500,
+        chaptersRestyled: 30,
+        ciAdvisory: ['restyleMs'],
+      },
+    ])
+    expect(md).toMatch(/\| perf-styles \| chromium \/ win32 \(shipping\) \| \*\*100\.4\*\* \(miss, CI-advisory: not blocking\) \| \*\*1200\*\* \(MISS\) \|/)
+  })
+
   it('tabulates typing, trim reflow, style edit and Replace All; marks misses by pair', () => {
     const md = toMarkdown([
       { scenario: 'perf-combined', browser: 'perf-webkit', platform: 'darwin', openMs: 900, typing: { medianMs: 12.5, p95Ms: 30, maxMs: 41 } },
