@@ -52,6 +52,12 @@ export function RewriteHost({ children }: RewriteHostProps) {
 
   useEffect(() => setViewHooks({ afterClose: () => void (restore.current = true) }), [])
 
+  // Find & Replace never stays open over the view (it would act on the hidden manuscript).
+  const findOpen = useStore((s) => s.find.open)
+  useEffect(() => {
+    if (open && findOpen) useStore.getState().findActions.closePanel()
+  }, [open, findOpen])
+
   // Back to the manuscript (still scrolled where it was): the focus in the text, its selection kept.
   useLayoutEffect(() => {
     if (open || !restore.current) return
@@ -125,11 +131,13 @@ function RewriteNotice({ inView = false }: { inView?: boolean }) {
   if (notice?.kind === 'undo') text = 'Undo changed text in a passage that is in re-write.'
   else if (notice?.kind === 'missing') text = `The passage for this re-write was removed. Its versions are kept${notice.id ? '; reopen it to copy text out' : ''}.`
   else if (notice?.kind === 'split') text = `The passage for this re-write is no longer in one piece. Its versions are kept${notice.id ? '; reopen it to copy text out' : ''}.`
-  else if (inView) text = null
+  else if (notice?.kind === 'unreadable') text = 'This version holds content this copy of Novel cannot read (it was saved by a newer version), so it was not kept. Nothing was changed.'
+  // Reopen from the list while the view is open on another re-write: the view stays, the notice shows over it.
   else if (notice?.kind === 'notFound')
     text = notice.ambiguous
       ? 'The text this re-write left fits more than one place in the manuscript, so it was not reopened (Novel does not guess). Its versions are kept.'
       : 'The text this re-write left was not found near where it was, so it cannot be reopened. Its versions are kept.'
+  else if (inView) text = null
   else if (notice?.kind === 'discarded') text = `Re-write discarded. Undo (${formatShortcut('Mod-z')}) brings it back.`
   else if (notice?.kind === 'span') text = 'A re-write covers one chapter at most. Select paragraphs within one chapter and try again.'
   else if (notice?.kind === 'locked' && record) text = 'This passage is being re-written, so it cannot be changed here. Edit it in its re-write.'

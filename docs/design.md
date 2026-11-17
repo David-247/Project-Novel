@@ -21,7 +21,10 @@ brightest, quietest plane on screen and everything else steps back.
 - **Shape.** Controls use a 6px radius and containers use 10px. The different radii make it easy to
   tell a control from a container at a glance.
 - **Motion.** There is one moment: a dialog fades and rises 4px when the user opens it. Nothing animates
-  without the user doing something, and everything is disabled under `prefers-reduced-motion`.
+  without the user doing something, and everything is disabled while motion is reduced: Settings >
+  Motion, whose 'Follow system' follows the OS `prefers-reduced-motion` and whose 'Allow motion'
+  overrides it. CSS keys on `<html data-reduce-motion="on|off">` (settings/motion.ts), never on the OS
+  query directly.
 - **Touch-tolerant.** Every control is at least 32×32 (`min-h-control min-w-control`). No action is
   hover-only. The toolbar (the ribbon) keeps one fixed-height row and scales its groups down instead of
   wrapping or scrolling (see "Ribbon"), and the dialog width is `min(28rem, 100vw - 2rem)`.
@@ -429,8 +432,20 @@ control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
   exactly the one the user made) and only then runs the chosen command, as the toolbar does. Rows are 40px (touch),
   titles 32px; colours are the chrome tokens, so it follows light/dark and stays AA. Every title, submenu title and
   item has a tooltip (a registry entry, else its command's description) and is in the coverage audit.
-- **Help**: Keyboard Shortcuts is generated from the registry (searchable); Project Folder Format renders the
-  bundled `docs/project-format.md` (no network); About Novel shows the version from the app config (`getVersion`).
+- **Help**: Keyboard Shortcuts is generated from the registry (searchable), followed by a "Navigation" section
+  for keys handled outside it (`EXTRA_SHORTCUTS` in `src/shared/commands`: PageUp/PageDown, the book's start and
+  end, Home/End on a page-turn control, Escape from the ribbon, Alt/F10 for the menu bar); Project Folder Format
+  renders the bundled `docs/project-format.md` (no network); About Novel shows the version from the app config
+  (`getVersion`).
+- **Layout-shifted keys**: a shortcut on a punctuation key (`Mod-=`, `Mod-/`) also matches when the keyboard layout
+  needs Shift to type that character (German: Ctrl+Shift+0 types "=", Ctrl+Shift+7 types "/"); letters still need
+  their exact Shift. `Command.altShortcuts` adds keys that run a command without being shown (Zoom In's `Mod-+`:
+  the numpad plus and US Ctrl+Shift+=); they collide like main shortcuts.
+- **Known limitation: Ctrl+Alt+Arrow on Windows.** Previous / Next Change (`Mod-Alt-ArrowUp/Down`) and the
+  re-write's Go to Left / Right Page (`Mod-Alt-ArrowLeft/Right`) are Ctrl+Alt+Arrow on Windows, the keys some Intel
+  graphics drivers once used to rotate the screen. Ruling (Phase 3 final review, UI #8): they stay, since those
+  hotkeys are off by default on most current drivers; where a driver still takes them, the app never sees the key
+  and the commands remain in the Review menu and the ribbon.
 
 ## Ribbon: the toolbar (Phase 3, T6)
 
@@ -577,9 +592,15 @@ Slice `src/features/comments/` (public interface `index.ts`). Format: docs/proje
   Toolbar: `comment.new`, `comment.panel`; every panel and card control has a registry tooltip. Menus (command
   registry): Review > New Comment (Mod-Alt-m), Next / Previous Comment, Show Resolved Comments (check); Insert >
   Comment (the same action; the shortcut is shown on Review's); View > Comments Panel (check). Next / Previous are
-  enabled while some thread is shown (resolved ones only with Show Resolved).
+  enabled while some shown thread (resolved ones only with Show Resolved) is anchored in the manuscript; hidden
+  threads (anchor text deleted) do not count.
 - **Author**: the Settings author (`getAuthor()`), "Unknown author" when no name is known. When no name is known
   and the one-time question was never asked, New Comment asks it first and opens the composer after the answer.
+  Edit and Delete appear on one's own messages, matched by author name (a known limitation: two writers with the
+  same name share them). A user without a name owns no message, so "Unknown author" messages are not editable as
+  one's own (the comment author source marks such an author `anonymous`).
+- **Highlights**: two generated style sheets, the author colours (rebuilt when threads, Show Resolved or the paper
+  change) and a small one for the selected / hovered thread, so hovering never regenerates the colour rules.
 
 ## Track changes: Review group (Phase 3)
 
@@ -606,10 +627,15 @@ The signature feature: a passage rewritten beside its original, compared like tw
   has the focus; with the focus elsewhere in the view they are disabled (Edit history / clipboard in the
   version-name field act on that field). A registry command gate
   (`setCommandGate`) disables what makes no sense on a revision: Insert Footnote, comments, Find / Replace, Track
-  Changes, Go to Page, page view and zoom. Copy stays available on both pages. The pages behind the view do not
-  scroll.
+  Changes, Go to Page, page view and zoom. It is an allow-list for the Review menu (only the re-write's own groups
+  stay on) and lists the View groups about the pages and the comments pane (Markup, Paper and Full Screen stay);
+  its test runs over the real registry, so a new group must be placed. Opening a re-write closes Find & Replace.
+  Controls that act without running a command read `useCommandGateAllows(id)`. Copy stays available on both
+  pages. The pages behind the view do not scroll.
 - **The spread**: the comparison view lies over the pages (they stay mounted, laid out and scrolled where they
-  were, so opening costs no reflow). Two pages on the desk at the book's trim width, margins and paper surface
+  were, so opening re-breaks no pages; the passage's blocks, which take the anchor attribute, are redrawn by
+  ProseMirror behind the view but keep their pagination measurements, since `rewriteId` does not render: see
+  docs/pagination.md, the block cache; e2e/rewrite-perf.spec.ts). Two pages on the desk at the book's trim width, margins and paper surface
   (`.nv-page`, verso / recto spine shading), typeset by the book style sheet with the manuscript's base face: the
   original on the left (read-only, focusable to read and select), the revision on the right (an editor with the
   manuscript's schema: `createEditorExtensions({ detached: true })`, which leaves out what belongs to the
@@ -619,7 +645,8 @@ The signature feature: a passage rewritten beside its original, compared like tw
 - **Alignment**: the blocks of both sides are aligned (word-similarity global alignment, `align.ts`): paired
   paragraphs start level, an inserted or removed paragraph leaves a gap opposite it. Levelling is `padding-top` on
   the higher block (a node decoration; padding never changes margin collapsing), measured per frame after a
-  change; the pairing itself is redone at once when a paragraph is added or removed, otherwise 150 ms after typing.
+  change; the pairing itself is redone 60 ms after a paragraph is added or removed (typing meanwhile never puts it
+  off), otherwise 150 ms after typing.
 - **The spine** (the one memorable element): the gutter between the pages carries one stitch per aligned row: a
   ring for an unchanged paragraph, a filled ink stitch for a changed one, a short red or green dash for a paragraph
   only the original or only the revision has. Decorative (aria-hidden); the differences themselves are in the text.
@@ -630,7 +657,11 @@ The signature feature: a passage rewritten beside its original, compared like tw
 - **Versions**: tabs above the pages (arrow keys move and select; double-click or the pen renames inline; New
   version copies the version shown). Each version keeps its own undo history while the view is open (undo is local
   to the revision). Flip Pages (Mod-Alt-k) swaps the sides; Go to Left / Right Page (Mod-Alt-ArrowLeft / Right)
-  moves the focus between them. Escape or Close returns to the manuscript; the re-write stays a draft.
+  moves the focus between them. Escape or Close returns to the manuscript; the re-write stays a draft (Escape
+  during an IME composition belongs to the composition). A version this build cannot read (saved by a newer
+  Novel) is shown empty and read-only with a banner, Keep This Version is off for it, and it is written back as it
+  was. Deleting a style while a re-write is open re-maps the hidden passage, the original page, every version
+  (the revision keeps its undo history) and kept copies, so no choice brings the deleted style back.
 - **Undo** is never blocked. When an undo or redo in the manuscript changes text in an open re-write's passage,
   the re-write is marked "original changed" (the view offers Show current text) and a short notice says so
   ("Undo changed text in a passage that is in re-write."), over the view too; it goes after a few seconds or when the

@@ -1,5 +1,5 @@
 import { useStore } from '@/shared/store'
-import { runCommand } from '@/shared/commands'
+import { runCommand, useCommandGateAllows } from '@/shared/commands'
 import { Button, IconButton, Select, ToggleButton, Tooltip } from '@/shared/ui'
 import { PAGINATION_CONTROLS as C } from './controls'
 import { MAX_SCALE, MIN_SCALE, stepZoom, ZOOM_STEPS } from './placement'
@@ -16,7 +16,8 @@ export function pageIndicatorText(first: number, last: number, count: number): s
  * Status-bar page indicator: the spread in view ("Pages 12–13 of 384"). It is also a button that
  * opens Edit > Go to Page (the command registry's `edit.go_to_page`), which jumps to the spread
  * holding the page asked for. No live region: it changes on every turn or scroll.
- * In a narrow status bar (`statusbar` container) it shortens to "12 / 384", then hides.
+ * In a narrow status bar (`statusbar` container) it shortens to "12 / 384", then hides. Its accessible
+ * name follows: "Pages 12–13 of 384. Go to page", or "12 / 384. Go to page" when narrow.
  */
 export function PageIndicator() {
   const count = useStore((s) => s.layout.pageCount)
@@ -28,17 +29,20 @@ export function PageIndicator() {
     <Tooltip>
       <Button
         variant="ghost"
-        className="shrink-0 tabular-nums whitespace-nowrap px-2 text-ui-xs font-normal @max-[560px]/statusbar:hidden"
+        className="relative shrink-0 tabular-nums whitespace-nowrap px-2 text-ui-xs font-normal @max-[560px]/statusbar:hidden"
         data-control-id={C.pageIndicator.id}
-        aria-label={`${full}. ${C.pageIndicator.label}`}
         onClick={() => runCommand('edit.go_to_page')}
       >
+        {/* The accessible name is the visible label plus a hidden ". Go to page" (no aria-label), so
+            it always contains the words shown (WCAG 2.5.3): the full or the short form, whichever
+            the status bar's width displays (the other is display:none, left out of the name). */}
         <span className="@max-[760px]/statusbar:hidden" data-testid="page-indicator">
           {full}
         </span>
-        <span className="@min-[760px]/statusbar:hidden" aria-hidden="true">
+        <span className="@min-[760px]/statusbar:hidden" data-testid="page-indicator-short">
           {`${Math.min(first, count - 1) + 1} / ${count}`}
         </span>
+        <span className="sr-only">{`. ${C.pageIndicator.label}`}</span>
       </Button>
     </Tooltip>
   )
@@ -74,6 +78,10 @@ export function ZoomControls() {
   const view = useStore((s) => s.book.view)
   const setView = useStore((s) => s.bookActions.setView)
   const effective = useStore((s) => s.layout.effectiveView)
+  // While a re-write is open its command gate stops page view and zoom, like their View menu items
+  // (rewrite review #5): the registry's gate hook, keyed by the commands these controls mirror.
+  const zoomAllowed = useCommandGateAllows('pagination.zoomIn')
+  const spreadAllowed = useCommandGateAllows('pagination.spreadView')
 
   const value = zoom.mode === 'percent' ? String(zoom.percent) : zoom.mode
   const options =
@@ -92,6 +100,7 @@ export function ZoomControls() {
           label={C.spreadView.label}
           data-control-id={C.spreadView.id}
           pressed={view === 'spread'}
+          disabled={!spreadAllowed}
           className="@max-[640px]/statusbar:hidden"
           onPressedChange={(on) => setView(on ? 'spread' : 'single')}
           data-fallback={effective !== view || undefined}
@@ -104,7 +113,7 @@ export function ZoomControls() {
           label={C.zoomOut.label}
           data-control-id={C.zoomOut.id}
           className="@max-[640px]/statusbar:hidden"
-          disabled={scale <= MIN_SCALE + 0.001 || pct <= ZOOM_STEPS[0]}
+          disabled={!zoomAllowed || scale <= MIN_SCALE + 0.001 || pct <= ZOOM_STEPS[0]}
           onClick={() => setZoom({ mode: 'percent', percent: stepZoom(scale, -1) })}
         >
           <MinusIcon />
@@ -118,6 +127,7 @@ export function ZoomControls() {
           className="min-h-control text-ui-xs"
           options={options}
           value={value}
+          disabled={!zoomAllowed}
           onChange={(e) => {
             const v = e.target.value
             if (v === 'fit-spread' || v === 'fit-width') setZoom({ mode: v })
@@ -130,7 +140,7 @@ export function ZoomControls() {
           label={C.zoomIn.label}
           data-control-id={C.zoomIn.id}
           className="@max-[640px]/statusbar:hidden"
-          disabled={scale >= MAX_SCALE - 0.001 || pct >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+          disabled={!zoomAllowed || scale >= MAX_SCALE - 0.001 || pct >= ZOOM_STEPS[ZOOM_STEPS.length - 1]}
           onClick={() => setZoom({ mode: 'percent', percent: stepZoom(scale, 1) })}
         >
           <PlusIcon />

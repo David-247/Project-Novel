@@ -20,6 +20,7 @@ import { listAuthors, listChanges } from './review'
  */
 const mounted: EditorView[] = []
 let source: (() => EditorView | null | undefined) | null = null
+let offSourceChange: (() => void) | null = null
 
 const alive = (v: EditorView | null | undefined): v is EditorView => !!v && !(v as unknown as { isDestroyed?: boolean }).isDestroyed
 
@@ -32,9 +33,24 @@ export function setReviewView(view: EditorView | null, gone?: EditorView): void 
   }
 }
 
-/** The composition root: which view is the manuscript (e.g. `() => getEditor()?.view`); null resets. */
-export function setReviewViewSource(fn: (() => EditorView | null | undefined) | null): void {
+/**
+ * The composition root: which view is the manuscript (e.g. `() => getEditor()?.view`); null resets.
+ * `subscribe` (the editor's attach / detach signal) tells when the answer may have changed: the
+ * summary is recomputed then, so a view mounted before it is named the manuscript (a remount with
+ * restored content) shows its changes at once, not "No changes" until the first edit.
+ */
+export function setReviewViewSource(
+  fn: (() => EditorView | null | undefined) | null,
+  subscribe?: (cb: () => void) => () => void,
+): void {
+  offSourceChange?.()
+  offSourceChange = null
   source = fn
+  if (fn && subscribe) {
+    const refresh = () => refreshChangeSummary(getReviewView()?.state.doc ?? null)
+    offSourceChange = subscribe(refresh)
+    refresh()
+  }
 }
 
 /** The manuscript view the review acts on, or null (none mounted, or destroyed). */

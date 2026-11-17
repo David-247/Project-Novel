@@ -1,7 +1,8 @@
 import type { Mark, Node as PMNode } from '@tiptap/pm/model'
 import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
-import type { EditorState, Transaction } from '@tiptap/pm/state'
-import { canJoin } from '@tiptap/pm/transform'
+import { closeHistory } from '@tiptap/pm/history'
+import { RemoveMarkStep } from '@tiptap/pm/transform'
+import { Selection, type EditorState, type Transaction } from '@tiptap/pm/state'
 import {
   DELETION_MARK,
   FORMAT_CHANGE_MARK,
@@ -12,7 +13,7 @@ import {
   TRACKING_MARKS,
 } from '@/shared/track-changes'
 import { hasTrackedChanges } from './has-changes'
-import { TRACK_SKIP_META, type ChangeStamp, type StyleChangeStamp } from './record'
+import { boundaryStart, TRACK_SKIP_META, type ChangeStamp, type StyleChangeStamp } from './record'
 
 /**
  * Accept / reject core (docs/track-changes.md, "Accept and reject"). Pure: each function returns a
@@ -127,16 +128,43 @@ function mergeRanges(ranges: [number, number][]): [number, number][] {
   return out
 }
 
-/** Remove the boundary before the block at `pos`: join it to the textblock before, or remove it. */
+/**
+ * Remove the boundary before the block at `pos`: join it to the textblock before it, or remove it.
+ * The boundary runs from the previous textblock in document order (boundaryStart), whatever the
+ * nesting: a list item's paragraph joins the last paragraph of the item before (or the paragraph
+ * before the list), and an empty item goes with its paragraph, the list too once it has no items.
+ */
 function removeBoundary(tr: Transaction, pos: number) {
-  const node = tr.doc.nodeAt(pos)
+  const doc = tr.doc
+  const node = doc.nodeAt(pos)
   if (!node) return
-  const $pos = tr.doc.resolve(pos)
+  const end = pos + node.nodeSize
   if (node.isLeaf || node.content.size === 0) {
-    if ($pos.parent.childCount > 1) tr.delete(pos, pos + node.nodeSize)
+    // Never the document's only textblock.
+    const others = !!Selection.findFrom(doc.resolve(pos), -1, true) || !!Selection.findFrom(doc.resolve(end), 1, true)
+    if (!others) {
+      if (node.isLeaf && doc.resolve(pos).parent.childCount > 1) tr.delete(pos, end)
+      return
+    }
+    // deleteRange also takes the parents the deletion would leave empty (the item, then the list).
+    const n = tr.steps.length
+    try {
+      tr.deleteRange(pos, end)
+    } catch {
+      // The rest of the item cannot stand without it (a nested list first): left as it is.
+    }
+    if (tr.steps.length === n && doc.resolve(pos).parent.childCount > 1) tr.delete(pos, end)
     return
   }
-  if ($pos.nodeBefore?.isTextblock && canJoin(tr.doc, pos)) tr.join(pos)
+  const start = boundaryStart(doc, pos)
+  if (start === null) return
+  // The step's fitter joins the block into the one before, closes its container and moves what
+  // follows in it (a nested list) along, as deleting the selection across two items does.
+  try {
+    tr.delete(start, pos + 1)
+  } catch {
+    // A structure that cannot be joined: the paragraphs stay apart (the change is resolved).
+  }
 }
 
 /**
@@ -145,15 +173,38 @@ function removeBoundary(tr: Transaction, pos: number) {
  * the range touches are resolved whole.
  */
 function resolve(state: EditorState, filter: Filter, mode: Mode, clip?: { from: number; to: number }): Transaction | null {
-  const tr = state.tr.setMeta(TRACK_SKIP_META, true)
+  // Its own undo step, never merged into the typing just before it (undo then leaves the typing).
+  const tr = closeHistory(state.tr.setMeta(TRACK_SKIP_META, true))
   const schema = state.schema
   const doc = state.doc
 
   // 1. Inline: marks first (positions never move), then the removed text, last to first.
   const deletions: [number, number][] = []
   const markOps: (() => void)[] = []
+  // Marks removed from text: neighbouring inline nodes losing the same mark are one RemoveMarkStep,
+  // across paragraphs (Accept All of a Select All + Bold: a few steps, not one per text node).
+  const removals: { a: number; b: number; mark: Mark; last: number }[] = []
+  let inlineIndex = 0
+  const removeFromText = (a: number, b: number, mark: Mark) => {
+    for (let i = removals.length - 1; i >= 0 && removals[i].last >= inlineIndex - 1; i--) {
+      const r = removals[i]
+      if (r.last === inlineIndex - 1 && r.mark.eq(mark)) {
+        r.b = b
+        r.last = inlineIndex
+        return
+      }
+    }
+    removals.push({ a, b, mark, last: inlineIndex })
+  }
   doc.descendants((node, pos) => {
-    if (!node.isInline) return hasTrackedChanges(node)
+    if (!node.isInline) {
+      if (hasTrackedChanges(node)) return true
+      // A skipped subtree breaks a run: a merged step never spans a paragraph it leaves alone (it
+      // would rebuild that paragraph, a new node to pagination, and its undo would cover it).
+      inlineIndex++
+      return false
+    }
+    inlineIndex++
     let a = pos
     let b = pos + node.nodeSize
     if (clip) {
@@ -174,18 +225,20 @@ function resolve(state: EditorState, filter: Filter, mode: Mode, clip?: { from: 
         continue
       }
       if (name === FORMAT_CHANGE_MARK && mode === 'reject') {
-        const before = ((m.attrs.before as unknown[]) ?? []).map((j) => schema.markFromJSON(j))
+        const before = readMarks(schema, m.attrs.before)
         const current = node.marks.filter((x) => !isTrackingMark(x) && x.type.name !== 'comment')
         markOps.push(() => {
           for (const x of current) if (!x.isInSet(before)) tr.removeMark(a, b, x)
           for (const x of before) if (!x.isInSet(current)) tr.addMark(a, b, x)
         })
       }
-      markOps.push(() => (onNode ? tr.removeNodeMark(a, m) : tr.removeMark(a, b, m)))
+      if (onNode) markOps.push(() => tr.removeNodeMark(a, m))
+      else removeFromText(a, b, m)
     }
     return true
   })
   for (const op of markOps) op()
+  for (const r of removals) tr.step(new RemoveMarkStep(r.a, r.b, r.mark))
   for (const [a, b] of mergeRanges(deletions).reverse()) tr.delete(a, b)
 
   // 2. Blocks (on the result of 1), last to first. With a range: the blocks it touches.
@@ -246,6 +299,22 @@ function resolve(state: EditorState, filter: Filter, mode: Mode, clip?: { from: 
   const after = tr.mapping.slice(start)
   for (const pos of joins) removeBoundary(tr, after.map(pos, 1))
   return tr.docChanged ? tr : null
+}
+
+/**
+ * The marks of a `formatChange`'s `before` (JSON) that this schema knows: a mark type it does not
+ * have (a project saved by a newer build) is left out, so Reject still works.
+ */
+function readMarks(schema: EditorState['schema'], json: unknown): Mark[] {
+  const out: Mark[] = []
+  for (const j of Array.isArray(json) ? json : []) {
+    try {
+      out.push(schema.markFromJSON(j))
+    } catch {
+      // Unknown mark type or bad attributes: dropped.
+    }
+  }
+  return out
 }
 
 const one = (id: string): Filter => (x) => x === id

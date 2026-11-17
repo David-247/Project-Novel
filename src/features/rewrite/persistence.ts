@@ -7,8 +7,8 @@ import { parseRewritesFile, REWRITES_FILE, serializeRewritesFile } from './model
  * rewrites.json as a project side file (storage slice): read on open, written in one batch with the
  * manuscript on every save, snapshotted by autosave (crash recovery), guarded when damaged or newer.
  * Unknown keys (top level, re-writes, versions) and entries this version cannot read are written
- * back unchanged. The revision being typed is copied into the store first, so a save or a snapshot
- * always holds the latest keystroke.
+ * back unchanged. The revision being typed is copied into the store first (`flush`, called by storage
+ * before every save, snapshot and copy), so a save or a snapshot always holds the latest keystroke.
  */
 let fileExtra: Record<string, unknown> = {}
 let unreadable: unknown[] = []
@@ -22,8 +22,10 @@ export const rewritesSideFile: ProjectSideFile = {
     useStore.getState().rewriteActions.loaded(parsed.rewrites)
     return parsed.newer !== undefined ? { newer: parsed.newer } : undefined
   },
+  // Storage flushes before it reads the document version (a save, a snapshot, a copy): the flush is a
+  // change (sideFileChanged), so inside serialize() it would leave a just-saved project unsaved.
+  flush: flushLiveVersions,
   serialize() {
-    flushLiveVersions()
     const rewrites = useStore.getState().rewrite.rewrites
     return {
       data: serializeRewritesFile({ rewrites: [...rewrites], extra: fileExtra, unreadable }),

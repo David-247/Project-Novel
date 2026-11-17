@@ -6,18 +6,25 @@ import {
   newComment,
   nextComment,
   prevComment,
+  shownAnchors,
   subscribeCommentsNarrow,
   toggleCommentsPanel,
   toggleShowResolved,
 } from './commands'
 import { COMMENT_CONTROLS, NEW_COMMENT_SHORTCUT } from './controls'
+import { getCommentsView } from './extension'
 
 const comments = () => useStore.getState().comments
 
-/** Some thread Next / Previous Comment can reach (store mirror; hidden ones are skipped by the step). */
+/**
+ * Some thread Next / Previous Comment can reach: anchored in the manuscript (a hidden thread, whose
+ * anchor text was deleted, is skipped by the step) and shown. Refreshed on every document change.
+ */
 const hasShownThreads = () => {
   const c = comments()
-  return c.threads.some((t) => c.showResolved || !t.resolved)
+  if (!c.threads.some((t) => c.showResolved || !t.resolved)) return false
+  const v = getCommentsView()
+  return !!v && shownAnchors(v.state, c.showResolved).length > 0
 }
 
 /** The comment commands for the registry (menus, shortcuts, Keyboard Shortcuts sheet). */

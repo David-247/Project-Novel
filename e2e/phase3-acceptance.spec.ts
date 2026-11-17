@@ -388,6 +388,13 @@ test('Phase 3 acceptance: track changes, comments and a re-write on the 100k-wor
   expect(back.status).toBe('open')
   expect(back.versions).toEqual(versions)
   await expect(editor(page).locator('.nv-rw-locked')).toHaveCount(1)
+  // Redo (Mod-Shift-z): the choice again, kept and resolved; then undo it once more and go on.
+  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await expect.poll(async () => (await blocks(page))[r1]).toBe(kept)
+  await expect.poll(async () => (await rw(page)).rewrites[0].status).toBe('resolved')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(async () => (await blocks(page))[r1]).toBe(text(r1))
+  await expect.poll(async () => (await rw(page)).rewrites[0].status).toBe('open')
   // Open it again in the view: both versions are there, each with its text; keep Version 2 again.
   await page.evaluate(() => window.__nvE2E.runCommand('rewrite.next'))
   await expect(rwView(page)).toBeVisible()
@@ -414,7 +421,9 @@ test('Phase 3 acceptance: track changes, comments and a re-write on the 100k-wor
   await page.keyboard.press('ControlOrMeta+Alt+w')
   await expect(revision(page)).toBeFocused()
   await page.keyboard.type('Quietly, ')
-  const secondVersion = (await rw(page)).rewrites[1].versions[0].id
+  // The new re-write's first version (its record appears with the view; read it once it is there).
+  let secondVersion = ''
+  await expect.poll(async () => (secondVersion = (await rw(page)).rewrites[1]?.versions[0]?.id ?? '')).not.toBe('')
   await ctl(page, 'rewrite.keepVersion').click()
   await expect(rwView(page)).toHaveCount(0)
   expect((await blocks(page))[r2]).toBe(`Quietly, ${text(r2)}`)

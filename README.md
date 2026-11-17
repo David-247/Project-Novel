@@ -126,9 +126,10 @@ Real-app smoke (Windows/Linux only; WebDriver does not exist for macOS WKWebView
 `tauri-driver` (`cargo install tauri-driver`) and an msedgedriver matching your WebView2 version
 (`EDGEWEBDRIVER` may point at it or its folder), build the app, then
 `node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe`. On Windows it tries tauri-driver first, then
-`--mode attach`: it starts the app with a WebView2 DevTools port and attaches msedgedriver to it. CI runs it
-non-blocking: on GitHub's Windows runners WebView2 ignores the extra browser arguments both modes rely on (see the
-comment in `.github/workflows/ci.yml`).
+`--mode attach`: it starts the app with a WebView2 DevTools port and attaches msedgedriver to it. CI does not
+run it on pushes or pull requests: on GitHub's Windows runners WebView2 ignores the extra browser arguments both
+modes rely on, so it could only fail. Run it locally as above, or by hand on a runner: Actions > "Real-app smoke
+(manual)" > Run workflow (`.github/workflows/smoke.yml`, `workflow_dispatch`; or `gh workflow run smoke.yml`).
 
 ## Architecture
 
@@ -188,8 +189,6 @@ the project. Crash recovery restores the ones that were not saved yet, together 
 - A pending paragraph join or split, while it is still tracked, shows as two paragraphs in No Markup and Original
   until the change is accepted or rejected (decision 5a4f5103; see [docs/track-changes.md](docs/track-changes.md)).
 - There are no context menus (right-click). Every action is in the menu bar, the ribbon or a shortcut.
-- Accepting or rejecting a tracked list item (an inserted or deleted bullet) can leave an empty list item behind.
-  Delete it by hand.
 - Revision marks are not exported, and there are no AI suggestions or collaboration. These are later phases.
 
 Projects are plain folders (`project.json`, `manuscript.json`, `index.sqlite`); see [docs/project-format.md](docs/project-format.md).

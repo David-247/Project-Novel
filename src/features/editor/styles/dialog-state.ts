@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { DEFAULT_STYLE_ID } from '@/shared/book'
 import { blockPlainText } from '../block-text'
-import { getEditor } from '../controller'
+import { getActiveEditor } from '../controller'
 import { readToolbarState } from '../toolbar/toolbar-state'
 import { getResolvedStyles } from './resolved'
 
@@ -25,9 +25,10 @@ function set(next: Partial<StyleDialogState>) {
   listeners.forEach((l) => l())
 }
 
-/** Open Modify style for the style of the paragraph at the selection (or Body). */
+/** Open Modify style for the style of the paragraph at the selection (or Body), in the active editor. */
 export function openModifyStyle(): void {
-  const ed = getEditor()
+  // The editor text commands act on: the revision while a re-write has the focus, else the manuscript.
+  const ed = getActiveEditor()
   const s = readToolbarState(ed)
   const styles = getResolvedStyles()
   const block = ed?.state.selection.$from.parent
@@ -45,6 +46,9 @@ export function modifyStyle(id: string | null): void {
 export function setManagingStyles(managing: boolean): void {
   set({ managing })
 }
+
+/** The dialogs' state now (outside React). */
+export const getStyleDialogs = (): StyleDialogState => state
 
 export function useStyleDialogs(): StyleDialogState {
   return useSyncExternalStore(

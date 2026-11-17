@@ -737,6 +737,156 @@ test('progressive restyle never paints a block at a stale place (Body font size)
   })
 })
 
+/** The first pagination pass that started after `window.__nvT0` (set by the test in the page). */
+const firstPassSinceT0 = (page: Page) =>
+  page.evaluate(() => {
+    const t0 = (window as unknown as { __nvT0: number }).__nvT0
+    return (window.__nvE2E.paginationLines().passes as Record<string, number>[]).find((p) => p.startedAt >= t0)!
+  })
+
+test('a mark-only bulk change (Reject All of formatting on every block) draws the pages in view first and never paints a block at a stale place', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(1000, 60))
+  // A tracked formatting change on every block (Select All + Bold, recording on), then the caret
+  // back in the text: Reject All removes the bold from the whole book in mark steps only (their step
+  // maps are empty: nothing trips the mapping limit; review UI #1).
+  await page.evaluate(() => window.__nvE2E.setTracking(true))
+  await editor(page).focus()
+  await page.keyboard.press('ControlOrMeta+a')
+  expect(await page.evaluate(() => window.__nvE2E.runCommand('toolbar.bold'))).toBe(true)
+  await waitForLayout(page)
+  await clickBlockStart(page, editor(page).locator('p').nth(3))
+  await waitForLayout(page)
+  await expectNoStalePaint(page, () =>
+    page.evaluate(() => {
+      window.__nvArm!()
+      ;(window as unknown as { __nvT0: number }).__nvT0 = performance.now()
+      window.__nvE2E.resolveAllChanges('reject')
+    }),
+  )
+  expect(await editor(page).locator('strong').count()).toBe(0)
+  // The first pass measured every block (the model is exact) but drew only the pages in view and the
+  // nearest chunk; the rest followed in later frames (not all 1,000 blocks in one frame).
+  const first = await firstPassSinceT0(page)
+  expect(first.measuredBlocks).toBeGreaterThanOrEqual(1000)
+  expect(first.deferredBlocks).toBeGreaterThan(500)
+  expect(first.dirtyBlocks - first.deferredBlocks).toBeLessThan(400)
+})
+
+test('Select All + Bold draws the whole book in one pass (a big selection makes every extra frame cost a repaint of it)', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(1000, 60))
+  await editor(page).focus()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.evaluate(() => {
+    ;(window as unknown as { __nvT0: number }).__nvT0 = performance.now()
+    if (!window.__nvE2E.runCommand('toolbar.bold')) throw new Error('bold disabled')
+  })
+  await waitForLayout(page)
+  expect(await editor(page).locator('strong').count()).toBeGreaterThan(900)
+  const first = await firstPassSinceT0(page)
+  expect(first.measuredBlocks).toBeGreaterThanOrEqual(1000)
+  expect(first.deferredBlocks).toBe(0)
+  expect(await page.evaluate(() => document.querySelectorAll('.nv-stale, .nv-unmapped').length)).toBe(0)
+})
+
+test('a bulk change that moved nothing (Select All + Underline) leaves no bulk flag: the next keystroke is drawn at once', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await paste(page, paragraphs(400, 60))
+  await editor(page).focus()
+  await page.keyboard.press('ControlOrMeta+a')
+  expect(await page.evaluate(() => window.__nvE2E.runCommand('toolbar.underline'))).toBe(true)
+  await waitForLayout(page)
+  expect(await editor(page).locator('u').count()).toBeGreaterThan(300)
+  await clickBlockStart(page, editor(page).locator('p').nth(3))
+  await waitForLayout(page)
+  const keystroke = async () => {
+    await page.evaluate(() => void ((window as unknown as { __nvT0: number }).__nvT0 = performance.now()))
+    await page.keyboard.type('x')
+    await waitForLayout(page)
+    return firstPassSinceT0(page)
+  }
+  const first = await keystroke()
+  expect(first.bulk).toBe(false)
+  expect(first.deferredBlocks).toBe(0)
+})
+
+test('opening a re-write (its anchor attribute on every passage block) re-measures no block', async ({ page }) => {
+  test.setTimeout(90_000)
+  await paste(page, paragraphs(300, 60))
+  await editor(page).focus()
+  await page.evaluate(() => {
+    const e = window.__nvE2E
+    e.selectText(e.blockPos(20) + 2, e.blockPos(219) + 2)
+    ;(window as unknown as { __nvT0: number }).__nvT0 = performance.now()
+    if (!e.runCommand('rewrite.open')) throw new Error('rewrite.open disabled')
+  })
+  await expect(page.getByTestId('rewrite-view')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.paginationSettled())).toBe(true)
+  // rewriteId does not render: the 200 rebuilt blocks keep their measurements (rewrite review #13).
+  const measured = await page.evaluate(() => {
+    const t0 = (window as unknown as { __nvT0: number }).__nvT0
+    return (window.__nvE2E.paginationLines().passes as Record<string, number>[]).filter((p) => p.startedAt >= t0).reduce((n, p) => n + p.measuredBlocks, 0)
+  })
+  expect(measured).toBeLessThan(5)
+})
+
+/**
+ * Stream tops kept from the last pass hold only below the same block as last time (re-review B): a
+ * node that renders like the block it replaces borrows that block's top, so the block it borrowed from
+ * (or one below a deleted block) must read its box. The incremental model must equal a full pass.
+ */
+test('Enter before an empty paragraph, and deleting a scene break: the page model equals a full re-pagination', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/')
+  await expect(editor(page)).toBeVisible()
+  await page.waitForFunction(() => !!window.__nvE2E?.setDoc)
+  const para = (t: string) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] })
+  const body = paragraphs(80, 50)
+  const content: unknown[] = []
+  body.forEach((t, i) => {
+    content.push(para(t))
+    if (i === 3) content.push({ type: 'paragraph' }) // block 5: empty, after block 4
+    if (i === 10) content.push({ type: 'sceneBreak' }) // block 12
+  })
+  await page.evaluate((d) => window.__nvE2E.setDoc(d), { type: 'doc', content })
+  await waitForLayout(page)
+  const model = () =>
+    page.evaluate(() => {
+      const l = window.__nvE2E.layout()
+      return { pages: l.pages.map((p) => [p.from, p.to]), lines: window.__nvE2E.paginationLines().lineRanges }
+    })
+  const full = async () => {
+    await page.evaluate(() => window.__nvE2E.remeasureAll())
+    await waitForLayout(page)
+    return model()
+  }
+
+  // Enter at the end of block 3 (tracking off): the new empty paragraph renders like block 4.
+  expect(await page.evaluate(() => window.__nvE2E.docJSON().content![4].content)).toBeUndefined()
+  await editor(page).focus()
+  await page.evaluate(() => {
+    const e = window.__nvE2E
+    const end = e.blockPos(4) - 1
+    e.selectText(end, end)
+  })
+  await page.keyboard.press('Enter')
+  await waitForLayout(page)
+  const afterEnter = await model()
+  expect(afterEnter).toEqual(await full())
+
+  // Delete the scene break (now block 13): the paragraphs around it are the same node instances.
+  expect(await page.evaluate(() => window.__nvE2E.docJSON().content![13].type)).toBe('sceneBreak')
+  await page.evaluate(() => window.__nvE2E.deleteBlock(13))
+  await waitForLayout(page)
+  const afterDelete = await model()
+  expect(afterDelete).toEqual(await full())
+})
+
 test('Replace All (unmapped decorations) never paints a block at a stale place', async ({ page }) => {
   test.setTimeout(90_000)
   await page.setViewportSize({ width: 1400, height: 900 })

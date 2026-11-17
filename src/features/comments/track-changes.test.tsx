@@ -85,7 +85,7 @@ describe('comments while Track Changes records', () => {
     expect(ranges.length).toBe(21)
     for (let i = ranges.length - 1; i >= 0; i--) tr.replaceWith(ranges[i], ranges[i] + 3, ed.schema.text('a'))
     act(() => ed.view.dispatch(tr))
-    expect(listChanges(ed.state.doc).length).toBe(2)
+    expect(listChanges(ed.state.doc).length).toBe(42) // each match its own deletion and insertion
     const draft = getPluginState(ed.state)?.draft
     expect(draft).not.toBeNull()
     // The deleted "the " stays before "quick": the draft moved by the inserted "a" only, still on "quick".

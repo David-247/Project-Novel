@@ -240,13 +240,22 @@ export function findPrevious(): void {
 }
 
 /**
+ * Replace works in the current markup view. Not in Original: it shows deleted text as plain text
+ * (Find finds it, Replace skips it) and hides what a tracked Replace inserts, so a replacement would
+ * seem to do nothing. The panel disables Replace and Replace All there and says why.
+ */
+export const canReplaceInView = (view: MarkupView = currentMarkupView()): boolean => view !== 'original'
+/** The panel's note while Replace is off in the Original view. */
+export const REPLACE_IN_ORIGINAL_NOTE = 'Switch to All Markup to replace'
+
+/**
  * Replace the current match, then move to the next one. Returns true if something was replaced.
  * Each Replace is its own undo step (history is closed before and after), so undo walks back
  * one replacement at a time; Replace All is a single step.
  */
 export function replaceCurrent(): boolean {
   const ed = getEditor()
-  if (!ed) return false
+  if (!ed || !canReplaceInView()) return false
   if (!isFresh(ed)) scanNow()
   // Track changes: a match that is all deleted text (found in All Markup) cannot be replaced.
   const at = replaceableFrom(ed.state.doc, current)
@@ -280,7 +289,7 @@ function replaceableFrom(doc: PMNode, index: number): number {
  */
 export function replaceAll(): number {
   const ed = getEditor()
-  if (!ed) return 0
+  if (!ed || !canReplaceInView()) return 0
   if (!isFresh(ed)) scanNow()
   const doc = ed.state.doc
   const replaceable = matches.map((m) => !deletedRange(doc, m))

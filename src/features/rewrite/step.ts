@@ -109,19 +109,36 @@ export function withStepState(r: RewriteRecord, s: RewriteStepState): RewriteRec
   return out
 }
 
+/**
+ * Re-writes a step removed (Discard, a redo of it), as they were when removed: a step that creates
+ * the re-write again (an undone Discard) puts back this copy, not the one frozen into the step, so
+ * the versions edited between an undo of the Discard and its redo are not lost by the next undo.
+ */
+const removed = new Map<string, RewriteRecord>()
+
+/** Test-only: forget the removed re-writes. */
+export function __resetRemovedRewritesForTests(): void {
+  removed.clear()
+}
+
 /** The store's re-writes after `steps` (in order). Returns `list` itself when nothing changes. */
 export function applyStateSteps(list: readonly RewriteRecord[], steps: readonly RewriteStateStep[]): readonly RewriteRecord[] {
   let out = list
   for (const step of steps) {
     const i = out.findIndex((r) => r.id === step.rewriteId)
     if (!step.after) {
-      if (i >= 0) out = [...out.slice(0, i), ...out.slice(i + 1)]
+      if (i >= 0) {
+        removed.set(out[i].id, out[i])
+        out = [...out.slice(0, i), ...out.slice(i + 1)]
+      }
       continue
     }
     if (i < 0) {
-      if (step.record) {
+      const record = removed.get(step.rewriteId) ?? step.record
+      if (record) {
+        removed.delete(step.rewriteId)
         const at = step.index === null ? out.length : Math.max(0, Math.min(step.index, out.length))
-        out = [...out.slice(0, at), withStepState(step.record, step.after), ...out.slice(at)]
+        out = [...out.slice(0, at), withStepState(record, step.after), ...out.slice(at)]
       }
       continue
     }

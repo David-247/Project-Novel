@@ -1,5 +1,5 @@
 import { Editor } from '@tiptap/core'
-import type { Node as PMNode } from '@tiptap/pm/model'
+import type { Node as PMNode, Schema } from '@tiptap/pm/model'
 import { EditorState } from '@tiptap/pm/state'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
@@ -14,6 +14,7 @@ import { alignBlocks, diffPassages, type AlignedRow } from './align'
 import { applyDiff, applyPads, CompareDecorations, computePads, naturalTops, type Stitch } from './compare'
 import {
   closeRewrite,
+  compact,
   currentPassageDoc,
   focusSide,
   newVersion,
@@ -73,15 +74,24 @@ function makeEditor(mount: HTMLElement, doc: DocNodeJSON, editable: boolean, att
   })
 }
 
-function stateFor(ed: PageEditor, doc: DocNodeJSON): EditorState {
-  let node: PMNode
+const EMPTY_DOC: DocNodeJSON = { type: 'doc', content: [{ type: 'paragraph' }] }
+
+/**
+ * Does the passage doc fit this build's schema? A rewrites.json written by a newer Novel can hold node
+ * types this one lacks: such a version is shown empty and read-only, and never written back.
+ */
+function fits(schema: Schema, doc: DocNodeJSON): boolean {
   try {
-    node = ed.schema.nodeFromJSON(doc)
-    node.check()
+    schema.nodeFromJSON(doc).check()
+    return true
   } catch (err) {
-    console.error('[rewrite] a version does not fit the schema; showing it empty', err)
-    node = ed.schema.topNodeType.createAndFill()!
+    console.error('[rewrite] a version does not fit the schema; it is kept as it is and not shown', err)
+    return false
   }
+}
+
+function stateFor(ed: PageEditor, doc: DocNodeJSON): EditorState {
+  const node = fits(ed.schema, doc) ? ed.schema.nodeFromJSON(doc) : ed.schema.topNodeType.createAndFill()!
   return EditorState.create({ schema: ed.schema, doc: node, plugins: ed.state.plugins })
 }
 
@@ -128,6 +138,9 @@ function Comparison({ record }: { record: RewriteRecord }) {
   const eds = useRef<{ orig: PageEditor; rev: PageEditor } | null>(null)
   const states = useRef(new Map<string, EditorState>())
   const dirty = useRef(new Set<string>())
+  // Versions that do not fit this build's schema (a newer Novel's): shown empty, read-only, never stored.
+  const unreadable = useRef(new Set<string>())
+  const [shownUnreadable, setShownUnreadable] = useState(false)
   const shownVersion = useRef(version.id)
   const rows = useRef<AlignedRow[]>([])
   const rowsStale = useRef(false)
@@ -139,6 +152,8 @@ function Comparison({ record }: { record: RewriteRecord }) {
   // ---- Alignment and differences -------------------------------------------------------------
   const frame = useRef(0)
   const diffTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** When the pending diffTimer fires (performance.now()), or 0. */
+  const diffDue = useRef(0)
 
   const layout = useCallback(() => {
     frame.current = 0
@@ -173,6 +188,7 @@ function Comparison({ record }: { record: RewriteRecord }) {
   /** Re-align the blocks and redo the word diff now. */
   const compare = useCallback(() => {
     clearTimeout(diffTimer.current)
+    diffDue.current = 0
     const e = eds.current
     if (!e || e.orig.isDestroyed || e.rev.isDestroyed) return
     const a = e.orig.state.doc
@@ -194,7 +210,8 @@ function Comparison({ record }: { record: RewriteRecord }) {
     if (e && !e.rev.isDestroyed) states.current.set(shownVersion.current, e.rev.state)
     for (const vid of dirty.current) {
       const st = states.current.get(vid)
-      if (st) storeVersionDoc(live.current.recordId, vid, st.doc.toJSON() as DocNodeJSON)
+      // Without attributes at their default, as the original is (and manuscript.json).
+      if (st && !unreadable.current.has(vid)) storeVersionDoc(live.current.recordId, vid, compact(st.doc))
     }
     dirty.current.clear()
   }, [])
@@ -213,7 +230,13 @@ function Comparison({ record }: { record: RewriteRecord }) {
       'data-testid': 'rewrite-original',
       tabindex: '0',
     })
-    const rev = makeEditor(rm, version.doc, true, {
+    const readable = fits(orig.schema, version.doc)
+    // (Set only when needed: a state change here would render the view a second time on every open.)
+    if (!readable) {
+      unreadable.current.add(version.id)
+      setShownUnreadable(true)
+    }
+    const rev = makeEditor(rm, readable ? version.doc : EMPTY_DOC, readable, {
       role: 'textbox',
       'aria-multiline': 'true',
       'aria-label': 'Revised passage',
@@ -235,7 +258,12 @@ function Comparison({ record }: { record: RewriteRecord }) {
       if (countChanged) rowsStale.current = true
       scheduleLayout()
       const delay = countChanged ? REALIGN_DEBOUNCE_MS : DIFF_DEBOUNCE_MS
+      const due = performance.now() + delay
+      // While the pairs are out of date (the levelling waits for them), typing never puts the pending
+      // realign off: the earlier deadline stands.
+      if (rowsStale.current && diffDue.current && diffDue.current <= due) return
       clearTimeout(diffTimer.current)
+      diffDue.current = due
       diffTimer.current = setTimeout(compare, delay)
     }
     rev.on('transaction', onTr)
@@ -262,6 +290,23 @@ function Comparison({ record }: { record: RewriteRecord }) {
     const offGate = setCommandGate(rewriteCommandGate)
     setLiveView({
       flush,
+      remapStyle: (remap) => {
+        const e = eds.current
+        if (!e || e.rev.isDestroyed) return
+        states.current.set(shownVersion.current, e.rev.state)
+        for (const [vid, st] of [...states.current]) {
+          if (unreadable.current.has(vid)) continue
+          const tr = st.tr
+          remap(tr)
+          if (!tr.docChanged) continue
+          // Not an undo step of the revision (the style is gone; an undo must not bring it back).
+          tr.setMeta('addToHistory', false)
+          if (vid === shownVersion.current) e.rev.view.dispatch(tr)
+          else states.current.set(vid, st.apply(tr))
+          dirty.current.add(vid)
+        }
+        flush()
+      },
       focus: (side) => {
         const e = eds.current
         if (!e) return
@@ -304,7 +349,12 @@ function Comparison({ record }: { record: RewriteRecord }) {
     if (!e || shownVersion.current === version.id) return
     states.current.set(shownVersion.current, e.rev.state)
     shownVersion.current = version.id
-    e.rev.view.updateState(states.current.get(version.id) ?? stateFor(e.rev, version.doc))
+    const held = states.current.get(version.id)
+    if (!held && !fits(e.rev.schema, version.doc)) unreadable.current.add(version.id)
+    const readable = !unreadable.current.has(version.id)
+    e.rev.view.updateState(held ?? stateFor(e.rev, readable ? version.doc : EMPTY_DOC))
+    e.rev.setEditable(readable, false)
+    setShownUnreadable(!readable)
     compare()
     // version.doc is read only when the version is first shown (later the live state wins).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -345,6 +395,8 @@ function Comparison({ record }: { record: RewriteRecord }) {
 
   // ---- Keys: Escape closes; the in-view shortcuts (by key code: Option changes letters on macOS) ---
   const onKeyDown = (e: ReactKeyboardEvent) => {
+    // An IME composition owns its keys (Escape cancels a conversion): never a view shortcut.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
     const mac = detectPlatform() === 'mac'
     const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
     // Escape closes, from the pages too (an editor keymap may mark the key handled); the rename field
@@ -409,7 +461,7 @@ function Comparison({ record }: { record: RewriteRecord }) {
       >
         <div ref={revMount} />
       </section>
-      <ChoiceButton side="revised" disabled={!!problem} versionName={version.name} />
+      <ChoiceButton side="revised" disabled={!!problem || shownUnreadable} versionName={version.name} />
     </div>
   )
 
@@ -417,6 +469,7 @@ function Comparison({ record }: { record: RewriteRecord }) {
     <section ref={rootRef} className="nv-rw" aria-label="Re-write" data-testid="rewrite-view" onKeyDown={onKeyDown}>
       <RewriteBar record={record} activeId={version.id} passageLabel={passageLabel} narrow={narrow} revisedName={revisedName} />
       {problem ? <MissingBanner problem={problem} /> : record.originalChanged ? <ChangedBanner current={!!current} /> : null}
+      {shownUnreadable ? <UnreadableBanner /> : null}
       <div ref={scrollerRef} className="nv-rw-scroller">
         <div
           ref={textRef}
@@ -646,6 +699,15 @@ function MissingBanner({ problem }: { problem: 'missing' | 'split' }) {
       {problem === 'missing'
         ? 'The passage for this re-write was removed from the manuscript. Your versions are kept: copy text out of them. The original page shows the passage as it was.'
         : 'The passage for this re-write is no longer in one piece in the manuscript. Your versions are kept: copy text out of them. The original page shows the passage as it was.'}
+    </div>
+  )
+}
+
+/** The version on the revised page holds content this copy of Novel cannot show (saved by a newer one). */
+function UnreadableBanner() {
+  return (
+    <div role="status" className="border-b border-border bg-surface-raised px-3 py-1.5 text-ui-sm text-text" data-testid="rewrite-unreadable">
+      This version holds content this copy of Novel cannot show (it was saved by a newer version). It is kept as it is: it cannot be edited or kept here.
     </div>
   )
 }

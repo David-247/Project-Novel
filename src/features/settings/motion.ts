@@ -33,15 +33,15 @@ export function useReducedMotion(): boolean {
 }
 
 /**
- * Mirrors the Motion preference on `<html data-reduce-motion="on">` while motion is reduced, so CSS
- * (index.css) can stop CSS animations and transitions app-wide. 'Allow motion' removes it; CSS that
- * already honours the OS setting (`motion-safe:`) is unchanged by it.
+ * Mirrors the resolved Motion preference on `<html data-reduce-motion>`: 'on' while motion is reduced,
+ * 'off' while it is allowed (always written, never left out). It is the app's only motion switch:
+ * index.css stops CSS animations and transitions app-wide under 'on', and a slice's own motion rules
+ * key on it too (comments.css, rewrite.css), never on the OS `prefers-reduced-motion` query or Tailwind
+ * `motion-safe:`, so 'Allow motion' overrides the OS setting and 'Follow system' resolves it here.
  */
 export function useReduceMotionAttribute(): void {
   const reduce = useReducedMotion()
   useEffect(() => {
-    const root = document.documentElement
-    if (reduce) root.dataset.reduceMotion = 'on'
-    else delete root.dataset.reduceMotion
+    document.documentElement.dataset.reduceMotion = reduce ? 'on' : 'off'
   }, [reduce])
 }

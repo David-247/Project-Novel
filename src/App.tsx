@@ -4,6 +4,7 @@ import {
   FindReplacePanel,
   getDocJSON,
   getEditor,
+  subscribeEditor,
   getDocVersion,
   isDirty,
   markClean,
@@ -75,10 +76,14 @@ export const editorDocumentProvider: DocumentProvider = {
 /** Shown on comments and tracked changes when the author has no name (the question was dismissed). */
 export const UNKNOWN_AUTHOR = 'Unknown author'
 
-/** The author of comments and tracked changes: the Settings name and colour (`Unknown author` without a name). */
-export function commentAuthor(): { name: string; color: string | null } {
+/**
+ * The author of comments and tracked changes: the Settings name and colour (`Unknown author` without a
+ * name). Without a name the author is `anonymous`, so they own no comment message: an "Unknown author"
+ * message is nobody's to edit or delete (storage review #13; see comments' `Author.anonymous`).
+ */
+export function commentAuthor(): { name: string; color: string | null; anonymous: boolean } {
   const a = getAuthor()
-  return { name: a.name || UNKNOWN_AUTHOR, color: a.color }
+  return { name: a.name || UNKNOWN_AUTHOR, color: a.color, anonymous: !a.name }
 }
 
 /**
@@ -133,7 +138,11 @@ export function App() {
   // cannot wait: changes made while the question is open carry "Unknown author").
   useEffect(() => {
     setCommentAuthorSource(commentAuthor)
-    setTrackChangesAuthorSource(commentAuthor)
+    // Tracked changes carry the name and colour only (ownership there is by name; `anonymous` is comments').
+    setTrackChangesAuthorSource(() => {
+      const { name, color } = commentAuthor()
+      return { name, color }
+    })
     setBeforeNewComment(() => (getAuthor().name ? null : ensureAuthorName().then(afterDialogFocus)))
     setOnTrackingSwitchedOn(() => {
       if (!getAuthor().name) void ensureAuthorName()
@@ -151,7 +160,7 @@ export function App() {
   useEffect(() => {
     setReviewConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
     // The review commands, the change popover and the count act on the manuscript only.
-    setReviewViewSource(() => getEditor()?.view)
+    setReviewViewSource(() => getEditor()?.view, subscribeEditor)
     return () => {
       setReviewConfirm(null)
       setReviewViewSource(null)

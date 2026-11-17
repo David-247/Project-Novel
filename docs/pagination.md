@@ -171,7 +171,14 @@ size / margin / view change, a font load, or `invalidatePagination()`.
 
 1. **Measure** (`measure.ts`). For each top-level block whose node changed (or after a geometry
    change): text and `<br>` fragments of each textblock (`Range.getClientRects`), grouped into line
-   boxes, in "stream px" (unscaled, page offsets subtracted). Cached by node identity. A change to
+   boxes, in "stream px" (unscaled, page offsets subtracted). Cached by node identity; a new node
+   that renders like the block at its place in the last pass (same type, content and marks, attributes
+   equal but for non-rendering ones: `rewriteId`, the re-write anchor) keeps the cached metrics, so
+   opening a chapter re-write re-measures nothing (and such attribute steps are never `bulk`). Stream tops
+   are kept the same way (a block's top in the last pass plus the shift of the changed blocks above),
+   but a kept top is trusted only below the same block as in the last pass, compared by the node each
+   block stands for: after a block deleted above it, or below a node another block already stood for
+   (Enter before an empty paragraph), the block's box is read instead. A change to
    `book.styles` re-measures only the blocks whose `data-style` resolves differently. Unchanged
    blocks keep their last stream top plus the shift of changed blocks above them (moves under
    0.1 px are box snapping, not moves).
@@ -203,6 +210,20 @@ Large document changes (Replace All of a common word, a restyle) take the same p
 in view first, the rest progressively. A transaction with more than 200 position-changing steps is
 not mapped: its decorations are dropped and redrawn. Steps that move nothing (AttrStep, e.g. the
 re-write anchor set on every block of a chapter) do not count and are left out of the mapping.
+(The mapping built from the remaining maps has no mirrors; that is fine, `tr.mapping` never has
+any.) Mark-only bulk changes (a format change or Accept / Reject All over the whole book) move
+nothing, so their decorations stay mapped, but the plugin state marks them `bulk` (more than 200
+steps, or more than 20,000 characters of mark / attribute steps; O(steps), so typing pays nothing),
+and a pass that re-measured more than 160 blocks counts as bulk too: every block is still measured
+(the published model is exact), but the pass draws only the pages in view and the nearest 120
+blocks, and hides the rest as `.nv-stale` until the following frames draw them. Every catch-up
+frame stops drawing after 8 ms (after at least 16 blocks), so typing during a catch-up stays fast.
+**Exception: a selection over more than 160 blocks** (Select All). Profiled at 100k words, every
+frame that changes the DOM inside such a selection costs the browser a repaint of all of it
+(Chromium: about 100 ms a frame, against about 25 ms with a caret), so a draw spread over a dozen
+frames costs far more than one frame that draws everything: with a big selection the pass draws all
+blocks at once (and a catch-up already under way finishes in its next frame). The perf report
+(`phase3-mark-only`) lists every pass and long task of each reflow (`firstPasses`, `longTasks`).
 Anything that needs them all (hit tests for the arrow keys and presses on the desk, PageUp/Down)
 finishes the pending frames first. `getPaginationDebug().modelSettled` is "reflow complete";
 `settled` is "every block drawn". The perf test asserts the first < 1 s and reports (and caps at 3 s)

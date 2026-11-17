@@ -1,7 +1,8 @@
-import type { Node as PMNode } from '@tiptap/pm/model'
+import type { Node as PMNode, Schema } from '@tiptap/pm/model'
 import { TextSelection } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
-import { chapterIndexAt, getChapters, getEditor } from '@/features/editor'
+import { Transform } from '@tiptap/pm/transform'
+import { chapterIndexAt, getChapters, getEditor, onStyleDeleted, type StyleRemap } from '@/features/editor'
 import { revealPosition } from '@/features/pagination'
 import { sideFileChanged } from '@/features/storage'
 import type { DocNodeJSON } from '@/shared/document'
@@ -38,6 +39,8 @@ export const nextSeq = (): number => ++noticeSeq
 export interface LiveView {
   flush(): void
   focus(side: 'left' | 'right'): void
+  /** Re-map a deleted style in every version the view holds (each keeps its undo history), then flush. */
+  remapStyle?(remap: StyleRemap): void
 }
 let live: LiveView | null = null
 export function setLiveView(v: LiveView | null): void {
@@ -191,6 +194,8 @@ export function openRewrite(id: string, versionId?: string): boolean {
   }
   if (store().rewrite.openId) closeRewrite({ restore: false })
   else hooks.beforeOpen?.()
+  // Find & Replace acts on the manuscript, which the view hides: it closes (it is off while the view is open).
+  store().findActions.closePanel()
   actions().open(id, vid)
   return true
 }
@@ -290,6 +295,49 @@ export function markOriginalChanged(anchor: string): void {
   update(r.id, (x) => ({ ...x, originalChanged: true }))
 }
 
+/** `json` (a passage doc) with a deleted style re-mapped; `json` itself when nothing changes or it does not fit the schema. */
+function remapPassageDoc(schema: Schema, json: DocNodeJSON, remap: StyleRemap): DocNodeJSON {
+  let tr: Transform
+  try {
+    tr = new Transform(schema.nodeFromJSON(json))
+  } catch {
+    return json
+  }
+  remap(tr)
+  return tr.docChanged ? compact(tr.doc) : json
+}
+
+/**
+ * A style was deleted (Format > Manage Styles): the manuscript is re-mapped by the editor slice; here
+ * every re-write follows, open or resolved (the original, each version, the kept copy) and the open
+ * revision, so neither Keep nor Reopen nor a later Keep Original brings the deleted style back.
+ */
+export function remapRewriteStyles(remap: StyleRemap): void {
+  const schema = getEditor()?.schema
+  if (!schema) return
+  // The revision being typed first (it keeps its undo history); its versions are then in the store.
+  live?.remapStyle?.(remap)
+  const list = store().rewrite.rewrites
+  let changed = false
+  const next = list.map((r) => {
+    const original = remapPassageDoc(schema, r.original, remap)
+    const kept = r.kept ? remapPassageDoc(schema, r.kept, remap) : undefined
+    let versionsChanged = false
+    const versions = r.versions.map((v) => {
+      const doc = remapPassageDoc(schema, v.doc, remap)
+      if (doc === v.doc) return v
+      versionsChanged = true
+      return { ...v, doc }
+    })
+    if (original === r.original && kept === r.kept && !versionsChanged) return r
+    changed = true
+    return { ...r, original, versions, ...(kept ? { kept } : {}) }
+  })
+  if (!changed) return
+  actions().changed(next)
+  sideFileChanged()
+}
+
 export function dismissNotice(): void {
   actions().setNotice(null)
 }
@@ -335,7 +383,9 @@ export function wireRewriteAnchors(): () => void {
     rewritePassage()
     return true
   })
+  const offStyles = onStyleDeleted((_id, remap) => remapRewriteStyles(remap))
   return () => {
+    offStyles()
     setOriginalChangedHandler(null)
     setStateStepsMirroredHandler(null)
     setSideBarClickHandler(null)

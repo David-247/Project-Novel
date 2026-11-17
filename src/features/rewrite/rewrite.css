@@ -285,10 +285,9 @@
 .nv-rw-stitch[data-kind='added'] {
   background: var(--page-rw-ins-line);
 }
-@media (prefers-reduced-motion: reduce) {
-  .nv-rw-stitch {
-    transition: none;
-  }
+/* Settings > Motion, not the OS query: 'Allow motion' overrides the OS setting (settings/motion.ts). */
+:root[data-reduce-motion='on'] .nv-rw-stitch {
+  transition: none;
 }
 
 /* The choice under each page: Keep Original / Keep This Version. Sticky at the bottom of the scroller

@@ -49,7 +49,9 @@ let currentView: EditorView | null = null
 export function currentAuthor(): Author {
   try {
     const a = authorSource()
-    return a && typeof a.name === 'string' && a.name.trim() ? { name: a.name.trim(), color: a.color ?? null } : DEFAULT_AUTHOR
+    return a && typeof a.name === 'string' && a.name.trim()
+      ? { name: a.name.trim(), color: a.color ?? null, ...(a.anonymous ? { anonymous: true } : {}) }
+      : DEFAULT_AUTHOR
   } catch {
     return DEFAULT_AUTHOR
   }

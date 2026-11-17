@@ -264,10 +264,31 @@ pub fn menu_set<R: Runtime>(
     Ok(())
 }
 
-/// Route a menu click to the frontend: one event carrying the command id.
+/// Route a menu click to the frontend: one event carrying the command id. Quit goes to the storage
+/// quit event instead (the same flow as the `app.quit` command): its listener is bound as soon as the
+/// app mounts, before the command registry, so Cmd+Q works during startup too.
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    if let Err(e) = app.emit(EVENT_COMMAND, id) {
+    let result = match menu_event_for(id) {
+        MenuEvent::Quit => app.emit(crate::storage::EVENT_QUIT, ()),
+        MenuEvent::Command => app.emit(EVENT_COMMAND, id),
+    };
+    if let Err(e) = result {
         eprintln!("failed to emit menu command {id}: {e}");
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MenuEvent {
+    Quit,
+    Command,
+}
+
+/// Which event a menu item id is sent as.
+pub fn menu_event_for(id: &str) -> MenuEvent {
+    if id == QUIT_ID {
+        MenuEvent::Quit
+    } else {
+        MenuEvent::Command
     }
 }
 
@@ -283,6 +304,13 @@ mod tests {
             {"kind":"submenu","label":"Open Recent","items":[{"kind":"item","id":"file.open_recent.0","label":"Book","enabled":true}]}]},
         {"id":"format","label":"Format","items":[{"kind":"item","id":"toolbar.bold","label":"Bold","accelerator":"CmdOrCtrl+B","enabled":true,"checked":true}]}
     ]}"#;
+
+    #[test]
+    fn quit_is_sent_as_the_storage_quit_event_so_it_works_before_the_registry_is_bound() {
+        assert_eq!(menu_event_for(QUIT_ID), MenuEvent::Quit);
+        assert_eq!(menu_event_for("file.save"), MenuEvent::Command);
+        assert_eq!(crate::storage::EVENT_QUIT, "menu://quit");
+    }
 
     #[test]
     fn parses_the_frontend_snapshot() {

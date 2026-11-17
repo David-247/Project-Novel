@@ -56,6 +56,8 @@ export function reviewPlugin(): Plugin {
     },
     view: (view) => {
       setReviewView(view)
+      // Mounted before the composition root names it the manuscript (attachEditor runs after the
+      // view exists): setReviewViewSource's subscription recomputes the summary on attach.
       if (isReviewView(view)) refreshChangeSummary(view.state.doc)
       return {
         update: (v, prev) => {

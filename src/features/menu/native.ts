@@ -36,7 +36,12 @@ export function startNativeMenu(opts: { force?: boolean } = {}): () => void {
     const json = JSON.stringify(snapshot)
     if (json === last) return
     last = json
-    invoke('menu_set', { snapshot }).catch((e) => console.warn('Updating the native menu failed:', e))
+    invoke('menu_set', { snapshot }).catch((e) => {
+      // Not applied: the next snapshot is sent even if it is the same (else the menu keeps stale
+      // enabled / checked state until something else changes).
+      if (last === json) last = ''
+      console.warn('Updating the native menu failed:', e)
+    })
   }
   const schedule = () => {
     if (timer === null) timer = setTimeout(send, REGISTRY_SETTLE_MS)

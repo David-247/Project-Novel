@@ -25,6 +25,7 @@ export {
   commandGuard,
   setCommandGate,
   commandGateAllows,
+  useCommandGateAllows,
   shortcutKey,
   commandProblem,
   COMMAND_STATE_DEBOUNCE_MS,
@@ -52,3 +53,5 @@ export {
 export type { CommandShortcutOptions } from './keyboard'
 export { menuBarKind } from './platform'
 export type { MenuBarKind } from './platform'
+export { EXTRA_SHORTCUTS } from './extra-shortcuts'
+export type { ExtraShortcut } from './extra-shortcuts'

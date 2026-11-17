@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { useStore } from '@/shared/store'
 import { Button, cn, fieldBase, IconButton, Tooltip } from '@/shared/ui'
-import { cancelDraft, deleteMessage, deleteThread, editMessage, goToThread, reopenThread, replyToThread, resolveThread, submitDraft } from './commands'
+import { cancelDraft, deleteMessage, deleteThread, editMessage, goToThread, isOwnAuthor, reopenThread, replyToThread, resolveThread, submitDraft } from './commands'
 import { COMMENT_CONTROLS as C } from './controls'
 import { currentAuthor, getCommentsView } from './extension'
 import { CheckIcon, JumpIcon, PencilIcon, ReopenIcon, TrashIcon } from './icons'
@@ -111,7 +111,6 @@ export const ThreadCard = memo(function ThreadCard({ thread, active, lit }: Thre
   const [reply, setReply] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
-  const me = currentAuthor().name
 
   const sendReply = () => {
     if (replyToThread(thread.id, reply)) {
@@ -152,7 +151,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, active, lit }: Thre
                 {m.editedAt ? ' · edited' : ''}
               </span>
               <span className="flex-1" />
-              {m.author === me && editing !== m.id ? (
+              {isOwnAuthor(m.author) && editing !== m.id ? (
                 <CardIconButton
                   meta={C.edit}
                   onClick={() => {

@@ -84,6 +84,8 @@ export type RewriteNotice =
   | { kind: 'notFound'; ambiguous?: boolean; seq: number }
   /** Discard Re-write: undo brings it back. */
   | { kind: 'discarded'; seq: number }
+  /** Keep This Version: the version holds content this build cannot read (a newer Novel's); nothing changed. */
+  | { kind: 'unreadable'; seq: number }
 
 export interface RewriteSlice {
   rewrite: {

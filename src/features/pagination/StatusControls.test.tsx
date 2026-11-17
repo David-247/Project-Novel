@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { registerCommand } from '@/shared/commands'
+import { COMMAND_STATE_DEBOUNCE_MS, registerCommand, setCommandGate } from '@/shared/commands'
+import { registerPaginationCommands } from './commands'
 import { useStore } from '@/shared/store'
 import { TooltipProvider } from '@/shared/ui'
 import { PAGINATION_CONTROLS } from './controls'
@@ -46,6 +47,26 @@ describe('page indicator', () => {
     expect(run).toHaveBeenCalledTimes(1)
     off()
   })
+
+  it('its accessible name holds the visible label, the narrow "2 / 5" form included (WCAG 2.5.3)', () => {
+    render(
+      <TooltipProvider>
+        <PageIndicator />
+      </TooltipProvider>,
+    )
+    act(() => {
+      const a = useStore.getState().layoutActions
+      a.setPages(Array.from({ length: 5 }, (_, i) => ({ index: i, side: i % 2 ? 'verso' : 'recto', from: i, to: i + 1, isBlank: false, startsBlockType: null, chapterIndex: 0 })))
+      a.setVisibleSpread({ index: 1, first: 1, last: 2 })
+    })
+    const btn = screen.getByTestId('page-indicator').closest('button')!
+    // No aria-label overriding the content: the name comes from what is shown (jsdom applies no
+    // container queries, so both forms count here; a browser leaves the hidden one out).
+    expect(btn.hasAttribute('aria-label')).toBe(false)
+    expect(screen.getByTestId('page-indicator-short').closest('[aria-hidden="true"]')).toBeNull()
+    expect(screen.getByRole('button', { name: /Pages 2–3 of 5/ })).toBe(btn)
+    expect(screen.getByRole('button', { name: /2 \/ 5\. Go to page$/ })).toBe(btn)
+  })
 })
 
 describe('zoom controls', () => {
@@ -84,6 +105,30 @@ describe('zoom controls', () => {
     expect(useStore.getState().layout.zoom.mode).toBe('fit-width')
     fireEvent.change(select, { target: { value: '150' } })
     expect(useStore.getState().layout.zoom).toEqual({ mode: 'percent', percent: 150 })
+  })
+
+  it('a command gate that stops zoom and page view (an open re-write) disables them here too', async () => {
+    const offCmds = registerPaginationCommands()
+    // The registry's state signal is debounced.
+    const signal = () => act(() => new Promise((r) => setTimeout(r, COMMAND_STATE_DEBOUNCE_MS + 20)))
+    let offGate = () => {}
+    try {
+      renderControls()
+      act(() => useStore.getState().layoutActions.setScale(1))
+      const ids = [PAGINATION_CONTROLS.zoomIn.id, PAGINATION_CONTROLS.zoomOut.id, PAGINATION_CONTROLS.zoom.id, PAGINATION_CONTROLS.spreadView.id]
+      const disabled = () => ids.map((id) => (document.querySelector(`[data-control-id="${id}"]`) as HTMLButtonElement).disabled)
+      expect(disabled()).toEqual([false, false, false, false])
+      offGate = setCommandGate((c) => !c.id.startsWith('pagination.'))
+      await signal()
+      expect(disabled()).toEqual([true, true, true, true])
+      offGate()
+      offGate = () => {}
+      await signal()
+      expect(disabled()).toEqual([false, false, false, false])
+    } finally {
+      offGate()
+      offCmds()
+    }
   })
 
   it('the spread toggle sets book.view', () => {

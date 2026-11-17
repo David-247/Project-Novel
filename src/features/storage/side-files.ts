@@ -20,7 +20,17 @@ export interface ProjectSideFile {
    * newer Novel: it is used as far as understood, and the file is guarded (below). Must not throw.
    */
   load(data: unknown | null): { newer?: number } | void
-  /** The current content. `empty`: nothing worth a file (a missing file is then not created). */
+  /**
+   * Copy edits the slice holds outside its content (the re-write view's debounced revision) into it.
+   * Storage calls it before it reads the document version for a save, a snapshot or a copy, so a
+   * change it makes (`sideFileChanged()`) is counted before the save and never leaves the project
+   * unsaved after it. Optional; must not throw.
+   */
+  flush?(): void
+  /**
+   * The current content. `empty`: nothing worth a file (a missing file is then not created). Must be
+   * free of side effects (no change, no `sideFileChanged()`): flushing belongs in `flush()`.
+   */
   serialize(): { data: unknown; empty: boolean }
   /** Bumps on every change the user makes (not on load). A guarded file is replaced only after one. */
   getVersion(): number
@@ -30,6 +40,12 @@ export interface ProjectSideFile {
    * session (comments: threads whose anchor text is gone are pruned on close).
    */
   closeData?(): unknown | null
+  /**
+   * `data` (this file's content in a recovery snapshot, or `serialize().data`) as `load` would leave it
+   * against the manuscript now, for comparing a snapshot with what is loaded (comments: orphans pruned,
+   * as on open). Optional: compared as is. Must not throw or change anything.
+   */
+  comparable?(data: unknown): unknown
 }
 
 /** A damaged / unreadable / newer side file: not replaced until a real change, copied aside first. */
@@ -57,6 +73,20 @@ export function registerSideFile(file: ProjectSideFile): () => void {
   entries.set(file.name, entry)
   return () => {
     if (entries.get(file.name) === entry) entries.delete(file.name)
+  }
+}
+
+/**
+ * Flush every side file's live edits (`flush()`). Call before reading the document version for a save,
+ * a snapshot or a copy. Never throws.
+ */
+export function flushSideFiles(): void {
+  for (const { file } of entries.values()) {
+    try {
+      file.flush?.()
+    } catch (e) {
+      console.warn(`Flushing ${file.name} failed:`, e)
+    }
   }
 }
 
@@ -256,6 +286,17 @@ export function sideFilesSaved(names: readonly string[]): void {
   }
 }
 
+/**
+ * The batch holding these side files failed: some may have been renamed into place before the failure
+ * (they are renamed before the manuscript), so treat each as present. Guards stay.
+ */
+export function sideFilesMaybeWritten(names: readonly string[]): void {
+  for (const name of names) {
+    const entry = entries.get(name)
+    if (entry) entry.present = true
+  }
+}
+
 /** True while any side file is guarded (its warning stays up). */
 export function hasGuardedSideFile(): boolean {
   return [...entries.values()].some((e) => e.guard !== null)
@@ -286,25 +327,56 @@ async function keepGuarded(folder: string, name: string, guard: SideGuard): Prom
   }
 }
 
-/** Side-file contents for a crash-recovery snapshot: every non-empty file, or one on disk. */
+/**
+ * Side-file contents for a crash-recovery snapshot: every non-empty file, or one on disk. A guarded file
+ * the user has not changed is left out: its content here is not what is on disk (it could not be read,
+ * or not understood), so Restore must keep the file as it is then rather than load this empty stand-in.
+ */
 export function sideFilesForSnapshot(): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const entry of entries.values()) {
+    if (entry.guard && entry.file.getVersion() === entry.guard.loadedVersion) continue
     const { data, empty } = entry.file.serialize()
     if (!empty || entry.present) out[entry.file.name] = data
   }
   return out
 }
 
-/** Comparable form of the loaded side files (crash recovery: is a snapshot identical to the save?). */
+/**
+ * The guard of each guarded side file `sideFilesForSnapshot` includes (the user changed it): recorded
+ * in the snapshot, so a Restore in a later session, where the file may read fine again, still copies
+ * the file on disk aside before the restored content replaces it.
+ */
+export function sideFileGuardsForSnapshot(): Record<string, 'damaged' | 'newer'> {
+  const out: Record<string, 'damaged' | 'newer'> = {}
+  for (const entry of entries.values()) {
+    if (!entry.guard || entry.file.getVersion() === entry.guard.loadedVersion) continue
+    out[entry.file.name] = entry.guard.kind
+  }
+  return out
+}
+
+/**
+ * Comparable form of the loaded side files (crash recovery: is a snapshot identical to the save?). A file
+ * the snapshot leaves out compares as loaded: Restore leaves it as it is.
+ */
 export function sideFilesKey(snapshot?: Record<string, unknown>): string {
   const names = [...entries.keys()].sort()
   return JSON.stringify(
     names.map((n) => {
-      if (snapshot) return n in snapshot ? snapshot[n] : null
       const entry = entries.get(n)!
+      const comparable = (data: unknown) => {
+        if (data === null || !entry.file.comparable) return data
+        try {
+          return entry.file.comparable(data)
+        } catch (e) {
+          console.warn(`Comparing ${n} failed:`, e)
+          return data
+        }
+      }
+      if (snapshot && n in snapshot) return comparable(snapshot[n])
       const { data, empty } = entry.file.serialize()
-      return empty && !entry.present ? null : data
+      return empty && !entry.present ? null : comparable(data)
     }),
   )
 }
@@ -314,7 +386,10 @@ export function sideFilesKey(snapshot?: Record<string, unknown>): string {
  * loaded is loaded from the snapshot. A snapshot without side files (older Novel) changes nothing.
  * Returns true when something changed.
  */
-export function restoreSideFiles(snapshot: Record<string, unknown> | undefined): boolean {
+export function restoreSideFiles(
+  snapshot: Record<string, unknown> | undefined,
+  guards?: Record<string, 'damaged' | 'newer'>,
+): boolean {
   if (!snapshot) return false
   let changed = false
   for (const entry of entries.values()) {
@@ -324,6 +399,11 @@ export function restoreSideFiles(snapshot: Record<string, unknown> | undefined):
     safeLoad(entry.file, data && typeof data === 'object' ? data : null)
     // Restored content is a change of the file (a guarded one may now be replaced).
     if (entry.guard) entry.guard.loadedVersion = Number.NaN
+    // Guarded when the snapshot was taken, readable now: the file on disk is still copied aside (read
+    // again then) before the first save replaces it, as it would have been in that session.
+    else if (guards?.[entry.file.name] && entry.present) {
+      entry.guard = { kind: guards[entry.file.name], original: null, loadedVersion: Number.NaN }
+    }
     changed = true
   }
   return changed

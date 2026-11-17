@@ -470,14 +470,13 @@ describe('review fixes', () => {
     }
     expect([0, 1, 2, 3].map(changed)).toEqual([false, true, false, true])
     const before = ed.state
-    // Known limitation of the recorder for list items (docs/track-changes.md): a list item is not a tracked
-    // block, so accepting its deletion leaves the item empty, and rejecting an inserted item leaves one empty.
-    const filled = () => listText().filter(Boolean)
+    // List items resolve as whole blocks (docs/track-changes.md, the boundary rule): accepting the deleted
+    // item removes it, and rejecting the inserted item removes it, with no empty item left behind.
     act(() => ed.view.dispatch(acceptAll(ed.state)!))
-    expect(filled()).toEqual(['Apples.', 'Plums.', 'Cherries.'])
+    expect(listText()).toEqual(['Apples.', 'Plums.', 'Cherries.'])
     act(() => ed.view.updateState(before))
     act(() => ed.view.dispatch(rejectAll(ed.state)!))
-    expect(filled()).toEqual(['Apples.', 'Pears.', 'Plums.'])
+    expect(listText()).toEqual(['Apples.', 'Pears.', 'Plums.'])
   })
 
   it('a heavily renamed chapter title at the same place is a rename: no question', async () => {

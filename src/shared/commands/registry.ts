@@ -25,6 +25,11 @@ export interface Command {
   /** ProseMirror syntax, e.g. 'Mod-Shift-e'. The one place a shortcut is declared. */
   shortcut?: ShortcutSpec
   /**
+   * More keys that run the command, not shown in menus or tooltips: layout and keypad variants such
+   * as Zoom In's Mod-+ (the numpad plus, and Ctrl+Shift+= on US keyboards).
+   */
+  altShortcuts?: readonly ShortcutSpec[]
+  /**
    * The webview handles the shortcut itself (Cut, Copy, Paste, Paste as Plain Text): the registry only
    * shows it, and the keyboard dispatcher leaves the key alone.
    */
@@ -82,12 +87,12 @@ export function commandProblem(cmd: Command, existing: Iterable<Command>, platfo
   if (!cmd.label?.trim()) return `command "${cmd.id}" has no label`
   if (!cmd.description?.trim()) return `command "${cmd.id}" has no description`
   if (cmd.description.includes('\n')) return `command "${cmd.id}": the description must be one line`
-  const key = cmd.shortcut ? shortcutKey(cmd.shortcut, platform) : null
+  const specs = (c: Command) => [...(c.shortcut ? [c.shortcut] : []), ...(c.altShortcuts ?? [])]
+  const mine = specs(cmd).map((s) => [s, shortcutKey(s, platform)] as const)
   for (const other of existing) {
     if (other.id === cmd.id) return `duplicate command id "${cmd.id}"`
-    if (key && other.shortcut && shortcutKey(other.shortcut, platform) === key) {
-      return `shortcut ${cmd.shortcut} of "${cmd.id}" is already bound to "${other.id}"`
-    }
+    const theirs = new Set(specs(other).map((s) => shortcutKey(s, platform)))
+    for (const [s, key] of mine) if (theirs.has(key)) return `shortcut ${s} of "${cmd.id}" is already bound to "${other.id}"`
   }
   return null
 }
@@ -173,6 +178,19 @@ export function commandGateAllows(cmd: Command): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * React: does the gate let command `id` run (true when it is not registered or no gate is set)? For a
+ * slice's own controls that do what a command does without running it (the status bar's zoom and
+ * spread controls): disable them when this is false. Re-renders after notifyCommandStateChanged,
+ * which setCommandGate calls.
+ */
+export function useCommandGateAllows(id: string): boolean {
+  useCommandStateVersion()
+  useCommands()
+  const cmd = commands.get(id)
+  return !cmd || commandGateAllows(cmd)
 }
 
 export function isCommandEnabled(cmd: Command): boolean {

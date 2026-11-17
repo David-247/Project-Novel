@@ -1,0 +1,51 @@
+name: Real-app smoke (manual)
+
+# The real-app smoke (e2e-tauri/smoke.mjs: tauri-driver, then attach mode) on a Windows runner, run by
+# hand only (Actions > "Real-app smoke (manual)" > Run workflow). It is not part of CI: on GitHub's
+# free Windows runners WebView2 ignores both WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS and the
+# AdditionalBrowserArguments policy (checked: the browser command line has only wry's own
+# arguments), so no DevTools port opens and msedgedriver fails with "DevToolsActivePort file
+# doesn't exist" (free-CI rule, decisions f040009b and a187e880: a check that fails for runner
+# reasons does not run on every push). It passes on a Windows desktop; see README, "Real-app smoke".
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Real-app smoke (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri build --no-bundle
+      - name: WebView2 runtime and msedgedriver versions
+        shell: pwsh
+        run: |
+          $keys = @(
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+            'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+            'HKCU:\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          )
+          foreach ($k in $keys) {
+            $pv = (Get-ItemProperty -Path $k -Name pv -ErrorAction SilentlyContinue).pv
+            if ($pv) { Write-Output "WebView2 runtime: $pv ($k)"; break }
+          }
+          $driver = if ($env:EDGEWEBDRIVER) { Join-Path $env:EDGEWEBDRIVER 'msedgedriver.exe' } else { 'msedgedriver' }
+          & $driver --version
+      - name: Install tauri-driver (pinned)
+        run: cargo install tauri-driver --version 2.1.0 --locked
+      - name: Real-app smoke (tauri-driver + msedgedriver)
+        run: node e2e-tauri/smoke.mjs src-tauri/target/release/novel.exe

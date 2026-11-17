@@ -17,7 +17,7 @@ import {
   snapshotsSuppressedAt,
   writeRecoveryFile,
 } from './recovery'
-import { sideFilesForSnapshot } from './side-files'
+import { flushSideFiles, sideFileGuardsForSnapshot, sideFilesForSnapshot } from './side-files'
 import { withWriteLock } from './write-lock'
 
 /**
@@ -110,6 +110,8 @@ async function snapshot(): Promise<AutosaveResult> {
       const p = getDocumentProvider()
       const meta = getCurrentProjectMeta()
       if (!p || !meta || getCurrentProjectPath() !== folder) return false
+      // Live side-file edits first: the change their flush makes belongs to this snapshot's version.
+      flushSideFiles()
       const version = p.getDocVersion()
       const bookVersion = getBookVersion()
       if (
@@ -119,6 +121,7 @@ async function snapshot(): Promise<AutosaveResult> {
       ) {
         return false
       }
+      const guards = sideFileGuardsForSnapshot()
       const text = serializeRecovery({
         format: RECOVERY_FORMAT,
         version: RECOVERY_VERSION,
@@ -129,6 +132,7 @@ async function snapshot(): Promise<AutosaveResult> {
         doc: p.getDocJSON(),
         book: currentBookSettings(),
         sideFiles: sideFilesForSnapshot(),
+        ...(Object.keys(guards).length ? { sideFileGuards: guards } : {}),
       })
       // A snapshot the user has not answered yet is moved aside, never overwritten.
       await preserveUnansweredRecoveryUnlocked(folder)

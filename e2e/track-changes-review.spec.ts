@@ -386,3 +386,115 @@ test('from the ribbon: Review > Changes has Previous, Next, Accept ▾ and Rejec
   await expect(ctl(group, 'ribbon.cmd.review.accept')).toBeDisabled()
   await expect(ctl(group, 'ribbon.cmd.review.change.next')).toBeDisabled()
 })
+
+test('list items while tracking: inserted, deleted and split items, a whole list, Backspace and Delete across items', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await launch(page)
+  const p = (t: string) => ({ type: 'paragraph', content: [text(t)] })
+  const ul = (...items: string[]) => ({ type: 'bulletList', content: items.map((t) => ({ type: 'listItem', content: [p(t)] })) })
+  const start = [p('Intro line.'), ul('Apple', 'Pear', 'Plum'), p('Outro line.')]
+  await seedReview(page, '/projects/Lists', start)
+  /** The structure: `ul[Apple, Pear]`, top-level blocks joined by " | ". */
+  const tree = () =>
+    page.evaluate(() => {
+      type N = { type: string; text?: string; content?: N[] }
+      const textOf = (n: N): string => (n.text ?? '') + (n.content ?? []).map(textOf).join('')
+      const show = (n: N): string =>
+        n.type === 'paragraph'
+          ? textOf(n)
+          : n.type === 'listItem'
+            ? (n.content ?? []).map(show).join(' / ')
+            : `${n.type === 'bulletList' ? 'ul' : n.type}[${(n.content ?? []).map(show).join(', ')}]`
+      return ((window.__nvE2E.docJSON() as N).content ?? []).map(show).join(' | ')
+    })
+  const reset = async () => {
+    await page.evaluate((d) => window.__nvE2E.setDoc(d), { type: 'doc', content: start })
+    await page.evaluate(() => window.__nvE2E.setTracking(true))
+    await waitForLayout(page)
+  }
+  // Positions in `start`: "Intro line." 1..12, then ul > li > p: "Apple" 16..21, "Pear" 25..29, "Plum" 33..37.
+  const AT = { introEnd: 12, appleEnd: 21, pearStart: 25, pearMid: 27, pearEnd: 29, plumEnd: 37 }
+  /** The caret (or a selection) at document positions, the editor focused: as a click (or a drag) would. */
+  const caret = async (from: number, to = from) => {
+    await editor(page).focus()
+    await page.evaluate(([a, b]) => window.__nvE2E.selectText(a, b), [from, to])
+  }
+  const all = (mode: 'accept' | 'reject') => reviewMenu(page, mode === 'accept' ? 'review.acceptAll' : 'review.rejectAll')
+  const LIST = 'Intro line. | ul[Apple, Pear, Plum] | Outro line.'
+
+  // An inserted item: Enter at the end of "Apple", type "Fig". Reject at the caret: the item goes.
+  await reset()
+  await caret(AT.appleEnd)
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Fig')
+  expect(await tree()).toBe('Intro line. | ul[Apple, Fig, Pear, Plum] | Outro line.')
+  await reviewMenu(page, 'review.reject')
+  await expect.poll(tree).toBe(LIST)
+  expect(await count(page)).toBe(0)
+  // One undo step brings it back; Accept All keeps it.
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(tree).toBe('Intro line. | ul[Apple, Fig, Pear, Plum] | Outro line.')
+  await all('accept')
+  await expect.poll(() => count(page)).toBe(0)
+  expect(await tree()).toBe('Intro line. | ul[Apple, Fig, Pear, Plum] | Outro line.')
+
+  // A split item: Enter inside "Pear". Reject All joins it again; Accept All keeps two items.
+  await reset()
+  await caret(AT.pearMid)
+  await page.keyboard.press('Enter')
+  expect(await tree()).toBe('Intro line. | ul[Apple, Pe, ar, Plum] | Outro line.')
+  await all('reject')
+  await expect.poll(tree).toBe(LIST)
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(() => count(page)).toBe(1)
+  await all('accept')
+  await expect.poll(() => count(page)).toBe(0)
+  expect(await tree()).toBe('Intro line. | ul[Apple, Pe, ar, Plum] | Outro line.')
+
+  // A deleted item: from the end of "Apple" to the end of "Pear", Delete. Accept All: the item goes.
+  await reset()
+  await caret(AT.appleEnd, AT.pearEnd)
+  await page.keyboard.press('Delete')
+  await expect(editor(page).locator('.nv-del')).toHaveText('Pear')
+  expect(await tree()).toBe(LIST)
+  await all('accept')
+  await expect.poll(tree).toBe('Intro line. | ul[Apple, Plum] | Outro line.')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(() => count(page)).toBe(1)
+  await all('reject')
+  await expect.poll(tree).toBe(LIST)
+  expect(await count(page)).toBe(0)
+
+  // A whole list: from the end of "Intro line." to the end of "Plum", Delete. Accept All: the list goes.
+  await reset()
+  await caret(AT.introEnd, AT.plumEnd)
+  await page.keyboard.press('Delete')
+  await expect(editor(page).locator('.nv-del')).toHaveCount(3)
+  expect(await tree()).toBe(LIST)
+  await all('accept')
+  await expect.poll(tree).toBe('Intro line. | Outro line.')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(() => count(page)).toBeGreaterThan(0)
+  await all('reject')
+  await expect.poll(tree).toBe(LIST)
+
+  // Backspace at the start of "Pear", Delete at the end of "Pear" (before "Plum"): each records the
+  // boundary, never a lost keystroke; Accept All joins the items (Word's result), Reject All keeps them.
+  await reset()
+  await caret(AT.pearStart)
+  await page.keyboard.press('Backspace')
+  await expect.poll(() => count(page)).toBe(1)
+  // The caret is left before the deleted boundary: typing goes at the end of "Apple".
+  await page.keyboard.type('s')
+  // "Apple" gained a letter: the end of "Pear" is one further.
+  await caret(AT.pearEnd + 1)
+  await page.keyboard.press('Delete')
+  await expect.poll(() => count(page)).toBe(3)
+  expect(await tree()).toBe('Intro line. | ul[Apples, Pear, Plum] | Outro line.')
+  await all('accept')
+  await expect.poll(tree).toBe('Intro line. | ul[ApplesPearPlum] | Outro line.')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(() => count(page)).toBe(3)
+  await all('reject')
+  await expect.poll(tree).toBe(LIST)
+})

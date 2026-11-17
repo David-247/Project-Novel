@@ -46,6 +46,7 @@ import {
   hasGuardedSideFile,
   loadSideFiles,
   resetSideFiles,
+  flushSideFiles,
   restoreSideFiles,
   sideFileNames,
   sideFilesForCopy,
@@ -56,6 +57,7 @@ import {
   skippedFileReason,
   type SkipReason,
   type SkippedFile,
+  sideFilesMaybeWritten,
   sideFilesSaved,
   writeSideFilesOnClose,
 } from './side-files'
@@ -361,6 +363,9 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
       )
     }
   }
+  if (!doc) flushSideFiles()
+  // Files a save of the previous project left out are not this project's (the left-unsaved prompt).
+  lastSkipped = []
   const version = p.getDocVersion()
   const content = doc ?? p.getDocJSON()
   const meta = newProjectMeta(baseName(folder))
@@ -485,8 +490,10 @@ async function writeProject(
   const skipped: SkippedFile[] = []
   lastSkipped = skipped
   try {
-    // The content is taken when Save is requested. Version read before the doc:
-    // edits made during the async write keep the doc dirty.
+    // The content is taken when Save is requested. Live side-file edits (the revision being typed) are
+    // flushed first, so the change that flush makes is counted in `version`. Version read before the
+    // doc: edits made during the async write keep the doc dirty.
+    flushSideFiles()
     const version = p.getDocVersion()
     const text = serializeManuscript(p.getDocJSON())
     const bookVersion = getBookVersion()
@@ -496,7 +503,14 @@ async function writeProject(
       // The manuscript and its side files (comments.json, ...) in one batch: all staged before any
       // is replaced, the manuscript renamed last (docs/project-format.md, "Saving").
       const side = await sideFilesForSave(folder)
-      await writeFilesAtomic([...side.files, { path: joinPath(folder, MANUSCRIPT_FILE), contents: text, label: MANUSCRIPT_FILE }])
+      try {
+        await writeFilesAtomic([...side.files, { path: joinPath(folder, MANUSCRIPT_FILE), contents: text, label: MANUSCRIPT_FILE }])
+      } catch (e) {
+        // A rename that failed after the side files were renamed leaves them on disk: a later save
+        // must replace them even when they are empty then.
+        sideFilesMaybeWritten(side.written)
+        throw e
+      }
       sideFilesSaved(side.written)
       // A guarded side file whose copy could not be kept was left out: its changes stay unsaved.
       skipped.push(...side.skipped)
@@ -780,6 +794,7 @@ export interface CopyDocument {
  * registry; an empty one is not written. project.json is written last, by the caller.
  */
 export function inMemoryCopyDocuments(p: DocumentProvider): { docs: CopyDocument[]; handled: Set<string> } {
+  flushSideFiles()
   const side = sideFilesForCopy()
   const docs = [
     ...side.files,
@@ -939,6 +954,8 @@ export function clearRecoveryData(): Promise<void> {
 
 /** "Don't Save": drop recovery data and do not snapshot the discarded content again. */
 async function discardUnsavedForRecovery(p: DocumentProvider): Promise<void> {
+  // A pending live edit belongs to what is discarded: flushed now, it cannot bump the version later.
+  flushSideFiles()
   suppressSnapshotsAt(p.getDocVersion(), getBookVersion())
   await clearRecoveryData()
 }
@@ -1034,7 +1051,7 @@ export async function restoreRecovery(): Promise<boolean> {
     const p = provider()
     loadDocument(p, pending.snapshot.doc)
     // Side files (comments) come back with the text they refer to.
-    restoreSideFiles(pending.snapshot.sideFiles)
+    restoreSideFiles(pending.snapshot.sideFiles, pending.snapshot.sideFileGuards)
     p.markDirty()
     // Unsaved book settings come back with the text (snapshots from before book settings have none).
     // Only when they differ: restoring equal settings would mark the book unsaved, and the next save would

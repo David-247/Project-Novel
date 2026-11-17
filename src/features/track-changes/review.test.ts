@@ -166,6 +166,16 @@ describe('markup views: hidden text', () => {
 
 })
 
+describe('a formatChange from a newer build', () => {
+  it('reject drops the mark types this schema does not know instead of throwing', () => {
+    const fc = { type: 'formatChange', attrs: { ...stamp('f1'), before: [{ type: 'italic' }, { type: 'sparkle', attrs: { level: 2 } }] } }
+    const s = state([p([t('Bold', [{ type: 'bold' }, fc])])])
+    const out = apply(s, rejectAll(s))
+    expect(out.doc.firstChild!.firstChild!.marks.map((m) => m.type.name)).toEqual(['italic'])
+    expect(hasTracking(out.doc)).toBe(false)
+  })
+})
+
 describe('markup view switch', () => {
   it('decorates hidden blocks, sets <html data-nv-markup>, recomputes and asks for repagination', () => {
     const el = document.createElement('div')
@@ -198,6 +208,50 @@ describe('markup view switch', () => {
   })
 })
 
+describe('hidden list items and lists', () => {
+  const li = (...content: JSONContent[]): JSONContent => ({ type: 'listItem', content })
+  const ul = (...items: JSONContent[]): JSONContent => ({ type: 'bulletList', content: items })
+  const gone = (el: Element | null | undefined, cls: string) => !!el && el.classList.contains(cls)
+
+  it('a list item whose paragraphs are all hidden is hidden too (no bullet left), and a list whose items all are', () => {
+    const el = document.createElement('div')
+    const ed = new Editor({
+      element: el,
+      extensions: createEditorExtensions(),
+      content: {
+        type: 'doc',
+        content: [
+          p([t('Intro')]),
+          ul(li(p([t('Kept')])), li(p([t('Gone', [del('d1')])], { trackedDelete: stamp('d1') })), li(p([t('New', [ins('i1')])], { trackedInsert: stamp('i1') }))),
+          ul(li(p([t('All new', [ins('i2')])], { trackedInsert: stamp('i2') }))),
+        ],
+      },
+    })
+    try {
+      const items = () => Array.from(ed.view.dom.querySelectorAll('li'))
+      expect(gone(items()[0], 'nv-tc-gone-final')).toBe(false)
+      expect(gone(items()[1], 'nv-tc-gone-final')).toBe(true)
+      expect(gone(items()[2], 'nv-tc-gone-original')).toBe(true)
+      const lists = () => Array.from(ed.view.dom.querySelectorAll('ul'))
+      expect(gone(lists()[0], 'nv-tc-gone-final')).toBe(false)
+      expect(gone(lists()[1], 'nv-tc-gone-original')).toBe(true)
+      // Incremental: accepting the deletion in the list item removes it, rejecting the new list removes that.
+      ed.view.dispatch(acceptAll(ed.state)!)
+      expect(items().map((x) => x.textContent)).toEqual(['Kept', 'New', 'All new'])
+      expect(items().some((x) => gone(x, 'nv-tc-gone-final') || gone(x, 'nv-tc-gone-original'))).toBe(false)
+      // A typed edit inside an item updates the item's class (the item is no longer all inserted).
+      const s2 = state([ul(li(p([t('New', [ins('i3')])], { trackedInsert: stamp('i3') })))])
+      ed.view.updateState(EditorState.create({ schema: ed.schema, doc: s2.doc, plugins: ed.state.plugins }))
+      expect(gone(items()[0], 'nv-tc-gone-original')).toBe(true)
+      ed.view.dispatch(ed.state.tr.insertText('x', 3).setMeta('nvTrackChangesSkip', true))
+      expect(gone(items()[0], 'nv-tc-gone-original')).toBe(false)
+      expect(gone(lists()[0], 'nv-tc-gone-original')).toBe(false)
+    } finally {
+      ed.destroy()
+    }
+  })
+})
+
 describe('copy', () => {
   const s = state(sample())
   const slice = s.doc.slice(0, s.doc.child(0).nodeSize + s.doc.child(1).nodeSize + s.doc.child(2).nodeSize)
@@ -223,5 +277,51 @@ describe('copy', () => {
   it('a slice without changes is returned as it is', () => {
     const plain = new Slice(Fragment.from(schema.text('x')), 0, 0)
     expect(copiedSlice(plain, 'all')).toBe(plain)
+  })
+})
+
+describe('undo of a resolve never touches the paragraphs it skipped (re-review A)', () => {
+  /** Apply `tr`, then its inverse (what undo does), and return the state after the undo. */
+  function undone(s: EditorState, tr: NonNullable<ReturnType<typeof acceptAll>>): EditorState {
+    let out = s.apply(tr)
+    const inv = out.tr
+    for (let i = tr.steps.length - 1; i >= 0; i--) inv.step(tr.steps[i].invert(tr.docs[i]))
+    out = out.apply(inv)
+    return out
+  }
+  /** The mark steps of `tr` that reach into top-level block `block` of `doc`. */
+  const stepsOverBlock = (doc: PMNode, tr: NonNullable<ReturnType<typeof acceptAll>>, block: number) => {
+    let from = 0
+    for (let i = 0; i < block; i++) from += doc.child(i).nodeSize
+    const to = from + doc.child(block).nodeSize
+    return tr.steps
+      .map((st) => st.toJSON() as { stepType: string; from: number; to: number })
+      .filter((j) => j.stepType.endsWith('Mark') && j.from < to - 1 && j.to > from + 1)
+  }
+  const marksOf = (doc: PMNode, block: number) => {
+    const out: string[][] = []
+    doc.child(block).forEach((n) => out.push(n.marks.map((m) => m.type.name).sort()))
+    return out
+  }
+
+  it('an insertion with a shared id around an unchanged paragraph (re-write Keep): undo gives P2 no mark', () => {
+    const s = state([p([t('One.', [ins('k')])]), p([t('Unchanged.')]), p([t('Three.', [ins('k')])])])
+    const tr = acceptAll(s)!
+    expect(stepsOverBlock(s.doc, tr, 1)).toEqual([])
+    expect(s.apply(tr).doc.child(1)).toBe(s.doc.child(1)) // untouched: the same node
+    expect(marksOf(s.apply(tr).doc, 1)).toEqual([[]])
+    const back = undone(s, tr)
+    expect(back.doc.eq(s.doc)).toBe(true)
+    expect(marksOf(back.doc, 1)).toEqual([[]])
+  })
+
+  it('a format change around a paragraph that was already bold: undo gives P2 no formatChange', () => {
+    const fc = { type: 'formatChange', attrs: { ...stamp('f'), before: [] } }
+    const s = state([p([t('One.', [{ type: 'bold' }, fc])]), p([t('Bold already.', [{ type: 'bold' }])]), p([t('Three.', [{ type: 'bold' }, fc])])])
+    const tr = acceptAll(s)!
+    expect(stepsOverBlock(s.doc, tr, 1)).toEqual([])
+    const back = undone(s, tr)
+    expect(back.doc.eq(s.doc)).toBe(true)
+    expect(marksOf(back.doc, 1)).toEqual([['bold']])
   })
 })

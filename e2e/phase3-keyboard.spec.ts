@@ -190,11 +190,18 @@ test('keyboard only: track changes, comments, re-write, settings, page turns and
   await expect(nav).toHaveValue('scroll')
   await expect.poll(() => page.evaluate(() => window.__nvE2E.pageNavigation())).toBe('scroll')
   await expect(page.locator('.nv-desk[data-navigation="scroll"]')).toBeAttached()
-  // A select's type-ahead joins keys typed within about a second ("st" matches nothing): let it reset.
-  await page.waitForTimeout(1200)
+  // A select's type-ahead joins keys typed within about a second ("st" matches nothing): press "t"
+  // until it has reset and picks Turn pages like a book.
   await expect(nav).toBeFocused()
-  await page.keyboard.press('t')
-  await expect(nav).toHaveValue('book')
+  await expect
+    .poll(
+      async () => {
+        await page.keyboard.press('t')
+        return nav.inputValue()
+      },
+      { intervals: [300, 600, 1000], timeout: 10_000 },
+    )
+    .toBe('book')
   await expect.poll(() => page.evaluate(() => window.__nvE2E.pageNavigation())).toBe('book')
   await tabTo(page, 'settings.done')
   await page.keyboard.press('Enter')
@@ -236,7 +243,9 @@ test('keyboard only: track changes, comments, re-write, settings, page turns and
   await keyTo(page, 'ArrowRight', 'ribbon.tab.review', 6)
   await page.keyboard.press('Enter')
   await expect(page.locator('[data-control-id="ribbon.tab.review"]')).toHaveAttribute('aria-selected', 'true')
-  for (const id of ['review.track', 'review.markup', 'review.accept.options', 'comment.new', 'ribbon.group.review.rewrite']) await keyTo(page, 'ArrowRight', id, 20)
+  // (No changes yet: the Accept / Reject split buttons are disabled, both halves, so the arrows skip
+  // them like any disabled control; ribbon.spec.ts walks into an enabled pair.)
+  for (const id of ['review.track', 'review.markup', 'comment.new', 'ribbon.group.review.rewrite']) await keyTo(page, 'ArrowRight', id, 20)
   await keyTo(page, 'ArrowLeft', 'review.track', 20)
   await page.keyboard.press('Enter')
   await expect(page.locator('[data-control-id="review.track"]')).toHaveAttribute('aria-pressed', 'true')

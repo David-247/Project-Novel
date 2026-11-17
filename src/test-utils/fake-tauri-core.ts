@@ -416,8 +416,12 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
         await persist.meta('recent', state.recent)
         return recentJSON()
       }
-      case 'preferences_read':
+      case 'preferences_read': {
+        // failRead is also asked for the app config dir's preferences.json (a locked file).
+        const failure = state.failRead?.('preferences.json')
+        if (failure) throw failure
         return state.preferences
+      }
       case 'preferences_write': {
         const contents = args.contents as string
         if (contents.length > 256 * 1024) throw { kind: 'invalid_path', message: 'Preferences are too large' }
