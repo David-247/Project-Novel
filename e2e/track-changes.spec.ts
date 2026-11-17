@@ -98,6 +98,37 @@ test('IME composition while tracking is one insertion', async ({ page, browserNa
   expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBe(1)
 })
 
+test('IME composition over a selection while tracking: the selection is deleted, the composed text inserted once', async ({ page }) => {
+  // WebKit has no IME protocol call: the composition is driven with composition events and
+  // execCommand('insertText'), which edits the DOM the way an IME does (ProseMirror reads it back).
+  await launch(page)
+  await newProject(page, '/projects/ImeSel')
+  await editor(page).click()
+  await page.keyboard.type('Word here')
+  await page.evaluate(() => window.__nvE2E.setTracking(true))
+  // Select "here".
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+ArrowLeft')
+  await page.evaluate(() => window.__nvE2E.syncSelection())
+  const dom = editor(page)
+  await dom.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' })))
+  for (const step of ['か', 'かん']) {
+    await dom.evaluate((el, data) => {
+      el.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data }))
+      const sel = document.getSelection()!
+      // Each update replaces the text composed so far (the IME's marked text).
+      if (data.length > 1) sel.modify('extend', 'backward', 'character')
+      document.execCommand('insertText', false, data.length > 1 ? data.slice(-2) : data)
+    }, step)
+    // Mid-composition the deleted text is struck through and the composed text is not wrapped yet.
+    await expect(dom.locator('.nv-del')).toHaveText('here')
+  }
+  await dom.evaluate((el) => el.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'かん' })))
+  await expect(dom.locator('.nv-ins')).toHaveText('かん')
+  await expect(dom.locator('.nv-del')).toHaveText('here')
+  await expect(dom.locator('p')).toHaveText('Word hereかん')
+  expect(await page.evaluate(() => window.__nvE2E.countChanges())).toBeLessThanOrEqual(2)
+})
+
 test('markup views: what each shows, footnote numbers and Find follow the view', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 })
   await launch(page)
@@ -208,6 +239,26 @@ function trackedFixture() {
       })
       changes++
     } else content.push(block)
+    // Lists: an item deleted and one inserted next to a kept one; now and then a whole inserted list.
+    const item = (t: string, attrs?: Json, marks?: Json[]) => ({ type: 'listItem', content: [{ type: 'paragraph', ...(attrs ? { attrs } : {}), content: [{ type: 'text', text: t, ...(marks ? { marks } : {}) }] }] })
+    if (n % 29 === 0) {
+      content.push({
+        type: 'bulletList',
+        content: [
+          item('A kept item of the list.'),
+          item('A deleted item, long enough to take a line of its own on the page.', { trackedDelete: stamp(`ld${n}`) }, [mark('deletion', `ld${n}`)]),
+          item('An inserted item.', { trackedInsert: stamp(`li${n}`) }, [mark('insertion', `li${n}`)]),
+        ],
+      })
+      changes += 2
+    }
+    if (n % 61 === 0) {
+      content.push({
+        type: 'orderedList',
+        content: [1, 2].map((k) => item(`A new numbered item ${k}.`, { trackedInsert: stamp(`ol${n}-${k}`) }, [mark('insertion', `ol${n}-${k}`)])),
+      })
+      changes += 2
+    }
     if (n % 17 === 0) {
       content.push({
         type: 'paragraph',
