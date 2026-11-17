@@ -311,7 +311,23 @@ export async function reveal(page: Page, id: string): Promise<Locator> {
   )
   if (tab) await ribbonTab(page, tab as RibbonTab)
   const control = page.locator(`[data-control-id="${id}"]`)
-  if (!tab || (await control.isVisible())) return control
+  if (!tab) return control
+  // The panel's size step is chosen in layout effects, but a ResizeObserver (fonts loading, a style
+  // name changing width) can re-step it a frame later: decide only once it held for two frames.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (t) =>
+          new Promise<boolean>((resolve) => {
+            const step = () => document.querySelector(`[data-ribbon-panel="${t}"]`)?.getAttribute('data-ribbon-step') ?? null
+            const s0 = step()
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve(step() === s0)))
+          }),
+        tab,
+      ),
+    )
+    .toBe(true)
+  if (await control.isVisible()) return control
   // The window is too narrow for its group (e.g. Review on macOS at 1280px, whose fonts are wider):
   // open the collapsed group, or More, and return the same command's item in that dropdown.
   const group = await control.evaluate((el) => el.closest('[data-ribbon-group]')?.getAttribute('data-ribbon-group') ?? null)
