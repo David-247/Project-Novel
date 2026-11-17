@@ -46,6 +46,7 @@ import {
   hasGuardedSideFile,
   loadSideFiles,
   resetSideFiles,
+  flushSideFiles,
   restoreSideFiles,
   sideFileNames,
   sideFilesForCopy,
@@ -361,6 +362,7 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
       )
     }
   }
+  if (!doc) flushSideFiles()
   const version = p.getDocVersion()
   const content = doc ?? p.getDocJSON()
   const meta = newProjectMeta(baseName(folder))
@@ -485,8 +487,10 @@ async function writeProject(
   const skipped: SkippedFile[] = []
   lastSkipped = skipped
   try {
-    // The content is taken when Save is requested. Version read before the doc:
-    // edits made during the async write keep the doc dirty.
+    // The content is taken when Save is requested. Live side-file edits (the revision being typed) are
+    // flushed first, so the change that flush makes is counted in `version`. Version read before the
+    // doc: edits made during the async write keep the doc dirty.
+    flushSideFiles()
     const version = p.getDocVersion()
     const text = serializeManuscript(p.getDocJSON())
     const bookVersion = getBookVersion()
@@ -780,6 +784,7 @@ export interface CopyDocument {
  * registry; an empty one is not written. project.json is written last, by the caller.
  */
 export function inMemoryCopyDocuments(p: DocumentProvider): { docs: CopyDocument[]; handled: Set<string> } {
+  flushSideFiles()
   const side = sideFilesForCopy()
   const docs = [
     ...side.files,
@@ -939,6 +944,8 @@ export function clearRecoveryData(): Promise<void> {
 
 /** "Don't Save": drop recovery data and do not snapshot the discarded content again. */
 async function discardUnsavedForRecovery(p: DocumentProvider): Promise<void> {
+  // A pending live edit belongs to what is discarded: flushed now, it cannot bump the version later.
+  flushSideFiles()
   suppressSnapshotsAt(p.getDocVersion(), getBookVersion())
   await clearRecoveryData()
 }

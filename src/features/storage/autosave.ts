@@ -17,7 +17,7 @@ import {
   snapshotsSuppressedAt,
   writeRecoveryFile,
 } from './recovery'
-import { sideFilesForSnapshot } from './side-files'
+import { flushSideFiles, sideFilesForSnapshot } from './side-files'
 import { withWriteLock } from './write-lock'
 
 /**
@@ -110,6 +110,8 @@ async function snapshot(): Promise<AutosaveResult> {
       const p = getDocumentProvider()
       const meta = getCurrentProjectMeta()
       if (!p || !meta || getCurrentProjectPath() !== folder) return false
+      // Live side-file edits first: the change their flush makes belongs to this snapshot's version.
+      flushSideFiles()
       const version = p.getDocVersion()
       const bookVersion = getBookVersion()
       if (
