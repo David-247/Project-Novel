@@ -8,7 +8,7 @@ import { breakPages, sideOf, type LineBox, type PageRange, type UnitInfo } from 
 import { chapterOpenings, hasReservations, onInvalidate, onInvalidateBlocks, onRelayout, totalReservation } from './extension-points'
 import { resolvePageGeometry, type PageGeometry } from './geometry'
 import { blockBreakBefore, lineStart, measureBlock, ownShift, scaleOf, SHIFT_ATTR, type BlockMetrics } from './measure'
-import { placePages, type Placement } from './placement'
+import { DESK_PAD, placePages, type Placement } from './placement'
 import { restyledIds } from './restyle'
 
 /**
@@ -144,6 +144,8 @@ const CATCH_UP_MIN = 16
 const PASS_LOG = 64
 
 interface DirtyBlock {
+  /** Index of the block in the pass. */
+  bi: number
   /** Range of the block's decorations in the pass's list. */
   a: number
   z: number
@@ -511,6 +513,8 @@ export class PaginationEngine {
     const blockDom: HTMLElement[] = []
     const blockMetrics: BlockMetrics[] = []
     const blockNodes: PMNode[] = []
+    /** Stream top of each block's element. */
+    const blockTops: number[] = []
     // Stream tops: unchanged blocks keep their last top plus the shift of the changed blocks above
     // them, so a keystroke reads two element boxes instead of one per block.
     const prevTops = key === this.lastKey ? this.prevTops : new Map<PMNode, number>()
@@ -602,6 +606,7 @@ export class PaginationEngine {
         for (const l of u.lines) lines.push({ top: top + l.top, bottom: top + l.bottom, unit: ui })
       })
       blockPos.push(pos)
+      blockTops.push(top)
       blockDom.push(dom)
       blockMetrics.push(m)
       blockNodes.push(node)
@@ -681,21 +686,49 @@ export class PaginationEngine {
       : null
     const pendingAt = (node: PMNode, pos: number) => this.pendingNodes.has(node) || !!staleAt?.has(pos)
     const spans: [number, number][] = []
+    /** Stream bottom of each block's last line. */
+    const blockBottoms: number[] = []
     {
       let c = 0
-      for (const m of blockMetrics) {
+      blockMetrics.forEach((m, bi) => {
         const n = m.units.reduce((s, u) => s + u.lines.length, 0)
         spans.push([pageOfLine[c] ?? 0, pageOfLine[Math.max(c, c + n - 1)] ?? 0])
+        blockBottoms.push(n ? lines[c + n - 1].bottom : blockTops[bi])
         c += n
-      }
+      })
     }
+    // A block not redrawn in this pass keeps the offsets drawn on it, made for the last layout: against
+    // this one they can paint it (hidden as stale) on any page, the spread in view included. Such a
+    // block is drawn with the pages in view, never left hidden there: a turned-to spread shows no
+    // stale block at all. Canvas band of the pages in view, and the drawn offset of each block start.
+    let drawnDy: Map<number, number> | null = null
+    const band = (() => {
+      const lo = Math.max(0, Math.min(ranges.length - 1, win[0]))
+      const hi = Math.max(0, Math.min(ranges.length - 1, win[1]))
+      const a = placement.frame(lo)
+      const z = placement.frame(hi)
+      return [a.y - DESK_PAD, z.y + z.height + DESK_PAD] as const
+    })()
+    const paintedInWin = (bi: number) => {
+      if (!drawnDy) {
+        drawnDy = new Map()
+        for (const d of current.find(undefined, undefined, (spec) => (spec as Partial<ShiftSpec>).nvShift !== undefined && !(spec as ShiftSpec).inline)) {
+          const y = /top:(-?[\d.]+)px/.exec((d.spec as ShiftSpec).nvShift)
+          if (y) drawnDy.set(d.from, Number(y[1]))
+        }
+      }
+      const dy = drawnDy.get(blockPos[bi]) ?? 0
+      return blockBottoms[bi] + dy > band[0] && blockTops[bi] + dy < band[1]
+    }
+    /** Drawn with the pages in view: on them now, or painted on them by the offsets drawn on it. */
+    const shownNow = (bi: number) => inWin(spans[bi][0], spans[bi][1]) || paintedInWin(bi)
     let chosen: Set<number> | null = null
     if (((allDirty || bulk) && blockNodes.length > PROGRESSIVE_MIN) || pureCatchUp) {
       const centre = (win[0] + win[1]) / 2
       const candidates: number[] = []
       blockNodes.forEach((node, bi) => {
-        if (inWin(spans[bi][0], spans[bi][1])) return
         if (pureCatchUp && !pendingAt(node, blockPos[bi])) return
+        if (shownNow(bi)) return
         candidates.push(bi)
       })
       candidates.sort((x, y) => Math.abs(spans[x][0] - centre) - Math.abs(spans[y][0] - centre))
@@ -711,7 +744,7 @@ export class PaginationEngine {
     const defer = (bi: number) => {
       const node = blockNodes[bi]
       // Redrawn in a later frame; hidden until then (below).
-      dirty.push({ a: 0, z: 0, pos: blockPos[bi], size: node.nodeSize, node, sig: '', p0: spans[bi][0], p1: spans[bi][1], lazy: true })
+      dirty.push({ bi, a: 0, z: 0, pos: blockPos[bi], size: node.nodeSize, node, sig: '', p0: spans[bi][0], p1: spans[bi][1], lazy: true })
       this.lastSigs.delete(node)
       lazy++
     }
@@ -729,7 +762,7 @@ export class PaginationEngine {
       const known = !allDirty && this.prevTops.has(node) && !this.pendingNodes.has(node) ? this.lastSigs.get(node) : undefined
       const last = allDirty ? null : (known ?? signatureOf(current.find(pos, pos + node.nodeSize), pos, pos + node.nodeSize - 1))
       if (last !== sig) {
-        dirty.push({ a: start, z: decos.length, pos, size: node.nodeSize, node, sig, p0, p1, lazy: false })
+        dirty.push({ bi, a: start, z: decos.length, pos, size: node.nodeSize, node, sig, p0, p1, lazy: false })
         // Recorded as applied only once it is drawn (below).
         this.lastSigs.delete(node)
       }
@@ -743,9 +776,8 @@ export class PaginationEngine {
       const first = lineCursor
       lineCursor += m.units.reduce((s, u) => s + u.lines.length, 0)
       if (chosen) {
-        const [p0, p1] = spans[bi]
         if (pureCatchUp && !pendingAt(blockNodes[bi], blockPos[bi])) continue
-        if (!inWin(p0, p1)) {
+        if (!shownNow(bi)) {
           if (!chosen.has(bi)) defer(bi)
           else if (pureCatchUp) lateFirst.set(bi, first)
           else consider(bi, first)
@@ -773,8 +805,8 @@ export class PaginationEngine {
       // Progressive also for a restyle that moved many blocks (all decorated, so pick by place).
       const wholesale = restyled !== null || this.catchUpOnly || bulk
       if (!chosen && wholesale && apply.length > PROGRESSIVE_MIN) {
-        const near = apply.filter((d) => inWin(d.p0, d.p1))
-        const rest = apply.filter((d) => !inWin(d.p0, d.p1))
+        const near = apply.filter((d) => shownNow(d.bi))
+        const rest = apply.filter((d) => !shownNow(d.bi))
         const centre = (win[0] + win[1]) / 2
         rest.sort((x, y) => Math.abs(x.p0 - centre) - Math.abs(y.p0 - centre))
         const now = near.concat(rest.slice(0, CHUNK))

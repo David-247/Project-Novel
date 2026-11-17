@@ -255,6 +255,70 @@ test('100k words, Book mode: a page turn shows a fully drawn spread < 100 ms (al
   await turnScenario(page, testInfo, 'pagination-turn', '/projects/Turn')
 })
 
+/**
+ * In the page, in one task (no catch-up frame in between): change the trim size, find a block still
+ * hidden as stale whose old offsets paint it on a row far from its own page, turn to that row and
+ * count the stale blocks on the spread shown in the first painted frame.
+ */
+async function turnOntoStaleBlock(page: Page, trim: string) {
+  return page.evaluate(async (id) => {
+    window.__nvE2E.setTrimSize(id)
+    // React renders the new page count (the turn reads its placement) in a microtask.
+    await Promise.resolve()
+    await Promise.resolve()
+    const { pages, effectiveView } = window.__nvE2E.layout()
+    const rowOf = (p: number) => (effectiveView === 'spread' ? Math.floor((p + 1) / 2) : p)
+    const pageAt = (pos: number) => Math.max(0, pages.findIndex((x) => x.from <= pos && pos < x.to))
+    const root = document.querySelector<HTMLElement>('.novel-editor-content')!
+    const rr = root.getBoundingClientRect()
+    const s = rr.height / root.offsetHeight
+    const rowCount = rowOf(pages.length - 1) + 1
+    const rowH = root.offsetHeight / rowCount
+    // The one painted farthest from its own page: the catch-up frames draw nearest the spread first.
+    let target = -1
+    let far = 2
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>(':scope > .nv-stale'))) {
+      const d = (el as unknown as { pmViewDesc?: { posAtStart: number } }).pmViewDesc
+      if (!d) continue
+      const r = el.getBoundingClientRect()
+      const row = Math.floor(((r.top + r.bottom) / 2 - rr.top) / s / rowH)
+      const dist = Math.abs(row - rowOf(pageAt(d.posAtStart)))
+      if (row < 2 || row >= rowCount - 1 || dist <= far) continue
+      target = row
+      far = dist
+    }
+    if (target < 0) return { target, stale: -1 }
+    window.__nvE2E.showPage(effectiveView === 'spread' ? 2 * target - 1 : target)
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => {
+        const ch = new MessageChannel()
+        ch.port1.onmessage = () => resolve()
+        ch.port2.postMessage(null)
+      }),
+    )
+    const sizer = document.querySelector('.nv-sizer')!.getBoundingClientRect()
+    const stale = Array.from(root.querySelectorAll('.nv-stale')).filter((el) => {
+      const r = el.getBoundingClientRect()
+      return r.bottom > sizer.top && r.top < sizer.bottom
+    }).length
+    return { target, far, shown: window.__nvE2E.layout().visibleSpread.index, stale }
+  }, trim)
+}
+
+test('100k words, Book mode: a turn during a progressive reflow never shows a block hidden at its old offsets', async ({ page }) => {
+  test.setTimeout(180_000)
+  await openFixture(page, '/projects/TurnStale')
+  expect(await page.evaluate(() => window.__nvE2E.pageNavigation())).toBe('book')
+  // Blocks not redrawn yet keep the old trim's offsets (hidden): against the new stream they can be
+  // painted on any spread, the one turned to included.
+  for (const trim of ['us-mass-market', 'us-5.5x8.5', 'uk-a5', 'us-5.5x8.5']) {
+    const t = await turnOntoStaleBlock(page, trim)
+    expect(t.target, `${trim}: a stale block painted away from its page`).toBeGreaterThan(0)
+    expect(t, `${trim}: ${JSON.stringify(t)}`).toMatchObject({ shown: t.target, stale: 0 })
+    await waitForLayout(page)
+  }
+})
+
 test('100k words, Book mode, Reduce motion on: a page turn shows a fully drawn spread < 100 ms', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   await seedPreferences(page, { reduceMotion: 'on' })
