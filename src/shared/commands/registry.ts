@@ -175,6 +175,19 @@ export function commandGateAllows(cmd: Command): boolean {
   }
 }
 
+/**
+ * React: does the gate let command `id` run (true when it is not registered or no gate is set)? For a
+ * slice's own controls that do what a command does without running it (the status bar's zoom and
+ * spread controls): disable them when this is false. Re-renders after notifyCommandStateChanged,
+ * which setCommandGate calls.
+ */
+export function useCommandGateAllows(id: string): boolean {
+  useCommandStateVersion()
+  useCommands()
+  const cmd = commands.get(id)
+  return !cmd || commandGateAllows(cmd)
+}
+
 export function isCommandEnabled(cmd: Command): boolean {
   try {
     if (gate && !gate(cmd)) return false
