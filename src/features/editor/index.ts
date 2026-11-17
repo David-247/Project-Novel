@@ -37,6 +37,7 @@ export {
   getDocVersion,
   onDocChange,
   getEditor,
+  subscribeEditor,
   getActiveEditor,
   setActiveEditorSource,
   activeEditorChanged,

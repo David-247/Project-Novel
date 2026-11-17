@@ -362,6 +362,23 @@ describe('review commands on the manuscript', () => {
     expect(ids(ed.state.doc)).toEqual(['d1', 'i1', 'i2', 'pb', 'j1'])
   })
 
+  it('typing straight after a Reject is its own undo step (re-review D)', async () => {
+    for (const run of [() => resolveSelection('reject'), () => resolveAll('reject')]) {
+      const ed = make(sample())
+      act(() => useStore.getState().bookActions.setTrackChanges(false))
+      select(ed, 10) // inside the inserted "new": rejecting it removes text
+      expect(await run()).toBe(true)
+      const rejected = ed.state.doc
+      expect(texts(rejected)[0]).toBe('Keep old end.')
+      // Within the history's 500 ms grouping delay, right where the reject removed text.
+      ed.view.dispatch(ed.state.tr.insertText('X', 9))
+      expect(ed.state.doc.eq(rejected)).toBe(false)
+      undo(ed.state, ed.view.dispatch)
+      expect(ed.state.doc.eq(rejected)).toBe(true)
+      act(() => useStore.getState().bookActions.setTrackChanges(true))
+    }
+  })
+
   it('Reject over a selection: every change it touches, one undo step', () => {
     const ed = make(sample())
     select(ed, 1, ed.state.doc.child(0).nodeSize + 13) // to the end of "added"
@@ -534,12 +551,19 @@ describe('change popover and status bar', () => {
 describe('the manuscript view only', () => {
   it('a view mounted before the root names it the manuscript gets its summary once it is (remount with restored content)', async () => {
     let named: Editor | null = null
-    setReviewViewSource(() => named?.view)
+    // The editor's attach signal (attachEditor notifies after the view exists).
+    const listeners = new Set<() => void>()
+    setReviewViewSource(() => named?.view, (cb) => (listeners.add(cb), () => void listeners.delete(cb)))
     const ed = make(sample())
     expect(getChangeSummary().count).toBe(0) // not the manuscript yet: no summary
-    named = ed // attachEditor, after the view exists
-    await new Promise((r) => setTimeout(r, 20))
+    // Named late (well past any polling window), then attach notifies: the summary is computed at once.
+    await new Promise((r) => setTimeout(r, 1200))
+    expect(getChangeSummary().count).toBe(0)
+    named = ed
+    listeners.forEach((l) => l())
     expect(getChangeSummary().count).toBe(5)
+    setReviewViewSource(null)
+    expect(listeners.size).toBe(0) // unsubscribed on reset
   })
 
   it('another editor with TrackChanges never takes the review commands (source set by the root)', async () => {

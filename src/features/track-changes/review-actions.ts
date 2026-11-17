@@ -1,3 +1,4 @@
+import { closeHistory } from '@tiptap/pm/history'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { NodeSelection, Selection, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
@@ -15,6 +16,7 @@ import {
   rejectChangesInRange,
   type TrackedChange,
 } from './review'
+import { TRACK_SKIP_META } from './record'
 import { closeChangePopover, getReviewView, refreshChangeSummary } from './review-state'
 
 /**
@@ -160,6 +162,9 @@ function dispatchResolved(view: EditorView, tr: Transaction | null, scroll = tru
   if (!tr) return false
   closeChangePopover()
   view.dispatch(scroll ? tr.scrollIntoView() : tr)
+  // Closed after too (the core closes it before): typing straight after an accept / reject is its own
+  // undo step, never merged into the review's.
+  view.dispatch(closeHistory(view.state.tr).setMeta(TRACK_SKIP_META, true).setMeta('addToHistory', false))
   refreshChangeSummary(view.state.doc)
   return true
 }

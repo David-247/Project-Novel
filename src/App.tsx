@@ -4,6 +4,7 @@ import {
   FindReplacePanel,
   getDocJSON,
   getEditor,
+  subscribeEditor,
   getDocVersion,
   isDirty,
   markClean,
@@ -159,7 +160,7 @@ export function App() {
   useEffect(() => {
     setReviewConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
     // The review commands, the change popover and the count act on the manuscript only.
-    setReviewViewSource(() => getEditor()?.view)
+    setReviewViewSource(() => getEditor()?.view, subscribeEditor)
     return () => {
       setReviewConfirm(null)
       setReviewViewSource(null)
