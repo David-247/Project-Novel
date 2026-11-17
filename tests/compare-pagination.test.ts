@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 // The comparison is a plain Node script (scripts/compare-pagination.mjs, run in CI); loaded untyped here.
 interface Result {
   mode: 'page' | 'recto'
+  markup?: 'none' | 'all'
   trim: string
   pageCount: number
   chapterOpenings: number[]
@@ -177,5 +178,21 @@ describe('cross-engine pagination tolerance', () => {
     expect(md).toMatch(/### Cross-engine page breaks/)
     expect(md).toMatch(/webkit-darwin vs chromium-win32 \(shipping pair\)/)
     expect(md).toMatch(/\| page \| uk-a5 \| 200 \| 205 \| 5 \/ 2\.05 \| 3 \/ 1 \| FAIL/)
+  })
+  it('Phase 3: the tracked-changes variant is compared per markup view, never against the untracked rows', () => {
+    const tracked = (markup: 'none' | 'all', pageCount: number, openings: number[]): Result => ({ ...res('page', 'uk-a5', pageCount, openings), markup })
+    const a = run('webkit', 'darwin', [res('page', 'uk-a5', 200, [0, 50]), tracked('none', 196, [0, 49]), tracked('all', 210, [0, 53])])
+    const b = run('chromium', 'win32', [res('page', 'uk-a5', 200, [0, 50]), tracked('none', 197, [0, 49]), tracked('all', 214, [0, 55])])
+    const c = mod.compareRuns(a, b)
+    expect(c.rows.map((r) => [r.mode, (r as Row & { markup?: string }).markup ?? null, r.totalDiff, r.maxOpeningDrift, r.ok])).toEqual([
+      ['page', null, 0, 0, true],
+      ['page', 'none', 1, 0, true],
+      ['page', 'all', 4, 2, false],
+    ])
+    const md = mod.toMarkdown(mod.compareAll([a, b]))
+    expect(md).toMatch(/\| page \(tracked, all markup\) \| uk-a5 \| 210 \| 214 \| 4 \/ 2\.14 \| 2 \/ 1 \| FAIL/)
+    // A tracked row missing on one side is a problem.
+    const missing = mod.compareRuns(a, run('chromium', 'win32', [res('page', 'uk-a5', 200, [0, 50]), tracked('none', 197, [0, 49])]))
+    expect(missing.ok).toBe(false)
   })
 })

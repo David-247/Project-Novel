@@ -23,7 +23,7 @@ const PERF = /(perf|phase2-acceptance)\.spec\.ts$/
 // Page navigation modes (Phase 3): the default is Book (one spread, page turns). The suites about the
 // pages also run in continuous scroll (the Phase 2 view): projects *-scroll seed preferences.json with
 // pageNavigation 'scroll' (metadata, read by seedProjectNavigation in e2e/helpers.ts).
-const BOTH_MODES = /(pagination|footnotes|headers|page-turn)\.spec\.ts$/
+const BOTH_MODES = /(pagination|footnotes|headers|page-turn|phase3-acceptance)\.spec\.ts$/
 
 export default defineConfig({
   testDir: './e2e',

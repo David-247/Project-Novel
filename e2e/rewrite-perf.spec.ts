@@ -1,8 +1,8 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { budget } from './budget'
+import { installLatencyProbe, report } from './perf-helpers'
 import { buildPaginationFixture } from './fixtures/pagination-manuscript'
-import { editor, launch, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
+import { editor, launch, lineEnd, lineStart, openRecent, saveStatus, seedProject, waitForLayout } from './helpers'
 
 /**
  * Re-write performance (serial perf projects): the 100,000-word manuscript.
@@ -63,14 +63,6 @@ async function openFixture(page: Page, folder: string, make: () => ReturnType<ty
   return { fx, first }
 }
 
-async function report(testInfo: TestInfo, name: string, result: Record<string, unknown>) {
-  const full = { scenario: name, browser: testInfo.project.name, platform: process.platform, ...result, measuredAt: new Date().toISOString() }
-  console.info(`[perf] ${JSON.stringify(full)}`)
-  mkdirSync('perf-results', { recursive: true })
-  writeFileSync(`perf-results/${name}-${testInfo.project.name}-${process.platform}.json`, JSON.stringify(full, null, 2))
-  await testInfo.attach(`${name}.json`, { body: JSON.stringify(full, null, 2), contentType: 'application/json' })
-}
-
 /** Re-write Passage… on blocks first..first+count-1: ms to the view aligned and painted. */
 async function timeOpen(page: Page, first: number, count = PARAGRAPHS): Promise<{ openMs: number; readyMs: number; rows: number }> {
   return page.evaluate(
@@ -100,27 +92,6 @@ async function timeOpen(page: Page, first: number, count = PARAGRAPHS): Promise<
     },
     [first, count] as const,
   )
-}
-
-/** Record keydown -> next frame painted for every key press (window.__perf). */
-async function installLatencyProbe(page: Page) {
-  await page.evaluate(() => {
-    const w = window as unknown as { __perf: number[] }
-    w.__perf = []
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        const now = performance.now()
-        const t0 = e.timeStamp > 0 && e.timeStamp <= now && now - e.timeStamp < 1000 ? e.timeStamp : now
-        requestAnimationFrame(() => {
-          const ch = new MessageChannel()
-          ch.port1.onmessage = () => w.__perf.push(performance.now() - t0)
-          ch.port2.postMessage(null)
-        })
-      },
-      true,
-    )
-  })
 }
 
 /** Press each key, waiting for its frame; the latencies after the warm-up. */
@@ -157,7 +128,7 @@ test('re-write on a 20-paragraph passage at 100k words: open < 300 ms, typing me
   await expect(rev).toBeFocused()
   await installLatencyProbe(page)
   await rev.locator('p').nth(9).click()
-  await page.keyboard.press('End')
+  await lineEnd(page) // End scrolls on macOS: Cmd+Right there
   const typing = await measureKeys(page, [...TYPED].map((ch) => (ch === ' ' ? 'Space' : ch)))
   await expect(rev).toContainText(TYPED.slice(0, 20))
 
@@ -180,7 +151,7 @@ test('re-write of a whole 250-paragraph chapter (8,000 words): open < 300 ms, En
   // every time (re-pairing, re-levelling of every later block).
   await installLatencyProbe(page)
   await rev.locator('p').nth(125).click()
-  await page.keyboard.press('Home')
+  await lineStart(page) // Home scrolls on macOS: Cmd+Left there
   for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight')
   const keys: string[] = []
   for (let i = 0; i < (WARMUP + MEASURED) / 2 + 1; i++) keys.push('Enter', 'Backspace')
@@ -212,7 +183,7 @@ test('Keep This Version on a 20-paragraph passage at 100k words: reflow complete
   const rev = page.getByRole('textbox', { name: 'Revised passage' })
   for (const n of [0, 6, 12, 19]) {
     await rev.locator('p').nth(n).click()
-    await page.keyboard.press('End')
+    await lineEnd(page)
     await page.keyboard.type(' And the lantern went out over the water, and nobody saw it go.')
   }
   await waitForLayout(page)
