@@ -33,9 +33,11 @@ async function osAuthorName(): Promise<string> {
 type Values = Partial<PreferenceValues>
 
 /** The preference values only (no `extra`, no `loaded`). */
-function valuesOf(p: Preferences): PreferenceValues {
-  const { extra: _extra, loaded: _loaded, ...values } = p
-  return values
+function valuesOf(p: Preferences): Record<keyof PreferenceValues, unknown> {
+  const values: Record<string, unknown> = { ...p }
+  delete values.extra
+  delete values.loaded
+  return values as Record<keyof PreferenceValues, unknown>
 }
 
 /** The values that differ between two states of the store: the user's changes in between. */
