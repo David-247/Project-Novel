@@ -197,7 +197,7 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     },
     paginationLines: () => {
       const d = getPaginationDebug()
-      return { lineCount: d.lineCount, lineRanges: d.lineRanges, lastPass: d.lastPass }
+      return { lineCount: d.lineCount, lineRanges: d.lineRanges, lastPass: d.lastPass, passes: d.passes }
     },
     /** The published layout model (store `layout` slice). */
     layout: () => {

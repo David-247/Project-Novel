@@ -429,8 +429,20 @@ control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
   exactly the one the user made) and only then runs the chosen command, as the toolbar does. Rows are 40px (touch),
   titles 32px; colours are the chrome tokens, so it follows light/dark and stays AA. Every title, submenu title and
   item has a tooltip (a registry entry, else its command's description) and is in the coverage audit.
-- **Help**: Keyboard Shortcuts is generated from the registry (searchable); Project Folder Format renders the
-  bundled `docs/project-format.md` (no network); About Novel shows the version from the app config (`getVersion`).
+- **Help**: Keyboard Shortcuts is generated from the registry (searchable), followed by a "Navigation" section
+  for keys handled outside it (`EXTRA_SHORTCUTS` in `src/shared/commands`: PageUp/PageDown, the book's start and
+  end, Home/End on a page-turn control, Escape from the ribbon, Alt/F10 for the menu bar); Project Folder Format
+  renders the bundled `docs/project-format.md` (no network); About Novel shows the version from the app config
+  (`getVersion`).
+- **Layout-shifted keys**: a shortcut on a punctuation key (`Mod-=`, `Mod-/`) also matches when the keyboard layout
+  needs Shift to type that character (German: Ctrl+Shift+0 types "=", Ctrl+Shift+7 types "/"); letters still need
+  their exact Shift. `Command.altShortcuts` adds keys that run a command without being shown (Zoom In's `Mod-+`:
+  the numpad plus and US Ctrl+Shift+=); they collide like main shortcuts.
+- **Known limitation: Ctrl+Alt+Arrow on Windows.** Previous / Next Change (`Mod-Alt-ArrowUp/Down`) and the
+  re-write's Go to Left / Right Page (`Mod-Alt-ArrowLeft/Right`) are Ctrl+Alt+Arrow on Windows, the keys some Intel
+  graphics drivers once used to rotate the screen. Ruling (Phase 3 final review, UI #8): they stay, since those
+  hotkeys are off by default on most current drivers; where a driver still takes them, the app never sees the key
+  and the commands remain in the Review menu and the ribbon.
 
 ## Ribbon: the toolbar (Phase 3, T6)
 

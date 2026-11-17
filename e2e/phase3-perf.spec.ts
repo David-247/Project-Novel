@@ -106,7 +106,15 @@ async function timeToReflow(page: Page, action: { command: string } | { resolveA
     const e = window.__nvE2E
     await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
     const v = e.layout().layoutVersion
-    const t0 = performance.now()
+    // Profile (review note): every pass since t0, and every long task, so the whole cost is seen.
+    const longTasks: { at: number; ms: number }[] = []
+    let t0 = 0
+    const observer = new PerformanceObserver((list) => {
+      for (const en of list.getEntries()) longTasks.push({ at: +(en.startTime - t0).toFixed(1), ms: +en.duration.toFixed(1) })
+    })
+    // WebKit has no longtask entries (then none are reported).
+    if (PerformanceObserver.supportedEntryTypes.includes('longtask')) observer.observe({ type: 'longtask', buffered: false })
+    t0 = performance.now()
     if ('command' in a) {
       if (!e.runCommand(a.command)) throw new Error(`${a.command} is disabled`)
     } else e.resolveAllChanges(a.resolveAll)
@@ -129,8 +137,35 @@ async function timeToReflow(page: Page, action: { command: string } | { resolveA
       const check = () => (e.paginationSettled() ? resolve() : requestAnimationFrame(check))
       check()
     })
-    const pass = e.paginationLines().lastPass as { totalMs?: number } | null
-    return { syncMs: +syncMs.toFixed(1), ms: +ms.toFixed(1), allDrawnMs: +(performance.now() - t0).toFixed(1), passMs: +(pass?.totalMs ?? -1).toFixed(1), pages: e.layout().pageCount }
+    const allDrawnMs = performance.now() - t0
+    observer.disconnect()
+    const lines = e.paginationLines()
+    const pass = lines.lastPass as { totalMs?: number } | null
+    type Pass = { startedAt: number; totalMs: number; measureMs: number; decorateMs: number; dispatchMs: number; publishMs: number; dirtyBlocks: number; deferredBlocks: number; measuredBlocks: number }
+    const ms1 = (n: number) => +n.toFixed(1)
+    const passes = (lines.passes as Pass[])
+      .filter((p) => p.startedAt >= t0)
+      .map((p) => ({
+        at: ms1(p.startedAt - t0),
+        ms: ms1(p.totalMs),
+        measureMs: ms1(p.measureMs),
+        decorateMs: ms1(p.decorateMs),
+        dispatchMs: ms1(p.dispatchMs),
+        publishMs: ms1(p.publishMs),
+        measured: p.measuredBlocks,
+        dirty: p.dirtyBlocks,
+        deferred: p.deferredBlocks,
+      }))
+    return {
+      syncMs: +syncMs.toFixed(1),
+      ms: +ms.toFixed(1),
+      allDrawnMs: +allDrawnMs.toFixed(1),
+      passMs: +(pass?.totalMs ?? -1).toFixed(1),
+      pages: e.layout().pageCount,
+      passCount: passes.length,
+      firstPasses: passes.slice(0, 4),
+      longTasks: longTasks.slice(0, 8),
+    }
   }, action)
 }
 

@@ -67,7 +67,13 @@ function guarded(cmd: Command, target: EventTarget | null, manuscript: HTMLEleme
 
 export function commandForKey(e: KeyboardEvent, platform: Platform): Command | undefined {
   if (e.isComposing || e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return undefined
-  return getCommands().find((c) => c.shortcut && matchesShortcut(c.shortcut, e, platform))
+  const keys = (c: Command) => (c.shortcut ? [c.shortcut, ...(c.altShortcuts ?? [])] : (c.altShortcuts ?? []))
+  const commands = getCommands()
+  // Exact keys first; then punctuation typed with a layout's Shift (see matchesShortcut).
+  return (
+    commands.find((c) => keys(c).some((k) => matchesShortcut(k, e, platform))) ??
+    commands.find((c) => keys(c).some((k) => matchesShortcut(k, e, platform, true)))
+  )
 }
 
 /** Install the shortcut listener on `window`. Returns uninstall. */

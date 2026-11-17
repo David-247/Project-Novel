@@ -141,6 +141,8 @@ export function SplitCommandButton({ commandId, label, icon, menuControlId, menu
         sections={[{ title: menuLabel, entries }]}
         trigger={<Chevron />}
         className={cn('px-0', command && 'rounded-l-none')}
+        // Greyed out with its main half when none of its commands can run (no changes to review).
+        disableWhenEmpty
       />
     </span>
   )

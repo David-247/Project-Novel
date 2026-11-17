@@ -104,6 +104,8 @@ export const PAGINATION_COMMANDS: readonly Command[] = [
     label: 'Zoom In',
     description: 'Make the pages larger on screen. The book itself does not change.',
     shortcut: C.zoomIn.shortcut,
+    // The numpad plus, and Ctrl+Shift+= ("+") on US keyboards.
+    altShortcuts: ['Mod-+'],
     menu: { id: 'view', group: 'zoom', order: 20 },
     ribbon: { group: 'view.zoom', order: 20 },
     isEnabled: () => layout().scale < MAX_SCALE - 0.001 && pct() < ZOOM_STEPS[ZOOM_STEPS.length - 1],

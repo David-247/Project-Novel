@@ -150,12 +150,8 @@
     background: var(--nv-accent-soft);
     color: var(--nv-text);
   }
-  @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-      transition-duration: 0.01ms !important;
-      animation-duration: 0.01ms !important;
-    }
-  }
+  /* No OS prefers-reduced-motion rule here: motion follows Settings > Motion, whose 'Follow system'
+     resolves the OS setting into <html data-reduce-motion="on"> (index.css stops all animation and
+     transitions there). A rule keyed on the media query alone would override 'Allow motion', and its
+     old 0.01 ms durations started a transition on every changed property of every element. */
 }

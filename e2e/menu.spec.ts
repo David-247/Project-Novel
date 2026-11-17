@@ -114,6 +114,14 @@ test('Help > Keyboard Shortcuts lists every registry shortcut and filters by sea
   for (const r of rows) {
     await expect(dialog.locator(`[data-command-id="${r.id}"] [data-testid="shortcut-keys"]`), r.id).toHaveText(r.keys)
   }
+  // Keys handled outside the registry are listed too (review UI #10), and found by search.
+  const nav = dialog.getByRole('region', { name: 'Navigation' })
+  await expect(nav.locator('[data-extra-shortcut="nav.pageUpDown"] [data-testid="shortcut-keys"]')).toHaveText('PageUp / PageDown')
+  await expect(nav.locator('[data-extra-shortcut="nav.docEdges"] [data-testid="shortcut-keys"]')).toHaveText(process.platform === 'darwin' ? '⌘↑ / ⌘↓' : 'Ctrl+Home / Ctrl+End')
+  await expect(nav.locator('[data-extra-shortcut="nav.ribbonEscape"]')).toBeVisible()
+  await page.getByRole('searchbox', { name: 'Search shortcuts' }).fill('pagedown')
+  await expect(dialog.locator('[data-command-id]')).toHaveCount(0)
+  await expect(dialog.locator('[data-extra-shortcut]')).toHaveCount(1)
   // The menu shows the same keys as the sheet.
   await page.getByRole('searchbox', { name: 'Search shortcuts' }).fill('bold')
   await expect(dialog.locator('[data-command-id]')).toHaveCount(1)
