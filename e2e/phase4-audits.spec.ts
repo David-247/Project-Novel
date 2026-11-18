@@ -27,6 +27,11 @@ const pane = (page: Page) => page.getByRole('complementary', { name: 'Navigation
 const wordCount = (page: Page) => page.getByRole('dialog', { name: 'Word Count' })
 const tip = (page: Page) => page.locator('[data-tooltip-body]')
 const menubar = (page: Page) => page.getByRole('menubar', { name: 'Menu bar' })
+/**
+ * The in-app menu bar is rendered on every platform in the e2e build (menuBarKind: only the desktop app
+ * on macOS shows the native one), so it missing is a failure, never a reason to skip the menu checks.
+ */
+const requireMenubar = (page: Page) => expect(menubar(page), 'the in-app menu bar is expected in the e2e build').toBeVisible()
 const focusedId = (page: Page) => page.evaluate(() => document.activeElement?.closest('[data-control-id]')?.getAttribute('data-control-id') ?? null)
 const STEPS = ['title', 'format', 'checks', 'export'] as const
 
@@ -143,16 +148,15 @@ test('tooltips: every Phase 4 control, with the pane, Word Count, each wizard st
   await ctl(wizard(page), 'export.finish').click()
   await expect(wizard(page)).toHaveCount(0)
 
-  // File > Export (the in-app menu bar; macOS uses the native one).
-  if (await menubar(page).isVisible()) {
-    await menubar(page).locator('[data-control-id="menu.file"]').click()
-    await page.locator('[role="menu"] [data-control-id="menu.file.export"]').click()
-    await expect(page.getByRole('menu')).toHaveCount(2)
-    await audit(page, 'File > Export', ['export.manuscript', 'export.again'])
-    await page.keyboard.press('Escape')
-    await page.keyboard.press('Escape')
-    await expect(page.getByRole('menu')).toHaveCount(0)
-  }
+  // File > Export (the in-app menu bar).
+  await requireMenubar(page)
+  await menubar(page).locator('[data-control-id="menu.file"]').click()
+  await page.locator('[role="menu"] [data-control-id="menu.file.export"]').click()
+  await expect(page.getByRole('menu')).toHaveCount(2)
+  await audit(page, 'File > Export', ['export.manuscript', 'export.again'])
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
 
   // The ribbon: Layout > Export (Manuscript…, Export Manuscript Again), hover and keyboard focus.
   await ribbonTab(page, 'layout')
@@ -413,21 +417,18 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
   await expect(wordCount(page)).toBeHidden()
   await expect(editor(page)).toBeFocused()
 
-  // The wizard from the menu bar (F10, File, Export, Manuscript…), or its shortcut where the menu bar is native.
-  if (await menubar(page).isVisible()) {
-    await page.keyboard.press('F10')
-    await expect.poll(() => focusedId(page)).toMatch(/^menu\./)
-    await keyTo(page, 'ArrowLeft', 'menu.file', 8)
-    await page.keyboard.press('ArrowDown')
-    await expect(page.getByRole('menu').first()).toBeVisible()
-    await keyTo(page, 'ArrowDown', 'menu.file.export')
-    await page.keyboard.press('ArrowRight')
-    await expect(page.getByRole('menu')).toHaveCount(2)
-    await keyTo(page, 'ArrowDown', 'export.manuscript')
-    await page.keyboard.press('Enter')
-  } else {
-    await page.keyboard.press('ControlOrMeta+Shift+X')
-  }
+  // The wizard from the menu bar (F10, File, Export, Manuscript…).
+  await requireMenubar(page)
+  await page.keyboard.press('F10')
+  await expect.poll(() => focusedId(page)).toMatch(/^menu\./)
+  await keyTo(page, 'ArrowLeft', 'menu.file', 8)
+  await page.keyboard.press('ArrowDown')
+  await expect(page.getByRole('menu').first()).toBeVisible()
+  await keyTo(page, 'ArrowDown', 'menu.file.export')
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('menu')).toHaveCount(2)
+  await keyTo(page, 'ArrowDown', 'export.manuscript')
+  await page.keyboard.press('Enter')
   await expect(wizard(page)).toBeVisible()
   // The wizard takes the focus as it opens (after the menu hands it back): wait for that before the
   // first Tab (seen once on macOS CI chromium: a Tab pressed in the same frame left from the menu bar).

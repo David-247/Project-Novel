@@ -68,7 +68,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/sidecar
-          key: sidecar-${{ runner.os }}-${{ hashFiles('scripts/fetch-typst.mjs') }}
+          # Its own key: the CI jobs cache one target's archive under sidecar-<os>-, and a hit on that key
+          # is never re-saved, so a release build would fetch the other target again every run.
+          key: sidecar-release-${{ matrix.sidecar-target }}-${{ hashFiles('scripts/fetch-typst.mjs') }}
       - name: Fetch Typst sidecar and fonts
         run: node scripts/fetch-typst.mjs --target ${{ matrix.sidecar-target }}
 
@@ -96,7 +98,7 @@ jobs:
             - macOS: the first time, right-click Novel in Applications and choose **Open**, then **Open** again. If macOS says the app is damaged, run `xattr -cr /Applications/Novel.app` in Terminal.
             - Windows: if SmartScreen appears, click **More info**, then **Run anyway**.
 
-      # The app must carry the sidecar and the fonts; installer sizes go to the job summary (the Typst
+      # The app must carry the sidecar, the fonts and the licence texts (the build tree on Windows, the app bundle on macOS); installer sizes go to the job summary (the Typst
       # sidecar is most of the size; compare with an earlier run's summary or artifacts).
       - name: Check the bundled sidecar and record installer sizes
         shell: bash
@@ -108,10 +110,16 @@ jobs:
             lipo -archs "$app/Contents/MacOS/typst" | grep -q arm64
             lipo -archs "$app/Contents/MacOS/typst" | grep -q x86_64
             test -f "$app/Contents/Resources/fonts/LiberationSerif-Regular.ttf"
+            test -f "$app/Contents/Resources/licenses/typst-NOTICE.txt"
+            test -f "$app/Contents/Resources/licenses/typst-LICENSE.txt"
+            test -f "$app/Contents/Resources/licenses/liberation-fonts-LICENSE.txt"
             "$app/Contents/MacOS/typst" --version
           else
             test -f src-tauri/target/release/typst.exe
             test -f src-tauri/target/release/fonts/LiberationSerif-Regular.ttf
+            test -f src-tauri/target/release/licenses/typst-NOTICE.txt
+            test -f src-tauri/target/release/licenses/typst-LICENSE.txt
+            test -f src-tauri/target/release/licenses/liberation-fonts-LICENSE.txt
             src-tauri/target/release/typst.exe --version
           fi
           {
