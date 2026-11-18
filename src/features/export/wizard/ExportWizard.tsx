@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { listSystemFonts } from '@/features/editor'
 import { PROFILE_MAX, useStore } from '@/shared/store'
 import type { PreferenceValues } from '@/shared/store'
-import { Button, cn, focusRing, IconButton, Tooltip } from '@/shared/ui'
+import { Button, cn, focusRing, IconButton, loopOptionTab, Tooltip } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
 import {
   CONTACT_FIELDS,
@@ -41,7 +41,7 @@ import {
   type RunState,
   type WizardStep,
 } from './controller'
-import { CheckField, DraftField, handleAccessKey, loopOptionTab, Mn, SelectField } from './fields'
+import { CheckField, DraftField, handleAccessKey, Mn, SelectField } from './fields'
 import { ChapterPagePreview, HeaderPreview, TitlePagePreview } from './previews'
 import { useExportRenderers, WIZARD_FORMATS, type WizardFormat } from './renderers'
 import { fileActionProblem } from './file-actions'
