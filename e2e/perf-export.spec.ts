@@ -56,3 +56,24 @@ test('100k-word manuscript: the export IR builds within budget', async ({ page }
   budget(testInfo, 'manuscript IR build, median ms', irBuild.medianMs, 500)
   budget(testInfo, 'manuscript IR build with 2,000 pending changes, median ms', irBuildTracked.medianMs, 500)
 })
+
+/**
+ * DOCX export (Phase 4, src/features/export/docx): the 100,000-word fixture, IR build plus the real
+ * renderer in its Web Worker, < 5 s (decision 1cedc290; median of 3 after a warm-up). Progress must
+ * reach 1 without going back. Numbers go to perf-results/perf-export-docx-*.json ("Export").
+ */
+test('100k-word manuscript: the DOCX export renders within budget', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const fixture = buildPaginationFixture()
+  await launch(page)
+  await page.evaluate((d) => window.__nvE2E.setDoc(d), fixture.doc)
+  await waitForLayout(page)
+  const r = await page.evaluate(() => window.__nvE2E.renderDocxTimes(3))
+  expect(r).not.toBeNull()
+  expect(r!.bytes).toBeGreaterThan(100_000)
+  expect(r!.fractions[r!.fractions.length - 1]).toBe(1)
+  for (let i = 1; i < r!.fractions.length; i++) expect(r!.fractions[i]).toBeGreaterThanOrEqual(r!.fractions[i - 1])
+  const docxExport = { medianMs: median(r!.ms), maxMs: Math.max(...r!.ms), runs: r!.ms, bytes: r!.bytes, framesDuringLastRun: r!.frames }
+  await report(testInfo, 'perf-export-docx', { docxExport })
+  budget(testInfo, 'DOCX export of 100k words (IR + render), median ms', docxExport.medianMs, 5000)
+})
