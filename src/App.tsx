@@ -58,6 +58,7 @@ import {
 } from '@/features/track-changes'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
 import { registerExportSideFile } from '@/features/export'
+import { NavigationPane, registerOutlineCommands } from '@/features/outline'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -122,6 +123,7 @@ export function App() {
       registerCommentsCommands(),
       registerTrackChangesCommands(),
       registerRewriteCommands(),
+      registerOutlineCommands(),
       // The toolbar's tabs and groups (Word-style ribbon; commands join groups by their `ribbon` field).
       registerAppRibbon(),
     ]
@@ -180,6 +182,7 @@ export function App() {
       <AppShell
         menuBar={<AppMenuBar />}
         toolbar={<Ribbon quickAccess={<RibbonQuickAccess />} />}
+        navigation={<NavigationPane />}
         editor={
           <>
             {/* Zero-height sticky anchor: the find panel floats at the top of the scrolling editor

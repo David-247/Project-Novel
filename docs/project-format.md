@@ -744,6 +744,8 @@ Windows and Cmd+, on macOS).
 | `profileAddress`, `profileAgent` | text, at most 400 and 300 characters; line breaks kept | Postal address and agent / agency for the title-page contact block. |
 | `exportFolders` | object: project id (the `id` of its project.json) to a folder path; at most 50 entries, oldest dropped | The folder of the last manuscript export of each project on this computer. Machine-local, so it lives here and never in a project. Reset to defaults keeps it. |
 | `profilePhone`, `profileEmail` | text, at most 60 and 200 characters | Phone and email for the contact block. |
+| `navigationPane` | `true`/`false` | View ▸ Navigation Pane is shown (Phase 4). Default `false`. Window layout, not a Settings value: Reset to defaults keeps it. |
+| `navigationPaneWidth` | number, 200 to 480 (CSS px; out-of-range values are clamped) | Width of the docked navigation pane. Default 280. Reset to defaults keeps it. |
 
 Rules:
 

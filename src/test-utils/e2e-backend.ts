@@ -26,6 +26,7 @@ import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
 import { commentsDebug } from '@/features/comments'
 import { rewriteDebug } from '@/features/rewrite'
+import { outlineDebug } from '@/features/outline'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
 import { getCommands, runCommand } from '@/shared/commands'
@@ -187,6 +188,8 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     countControls: () => document.body.querySelectorAll(CONTROL_SELECTOR).length,
     /** Take a crash-recovery snapshot now, as the 30 s autosave timer would (perf: autosave mid-typing). */
     autosaveNow: () => autosaveNow(),
+    /** Navigation pane: how long its last tree rebuild took (ms; perf report). */
+    outlineBuildMs: () => +outlineDebug.lastBuildMs.toFixed(2),
     // ---- Pagination (Phase 2) ----
     /** The engine has laid out the current document and no reflow is pending. */
     paginationSettled: () => getPaginationDebug().settled,
