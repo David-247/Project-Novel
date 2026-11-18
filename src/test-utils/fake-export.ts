@@ -1,10 +1,20 @@
 /**
  * TEST-ONLY stand-in for the Rust export platform commands (src-tauri/src/export), part of the fake
- * Tauri core (./fake-tauri-core.ts) used by Vitest and the e2e backend. It mirrors Rust's rules:
- * writes only to a path picked in the (fake) Save dialog, by token and kind; renders registered
- * before anything else so a cancel is never lost; reveal only for files it exported. The render
- * returns a stub PDF (no Typst in the browser).
+ * Tauri core (./fake-tauri-core.ts) used by Vitest and the e2e backend. It mirrors Rust's rules
+ * (src-tauri/src/export/files.rs), no more leniently:
+ * - a write goes only to a path picked in the (fake) Save dialog, named by its token and kind headers
+ *   (no headers: `invalid_token`); the last 16 grants are kept (MAX_PICKED);
+ * - reveal and open only for a file exported in this session (the last 32, MAX_EXPORTED; a restart
+ *   forgets them), and open only for a .docx or .pdf;
+ * - a typed Save-dialog name without an extension gets the kind's (`with_extension`);
+ * - the dialog starts in a folder only when it exists (`start_directory`; `missingFolders`);
+ * - renders are registered before anything else, so a cancel is never lost.
+ * The render returns a stub PDF (no Typst in the browser).
  */
+
+/** Rust's MAX_PICKED and MAX_EXPORTED (src-tauri/src/export/files.rs). */
+export const FAKE_MAX_PICKED = 16
+export const FAKE_MAX_EXPORTED = 32
 
 export const EXPORT_COMMAND_NAMES = [
   'export_pick_save_path',
@@ -43,8 +53,12 @@ export function createFakeExport(installedFonts: () => readonly string[], active
     savePath: undefined as string | null | undefined,
     picks: [] as { token: string; path: string; kind: Kind }[],
     nextToken: 0,
-    /** Files written by export_write_file or a render with an output token, by path. */
+    /** Files written by export_write_file or a render with an output token, by path (the disk). */
     written: new Map<string, Uint8Array>(),
+    /** Rust's session list of exported files (reveal / open accept only these). A restart clears it. */
+    exported: [] as string[],
+    /** Folders that no longer exist: the Save dialog does not start there (Rust's start_directory). */
+    missingFolders: new Set<string>(),
     /** Every export_render_pdf request, in order. */
     renders: [] as Record<string, unknown>[],
     /** Each render takes this long (so tests can cancel it). */
@@ -71,13 +85,28 @@ export function createFakeExport(installedFonts: () => readonly string[], active
   /** A relaunch of the app: Rust forgets its Save-dialog grants and exported files; its files on disk stay. */
   function restartSession() {
     state.picks = []
+    state.exported = []
   }
 
-  /** Where Rust opens the Save dialog: the most recent grant's folder (any kind), else the remembered one. */
+  /**
+   * Where Rust opens the Save dialog: the most recent grant's folder (any kind), else the remembered
+   * one; only a folder that exists (else the OS default: null).
+   */
   function dialogStart(): string | null {
     const last = state.picks[state.picks.length - 1]
-    if (last) return folderOf(last.path)
-    return state.remembered.get(activeRoot() ?? '') ?? null
+    const folder = last ? folderOf(last.path) : (state.remembered.get(activeRoot() ?? '') ?? null)
+    return folder !== null && !state.missingFolders.has(folder) ? folder : null
+  }
+
+  /** Rust's Targets::exported list: a successful write records its path (newest last, capped). */
+  function recordExported(path: string) {
+    state.exported = [...state.exported.filter((p) => p !== path), path].slice(-FAKE_MAX_EXPORTED)
+  }
+
+  /** Rust's exported_file: a path this session exported that is still on disk. */
+  function exportedFile(path: string): string {
+    if (!state.exported.includes(path) || !state.written.has(path)) throw fail('not_exported', 'Novel only shows files it has just exported.')
+    return path
   }
 
   function reset() {
@@ -85,6 +114,8 @@ export function createFakeExport(installedFonts: () => readonly string[], active
     state.picks = []
     state.nextToken = 0
     state.written.clear()
+    state.exported = []
+    state.missingFolders.clear()
     state.renders = []
     state.renderDelayMs = 0
     state.failRender = null
@@ -123,16 +154,18 @@ export function createFakeExport(installedFonts: () => readonly string[], active
     const a = (args ?? {}) as Record<string, unknown>
     switch (cmd) {
       case 'export_pick_save_path': {
-        const kind = a.kind === 'docx' ? 'docx' : 'pdf'
+        const kind: Kind = a.kind === 'docx' ? 'docx' : 'pdf'
         if ('directory' in a) throw fail('invalid_request', 'The webview names no folder for the Save dialog.')
         if (state.failPick) throw state.failPick
         state.dialogs.push({ kind, defaultName: String(a.defaultName ?? ''), directory: dialogStart() })
-        const path =
+        const typed =
           state.savePath === undefined ? `/exports/${safeName(String(a.defaultName ?? ''), kind)}` : state.savePath
-        if (path === null) return null
+        if (typed === null) return null
+        // Rust's with_extension: a name typed without an extension gets the kind's.
+        const path = /[^/]\.[^./]+$/.test(typed.slice(typed.lastIndexOf('/'))) ? typed : `${typed}.${kind}`
         state.nextToken += 1
         const token = `export-${state.nextToken}`
-        state.picks.push({ token, path, kind })
+        state.picks = [...state.picks, { token, path, kind }].slice(-FAKE_MAX_PICKED)
         return { token, path }
       }
       case 'export_write_file': {
@@ -140,14 +173,14 @@ export function createFakeExport(installedFonts: () => readonly string[], active
         const isBytes = args instanceof Uint8Array || Object.prototype.toString.call(args) === '[object Uint8Array]'
         if (!isBytes) throw fail('invalid_request', 'Expected the file bytes as the raw request body.')
         const body = args as Uint8Array
-        // mockIPC drops invoke options (headers): then the latest pick is the target.
+        // The target is named only by the headers (both harnesses pass them), as in Rust.
         const headers = (options?.headers ?? {}) as Record<string, string>
-        const last = state.picks[state.picks.length - 1]
-        const token = headers['x-export-token'] ?? last?.token
-        const kind = (headers['x-export-kind'] ?? last?.kind) as Kind
-        const path = target(token, kind)
+        const kind = headers['x-export-kind']
+        if (kind !== 'docx' && kind !== 'pdf') throw fail('invalid_request', 'Missing or unknown x-export-kind header.')
+        const path = target(headers['x-export-token'], kind)
         if (state.failWrite && (state.failWriteMatch === null || path.includes(state.failWriteMatch))) throw state.failWrite
         state.written.set(path, Uint8Array.from(body))
+        recordExported(path)
         state.remembered.set(activeRoot() ?? '', folderOf(path))
         return { path, bytes: body.length }
       }
@@ -169,6 +202,7 @@ export function createFakeExport(installedFonts: () => readonly string[], active
           const font = fontReport(req.font, req.preferInstalledFont !== false)
           if (path) {
             state.written.set(path, FAKE_PDF.slice())
+            recordExported(path)
             state.remembered.set(activeRoot() ?? '', folderOf(path))
             return { font, warnings: [], path, pdfBase64: null, bytes: FAKE_PDF.length }
           }
@@ -184,14 +218,12 @@ export function createFakeExport(installedFonts: () => readonly string[], active
         return cancel !== undefined
       }
       case 'export_reveal_in_folder': {
-        const path = String(a.path)
-        if (!state.written.has(path)) throw fail('not_exported', 'Novel only shows files it has just exported.')
-        state.reveals.push(path)
+        state.reveals.push(exportedFile(String(a.path)))
         return null
       }
       case 'export_open_file': {
-        const path = String(a.path)
-        if (!state.written.has(path)) throw fail('not_exported', 'Novel only shows files it has just exported.')
+        const path = exportedFile(String(a.path))
+        if (!/\.(docx|pdf)$/i.test(path)) throw fail('not_exported', 'Novel only opens the DOCX and PDF files it exported.')
         state.opens.push(path)
         return null
       }

@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
 
 import { core } from '@/test-utils/fake-tauri'
-import { pickSavePath, renderPdf, revealInFolder, writeExportFile } from '@/features/export'
-import { FAKE_PDF } from './fake-export'
+import { openExportedFile, pickSavePath, renderPdf, revealInFolder, writeExportFile } from '@/features/export'
+import { FAKE_MAX_EXPORTED, FAKE_MAX_PICKED, FAKE_PDF } from './fake-export'
 
 // The export platform wrapper running against the fake core (the path Wave 2's tests use).
 beforeEach(() => core.reset())
@@ -20,6 +20,55 @@ describe('fake export platform', () => {
     expect(core.exports.reveals).toEqual(['/exports/My Novel.docx'])
     await expect(revealInFolder('/etc/passwd')).rejects.toMatchObject({ kind: 'not_exported' })
     await expect(writeExportFile({ ...target!, kind: 'pdf' }, bytes)).rejects.toMatchObject({ kind: 'invalid_token' })
+  })
+
+  it('B-M5: as strict as Rust: a write without its token and kind headers is refused (no "latest pick" fallback)', async () => {
+    await pickSavePath('docx', 'My Novel')
+    await expect(core.handle('export_write_file', new Uint8Array([1]) as never)).rejects.toMatchObject({ kind: 'invalid_request' })
+    await expect(core.handle('export_write_file', new Uint8Array([1]) as never, { headers: { 'x-export-kind': 'docx' } })).rejects.toMatchObject({ kind: 'invalid_token' })
+    expect(core.exports.written.size).toBe(0)
+  })
+
+  it('B-M5: after a restart, reveal and open refuse the files of the earlier session (Rust forgets its list)', async () => {
+    const t = (await pickSavePath('docx', 'Book'))!
+    await writeExportFile(t, new Uint8Array([1]))
+    await revealInFolder('/exports/Book.docx')
+    core.restartExportSession()
+    expect(core.exports.written.has('/exports/Book.docx')).toBe(true)
+    await expect(revealInFolder('/exports/Book.docx')).rejects.toMatchObject({ kind: 'not_exported' })
+    await expect(openExportedFile('/exports/Book.docx')).rejects.toMatchObject({ kind: 'not_exported' })
+  })
+
+  it('B-M5: open refuses an exported file that is not .docx or .pdf; a typed name without an extension gets the kind\'s', async () => {
+    core.exports.savePath = '/exports/notes.txt'
+    const txt = (await pickSavePath('docx', 'x'))!
+    expect(txt.path).toBe('/exports/notes.txt')
+    await writeExportFile(txt, new Uint8Array([1]))
+    await revealInFolder('/exports/notes.txt')
+    await expect(openExportedFile('/exports/notes.txt')).rejects.toMatchObject({ kind: 'not_exported' })
+    core.exports.savePath = '/exports/Final'
+    expect((await pickSavePath('pdf', 'x'))!.path).toBe('/exports/Final.pdf')
+    core.exports.savePath = '/exports/.hidden'
+    expect((await pickSavePath('pdf', 'x'))!.path).toBe('/exports/.hidden.pdf')
+  })
+
+  it('B-M5: grants and the exported list are capped like Rust (16 and 32)', async () => {
+    const first = (await pickSavePath('docx', 'First'))!
+    for (let i = 0; i < FAKE_MAX_PICKED; i++) await pickSavePath('docx', `More ${i}`)
+    await expect(writeExportFile(first, new Uint8Array([1]))).rejects.toMatchObject({ kind: 'invalid_token' })
+    core.reset()
+    for (let i = 0; i <= FAKE_MAX_EXPORTED; i++) await writeExportFile((await pickSavePath('pdf', `F${i}`))!, new Uint8Array([1]))
+    await expect(revealInFolder('/exports/F0.pdf')).rejects.toMatchObject({ kind: 'not_exported' })
+    await revealInFolder(`/exports/F${FAKE_MAX_EXPORTED}.pdf`)
+  })
+
+  it('B-M5: the Save dialog starts in the last folder only while it exists (Rust start_directory)', async () => {
+    core.exports.savePath = '/books/Night.docx'
+    await pickSavePath('docx', 'a')
+    await pickSavePath('pdf', 'b')
+    core.exports.missingFolders.add('/books')
+    await pickSavePath('pdf', 'c')
+    expect(core.exports.dialogs.map((d) => d.directory)).toEqual([null, '/books', null])
   })
 
   it('a cancelled Save dialog returns null', async () => {
