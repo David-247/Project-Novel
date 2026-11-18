@@ -417,7 +417,7 @@ control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
   Size | Paper ▸ | Markup ▸ (All Markup, Simple Markup, No Markup, Original) | Comments Panel | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote,
   Comment), Format (Bold, Italic,
   Underline | Font ▸ (System Default and the installed families, as in the picker), Font Size ▸ | Paragraph Style ▸, Alignment ▸, Lists ▸, Line Spacing ▸, Space After ▸, First-Line Indent ▸ | Clear Formatting | Modify Style…, Manage Styles… |
-  Headers & Page Numbers…, Footnote Options…), Review (Track Changes | New Comment | Next Comment, Previous Comment | Show Resolved
+  Headers & Page Numbers…, Footnote Options…), Review (Word Count… | Track Changes | New Comment | Next Comment, Previous Comment | Show Resolved
   Comments), Help (Keyboard Shortcuts, Project Folder Format | About Novel).
 - **Keyboard** (one window listener, `installCommandShortcuts`): bubble phase, so a key the editor's keymap already
   handled is not run again; Cut/Copy/Paste keep the webview's own handling (`nativeShortcut`). Each command has a
@@ -485,6 +485,7 @@ What Word does, and what we took from it:
 | Layout | Header & Footer | Headers & page numbers |
 | Layout | Paper | The paper surface picker |
 | Layout | Book | Book Details |
+| Review | Proofing | Word Count (Phase 4, docs/word-count.md; Ctrl/Cmd+Shift+G) |
 | Review | Tracking | Track Changes, Markup |
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
@@ -496,7 +497,7 @@ What Word does, and what we took from it:
 
 Priorities (higher keeps its size longer): Home Font 90, Styles 80, Paragraph 75, Editing 60 (never collapses: two
 small buttons); Insert Breaks 90, Footnotes 80, Comments 70; Layout Page Setup 90, Header & Footer 80, Paper 70, Book
-60; Review Tracking 90, Changes 85, Comments 80, Re-write 70; View Views 90, Zoom 80, Show 70, Window 60. A group
+60; Review Tracking 90, Changes 85, Comments 80, Re-write 70, Proofing 60; View Views 90, Zoom 80, Show 70, Window 60. A group
 whose own controls are no wider than its group button (one icon) never collapses either; it only moves into More.
 
 **Model** (`src/shared/ribbon`, data only; any slice may use it):

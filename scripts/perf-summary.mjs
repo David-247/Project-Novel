@@ -143,6 +143,16 @@ export function toMarkdown(results, dir = 'perf-results') {
     md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...rows, '')
   }
 
+  // Phase 4: live word counts (e2e/perf.spec.ts). Typing with the counts on is in the typing table
+  // (blocking on Windows Chromium like plain typing); the count's catch-up is reported, not a budget.
+  const counts = results.filter((r) => r.wordCount && typeof r.wordCount === 'object')
+  if (counts.length) {
+    md.push('#### Live word count (status bar update after typing; reported, no budget)', '')
+    md.push('| scenario | engine / OS | one keystroke to count shown ms | after typing, caught up ms |', '| --- | --- | --- | --- |')
+    for (const r of counts) md.push(`| ${r.scenario} | ${pair(r)} | ${v(r.wordCount.updateMs)} | ${v(r.wordCount.caughtUpMs)} |`)
+    md.push('')
+  }
+
   const broken = results.filter((r) => r.error)
   for (const r of broken) md.push(`- ${r.file}: unreadable (${r.error})`)
   return md.join('\n') + '\n'

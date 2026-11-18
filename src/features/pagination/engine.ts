@@ -445,6 +445,60 @@ export class PaginationEngine {
     return this.snapshot
   }
 
+  /**
+   * Laid-out lines of the manuscript (`from`/`to` omitted), or the lines touched by the document
+   * range `[from, to)`: whole blocks inside it count all their lines, a partly selected textblock the
+   * lines from the one holding `from` to the one holding the last selected position. From the
+   * measurements of the last pass (no layout is forced, except to locate a line start in a partly
+   * selected block, cached per line). Null before the first pass.
+   */
+  countLines(from?: number, to?: number): number | null {
+    const snap = this.snapshot
+    if (!snap) return null
+    if (from === undefined || to === undefined) return snap.lines.length
+    if (to <= from) return 0
+    const view = this.view
+    const doc = view.state.doc
+    let scale = 0
+    let n = 0
+    doc.forEach((node, pos) => {
+      const end = pos + node.nodeSize
+      if (end <= from || pos >= to) return
+      const m = this.cache.get(node)
+      if (!m) return
+      for (const u of m.units) {
+        const uFrom = pos + u.rel
+        const uTo = uFrom + u.node.nodeSize
+        if (uTo <= from || uFrom >= to || !u.lines.length) continue
+        if (from <= uFrom && to >= uTo) {
+          n += u.lines.length
+          continue
+        }
+        const dom = view.nodeDOM(pos) as HTMLElement | null
+        if (!dom || dom.nodeType !== 1) {
+          n += u.lines.length
+          continue
+        }
+        scale ||= scaleOf(view.dom as HTMLElement)
+        // Largest k whose line starts at or before `rel` (line starts grow with k).
+        const lineAt = (rel: number) => {
+          let lo = 0
+          let hi = u.lines.length - 1
+          while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1
+            if (lineStart(view, pos, dom, u, mid, scale) <= rel) lo = mid
+            else hi = mid - 1
+          }
+          return lo
+        }
+        const first = from <= uFrom ? 0 : lineAt(from - pos)
+        const last = to >= uTo ? u.lines.length - 1 : lineAt(to - 1 - pos)
+        n += Math.max(0, last - first) + 1
+      }
+    })
+    return n
+  }
+
   onPass(cb: SnapshotListener): () => void {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)
