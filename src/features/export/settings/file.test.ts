@@ -25,7 +25,6 @@ describe('parseExportFile', () => {
       titlePage: { ...D().titlePage, showAgent: true, bylineStyle: 'by' as const },
       wordCountRounding: 'nearest-1000' as const,
       outputs: { docx: false, pdf: true },
-      lastOutputFolder: '/out/here',
     }
     const text = JSON.stringify(serializeExportFile({ settings: s, contact: { email: 'x@y.z' }, extra: {} }))
     const back = parseExportFile(JSON.parse(text), 'en-US')
@@ -46,6 +45,19 @@ describe('parseExportFile', () => {
       chapterDropFraction: 1 / 3,
       preset: 'classic',
     })
+  })
+  it('chapterDropFraction is 0 to 0.5 everywhere: 0.5 is kept, more falls back to one third', () => {
+    expect(parseExportFile({ settings: { chapterDropFraction: 0.5 } }, 'en-US').settings.chapterDropFraction).toBe(0.5)
+    expect(parseExportFile({ settings: { chapterDropFraction: 0.6 } }, 'en-US').settings.chapterDropFraction).toBe(1 / 3)
+  })
+  it('lastOutputFolder from an older file is dropped, not kept and not written', () => {
+    const p = parseExportFile({ version: 1, settings: { lastOutputFolder: 'C:\\Users\\ada\\Out', keep: 1 } }, 'en-US')
+    expect('lastOutputFolder' in p.settings).toBe(false)
+    expect(JSON.stringify(serializeExportFile(p))).not.toMatch(/ada|lastOutputFolder/)
+    expect(p.settingsExtra).toEqual({ keep: 1 })
+  })
+  it('does not trim text fields (a space just typed must stay)', () => {
+    expect(parseExportFile({ settings: { sceneBreak: '* ', header: { shortTitle: 'The ' } } }, 'en-US').settings).toMatchObject({ sceneBreak: '* ', header: { shortTitle: 'The ' } })
   })
   it('an unknown paper in a file with no paper uses the locale', () => {
     expect(parseExportFile({ version: 1, settings: {} }, 'en-GB').settings.paper).toBe('a4')

@@ -41,6 +41,11 @@ export interface PreferenceValues {
   profilePhone: string
   profileEmail: string
   profileAgent: string
+  /**
+   * Folder of the last manuscript export, by project id (a machine-local path, so it lives here and not in
+   * the project folder). At most MAX_EXPORT_FOLDERS entries; the oldest are dropped.
+   */
+  exportFolders: Record<string, string>
 }
 
 export interface Preferences extends PreferenceValues {
@@ -62,6 +67,20 @@ export const PROFILE_MAX = {
   profileAgent: 300,
 } as const
 
+export const MAX_EXPORT_FOLDERS = 50
+
+/** The default `exportFolders`: one shared object, so a fresh default is `===` the store's (no phantom change). */
+const NO_EXPORT_FOLDERS: Record<string, string> = Object.freeze({}) as Record<string, string>
+
+function readExportFolders(v: unknown): Record<string, string> | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
+  const out: Record<string, string> = {}
+  for (const [k, p] of Object.entries(v)) {
+    if (typeof p === 'string' && p !== '' && k.length <= 64 && p.length <= 1024) out[k] = p
+  }
+  return Object.fromEntries(Object.entries(out).slice(-MAX_EXPORT_FOLDERS))
+}
+
 /** The author-profile keys, in the order of the title-page contact block. */
 export const PROFILE_KEYS = ['profileLegalName', 'profilePenName', 'profileAddress', 'profilePhone', 'profileEmail', 'profileAgent'] as const
 
@@ -80,6 +99,7 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     profilePhone: '',
     profileEmail: '',
     profileAgent: '',
+    exportFolders: NO_EXPORT_FOLDERS,
   }
 }
 
@@ -100,6 +120,7 @@ const READERS: { [K in keyof PreferenceValues]: (v: unknown) => PreferenceValues
   profilePhone: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profilePhone) : undefined),
   profileEmail: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileEmail) : undefined),
   profileAgent: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileAgent) : undefined),
+  exportFolders: readExportFolders,
 }
 
 const KNOWN_KEYS = new Set<string>(Object.keys(READERS))
@@ -167,6 +188,7 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     profilePhone: p.profilePhone.trim(),
     profileEmail: p.profileEmail.trim(),
     profileAgent: p.profileAgent.trim(),
+    exportFolders: readExportFolders(p.exportFolders) ?? {},
   }
   return JSON.stringify(out, null, 2) + '\n'
 }

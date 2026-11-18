@@ -467,8 +467,7 @@ file is created only when the user changes a setting.
     "endMarker": "none",
     "titlePage": { "include": true, "showContact": true, "showAgent": false, "showWordCount": true, "bylineStyle": "a-novel-by" },
     "wordCountRounding": "auto",
-    "outputs": { "docx": true, "pdf": true },
-    "lastOutputFolder": null
+    "outputs": { "docx": true, "pdf": true }
   },
   "contact": { "email": "book@example.com" }
 }
@@ -487,16 +486,18 @@ file is created only when the user changes a setting.
 | `settings.sentenceSpacing` | `1`, `2` | Spaces after a sentence. |
 | `settings.header` | `format`: `surname-title-page`, `title-surname-page`, `surname-page`, `page`, `none`; `titleCase`: `as-typed`, `upper`; `startPage`: `1`, `2`; `shortTitle`: text | Running header. `startPage` 2 skips the title page. |
 | `settings.sceneBreak` | text, at most 20 characters | Centred marker between scenes. |
-| `settings.chapterDropFraction` | 0 to 0.75 | How far down the text area a chapter heading starts, as a fraction of its height. |
+| `settings.chapterDropFraction` | 0 to 0.5 | How far down the text area a chapter heading starts, as a fraction of its height. |
 | `settings.endMarker` | `"none"`, `"end"`, `"the-end"` | Marker after the last line. |
 | `settings.titlePage` | `include`, `showContact`, `showAgent`, `showWordCount`: boolean; `bylineStyle`: `a-novel-by`, `by`, `name-only` | Title page content. |
 | `settings.wordCountRounding` | `auto`, `nearest-100`, `nearest-500`, `nearest-1000`, `exact` | Rounding rule of the title-page word count. |
 | `settings.outputs` | `docx`, `pdf`: boolean | Formats the wizard exports. |
-| `settings.lastOutputFolder` | text or `null` | Folder of the last export, a machine-local hint (the wizard checks that it still exists). The only absolute path in a project; ignore it when it does not exist on this machine. |
 | `contact` | object with any of `legalName`, `penName`, `address`, `phone`, `email`, `agent` (text) | **Per-project override of the author profile.** Only the fields the user set for this project; absent when nothing is overridden. |
 
 Rules:
 
+- **No machine paths.** The folder of the last export is not a project setting: it is kept per project id in the app's
+  `preferences.json` (`exportFolders`, below), so no absolute path (often containing the OS user name) enters a project
+  folder, and remembering it is not a change of the project. A `lastOutputFolder` key found in an older file is dropped.
 - **Personal contact details are not stored in the project by default.** The contact block of the title page comes from
   the author profile in app Settings (`preferences.json`, below). `contact` is written only when the user overrides a
   field for this project, and holds only the overridden fields; clearing an override removes it.
@@ -725,7 +726,8 @@ Windows and Cmd+, on macOS).
   "profileAddress": "1 Analytical Way\nLondon",
   "profilePhone": "",
   "profileEmail": "ada@example.com",
-  "profileAgent": ""
+  "profileAgent": "",
+  "exportFolders": { "0b0c7d2e-0000-4000-8000-000000000000": "C:\\Exports" }
 }
 ```
 
@@ -740,6 +742,7 @@ Windows and Cmd+, on macOS).
 | `authorPrompted` | `true`/`false` | The one-time "who is writing?" question has been asked (answered or dismissed); it is never asked again. |
 | `profileLegalName`, `profilePenName` | text, at most 120 characters each | **Author profile** (Phase 4): the legal name and the by-line (pen) name for the title page of an exported manuscript. `""`: not set (an empty pen name means the legal name). |
 | `profileAddress`, `profileAgent` | text, at most 400 and 300 characters; line breaks kept | Postal address and agent / agency for the title-page contact block. |
+| `exportFolders` | object: project id (the `id` of its project.json) to a folder path; at most 50 entries, oldest dropped | The folder of the last manuscript export of each project on this computer. Machine-local, so it lives here and never in a project. Reset to defaults keeps it. |
 | `profilePhone`, `profileEmail` | text, at most 60 and 200 characters | Phone and email for the contact block. |
 
 Rules:

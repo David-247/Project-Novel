@@ -47,6 +47,7 @@ export {
   MAX_AUTHOR_NAME,
   PROFILE_MAX,
   PROFILE_KEYS,
+  MAX_EXPORT_FOLDERS,
   PAPER_SURFACES,
 } from './preferences-file'
 export type { ParsedPreferences } from './preferences-file'

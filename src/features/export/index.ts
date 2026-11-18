@@ -12,7 +12,8 @@
 // Project state (export.json is a storage side file; register it once at app start):
 // - registerExportSideFile()
 // - getManuscriptSettings() / useManuscriptSettings(), updateManuscriptSettings(), setPreset(),
-//   setLastOutputFolder(), getContactOverride() / useContactOverride(), setContactOverride()
+//   getLastOutputFolder() / useLastOutputFolder() / setLastOutputFolder() (machine-local: preferences.json by
+//   project id, never export.json), getContactOverride() / useContactOverride(), setContactOverride()
 // - getResolvedContact() / useResolvedContact(): the app author profile + the project's override
 export * from './settings'
 // --- end of the export settings block ------------------------------------------------------------

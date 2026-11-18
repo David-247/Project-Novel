@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from 'react'
-import { sideFileChanged } from '@/features/storage'
+import { getCurrentProjectMeta, sideFileChanged } from '@/features/storage'
+import { MAX_EXPORT_FOLDERS, useStore } from '@/shared/store'
 import { defaultManuscriptSettings, applyPreset, systemLocale } from './presets'
 import type { ExportFileContent, ParsedExportFile } from './file'
-import { parseExportFile } from './file'
+import { parseExportFile, readSettings } from './file'
 import type { ContactOverride, ManuscriptSettings, PresetId } from './types'
 import { CONTACT_FIELDS, CONTACT_MAX } from './types'
 
@@ -16,7 +17,7 @@ interface State {
   contact: ContactOverride
 }
 
-let state: State = { settings: defaultManuscriptSettings(''), contact: {} }
+let state: State = { settings: defaultManuscriptSettings(), contact: {} }
 let extra: Record<string, unknown> = {}
 let settingsExtra: Record<string, unknown> = {}
 /** The user changed something (or the file exists): there is something worth a file. */
@@ -40,7 +41,9 @@ export const getContactOverride = (): ContactOverride => state.contact
 export const useManuscriptSettings = (): ManuscriptSettings => useSyncExternalStore(subscribe, getManuscriptSettings)
 export const useContactOverride = (): ContactOverride => useSyncExternalStore(subscribe, getContactOverride)
 
-function commit(next: State): void {
+function commit(candidate: State): void {
+  // What is saved is what reopens: run the settings through the reader (clamps, falls back).
+  const next: State = { ...candidate, settings: readSettings(candidate.settings as unknown as Record<string, unknown>, candidate.settings.paper).settings }
   if (JSON.stringify(next) === JSON.stringify(state)) return
   state = next
   touched = true
@@ -74,9 +77,34 @@ export function setContactOverride(patch: ContactOverride): void {
   commit({ ...state, contact: next })
 }
 
-/** Remember the folder of the last export (the wizard offers it next time). */
+/**
+ * The folder of the last export of the open project, or null. Kept in the app's preferences.json by project
+ * id (machine-local), never in the project folder: reading or setting it is not a change of the project (no
+ * unsaved state, no autosave, no export.json write).
+ */
+export function getLastOutputFolder(): string | null {
+  const id = getCurrentProjectMeta()?.id
+  return id ? (useStore.getState().preferences.exportFolders[id] ?? null) : null
+}
+
+/** Reactive `getLastOutputFolder()`. */
+export function useLastOutputFolder(): string | null {
+  const folders = useStore((s) => s.preferences.exportFolders)
+  const id = getCurrentProjectMeta()?.id
+  return id ? (folders[id] ?? null) : null
+}
+
+/** Remember the folder of the last export of the open project (null forgets it). No-op without an open project. */
 export function setLastOutputFolder(folder: string | null): void {
-  updateManuscriptSettings({ lastOutputFolder: folder })
+  const id = getCurrentProjectMeta()?.id
+  if (!id) return
+  const current = useStore.getState().preferences.exportFolders
+  if ((current[id] ?? null) === (folder?.trim() || null)) return
+  const next = { ...current }
+  delete next[id]
+  if (folder?.trim()) next[id] = folder.trim()
+  const kept = Object.fromEntries(Object.entries(next).slice(-MAX_EXPORT_FOLDERS))
+  useStore.getState().preferencesActions.set('exportFolders', kept)
 }
 
 /** Storage opened a project: its export.json parsed (null: none, or a damaged one), or reset. */
@@ -100,7 +128,7 @@ export const getExportVersion = (): number => version
 
 /** Test-only. */
 export function __resetExportSettingsForTests(): void {
-  state = { settings: defaultManuscriptSettings(''), contact: {} }
+  state = { settings: defaultManuscriptSettings(), contact: {} }
   extra = {}
   settingsExtra = {}
   touched = false

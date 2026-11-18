@@ -78,9 +78,33 @@ The Classic preset changes only the type: Courier New 12 pt, underline for itali
 - **Rule.** Double-spaced throughout, so the editor can mark up between the lines. [S-shunn-story] [S-shunn-checklist]
   [S-maria]. The UK agencies Blake Friedmann asks for 1.5 spacing "preferably" [S-blake]; Felicity Bryan "double or 1.5"
   [S-felicity]; Eve White "double line spaced" [S-evewhite].
-- **Default.** Double. A generator sets the Word "Double" multiple (2.0 x the font's natural line height, about 27.6 pt
-  for Times New Roman 12). A fixed 24 pt line (the typewriter pitch of Standard Manuscript Format, 24 lines per page
-  [S-wiki]) is the equivalent for Courier 12 pt.
+- **Default.** Double, meaning Word's "Double": the baseline-to-baseline distance (the **pitch**) is 2 x the font's single
+  line height. Both generators must produce the same pitch, so it is fixed here (12 pt text). Single line height is the
+  font's ascent + descent + line gap (Times New Roman: 1825 + 443 + 87 of 2048 units = 1.1499 em; Courier New: 1705 +
+  615 + 0 of 2048 = 1.1328 em). Tinos, Liberation Serif, Cousine and Liberation Mono carry the same vertical metrics.
+
+  | Font (12 pt) | Single | Double (default) | 1.5 |
+  |---|---|---|---|
+  | Times New Roman / Tinos / Liberation Serif | 13.80 pt | **27.60 pt** | 20.70 pt |
+  | Courier New / Cousine / Liberation Mono | 13.59 pt | **27.19 pt** | 20.39 pt |
+
+  The typewriter pitch of Standard Manuscript Format is a fixed 24 pt line (24 lines per page [S-wiki]); it is not used.
+  - **DOCX (`docx` library):** paragraph `spacing: { line: 480, lineRule: "auto", before: 0, after: 0 }` (240 = single,
+    360 = 1.5, 480 = double). Word then derives 27.60 pt itself from the font.
+  - **Typst:** text and paragraph settings, with the line box set to the font's ascender-to-descender height
+    (Times 0.8911 + 0.2163 = 1.1074 em = 13.29 pt; Courier 0.8325 + 0.2998 = 1.1323 em = 13.59 pt), and `leading` the
+    rest of the pitch:
+    ```typst
+    #set page(paper: "us-letter", margin: 1in)            // "a4" on A4
+    #set text(size: 12pt, top-edge: "ascender", bottom-edge: "descender", hyphenate: false)
+    #set par(leading: 14.31pt, spacing: 14.31pt, justify: false,   // Times: 27.60 - 13.29
+             first-line-indent: (amount: 0.5in, all: true))        // Courier: leading and spacing 13.60pt
+    ```
+    `spacing` is set equal to `leading` so the pitch is the same between paragraphs as inside them (no extra gap). For
+    1.5 and single, `leading = lineSpacing x single height - 13.29 pt` (Times) or `- 13.59 pt` (Courier).
+    The metrics above are the published font values; the Typst ticket must assert, with a rendered page, that the
+    baseline-to-baseline pitch equals the table value within 0.1 pt, and correct `leading` if Typst measures the line
+    box differently.
 - **Options.** 1.5 (for UK agencies that ask), single.
 
 ### Paragraphs and alignment
@@ -218,8 +242,8 @@ is "starting to get long for querying a debut". [S-broad]
 | Literary fiction | 50,000 - 120,000 | (same) | [S-bransford] |
 | Commercial / general fiction | 75,000 - 100,000 | 70,000 - 100,000 | [S-bransford], [S-broad] |
 | Historical fiction | 80,000 - 120,000 | (same) | [S-bransford] |
-| Fantasy | 80,000 - 120,000 | (same) | [S-bransford], [S-broad] (adult SFF 100,000 - 120,000) |
-| Science fiction | 90,000 - 120,000 | (same) | [S-bransford], [S-broad] |
+| Fantasy | 80,000 - 120,000 | 100,000 - 120,000 | [S-bransford]; [S-broad] (adult SFF recommendations "more in the 100,000 to 120,000 range") |
+| Science fiction | 90,000 - 120,000 | 100,000 - 120,000 | [S-bransford]; [S-broad] (as fantasy) |
 | Romance | 50,000 - 90,000 | (same) | [S-bransford] |
 | Mystery | 75,000 - 90,000 | (same) | [S-bransford] |
 | Thriller | 80,000 - 100,000 | (same) | [S-bransford] |

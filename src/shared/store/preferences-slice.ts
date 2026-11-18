@@ -43,6 +43,7 @@ export const createPreferencesSlice: SliceCreator<PreferencesSlice> = (set) => (
           profilePhone: s.preferences.profilePhone,
           profileEmail: s.preferences.profileEmail,
           profileAgent: s.preferences.profileAgent,
+          exportFolders: s.preferences.exportFolders,
           extra: s.preferences.extra,
           loaded: s.preferences.loaded,
         },

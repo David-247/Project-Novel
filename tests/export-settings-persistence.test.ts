@@ -21,6 +21,7 @@ import {
 import {
   defaultManuscriptSettings,
   getContactOverride,
+  getLastOutputFolder,
   getManuscriptSettings,
   getResolvedContact,
   registerExportSideFile,
@@ -29,7 +30,7 @@ import {
   setPreset,
   updateManuscriptSettings,
 } from '@/features/export'
-import { __resetExportSettingsForTests } from '@/features/export/settings/store'
+import { __resetExportSettingsForTests, getExportVersion } from '@/features/export/settings/store'
 
 // Test-only resets of storage internals: this test drives the real storage slice end to end with the
 // export settings registered as a side file (it lives in tests/, outside the slice-import rule).
@@ -177,11 +178,59 @@ describe('export.json', () => {
     useStore.getState().preferencesActions.set('profileEmail', '')
   })
 
-  it('remembers the last output folder', async () => {
+  it('the last output folder is machine-local: kept per project in preferences, never a project change or in the file', async () => {
     await createProject()
-    setLastOutputFolder('/exports')
+    editor.update(textDoc('x'))
     expect(await saveProject()).toBe(true)
-    expect(onDisk().settings.lastOutputFolder).toBe('/exports')
+    expect(editor.isDirty()).toBe(false)
+    const prefs = () => useStore.getState().preferences
+    expect(getLastOutputFolder()).toBeNull()
+    setLastOutputFolder('C:\\Users\\ada\\Exports')
+    expect(getLastOutputFolder()).toBe('C:\\Users\\ada\\Exports')
+    // Not a change of the project: still saved, no export.json, no unsaved state for autosave to snapshot.
+    expect(editor.isDirty()).toBe(false)
+    expect(getExportVersion()).toBe(0)
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.has(FILE)).toBe(false)
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_INTERVAL_MS)
+    expect(backend.files.has(RECOVERY)).toBe(false)
+    // It is in the app preferences, keyed by the project id.
+    const id = JSON.parse(backend.files.get(`${ROOT}/project.json`)!).id as string
+    expect(prefs().exportFolders[id]).toBe('C:\\Users\\ada\\Exports')
+    // A later change to the file never carries the path.
+    updateManuscriptSettings({ sceneBreak: '***' })
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(FILE)).not.toMatch(/ada|Exports|lastOutputFolder/)
+    // It does not change the guard of a damaged file either: setting it leaves the file alone.
+    setLastOutputFolder(null)
+    expect(getLastOutputFolder()).toBeNull()
+    expect(prefs().exportFolders[id]).toBeUndefined()
+    useStore.getState().preferencesActions.set('exportFolders', {})
+  })
+
+  it('setting the last output folder leaves a guarded (damaged) export.json guarded', async () => {
+    await createProject()
+    backend.files.set(FILE, '{ not json')
+    await launch()
+    await reopen()
+    setLastOutputFolder('/exports')
+    editor.update(textDoc('typing'))
+    expect(await saveProject()).toBe(true)
+    expect(backend.files.get(FILE)).toBe('{ not json')
+    expect([...backend.files.keys()].some((k) => /export\.damaged-/.test(k))).toBe(false)
+    useStore.getState().preferencesActions.set('exportFolders', {})
+  })
+
+  it('what is saved is what reopens: out-of-range values are normalised when set', async () => {
+    await createProject()
+    updateManuscriptSettings({ chapterDropFraction: 0.9, fontSizePt: 200, paper: 'a3' as never })
+    expect(getManuscriptSettings()).toMatchObject({ chapterDropFraction: 1 / 3, fontSizePt: 12 })
+    updateManuscriptSettings({ chapterDropFraction: 0.5 })
+    const live = getManuscriptSettings()
+    expect(await saveProject()).toBe(true)
+    await launch()
+    await reopen()
+    expect(getManuscriptSettings()).toEqual(live)
   })
 
   it('a change that sets what is already set is not a change', async () => {
@@ -224,10 +273,19 @@ describe('export.json', () => {
 
   it('opening another project resets to its own settings (none: defaults)', async () => {
     await createProject()
-    updateManuscriptSettings({ sceneBreak: '***' })
+    updateManuscriptSettings({ sceneBreak: '***', paper: 'a4' })
+    setContactOverride({ email: 'first@example.com' })
     expect(await saveProject()).toBe(true)
-    __resetExportSettingsForTests()
-    expect(getManuscriptSettings().sceneBreak).toBe('#')
+    // A second project in another folder, opened in the same session.
+    backend.dirs.add('/books/second')
+    backend.pick = '/books/second'
+    expect(await newProject()).toBe(true)
+    expect(getManuscriptSettings()).toEqual(defaultManuscriptSettings(navigator.language))
+    expect(getContactOverride()).toEqual({})
+    // And back: the first project's own settings return.
+    expect(await openProject(ROOT)).toBe(true)
+    expect(getManuscriptSettings()).toMatchObject({ sceneBreak: '***', paper: 'a4' })
+    expect(getContactOverride()).toEqual({ email: 'first@example.com' })
   })
 
   it('Save a Copy carries it', async () => {

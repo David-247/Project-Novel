@@ -11,6 +11,9 @@ import { CONTACT_FIELDS, CONTACT_MAX } from './types'
 export const EXPORT_FILE = 'export.json'
 export const EXPORT_FILE_VERSION = 1
 
+/** Largest chapter drop: half the text-area height (docs/manuscript-format.md: one third to one half). */
+export const MAX_CHAPTER_DROP = 0.5
+
 export interface ExportFileContent {
   settings: ManuscriptSettings
   /** Per-project contact override: only the fields the user set for this project. */
@@ -37,23 +40,27 @@ const range = (v: unknown, min: number, max: number): number | undefined => (isN
 const SETTINGS_KEYS = [
   'preset', 'paper', 'fontFamily', 'fontSizePt', 'lineSpacing', 'margins', 'firstLineIndentIn', 'indentFirstParagraph',
   'italics', 'sentenceSpacing', 'header', 'sceneBreak', 'chapterDropFraction', 'endMarker', 'titlePage',
-  'wordCountRounding', 'outputs', 'lastOutputFolder',
+  'wordCountRounding', 'outputs',
 ] as const
 
+/** Keys an older file may carry that are dropped on read (and so on the next write), not kept as unknown. */
+const DROPPED_KEYS = new Set(['lastOutputFolder'])
+
 /** `settings` of the file over the defaults, field by field. */
-function readSettings(raw: Obj, locale: string | null | undefined): { settings: ManuscriptSettings; extra: Obj } {
+export function readSettings(raw: Obj, locale: string | null | undefined): { settings: ManuscriptSettings; extra: Obj } {
   const d = defaultManuscriptSettings(locale)
   const m = isObj(raw.margins) ? raw.margins : {}
   const h = isObj(raw.header) ? raw.header : {}
   const t = isObj(raw.titlePage) ? raw.titlePage : {}
   const o = isObj(raw.outputs) ? raw.outputs : {}
   const margin = (v: unknown, fallback: number) => range(v, 0, 4) ?? fallback
-  const fam = text(raw.fontFamily, 80)?.trim()
-  const marker = text(raw.sceneBreak, 20)?.trim()
+  // Not trimmed: a field being typed into must keep the space just typed. Blank falls back to the default.
+  const fam = text(raw.fontFamily, 80)
+  const marker = text(raw.sceneBreak, 20)
   const settings: ManuscriptSettings = {
     preset: oneOf(raw.preset, Object.keys(PRESETS) as (keyof typeof PRESETS)[]) ?? d.preset,
     paper: oneOf(raw.paper, ['letter', 'a4'] as const) ?? d.paper,
-    fontFamily: fam ? fam : d.fontFamily,
+    fontFamily: fam && fam.trim() ? fam : d.fontFamily,
     fontSizePt: range(raw.fontSizePt, 8, 24) ?? d.fontSizePt,
     lineSpacing: oneOf(raw.lineSpacing, [1, 1.5, 2] as const) ?? d.lineSpacing,
     margins: { top: margin(m.top, d.margins.top), right: margin(m.right, d.margins.right), bottom: margin(m.bottom, d.margins.bottom), left: margin(m.left, d.margins.left) },
@@ -65,10 +72,10 @@ function readSettings(raw: Obj, locale: string | null | undefined): { settings: 
       format: oneOf(h.format, ['surname-title-page', 'title-surname-page', 'surname-page', 'page', 'none'] as const) ?? d.header.format,
       titleCase: oneOf(h.titleCase, ['as-typed', 'upper'] as const) ?? d.header.titleCase,
       startPage: oneOf(h.startPage, [1, 2] as const) ?? d.header.startPage,
-      shortTitle: text(h.shortTitle, 80)?.trim() ?? d.header.shortTitle,
+      shortTitle: text(h.shortTitle, 80) ?? d.header.shortTitle,
     },
-    sceneBreak: marker ? marker : d.sceneBreak,
-    chapterDropFraction: range(raw.chapterDropFraction, 0, 0.75) ?? d.chapterDropFraction,
+    sceneBreak: marker && marker.trim() ? marker : d.sceneBreak,
+    chapterDropFraction: range(raw.chapterDropFraction, 0, MAX_CHAPTER_DROP) ?? d.chapterDropFraction,
     endMarker: oneOf(raw.endMarker, ['none', 'end', 'the-end'] as const) ?? d.endMarker,
     titlePage: {
       include: bool(t.include) ?? d.titlePage.include,
@@ -79,11 +86,10 @@ function readSettings(raw: Obj, locale: string | null | undefined): { settings: 
     },
     wordCountRounding: oneOf(raw.wordCountRounding, ['auto', 'nearest-100', 'nearest-500', 'nearest-1000', 'exact'] as const) ?? d.wordCountRounding,
     outputs: { docx: bool(o.docx) ?? d.outputs.docx, pdf: bool(o.pdf) ?? d.outputs.pdf },
-    lastOutputFolder: raw.lastOutputFolder === null ? null : (text(raw.lastOutputFolder, 1024) ?? d.lastOutputFolder),
   }
   const known = new Set<string>(SETTINGS_KEYS)
   const extra: Obj = {}
-  for (const [k, v] of Object.entries(raw)) if (!known.has(k)) extra[k] = v
+  for (const [k, v] of Object.entries(raw)) if (!known.has(k) && !DROPPED_KEYS.has(k)) extra[k] = v
   return { settings, extra }
 }
 

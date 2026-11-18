@@ -33,7 +33,6 @@ describe('defaults', () => {
       endMarker: 'none',
       chapterDropFraction: 1 / 3,
       outputs: { docx: true, pdf: true },
-      lastOutputFolder: null,
     })
     expect(s.header).toMatchObject({ format: 'surname-title-page', startPage: 2, titleCase: 'as-typed' })
     expect(s.wordCountRounding).toBe('auto')
@@ -74,9 +73,9 @@ describe('presets', () => {
   })
   it('lists both', () => expect(Object.keys(PRESETS).sort()).toEqual(['classic', 'standard']))
   it('applyPreset changes the look but keeps the user choices', () => {
-    const base = { ...defaultManuscriptSettings('en-GB'), sceneBreak: '* * *', lastOutputFolder: '/out' }
+    const base = { ...defaultManuscriptSettings('en-GB'), sceneBreak: '* * *' }
     const classic = applyPreset(base, 'classic')
-    expect(classic).toMatchObject({ preset: 'classic', fontFamily: 'Courier New', italics: 'underline', paper: 'a4', sceneBreak: '* * *', lastOutputFolder: '/out' })
+    expect(classic).toMatchObject({ preset: 'classic', fontFamily: 'Courier New', italics: 'underline', paper: 'a4', sceneBreak: '* * *' })
     expect(applyPreset(classic, 'standard')).toMatchObject({ preset: 'standard', fontFamily: 'Times New Roman', italics: 'italic' })
   })
 })
@@ -170,6 +169,12 @@ describe('genre word-count table', () => {
     expect(checkWordCount('thriller', 110_000)).toMatchObject({ status: 'long' })
     expect(checkWordCount('thriller', 135_000)).toMatchObject({ status: 'very-long' })
     expect(checkWordCount('unknown-genre', 90_000)).toMatchObject({ status: 'unknown' })
+  })
+  it('adult SFF debut range is the 100,000 - 120,000 the agent source gives', () => {
+    expect(GENRE_WORD_COUNTS.find((g) => g.id === 'fantasy')!.debut).toEqual({ min: 100_000, max: 120_000 })
+    expect(GENRE_WORD_COUNTS.find((g) => g.id === 'science-fiction')!.debut).toEqual({ min: 100_000, max: 120_000 })
+    expect(checkWordCount('fantasy', 85_000).status).toBe('within')
+    expect(checkWordCount('fantasy', 85_000, { debut: true }).status).toBe('short')
   })
   it('uses the debut range when asked and one exists', () => {
     expect(checkWordCount('commercial', 72_000).status).toBe('short')

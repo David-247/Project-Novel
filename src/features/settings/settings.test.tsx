@@ -197,6 +197,7 @@ describe('writing preferences.json', () => {
         'authorPrompted',
         'defaultPaper',
         'defaultTrimSize',
+        'exportFolders',
         'pageNavigation',
         'profileAddress',
         'profileAgent',

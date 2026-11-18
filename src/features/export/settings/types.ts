@@ -83,11 +83,9 @@ export interface ManuscriptSettings {
   titlePage: TitlePageSettings
   wordCountRounding: WordCountRounding
   outputs: OutputSettings
-  /**
-   * The folder the last export went to. A machine-local hint for the wizard (it checks that the folder
-   * still exists); the only absolute path in a project folder.
-   */
-  lastOutputFolder: string | null
+  // The folder of the last export is NOT a project setting (an absolute path, often with the OS user
+  // name, must not enter a shareable folder): see getLastOutputFolder() / setLastOutputFolder(), kept in
+  // the app's preferences.json by project id.
 }
 
 /** Contact details of the author (legal name, pen name, address, phone, email, agent). */

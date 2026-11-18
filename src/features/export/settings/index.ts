@@ -10,6 +10,8 @@ export {
   updateManuscriptSettings,
   setPreset,
   setLastOutputFolder,
+  getLastOutputFolder,
+  useLastOutputFolder,
   getContactOverride,
   useContactOverride,
   setContactOverride,
