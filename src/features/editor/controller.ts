@@ -5,6 +5,7 @@ import { useStore } from '@/shared/store'
 import { TRACKING_BLOCK_ATTRS } from '@/shared/track-changes'
 import { REWRITE_BLOCK_ATTR } from '@/shared/rewrite'
 import { createEditorExtensions } from './extensions'
+import { attachWordCount } from './word-count/publisher'
 
 /**
  * Module-level bridge between the mounted Tiptap editor and the rest of the
@@ -100,11 +101,14 @@ export function attachEditor(editor: Editor): () => void {
     if (tr.docChanged && !tr.getMeta('preventUpdate') && tr.before.eq(tr.doc)) onUpdate({ editor: ed })
   }
   editor.on('transaction', onTransaction)
+  // Live word counts (store `wordCount`), published off the typing path.
+  const detachWordCount = attachWordCount(editor, subscribeDocLoad)
   notify(editorListeners)
 
   return () => {
     editor.off('update', onUpdate)
     editor.off('transaction', onTransaction)
+    detachWordCount()
     if (current !== editor) return
     if (!editor.isDestroyed) {
       // Keep the content reachable via getDocJSON() and restorable on remount.

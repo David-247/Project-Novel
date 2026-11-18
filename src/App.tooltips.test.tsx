@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { FIND_CONTROLS, getEditor, HISTORY_CONTROLS, setDocJSON, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, flushWordCount, getEditor, HISTORY_CONTROLS, setDocJSON, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
 import { auditTooltipCoverage, formatCoverageProblems, getTooltipCopy, TOOLTIP_REGISTRY } from '@/features/tooltips'
 import { SURFACE_CONTROLS } from '@/shared/theme'
@@ -41,6 +41,8 @@ async function renderFullApp(extra?: React.ReactNode) {
     </>,
   )
   await waitFor(() => expect(getEditor()).not.toBeNull())
+  // The status bar's word count shows once the manuscript is counted (off the typing path).
+  act(() => flushWordCount())
   act(() => useStore.getState().findActions.openPanel('night'))
   await screen.findByRole('textbox', { name: FIND_CONTROLS.query.label })
   return utils
@@ -74,6 +76,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
         'review.markup',
         'file.new_project',
         'file.open_project',
+        'wordCount.indicator',
         // The ribbon: its tabs, and registry commands shown as buttons (all tabs stay mounted).
         ...['home', 'insert', 'layout', 'review', 'view'].map((t) => `ribbon.tab.${t}`),
         ...[
@@ -87,6 +90,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'comment.prev',
           'comment.next',
           'comment.showResolved',
+          'review.wordCount',
           'review.change.prev',
           'review.change.next',
           'review.accept',
@@ -137,10 +141,10 @@ describe('tooltip coverage (every control in the app has a registered, wired too
   it('covers the no-project state: New / Open, and Save as project once text was typed', async () => {
     const { container } = await renderFullApp()
     const statusBar = container.querySelector('footer[aria-label="Status bar"]')!
-    // Project actions (the page view controls always follow them).
+    // Project actions (the word count and the page view controls always follow them).
     const ids = () =>
       Array.from(statusBar.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id')).filter(
-        (id) => !id!.startsWith('pagination.'),
+        (id) => !id!.startsWith('pagination.') && !id!.startsWith('wordCount.'),
       )
     expect(ids()).toEqual(['file.new_project', 'file.open_project'])
     expect(statusBar).toHaveTextContent('No project open')

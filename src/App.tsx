@@ -13,6 +13,9 @@ import {
   onDocChange,
   registerEditorCommands,
   setDocJSON,
+  setWordCountLineSource,
+  WordCountDialog,
+  WordCountIndicator,
 } from '@/features/editor'
 import { registerBookSettingsCommands } from '@/features/book-settings'
 import { HeaderFooter, registerHeaderFooterCommands } from '@/features/header-footer'
@@ -25,7 +28,7 @@ import {
   SaveStatusIndicator,
   useStorageIntegration,
 } from '@/features/storage'
-import { invalidatePaginationAt, PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
+import { countLines, invalidatePaginationAt, PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
 import { registerFootnoteCommands, useFootnotePagination } from '@/features/footnotes'
 import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
 import {
@@ -157,6 +160,8 @@ export function App() {
       setOnTrackingSwitchedOn(null)
     }
   }, [])
+  // Word Count's "Lines" are the pages' lines (pagination slice).
+  useEffect(() => setWordCountLineSource(countLines), [])
   // Track changes: a markup view switch re-measures the blocks holding changes (hidden text).
   useEffect(() => setMarkupViewRepaginate(invalidatePaginationAt), [])
   // Accept / Reject All above 50 changes asks with the app's native message dialog.
@@ -202,6 +207,7 @@ export function App() {
             <ChangesIndicator />
             <span className="flex-1" />
             <NoProjectActions />
+            <WordCountIndicator />
             <PageIndicator />
             <ZoomControls />
           </>
@@ -215,6 +221,8 @@ export function App() {
       <RecoveryDialog />
       {/* Help and Go to Page dialogs (portal). */}
       <MenuDialogs />
+      {/* Review > Word Count (portal). */}
+      <WordCountDialog />
       {/* Tracked change details with Accept / Reject (portal). */}
       <ChangePopover />
     </TooltipProvider>

@@ -288,6 +288,57 @@ function buildFootnotedManuscript() {
   return { ...built, content, notes }
 }
 
+/**
+ * Phase 4: live word counts (docs/word-count.md). The status bar shows "100,000 words" and follows the
+ * typing; the count runs off the typing path (throttled, in an idle callback), so typing keeps its
+ * budget, blocking on Windows Chromium CI like plain typing (decision f040009b). The time from the
+ * last keystroke to the status bar showing its count is reported (not a budget: it is the throttle
+ * plus one count).
+ */
+test('100k-word manuscript with live word counts: typing stays within budget and the count follows', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const { doc, words } = buildManuscript()
+  const openMs = await openEpic(page, '/projects/Counted', doc)
+  const count = page.getByTestId('word-count')
+  await expect(count).toHaveText('100,000 words', { timeout: 30_000 })
+  await installLatencyProbe(page)
+  const typing = await measureTyping(page)
+  // TYPED runs on from the paragraph's last word (no space before it): its first word joins that one.
+  const after = words + TYPED.trim().split(/\s+/).length - 1
+  const t0 = Date.now()
+  await expect(count).toHaveText(`${after.toLocaleString('en-US')} words`, { timeout: 10_000 })
+  const caughtUpMs = Date.now() - t0
+  // One more keystroke, timed to the count update in the page.
+  const updateMs = await page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        const el = document.querySelector('[data-testid="word-count"]')!
+        const before = el.textContent
+        const t = performance.now()
+        const obs = new MutationObserver(() => {
+          if (el.textContent !== before) {
+            obs.disconnect()
+            resolve(performance.now() - t)
+          }
+        })
+        obs.observe(el, { characterData: true, childList: true, subtree: true })
+        document.execCommand('insertText', false, ' x')
+      }),
+  )
+  await expect(count).toHaveText(`${(after + 1).toLocaleString('en-US')} words`)
+
+  await report(testInfo, 'perf-word-count', {
+    manuscript: { words, blocks: doc.content.length },
+    openMs,
+    typing,
+    wordCount: { caughtUpMs, updateMs: +updateMs.toFixed(1) },
+    budgets: { typingMedianMs: 50 },
+  })
+
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  budget(testInfo, 'typing median ms (live word counts)', typing.medianMs, 50)
+})
+
 test('100k-word manuscript with 200 footnotes: typing in the main text stays within budget', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   const { content, notes, ...built } = buildFootnotedManuscript()

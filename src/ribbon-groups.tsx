@@ -100,6 +100,11 @@ const icons = {
       <path d="M10 5.5C8.5 4 6 3.5 3 3.5v12c3 0 5.5.5 7 2 1.5-1.5 4-2 7-2v-12c-3 0-5.5.5-7 2zM10 5.5v12" />
     </Icon>
   ),
+  proofing: () => (
+    <Icon>
+      <path d="M3 4.5h9M3 8.5h6M3 12.5h4M11.5 16.5l2-6 2 6M12.2 14.5h2.6M17.5 9.5v7" />
+    </Icon>
+  ),
   tracking: () => (
     <Icon>
       <path d="M3 5h8M3 9h6M3 13h4M10.5 16.5l.8-3 5-5 2.2 2.2-5 5z" />
@@ -286,6 +291,8 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
   },
   { id: 'layout.book', tab: 'layout', label: 'Book', order: 40, priority: 60, icon: icons.book },
   // ---- Review ----
+  // Proofing (Word's first Review group): Word Count, placed by its command.
+  { id: 'review.proofing', tab: 'review', label: 'Proofing', order: 5, priority: 60, icon: icons.proofing },
   {
     id: 'review.tracking',
     tab: 'review',

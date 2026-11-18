@@ -9,6 +9,7 @@ import type { PreferencesSlice } from './preferences-slice'
 import type { CommentsSlice } from './comments-slice'
 import type { TrackChangesSlice } from './track-changes-slice'
 import type { RewriteSlice } from './rewrite-slice'
+import type { WordCountSlice } from './word-count-slice'
 
 /**
  * Compose the full store state here: `RootState = AppSlice & EditorSlice & ...`.
@@ -23,7 +24,8 @@ export type RootState = AppSlice &
   PreferencesSlice &
   CommentsSlice &
   TrackChangesSlice &
-  RewriteSlice
+  RewriteSlice &
+  WordCountSlice
 
 /** A slice creator contributes state + named actions to the single store. */
 export type SliceCreator<S> = StateCreator<RootState, [], [], S>

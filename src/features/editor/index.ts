@@ -113,3 +113,15 @@ export { getFootnotes } from './footnote/api'
 export { registerEditorCommands } from './commands'
 export { openModifyStyle, setManagingStyles } from './styles/dialog-state'
 export { FOOTNOTE_EDITOR_CONTROLS } from './footnote/controls'
+// Word count (Phase 4, docs/word-count.md). The mounted manuscript's live counts are published to the
+// store's `wordCount` (document, selection, front matter, per chapter; body and footnotes apart, and
+// `total` per "Include footnotes"), off the typing path. countManuscript / countRange count any
+// document the same way (text with every tracked change accepted; cached per top-level block).
+// <WordCountIndicator> goes in the status bar, <WordCountDialog> once in the app (portal); lines come
+// from setWordCountLineSource (the composition root wires the pagination slice's countLines).
+export { countManuscript, countRange } from './word-count/count'
+export type { BodyAndNotes, ManuscriptCounts } from './word-count/count'
+export { flushWordCount, WORD_COUNT_THROTTLE_MS } from './word-count/publisher'
+export { WordCountDialog, WordCountIndicator, openWordCount, setWordCountLineSource, wordCountText } from './word-count/WordCount'
+export { WORD_COUNT_CONTROLS } from './word-count/controls'
+export type { WordCountControlMeta } from './word-count/controls'
