@@ -78,7 +78,7 @@ export const BUNDLED = [
     license: 'Apache-2.0 AND LPPL-1.3c',
     note: 'LPPL-1.3c covers embedded language data, shipped unmodified',
     externalBin: 'binaries/typst',
-    texts: ['typst-LICENSE.txt', 'typst-NOTICE.txt'],
+    texts: ['typst-LICENSE.txt', 'typst-NOTICE.txt', 'lppl-1.3c.txt'],
   },
   {
     name: 'Liberation Fonts',
