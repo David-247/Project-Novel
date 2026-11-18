@@ -65,8 +65,7 @@ interface ManuscriptRenderer<TSettings> {
 - `signal`: check before starting and between units of work; reject with `abortError()` (an `AbortError`).
 - `onProgress({ fraction, done?, total?, stage? })`: `fraction` 0 → 1, never decreasing, 1 last.
 - Never mutate the IR or the settings; no network; resolve with the file's bytes (the caller writes them).
-- `TSettings` defaults to `ManuscriptSettingsPlaceholder` until the settings ticket's `ManuscriptSettings`
-  replaces it at merge.
+- `TSettings` defaults to `ManuscriptSettings` (the export settings, src/features/export/settings/types.ts).
 
 Renderers print their own scene-break marker (never `original`), chapter openings from `number` / `title`,
 and number footnotes with `number` (`label` is the book's symbol form).

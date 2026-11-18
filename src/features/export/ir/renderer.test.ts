@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { defaultManuscriptSettings } from '../settings'
 import { FIXTURE_MANUSCRIPT_IR } from './fixtures'
 import { createMockRenderer } from './mock-renderer'
 import { manuscriptPlainText } from './plain-text'
@@ -8,13 +9,14 @@ import type { ManuscriptIR } from './types'
 /** The renderer contract (./renderer.ts), checked on the mock renderer. */
 
 const ir = (): ManuscriptIR => structuredClone(FIXTURE_MANUSCRIPT_IR)
+const settings = defaultManuscriptSettings('en-US')
 
 describe('ManuscriptRenderer contract (mock renderer)', () => {
   it('resolves with the bytes, reporting progress from 0 up to 1, and leaves the IR unchanged', async () => {
     const renderer = createMockRenderer()
     const input = ir()
     const progress: RenderProgress[] = []
-    const bytes = await renderer.render(input, {}, { onProgress: (p) => progress.push(p) })
+    const bytes = await renderer.render(input, settings, { onProgress: (p) => progress.push(p) })
     // (jsdom's TextEncoder returns another realm's Uint8Array: check the tag, not instanceof.)
     expect(Object.prototype.toString.call(bytes)).toBe('[object Uint8Array]')
     const text = new TextDecoder().decode(bytes)
@@ -32,16 +34,16 @@ describe('ManuscriptRenderer contract (mock renderer)', () => {
     const renderer = createMockRenderer({ delayMs: 5 })
     const before = new AbortController()
     before.abort()
-    await expect(renderer.render(ir(), {}, { signal: before.signal })).rejects.toSatisfy(isAbortError)
+    await expect(renderer.render(ir(), settings, { signal: before.signal })).rejects.toSatisfy(isAbortError)
 
     const during = new AbortController()
-    const run = renderer.render(ir(), {}, { signal: during.signal, onProgress: (p) => p.done === 1 && during.abort() })
+    const run = renderer.render(ir(), settings, { signal: during.signal, onProgress: (p) => p.done === 1 && during.abort() })
     await expect(run).rejects.toSatisfy(isAbortError)
   })
 
   it('rejects an IR version it does not know', async () => {
     const future = { ...ir(), version: 99 } as unknown as ManuscriptIR
     expect(() => assertManuscriptVersion(future)).toThrow(UnsupportedManuscriptVersionError)
-    await expect(createMockRenderer().render(future, {})).rejects.toBeInstanceOf(UnsupportedManuscriptVersionError)
+    await expect(createMockRenderer().render(future, settings)).rejects.toBeInstanceOf(UnsupportedManuscriptVersionError)
   })
 })

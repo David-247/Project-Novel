@@ -1,5 +1,6 @@
+import type { ManuscriptSettings } from '../settings'
 import { manuscriptPlainText } from './plain-text'
-import { assertManuscriptVersion, throwIfAborted, type ManuscriptRenderer, type ManuscriptSettingsPlaceholder, type RenderOptions } from './renderer'
+import { assertManuscriptVersion, throwIfAborted, type ManuscriptRenderer, type RenderOptions } from './renderer'
 import type { ManuscriptIR } from './types'
 
 export interface MockRenderer<TSettings> extends ManuscriptRenderer<TSettings> {
@@ -20,7 +21,7 @@ const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * per chapter; cancelling between chapters rejects with an AbortError. For the wizard's tests and
  * as the reference the DOCX / PDF renderers are tested like.
  */
-export function createMockRenderer<TSettings = ManuscriptSettingsPlaceholder>(options: MockRendererOptions = {}): MockRenderer<TSettings> {
+export function createMockRenderer<TSettings = ManuscriptSettings>(options: MockRendererOptions = {}): MockRenderer<TSettings> {
   const calls: { ir: ManuscriptIR; settings: TSettings }[] = []
   return {
     format: 'text',

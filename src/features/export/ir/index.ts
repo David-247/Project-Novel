@@ -33,7 +33,7 @@ export type {
   ManuscriptIR,
 } from './types'
 export { assertManuscriptVersion, abortError, isAbortError, throwIfAborted, UnsupportedManuscriptVersionError } from './renderer'
-export type { ManuscriptRenderer, ManuscriptSettingsPlaceholder, RenderOptions, RenderProgress, ExportFormat } from './renderer'
+export type { ManuscriptRenderer, RenderOptions, RenderProgress, ExportFormat } from './renderer'
 export { manuscriptPlainText, runsText } from './plain-text'
 export type { PlainTextOptions } from './plain-text'
 export { createMockRenderer } from './mock-renderer'

@@ -1,3 +1,4 @@
+import type { ManuscriptSettings } from '../settings'
 import { MANUSCRIPT_IR_VERSION, type ManuscriptIR } from './types'
 
 /**
@@ -5,14 +6,6 @@ import { MANUSCRIPT_IR_VERSION, type ManuscriptIR } from './types'
  * generator through the Typst sidecar; EPUB later) implements `ManuscriptRenderer`, so the export
  * wizard drives them the same way.
  */
-
-/**
- * PLACEHOLDER, replaced at merge: the export settings type (`ManuscriptSettings`) is written by the
- * research-and-settings ticket in parallel. Renderers are generic over their settings, so the merge
- * only changes the default type argument below; no field is assumed here.
- */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ManuscriptSettingsPlaceholder {}
 
 export type ExportFormat = 'docx' | 'pdf' | 'text'
 
@@ -44,7 +37,7 @@ export interface RenderOptions {
  *   (`assertManuscriptVersion`), and with an `AbortError` once `signal` is aborted.
  * - It resolves with the complete file's bytes; writing them to disk is the caller's job.
  */
-export interface ManuscriptRenderer<TSettings = ManuscriptSettingsPlaceholder> {
+export interface ManuscriptRenderer<TSettings = ManuscriptSettings> {
   readonly format: ExportFormat
   /** e.g. 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'. */
   readonly mimeType: string

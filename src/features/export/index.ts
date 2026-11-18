@@ -17,3 +17,12 @@
 // - getResolvedContact() / useResolvedContact(): the app author profile + the project's override
 export * from './settings'
 // --- end of the export settings block ------------------------------------------------------------
+
+// --- Manuscript IR (src/features/export/ir/*) ----------------------------------------------------
+// The renderer-neutral manuscript (docs/manuscript-ir.md):
+// - buildManuscript(doc, styles, options) -> ManuscriptIR (pending tracked changes accepted)
+// - ManuscriptRenderer<TSettings = ManuscriptSettings>, RenderOptions / RenderProgress, ExportFormat,
+//   assertManuscriptVersion(), abortError() / isAbortError() / throwIfAborted()
+// - manuscriptPlainText() / runsText(), createMockRenderer(), and the feature fixtures
+export * from './ir'
+// --- end of the manuscript IR block --------------------------------------------------------------
