@@ -150,6 +150,13 @@ test('every control has a tooltip, is reachable with Tab, and the audit finds no
     'settings.authorName',
     'settings.authorColor',
     // 'Automatic colour' is disabled until a colour is chosen, so Tab skips it.
+    // Author profile (Phase 4: the contact details for manuscript export).
+    'settings.profileLegalName',
+    'settings.profilePenName',
+    'settings.profileAddress',
+    'settings.profilePhone',
+    'settings.profileEmail',
+    'settings.profileAgent',
     'settings.pageNavigation',
     'settings.reduceMotion',
     'settings.defaultPaper',
