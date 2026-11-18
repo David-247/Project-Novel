@@ -33,6 +33,24 @@ describe('loopOptionTab: Option+Tab loops inside the wizard like a plain Tab', (
     expect(active()).toBe('next')
   })
 
+  it('forward, a dialog that can take the focus takes it, and the browser moves on to the first stop', async () => {
+    const root = setup()
+    root.tabIndex = -1
+    focus('next')
+    const fwd = key({})
+    expect(loopOptionTab(fwd, root)).toBe(true)
+    // Not prevented: the browser's own Option+Tab continues from the dialog (its first stop: Close).
+    expect(fwd.defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(root)
+    // jsdom's Tab moves nothing: the focus is finished on the first stop.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(active()).toBe('close')
+    // Backward still focuses the last stop itself.
+    focus('close')
+    expect(loopOptionTab(key({ shiftKey: true }), root)).toBe(true)
+    expect(active()).toBe('next')
+  })
+
   it('in the middle, or for a plain Tab, the browser (and the focus trap) move the focus', () => {
     const root = setup()
     focus('title')
