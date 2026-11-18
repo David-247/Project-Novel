@@ -66,7 +66,7 @@ book settings together with the text.
 - Pages are laid out with the fonts installed on your computer, so the same manuscript can paginate slightly
   differently on macOS and Windows. The automated cross-engine check uses a bundled test font to separate engine
   differences from font differences (see "End-to-end tests").
-- Export (PDF, DOCX) and the AI tutor are later phases (track changes and comments came in Phase 3, below).
+- The AI tutor is a later phase (track changes and comments came in Phase 3, manuscript export in Phase 4, below).
 
 ## Development
 
@@ -130,6 +130,25 @@ Phase 2 (book layout) adds:
   most max(2, 1 %), chapter openings by 1 page (2 for chapters that open on a right-hand page). A miss fails the
   job with a diff table in the job summary.
 
+Phase 4 (manuscript export) adds:
+
+- `e2e/phase4-acceptance.spec.ts`: the acceptance scenario. On the 100k-word fixture: the Navigation Pane jumps to
+  chapters in Book and Scroll mode, and the word and page counts follow typing. On the wizard fixture: the wizard
+  with a blocking check fixed through Fix, DOCX and PDF, settings through save, reopen and crash recovery, and Export
+  Manuscript Again. The 100k-word book exports too, and an offline run (network off, the app's files from disk)
+  exports with no outside request. The browser has no Typst, so the fake core returns a stub PDF. The test renders
+  the request the app sent with the real sidecar, as Rust would, and reads it back with pdfjs-dist: title page,
+  headers, page numbers, chapter openings. It needs `pnpm fetch:typst`, and without it the PDF checks are skipped
+  (CI sets `NOVEL_REQUIRE_TYPST=1`). The files go to `e2e-exports/`. CI uploads them, and on macOS it also renders
+  them with Quick Look and PDFKit (`scripts/render-pdf-pages.swift`), so they can be looked at as macOS draws them.
+- `e2e/phase4-audits.spec.ts`: the tooltip audit with the pane, Word Count, every wizard step, File > Export, the
+  ribbon's Export group and the export status open. AA contrast of all of them on the four paper surfaces in light
+  and dark (the measurer in `e2e/contrast.ts`). The whole flow from the keyboard.
+- Perf: IR build, DOCX export (`e2e/perf-export.spec.ts`), typing with the pane open and the outline after a trim
+  reflow (`e2e/outline-perf.spec.ts`), and the PDF render of 100k words by the sidecar
+  (`src/features/export/pdf/pdf.sidecar.test.ts`, in CI's Rust job). Budgets: IR build < 500 ms, DOCX < 5 s,
+  PDF < 15 s, typing < 50 ms, outline caught up < 1 s after a trim change.
+
 Real-app smoke (Windows/Linux only; WebDriver does not exist for macOS WKWebView): install
 `tauri-driver` (`cargo install tauri-driver`) and an msedgedriver matching your WebView2 version
 (`EDGEWEBDRIVER` may point at it or its folder), build the app, then
@@ -143,7 +162,7 @@ modes rely on, so it could only fail. Run it locally as above, or by hand on a r
 
 ### Feature slices
 
-`src/features/{editor,storage,tooltips,app-shell,book-settings,pagination,header-footer,footnotes}/` are independent
+`src/features/{editor,storage,tooltips,app-shell,book-settings,pagination,header-footer,footnotes,track-changes,comments,rewrite,menu,ribbon,settings,outline,export}/` are independent
 slices; the shared book contract (types, trim sizes, styles, header/footer resolution) is `src/shared/book`. Each exposes **only** `src/features/<slice>/index.ts`
 as its public interface. A slice may import another slice's `index.ts` (`@/features/other`) or `@/shared/*`, never its internals
 (`@/features/other/x` or `../other/x`). ESLint (`no-restricted-imports` in `eslint.config.js`) enforces this; `tests/cross-slice-lint.test.ts`
@@ -198,6 +217,52 @@ the project. Crash recovery restores the ones that were not saved yet, together 
   until the change is accepted or rejected (decision 5a4f5103; see [docs/track-changes.md](docs/track-changes.md)).
 - There are no context menus (right-click). Every action is in the menu bar, the ribbon or a shortcut.
 - Revision marks are not exported, and there are no AI suggestions or collaboration. These are later phases.
+
+### Manuscript export (Phase 4)
+
+Version 0.4.0 exports the book as a submission manuscript, a Word file (DOCX) and a PDF in standard manuscript format
+(Shunn's "Proper Manuscript Format": Times New Roman 12 pt, double-spaced, 1 in margins, a title page, the running
+header `Surname / Title / page`). It also adds a live word count and a Navigation Pane. Export runs fully offline, and
+the PDF is typeset by the bundled Typst engine. Every control has a tooltip (hover, or focus it with the keyboard), and
+everything below works from the keyboard. "Mod" is ⌘ on macOS and Ctrl on Windows.
+
+| Try | How | What to look for |
+| --- | --- | --- |
+| Word count | The status bar ("84,212 words", or "120 of 84,212 words" with a selection). Review > Word Count, Mod+Shift+G, or a click on the status bar count | Counts follow your typing within a moment. The dialog shows words, characters, paragraphs, lines and pages. "Include footnotes" changes the count everywhere, the title page too. Pending tracked changes are counted as accepted. |
+| Navigation Pane | View > Navigation Pane, Mod+Shift+O | Word's Headings pane: front matter, chapters and subheadings, each with its words and pages. A click, or the arrows and Enter, jumps there in Book and Scroll mode alike. Left and Right fold a chapter, and typing a letter finds a heading. Escape returns to the text. Drag the edge to resize. In a narrow window the pane floats over the pages. |
+| Your author profile | File > Settings… (macOS: Novel > Settings…), Author profile | Legal name, pen name, address, phone, email and agent. They go on the title page of every export and stay on this computer, never in the project folder. The wizard can override them for one project. |
+| Export a manuscript | File > Export > Manuscript…, Mod+Shift+X, or Layout > Export > Manuscript… | A four-step wizard: **Title page** (title, by-line, contact block, genre for the length check, word-count rounding, with a live preview), **Formatting** (Standard or Classic Courier preset, Letter or A4, scene break marker, end marker), **Checks**, **Export**. Alt+N and Alt+B go to the next and previous step, Alt+1 to Alt+4 to a step, Alt+E exports. |
+| Checks before exporting | The Checks step | Length against the genre, pending tracked changes (exported as accepted), comments (never exported), open re-writes, chapter numbering gaps, untitled chapters, manual scene breaks, stray formatting, double spaces, a missing title, name or contact details. **Show me** closes the wizard and puts the cursor on the problem, and **Fix** goes to the field. A blocking check (no title, name or contact) disables Export until it is fixed. |
+| Export | The Export step: choose DOCX, PDF or both, then Export | Each file goes where you choose in the Save dialog (the second dialog opens where the first file went). Progress and Cancel, then **Open file** and **Show in folder**. A cancel or an error leaves no partial file. Errors (a full disk, a folder you cannot write to, a PDF the engine could not make) come with Retry. |
+| Export Manuscript Again | File > Export > Export Manuscript Again, Mod+Alt+Shift+X, or Layout > Export | The same settings to the same files: it asks before replacing them, then shows progress in the status bar, without the wizard. After a restart, the Save dialogs come back, because Novel only writes where you chose in this session. |
+
+**What to check in the files.** Open the DOCX in Word (or LibreOffice, Pages) and the PDF in any reader:
+
+- The title page: your contact block at the upper left, "about N words" at the upper right (rounded to the nearest
+  100, or 500 from 20,000 words), the title a third of the way down, and "A Novel by …" below it. There is no header
+  on the title page.
+- The running header `Surname / Title / 1`, flush right, from the first page of text. The page numbers run on from
+  there.
+- Every chapter starts on a new page, a third of the way down, with scene breaks shown as a centred `#`.
+- No revision marks or comments. Pending changes appear as accepted. The text is double-spaced, with a 0.5 in indent
+  and no space between paragraphs.
+
+**Save and reopen.** The export settings are saved with the project in `export.json` (see
+[docs/project-format.md](docs/project-format.md)). They survive Save and reopening the project, and crash recovery
+restores unsaved ones. The format rules, their sources and every option are in
+[docs/manuscript-format.md](docs/manuscript-format.md). The DOCX details are in
+[docs/docx-export.md](docs/docx-export.md).
+
+**Known limitations (Phase 4).**
+
+- Fonts: the PDF uses Times New Roman or Courier New when they are installed. Otherwise it uses the bundled Liberation
+  Serif or Liberation Mono, which have the same metrics, and the wizard says which it used. The DOCX names the font,
+  and Word substitutes it on a computer that lacks it.
+- Footnotes are real footnotes. With the book's "per chapter" footnote numbering, the PDF restarts at each chapter, but
+  Word numbers the DOCX through the document. Endnotes are not offered.
+- There is no EPUB, direct submission or print-ready (trim size) PDF. Those are later phases. The export is the
+  manuscript format, not the book layout on screen.
+- The navigation pane does not reorder chapters by dragging.
 
 Projects are plain folders (`project.json`, `manuscript.json`, `index.sqlite`); see [docs/project-format.md](docs/project-format.md).
 The storage slice talks to the editor only through the `DocumentProvider` contract in `src/shared/document.ts`.

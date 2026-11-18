@@ -153,6 +153,30 @@ describe('navigation pane (View ▸ Navigation Pane)', () => {
     expect(useStore.getState().preferences.navigationPane).toBe(false)
   })
 
+  it('REGRESSION: a click or a key in the manuscript before the tree is built cancels the focus request (the focus stays in the text)', async () => {
+    await renderApp()
+    const ed = getEditor()!
+    for (const interact of [
+      () => fireEvent.pointerDown(ed.view.dom),
+      () => fireEvent.keyDown(ed.view.dom, { key: 't' }),
+    ]) {
+      act(() => useStore.getState().preferencesActions.set('navigationPane', false))
+      ed.view.focus()
+      expect(document.activeElement).toBe(ed.view.dom)
+      // The command, then (after its own event) an interaction in the manuscript, which keeps the focus
+      // where it was: before the fix the request survived and the tree took the focus once built.
+      act(() => runCommand('view.navigationPane'))
+      await act(() => new Promise((r) => setTimeout(r, 0)))
+      // As in the app, the interaction is in the manuscript, with the focus there (jsdom's events do
+      // not move the focus themselves; a tree already focused by now is a later, valid case).
+      ed.view.focus()
+      interact()
+      await waitFor(() => expect(rows()).toHaveLength(4))
+      await act(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))))
+      expect(document.activeElement).toBe(ed.view.dom)
+    }
+  })
+
   it('live: an edit updates the counts after the word count publish (not on the keystroke)', async () => {
     await renderApp()
     act(() => runCommand('view.navigationPane'))

@@ -16,6 +16,7 @@ src-tauri/target/
 src-tauri/gen/
 playwright-report/
 test-results/
+e2e-exports/
 coverage/
 *.log
 .DS_Store

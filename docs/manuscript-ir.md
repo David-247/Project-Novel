@@ -92,5 +92,7 @@ an `AbortError` (no bytes, so no file). `src-tauri/templates/manuscript.sample.j
 - `createMockRenderer()`: keeps the contract; the bytes are `manuscriptPlainText(ir, { footnotes: true })`.
 - 100k words: `buildPaginationFixture()` (e2e/fixtures/pagination-manuscript.ts).
 
-Word-count parity (IR text vs. the live word count) is checked in the Wave 2 DOCX / PDF tickets, once the
-word count engine is merged (ruling R2); `manuscriptPlainText` is the IR side.
+Word-count parity: `manuscriptWordCount(ir)` (counted from the IR runs) equals the live word count
+(`countManuscript`) on the same document, body and footnotes (`ir/word-count-parity.test.ts`,
+`docx/word-count-parity.test.ts`, `pdf/word-count-parity.test.ts`). `manuscriptPlainText` is not used for counting: it
+writes list markers as text, which Word counts and the app does not.

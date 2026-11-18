@@ -14,15 +14,57 @@ const setOpen = (open: boolean) => useStore.getState().preferencesActions.set('n
 let focusRequested = false
 /** Where the focus was when it was requested: if the user moved it since, the request lapses. */
 let focusedAtRequest: Element | null = null
+/** A click or a key outside the pane since the request (see cancelOnInteraction). */
+let interacted = false
 const focusListeners = new Set<() => void>()
 
-/** The pane asks whether it should take the focus now (and clears the request). */
-export function takeFocusRequest(): boolean {
+/**
+ * The pane asks whether it should take the focus now (and clears the request). Null: no. Otherwise a
+ * check to call right before focusing (the pane focuses a frame later): false when the user clicked or
+ * typed outside the pane in between.
+ */
+export function takeFocusRequest(): (() => boolean) | null {
   const r = focusRequested
   focusRequested = false
   const moved = document.activeElement !== focusedAtRequest && document.activeElement !== document.body
   focusedAtRequest = null
-  return r && !moved
+  if (!r || moved || interacted) {
+    stopWatchingInteraction()
+    return null
+  }
+  return () => {
+    const ok = !interacted
+    stopWatchingInteraction()
+    return ok
+  }
+}
+
+/**
+ * A click or a key outside the pane after the request also cancels it, even when the focus stays
+ * where it was (a click into the manuscript that already had the focus): otherwise a tree built later
+ * (an idle callback) would take the focus from text being typed (seen on macOS CI: the typed words went
+ * to the tree's type-ahead). The listeners are added after the current event, so the shortcut's own
+ * keydown does not count.
+ */
+let stopWatchingInteraction: () => void = () => {}
+function cancelOnInteraction() {
+  stopWatchingInteraction()
+  interacted = false
+  const cancel = (e: Event) => {
+    if (e.target instanceof Element && e.target.closest(`[${PANE_ATTR}]`)) return
+    interacted = true
+    focusRequested = false
+  }
+  const timer = setTimeout(() => {
+    window.addEventListener('pointerdown', cancel, true)
+    window.addEventListener('keydown', cancel, true)
+  }, 0)
+  stopWatchingInteraction = () => {
+    clearTimeout(timer)
+    window.removeEventListener('pointerdown', cancel, true)
+    window.removeEventListener('keydown', cancel, true)
+    stopWatchingInteraction = () => {}
+  }
 }
 
 export function onFocusRequest(cb: () => void): () => void {
@@ -33,6 +75,7 @@ export function onFocusRequest(cb: () => void): () => void {
 function requestFocus() {
   focusRequested = true
   focusedAtRequest = document.activeElement
+  cancelOnInteraction()
   focusListeners.forEach((l) => l())
 }
 

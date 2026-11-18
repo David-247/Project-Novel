@@ -198,9 +198,12 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
     // Until the tree is built a request waits (the pane opens first, its rows an idle callback later).
     if (!hasData) return
     const take = () => {
-      if (!takeFocusRequest()) return
-      // After the pane rendered: the row in the tab order (the current heading), else the tree.
+      const stillWanted = takeFocusRequest()
+      if (!stillWanted) return
+      // After the pane rendered: the row in the tab order (the current heading), else the tree; not
+      // when the user clicked or typed elsewhere in the meantime.
       requestAnimationFrame(() => {
+        if (!stillWanted()) return
         const tree = treeRef.current
         const row = tree?.querySelector<HTMLElement>('[role="treeitem"][tabindex="0"]')
         if (row) row.focus()
