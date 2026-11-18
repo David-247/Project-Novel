@@ -32,6 +32,36 @@ function accessKey(e: KeyboardEvent | ReactKeyboardEvent): string | null {
   return null
 }
 
+const TAB_STOPS = 'a[href], button, input, select, textarea, [tabindex]'
+
+/** The Tab stops of `root` in DOM order (no positive tabindex is used): enabled, visible, not tabindex -1, one per radio group. */
+function tabStops(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(TAB_STOPS)).filter((el) => {
+    if ((el as HTMLButtonElement).disabled || el.tabIndex < 0) return false
+    if (typeof el.checkVisibility === 'function' ? !el.checkVisibility() : el.closest('[hidden]')) return false
+    const input = el as HTMLInputElement
+    return !(el.tagName === 'INPUT' && input.type === 'radio' && !input.checked && input.name !== '')
+  })
+}
+
+/**
+ * Option+Tab (Alt+Tab), Safari's and WKWebView's "every control" Tab when "Keyboard navigation" is
+ * off: the dialog's focus trap (Radix FocusScope) only loops a plain Tab, so at the last control
+ * Option+Tab would stop. Loop it the same way: past the last stop to the first, Shift before the
+ * first to the last. Returns true when it moved the focus.
+ */
+export function loopOptionTab(e: KeyboardEvent | ReactKeyboardEvent, root: HTMLElement | null): boolean {
+  if (e.key !== 'Tab' || !e.altKey || e.ctrlKey || e.metaKey || !root) return false
+  const stops = tabStops(root)
+  if (!stops.length) return false
+  const at = stops.indexOf(document.activeElement as HTMLElement)
+  const target = e.shiftKey ? (at <= 0 ? stops[stops.length - 1] : null) : at === stops.length - 1 || at < 0 ? stops[0] : null
+  if (!target) return false
+  e.preventDefault()
+  target.focus()
+  return true
+}
+
 /**
  * Alt+<key> inside `root`: the first visible, enabled element marked `data-mnemonic="<key>"` is
  * focused; a button, checkbox or radio is also pressed (Word: an access key on a button runs it).

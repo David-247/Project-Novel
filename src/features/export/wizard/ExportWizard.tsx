@@ -41,7 +41,7 @@ import {
   type RunState,
   type WizardStep,
 } from './controller'
-import { CheckField, DraftField, handleAccessKey, Mn, SelectField } from './fields'
+import { CheckField, DraftField, handleAccessKey, loopOptionTab, Mn, SelectField } from './fields'
 import { ChapterPagePreview, HeaderPreview, TitlePagePreview } from './previews'
 import { useExportRenderers, WIZARD_FORMATS, type WizardFormat } from './renderers'
 import { fileActionProblem } from './file-actions'
@@ -137,6 +137,7 @@ export function ExportWizard() {
           onCloseAutoFocus={(e) => e.preventDefault()}
           onKeyDown={(e) => {
             if (handleAccessKey(e, contentRef.current)) return
+            loopOptionTab(e, contentRef.current)
           }}
           className={cn(
             'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col',
