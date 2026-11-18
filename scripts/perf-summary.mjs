@@ -143,6 +143,18 @@ export function toMarkdown(results, dir = 'perf-results') {
     md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...rows, '')
   }
 
+  // Phase 4 (export): the manuscript IR build (e2e/perf-export.spec.ts).
+  const exportRows = []
+  for (const r of results) {
+    const row = (measure, n, limit) => n !== undefined && n !== null && exportRows.push(`| ${r.scenario} | ${measure} | ${pair(r)} | ${cell(r, n, limit)} | ${limit} |`)
+    if (r.irBuild) row('manuscript IR build (median)', r.irBuild.medianMs, 500)
+    if (r.irBuildTracked) row('manuscript IR build, 2,000 pending changes (median)', r.irBuildTracked.medianMs, 500)
+  }
+  if (exportRows.length) {
+    md.push('#### Export', '')
+    md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...exportRows, '')
+  }
+
   const broken = results.filter((r) => r.error)
   for (const r of broken) md.push(`- ${r.file}: unreadable (${r.error})`)
   return md.join('\n') + '\n'
