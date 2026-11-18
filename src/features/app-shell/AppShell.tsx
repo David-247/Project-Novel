@@ -5,6 +5,8 @@ export interface AppShellProps {
   menuBar?: ReactNode
   toolbar: ReactNode
   editor: ReactNode
+  /** A pane docked at the left of the editor region (the navigation pane); it may float over it instead. */
+  navigation?: ReactNode
   statusBar?: ReactNode
 }
 
@@ -16,7 +18,7 @@ export interface AppShellProps {
  * and status-bar items shrink with container queries on it (`@max-[640px]/statusbar:hidden`), widest first:
  * the page indicator shortens then goes, the project buttons become icons, zoom keeps only its menu.
  */
-export function AppShell({ menuBar, toolbar, editor, statusBar }: AppShellProps) {
+export function AppShell({ menuBar, toolbar, editor, navigation, statusBar }: AppShellProps) {
   return (
     <div className="flex h-full flex-col bg-bg text-text">
       {menuBar}
@@ -27,13 +29,16 @@ export function AppShell({ menuBar, toolbar, editor, statusBar }: AppShellProps)
       >
         {toolbar}
       </header>
-      <main
-        role="main"
-        aria-label="Editor"
-        className="min-h-0 flex-1 overflow-auto bg-desk text-text"
-      >
-        {editor}
-      </main>
+      <div className="relative flex min-h-0 flex-1">
+        {navigation}
+        <main
+          role="main"
+          aria-label="Editor"
+          className="min-h-0 min-w-0 flex-1 overflow-auto bg-desk text-text"
+        >
+          {editor}
+        </main>
+      </div>
       {statusBar ? (
         <footer
           aria-label="Status bar"

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { newProjectBookSettings } from '@/shared/book'
-import { defaultPreferenceValues, parsePreferences, PREFERENCES_VERSION, serializePreferences } from './preferences-file'
+import { defaultPreferenceValues, NAV_PANE_DEFAULT_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH, parsePreferences, PREFERENCES_VERSION, serializePreferences } from './preferences-file'
 import { setSystemAuthorName } from './preferences-slice'
 import { useStore } from './index'
 
@@ -61,9 +61,20 @@ describe('preferences.json', () => {
       profileEmail: 'ada@example.com',
       profileAgent: 'Babbage & Co.',
       exportFolders: { 'project-id': '/exports' },
+      navigationPane: true,
+      navigationPaneWidth: 320,
     }
     const parsed = parsePreferences(serializePreferences({ ...values, extra: {} }))
     expect(parsed).toMatchObject({ values, extra: {}, authorNameMissing: false, fallback: null })
+  })
+
+  it('the navigation pane: open state and width, the width kept in range, wrong types fall back', () => {
+    expect(defaultPreferenceValues()).toMatchObject({ navigationPane: false, navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH })
+    const read = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values
+    expect(read({ navigationPane: true, navigationPaneWidth: 333.4 })).toMatchObject({ navigationPane: true, navigationPaneWidth: 333 })
+    expect(read({ navigationPaneWidth: 10 }).navigationPaneWidth).toBe(NAV_PANE_MIN_WIDTH)
+    expect(read({ navigationPaneWidth: 5000 }).navigationPaneWidth).toBe(NAV_PANE_MAX_WIDTH)
+    expect(read({ navigationPane: 'yes', navigationPaneWidth: 'wide' })).toMatchObject({ navigationPane: false, navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH })
   })
 
   it('writes the version first-class and trims the name', () => {

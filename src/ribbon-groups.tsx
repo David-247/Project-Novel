@@ -378,7 +378,8 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
   // Page-turn / continuous scroll (T5) place their commands here.
   { id: 'view.views', tab: 'view', label: 'Views', order: 10, priority: 90, icon: icons.views },
   { id: 'view.zoom', tab: 'view', label: 'Zoom', order: 20, priority: 80, icon: icons.zoom },
-  { id: 'view.show', tab: 'view', label: 'Show', order: 30, priority: 70, icon: icons.show, Content: () => item(<CommentsPanelButton />), menu: [cmd('comment.panel')] },
+  // Navigation Pane (outline slice, a registry command) first, as in Word's Show group, then Comments.
+  { id: 'view.show', tab: 'view', label: 'Show', order: 30, priority: 70, icon: icons.show, buttons: 'before', Content: () => item(<CommentsPanelButton />), menu: [cmd('view.navigationPane'), cmd('comment.panel')] },
   { id: 'view.window', tab: 'view', label: 'Window', order: 40, priority: 60, icon: icons.window },
 ]
 

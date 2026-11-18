@@ -15,6 +15,7 @@ import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTR
 import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import { COMMENT_CONTROLS } from '@/features/comments'
 import { REWRITE_CONTROLS } from '@/features/rewrite'
+import { OUTLINE_CONTROLS } from '@/features/outline'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
@@ -301,6 +302,11 @@ const COMMENT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   ]),
 )
 
+/** The navigation pane: close, the heading rows (their own copy names the heading), the resize handle (outline slice). */
+const OUTLINE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(OUTLINE_CONTROLS).map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined }]),
+)
+
 /** Review: Track Changes and the markup view picker with its choices (track-changes slice). */
 const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
   ...Object.fromEntries(
@@ -389,6 +395,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...RECOVERY_TOOLTIPS,
   ...COMMENT_TOOLTIPS,
   ...REWRITE_TOOLTIPS,
+  ...OUTLINE_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,
 })
