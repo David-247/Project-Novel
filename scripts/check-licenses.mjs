@@ -7,9 +7,12 @@
 // pnpm groups packages by their declared license expression. An SPDX expression passes when it is
 // satisfiable with allowlisted licenses: "A OR B" needs one side, "A AND B" needs both.
 // MPL-2.0 is file-level copyleft: fine to use unmodified (see README "Licenses").
+// It also checks the bundled non-package files (Typst sidecar, fonts): see BUNDLED below.
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { TYPST_VERSION } from './fetch-typst.mjs'
 
 export const ALLOWED = new Set([
   'MIT',
@@ -60,7 +63,63 @@ export function allowedExpression(expr) {
   return tokens.length > 0 && or() && i === tokens.length
 }
 
+/**
+ * Third-party files shipped in the app that are neither npm packages nor crates: the Typst sidecar
+ * (bundle.externalBin) and the bundled fonts (bundle.resources). Each must have an allowlisted
+ * licence, its licence text in src-tauri/resources/licenses (shipped with the app), and an entry in
+ * THIRD_PARTY_LICENSES.md.
+ */
+export const BUNDLED = [
+  {
+    name: 'Typst CLI',
+    version: TYPST_VERSION,
+    license: 'Apache-2.0',
+    externalBin: 'binaries/typst',
+    texts: ['typst-LICENSE.txt', 'typst-NOTICE.txt'],
+  },
+  {
+    name: 'Liberation Fonts',
+    version: '2.1.5',
+    license: 'OFL-1.1',
+    resources: 'resources/fonts/',
+    texts: ['liberation-fonts-LICENSE.txt'],
+  },
+]
+
+/** Fonts may also be under the SIL Open Font License (constraint: fonts OFL or similar). */
+export const BUNDLED_ALLOWED = new Set([...ALLOWED, 'OFL-1.1'])
+
+/** Problems with the bundled assets (empty = OK). `root` is the repo root. */
+export function checkBundled(root, bundled = BUNDLED) {
+  const problems = []
+  const conf = JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'))
+  const notices = readFileSync(join(root, 'THIRD_PARTY_LICENSES.md'), 'utf8')
+  for (const b of bundled) {
+    if (!BUNDLED_ALLOWED.has(b.license)) problems.push(`${b.name}: licence ${b.license} is not allowed`)
+    for (const t of b.texts) {
+      if (!existsSync(join(root, 'src-tauri', 'resources', 'licenses', t))) problems.push(`${b.name}: missing licence text ${t}`)
+    }
+    if (!notices.includes(`${b.name} ${b.version}`)) problems.push(`${b.name} ${b.version} is not in THIRD_PARTY_LICENSES.md`)
+  }
+  // Nothing may be bundled without an entry above.
+  for (const bin of conf.bundle?.externalBin ?? []) {
+    if (!bundled.some((b) => b.externalBin === bin)) problems.push(`externalBin ${bin} has no licence entry`)
+  }
+  for (const res of Object.keys(conf.bundle?.resources ?? {})) {
+    if (res !== 'resources/licenses/' && !bundled.some((b) => b.resources === res)) {
+      problems.push(`resource ${res} has no licence entry`)
+    }
+  }
+  return problems
+}
+
 function main() {
+  const bundledProblems = checkBundled(join(dirname(fileURLToPath(import.meta.url)), '..'))
+  if (bundledProblems.length) {
+    console.error(`check-licenses: bundled third-party files:\n  ${bundledProblems.join('\n  ')}`)
+    process.exit(1)
+  }
+  console.log(`check-licenses: bundled OK (${BUNDLED.map((b) => `${b.name} ${b.version}: ${b.license}`).join('; ')})`)
   const file = process.argv[2]
   const json = file
     ? readFileSync(file, 'utf8')
