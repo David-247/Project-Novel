@@ -6,6 +6,7 @@ import { blockPlainText, createEditorExtensions, defaultStyleIdFor, effectiveSty
 import { acceptAll, listChanges } from '@/features/track-changes'
 import {
   chapterRoles,
+  continuesHeadingGroup,
   footnoteLabel,
   resolveFootnoteOptions,
   resolveStyleSheet,
@@ -33,6 +34,7 @@ import {
   type NoteRun,
   type ParagraphBlock,
   type ParagraphRole,
+  type SceneBreakBlock,
 } from './types'
 
 export interface BuildManuscriptOptions {
@@ -45,6 +47,12 @@ export interface BuildManuscriptOptions {
   openRewriteAnchors?: Iterable<string>
   /** Schema for a JSON `doc`. Default: the editor's schema. */
   schema?: Schema
+  /**
+   * Empty paragraphs between two prose paragraphs of a chapter: `'auto'` (default) reads them as a
+   * scene break, unless blanks separate most paragraphs (spacing: `report.blankLineSpacing`); `'off'`
+   * always leaves them out.
+   */
+  blankLineSceneBreaks?: 'auto' | 'off'
 }
 
 let editorSchema: Schema | null = null
@@ -70,7 +78,7 @@ export function buildManuscript(doc: PMNode | DocJSON, styles: ResolvedStyles | 
   const report = emptyReport()
   countReviewItems(source, report, options.openRewriteAnchors)
   const accepted = acceptAll(EditorState.create({ doc: source }))?.doc ?? source
-  return new Builder(accepted, resolved, resolveFootnoteOptions(options.footnotes), report).build()
+  return new Builder(accepted, resolved, resolveFootnoteOptions(options.footnotes), report, options.blankLineSceneBreaks ?? 'auto').build()
 }
 
 function emptyReport(): ManuscriptReport {
@@ -81,6 +89,7 @@ function emptyReport(): ManuscriptReport {
     manualSceneBreaks: [],
     strippedFormatting: { fontFamily: 0, fontSize: 0, blockLayout: 0 },
     emptyParagraphs: 0,
+    blankLineSpacing: false,
     redundantPageBreaks: 0,
   }
 }
@@ -128,6 +137,21 @@ const MANUAL_SCENE_BREAK = /^(?:[*#~❦⁂✻✱•·]\s*){1,9}$/u
 
 const BULLETS = ['•', '◦', '▪']
 
+/** Blank lines are spacing when at least this many prose pairs exist and most are blank-separated. */
+const SPACING_MIN_PAIRS = 8
+
+const isProse = (b: ManuscriptBlock | undefined): b is ParagraphBlock => b?.kind === 'paragraph' && (b.role === 'body' || b.role === 'first')
+
+/** A blank-line scene break, kept or taken out again once the whole document is read. */
+interface BlankBreak {
+  blocks: ManuscriptBlock[]
+  brk: SceneBreakBlock
+  next: ParagraphBlock
+  /** `next` was 'body' before the break made it 'first'. */
+  wasBody: boolean
+  blanks: number
+}
+
 class Builder {
   private readonly roles: ReadonlyMap<string, ChapterRole>
   private readonly footnotes: ManuscriptFootnote[] = []
@@ -140,12 +164,21 @@ class Builder {
   private firstPending = true
   /** Empty paragraphs seen since the last block (a blank-line scene break when text follows). */
   private blanks = 0
+  /** Since the last heading (chapter title, subheading, part title): only epigraphs, quotes and aligned lines. */
+  private headingOpening = false
+  /** Rendered style id of the previous top-level block (null for a break or a list), for heading groups. */
+  private prevTop: string | null = null
+  private readonly blankBreaks: BlankBreak[] = []
+  /** Neighbouring prose paragraphs in chapters, and those of them separated by blanks (the spacing guard). */
+  private prosePairs = 0
+  private blankPairs = 0
 
   constructor(
     private readonly doc: PMNode,
     private readonly styles: ResolvedStyles,
     private readonly noteOptions: FootnoteOptions,
     private readonly report: ManuscriptReport,
+    private readonly blankLines: 'auto' | 'off',
   ) {
     this.roles = chapterRoles(styles)
   }
@@ -154,7 +187,10 @@ class Builder {
     const starts = getChapters(this.doc, this.styles, 'all').map((c) => c.from)
     let next = 0
     let number: PMNode[] = []
+    let prev: string | null = null
     this.doc.forEach((node, offset) => {
+      this.prevTop = prev
+      prev = node.type.name === 'paragraph' || node.type.name === 'heading' ? (this.styleOf(node)?.id ?? null) : null
       if (next < starts.length && offset === starts[next]) {
         this.endSection()
         next++
@@ -174,6 +210,7 @@ class Builder {
       this.block(node)
     })
     this.endSection()
+    this.settleBlankBreaks()
     return { version: MANUSCRIPT_IR_VERSION, frontMatter: this.frontMatter, chapters: this.chapters, footnotes: this.footnotes, report: this.report }
   }
 
@@ -199,12 +236,13 @@ class Builder {
   // ---- structure ----
 
   private openChapter(index: number, numberBlocks: PMNode[], title: PMNode): void {
+    // Footnotes in the number block(s) belong to this chapter (the editor's chapter starts there).
+    this.chapter = index
     const number: InlineRun[] = []
     for (const [i, b] of numberBlocks.entries()) {
       if (i > 0) number.push({ kind: 'lineBreak' })
       number.push(...this.runs(b))
     }
-    this.chapter = index
     const chapter: ManuscriptChapter = {
       index,
       number: mergeRuns(number),
@@ -217,7 +255,20 @@ class Builder {
     this.chapters.push(chapter)
     this.out = chapter.blocks
     this.firstPending = true
+    this.headingOpening = true
     this.blanks = 0
+  }
+
+  /** When blanks separate most prose paragraphs they are spacing: take the blank-line breaks out again. */
+  private settleBlankBreaks(): void {
+    if (this.prosePairs < SPACING_MIN_PAIRS || this.blankPairs * 2 <= this.prosePairs) return
+    this.report.blankLineSpacing = true
+    for (const b of this.blankBreaks) {
+      b.blocks.splice(b.blocks.indexOf(b.brk), 1)
+      if (b.wasBody) b.next.role = 'body'
+      this.report.emptyParagraphs += b.blanks
+    }
+    this.report.manualSceneBreaks = this.report.manualSceneBreaks.filter((m) => m.kind !== 'blank')
   }
 
   /** The end of the front matter or a chapter: trailing empty paragraphs and page breaks go. */
@@ -231,15 +282,20 @@ class Builder {
   }
 
   private emit(block: ManuscriptBlock): void {
+    // A blank line is a scene break only between two prose paragraphs of a chapter.
+    const prosePair = this.chapter >= 0 && isProse(block) && isProse(this.out.at(-1))
+    if (prosePair) {
+      this.prosePairs++
+      if (this.blanks > 0) this.blankPairs++
+    }
     if (this.blanks > 0) {
-      const last = this.out.at(-1)
-      const afterText = last?.kind === 'paragraph' && last.role !== 'subheading' && last.role !== 'partTitle'
-      if (afterText && this.chapter >= 0 && block.kind === 'paragraph') {
-        this.out.push({ kind: 'sceneBreak', source: 'manual', original: '' })
+      if (prosePair && this.blankLines === 'auto') {
+        const brk: SceneBreakBlock = { kind: 'sceneBreak', source: 'manual', original: '' }
+        this.out.push(brk)
         this.report.manualSceneBreaks.push({ chapter: this.chapter, kind: 'blank', original: '' })
+        this.blankBreaks.push({ blocks: this.out, brk, next: block, wasBody: block.role === 'body', blanks: this.blanks })
         this.report.emptyParagraphs += this.blanks - 1
-        this.firstPending = true
-        if (block.role === 'body') block.role = 'first'
+        block.role = 'first'
       } else this.report.emptyParagraphs += this.blanks
       this.blanks = 0
     }
@@ -257,6 +313,7 @@ class Builder {
     this.emit({ kind: 'sceneBreak', source, original })
     if (source === 'manual') this.report.manualSceneBreaks.push({ chapter: this.chapter, kind: 'symbol', original })
     this.firstPending = true
+    this.headingOpening = false
   }
 
   // ---- blocks ----
@@ -305,12 +362,15 @@ class Builder {
     this.countBlockLayout(node)
     const style = this.styleOf(node)
     const text = node.textContent.trim()
-    if (this.basedOn(style, STYLE_IDS.sceneBreak) || (MANUAL_SCENE_BREAK.test(text) && !this.hasFootnote(node))) return this.sceneBreak('manual', text)
+    // A paragraph holding a footnote is never a scene break (the note would be lost).
+    if (!this.hasFootnote(node) && (this.basedOn(style, STYLE_IDS.sceneBreak) || MANUAL_SCENE_BREAK.test(text))) return this.sceneBreak('manual', text)
 
     const level = node.type.name === 'heading' ? Number(node.attrs.level) : 0
     const chapterStyle = style?.kind === 'chapter'
     const outline = chapterStyle ? (style.outlineLevel ?? 1) : level
-    if (style?.breakBefore === 'page' || style?.breakBefore === 'recto') this.emit({ kind: 'sectionBreak', start: style.breakBefore })
+    // A block continuing a heading group (a breaking style's breaking next style) breaks once, as in the editor.
+    const start = style?.breakBefore
+    if (style && (start === 'page' || start === 'recto') && !continuesHeadingGroup(this.prevTop, style.id, this.styles)) this.emit({ kind: 'sectionBreak', start })
 
     let role: ParagraphRole
     if ((chapterStyle && outline >= 2) || (!chapterStyle && level >= 2)) role = 'subheading'
@@ -318,14 +378,22 @@ class Builder {
     else if (this.basedOn(style, STYLE_IDS.blockQuote, STYLE_IDS.epigraph)) role = 'blockQuote'
     else role = 'body'
 
-    const block: ParagraphBlock = { kind: 'paragraph', role, runs: this.runs(node) }
+    const variant = this.basedOn(style, STYLE_IDS.epigraph) ? 'epigraph' : this.basedOn(style, STYLE_IDS.dedication) ? 'dedication' : undefined
+    let runs = this.runs(node)
+    // An epigraph style's italic is emphasis, not book styling.
+    if (variant === 'epigraph' && style?.italic) runs = mergeRuns(runs.map((r) => (r.kind === 'text' ? { ...r, italic: true } : r)))
+    const block: ParagraphBlock = { kind: 'paragraph', role, ...(style ? { styleId: style.id } : {}), ...(variant ? { variant } : {}), runs }
     const align = this.alignOf(node, style)
     if (role === 'body' && align) {
       block.role = 'aligned'
       block.align = align
-    } else if (role === 'body' && (this.firstPending || effectiveStyleId(node) === STYLE_IDS.firstParagraph)) block.role = 'first'
+    } else if (role === 'body' && (this.firstPending || this.basedOn(style, STYLE_IDS.firstParagraph))) block.role = 'first'
     this.emit(block)
-    this.firstPending = role === 'subheading' || role === 'partTitle'
+    const heading = role === 'subheading' || role === 'partTitle'
+    // Right after a heading, an epigraph, quote or aligned line keeps the next prose paragraph first.
+    const keep = this.headingOpening && this.firstPending && (block.role === 'blockQuote' || block.role === 'aligned')
+    this.firstPending = heading || keep
+    this.headingOpening = heading || keep
   }
 
   private alignOf(node: PMNode, style: ResolvedStyle | undefined): 'center' | 'right' | undefined {
@@ -359,10 +427,12 @@ class Builder {
         this.countBlockLayout(child)
         const info: ListInfo = { marker: marked ? '' : ordered ? `${start + i}.` : BULLETS[Math.min(depth, BULLETS.length - 1)], depth, ordered }
         marked = true
-        this.emit({ kind: 'paragraph', role: 'listItem', list: info, runs: this.runs(child) })
+        const styleId = this.styleOf(child)?.id
+        this.emit({ kind: 'paragraph', role: 'listItem', ...(styleId ? { styleId } : {}), list: info, runs: this.runs(child) })
       })
     })
     this.firstPending = false
+    this.headingOpening = false
   }
 
   // ---- runs ----

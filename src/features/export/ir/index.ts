@@ -19,6 +19,7 @@ export type {
   InlineRun,
   NoteRun,
   ParagraphRole,
+  ParagraphVariant,
   ListInfo,
   ParagraphBlock,
   SceneBreakBlock,

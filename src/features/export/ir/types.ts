@@ -64,8 +64,9 @@ export type NoteRun = TextRun | LineBreakRun
 /**
  * The semantic role of a paragraph (how a manuscript formats it):
  * - `body`: running text (indented first line in the usual manuscript format);
- * - `first`: the first paragraph of a chapter, or after a subheading, part title or scene break (or
- *   one styled First Paragraph): flush left in most presets;
+ * - `first`: the first prose paragraph of a chapter, or after a subheading, part title or scene break
+ *   (an epigraph, block quote or aligned line right after a heading does not use it up), or one styled
+ *   First Paragraph or a style based on it: flush left in most presets;
  * - `blockQuote`: Block Quote, Epigraph, or a style based on them;
  * - `subheading`: a level-2/3 heading or chapter style (Subheading and styles based on it);
  * - `partTitle`: a level-1 chapter style that does not open a chapter (Part Title, or a level-1
@@ -83,9 +84,23 @@ export interface ListInfo {
   ordered: boolean
 }
 
+/**
+ * A paragraph kind a renderer may set apart within its role (both are `blockQuote` or `aligned`):
+ * Epigraph and Dedication, and styles based on them.
+ */
+export type ParagraphVariant = 'epigraph' | 'dedication'
+
 export interface ParagraphBlock {
   kind: 'paragraph'
   role: ParagraphRole
+  /**
+   * The style the block renders with in the book (its `styleId`, or the default for its type: 'body',
+   * 'subheading'...), so a renderer can map custom styles. Always set by `buildManuscript`; optional in
+   * the type (added in version 1 without a bump; older IRs may lack it).
+   */
+  styleId?: string
+  /** Epigraph or Dedication (or a style based on one). An epigraph style's italic is kept as `italic` runs. */
+  variant?: ParagraphVariant
   /** Centred or right-aligned (direct alignment or the style's). Absent: the format's default alignment. */
   align?: 'center' | 'right'
   /** Only on `listItem`. */
@@ -95,8 +110,10 @@ export interface ParagraphBlock {
 
 /**
  * A scene break. `source: 'node'` is the scene-break node; `'manual'` is a paragraph the build read
- * as one: "***", "* * *", "#", "###", an ornament ("❦", "⁂"), a paragraph in the Scene Break style, or
- * an empty paragraph between two paragraphs of a chapter (a blank-line break). Renderers print the
+ * as one: "***", "* * *", "#", "###", an ornament ("❦", "⁂"), a paragraph in the Scene Break style
+ * (without a footnote), or empty paragraphs between two prose (`body` / `first`) paragraphs of a
+ * chapter (a blank-line break; not when blanks separate most paragraphs, see
+ * `ManuscriptReport.blankLineSpacing`, nor with the build option `blankLineSceneBreaks: 'off'`). Renderers print the
  * format's own scene-break marker (e.g. "#"), never `original`; manual ones are also listed in
  * `report.manualSceneBreaks` so the wizard can tell the user.
  */
@@ -200,6 +217,11 @@ export interface ManuscriptReport {
   }
   /** Empty paragraphs left out (other than blank-line scene breaks). */
   emptyParagraphs: number
+  /**
+   * True when empty paragraphs separate most prose paragraphs (spacing, as in pasted text): they were
+   * then all left out and none was read as a scene break. Also false with `blankLineSceneBreaks: 'off'`.
+   */
+  blankLineSpacing: boolean
   /** Page breaks left out because a chapter starts right after them (or the document ends). */
   redundantPageBreaks: number
 }

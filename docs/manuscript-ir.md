@@ -27,14 +27,20 @@ Steps:
 2. **Structure**: front matter (before the first chapter), then chapters from `getChapters` (Chapter Title,
    level-1 chapter styles based on it, unstyled level-1 headings), each with its Chapter Number block(s)
    and title. A document without a chapter title is all front matter.
-3. **Blocks** get a role: `body`, `first` (after a chapter title, subheading, part title or scene break, or
-   styled First Paragraph), `blockQuote` (Block Quote, Epigraph and styles based on them), `subheading`
-   (level 2–3), `partTitle` (a level-1 chapter style that opens no chapter), `aligned` (centre / right,
-   direct or from the style), `listItem` (lists are flattened: marker "•", "◦", "▪" or "3.", and depth).
+3. **Blocks** get a role: `body`, `first` (the first prose paragraph after a chapter title, subheading, part
+   title or scene break: an epigraph, block quote or aligned line right after a heading does not use it up;
+   or styled First Paragraph or a style based on it), `blockQuote` (Block Quote, Epigraph and styles based on
+   them), `subheading` (level 2–3), `partTitle` (a level-1 chapter style that opens no chapter), `aligned`
+   (centre / right, direct or from the style), `listItem` (lists are flattened: marker "•", "◦", "▪" or
+   "3.", and depth). Every paragraph also carries its rendered `styleId`, and `variant: 'epigraph' |
+   'dedication'` for those styles (an epigraph style's italic is kept as italic runs).
 4. **Breaks**: `sceneBreak` from the node (`source: 'node'`) or from a manual one (`'manual'`: "***",
-   "* * *", "#", "###", "❦", "⁂", a Scene Break paragraph, or an empty paragraph between two paragraphs of a
-   chapter); `pageBreak` (left out right before a chapter or at the end); `sectionBreak` (`page` / `recto`)
-   before a block whose style starts a page outside a chapter opening (Part Title, Dedication).
+   "* * *", "#", "###", "❦", "⁂", or a Scene Break paragraph, without a footnote; or empty paragraphs between
+   two prose (`body` / `first`) paragraphs of a chapter). Blank lines are spacing, not breaks, when they
+   separate most prose paragraphs (8 pairs or more, over half blank-separated: `report.blankLineSpacing`),
+   or with the option `blankLineSceneBreaks: 'off'`. `pageBreak` (left out right before a chapter or at the
+   end); `sectionBreak` (`page` / `recto`) before a block whose style starts a page outside a chapter
+   opening (Part Title, Dedication), once per heading group (as the editor's page starts).
 5. **Runs**: text with `bold`, `italic`, `underline` (and `smallCaps`, `superscript`, `subscript` when the
    schema has such marks), line breaks and footnote references. Fonts, sizes, line spacing and indents are
    dropped: the manuscript format replaces book styling.

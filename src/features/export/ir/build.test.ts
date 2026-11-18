@@ -109,7 +109,7 @@ describe('buildManuscript: rules', () => {
       ),
     )
     expect(ir.footnotes.map((f) => [f.number, f.runs])).toEqual([[1, [{ kind: 'text', text: 'kept' }]]])
-    expect(ir.chapters[0].blocks).toEqual([{ kind: 'paragraph', role: 'first', runs: [{ kind: 'text', text: 'xy' }, { kind: 'footnoteRef', footnote: 0 }] }])
+    expect(ir.chapters[0].blocks).toEqual([{ kind: 'paragraph', role: 'first', styleId: 'body', runs: [{ kind: 'text', text: 'xy' }, { kind: 'footnoteRef', footnote: 0 }] }])
   })
 
   it('joins two chapter number blocks before a title; a number block with no title after it is not a chapter', () => {
@@ -141,7 +141,82 @@ describe('buildManuscript: rules', () => {
       manualSceneBreaks: [],
       strippedFormatting: { fontFamily: 0, fontSize: 0, blockLayout: 0 },
       emptyParagraphs: 0,
+      blankLineSpacing: false,
       redundantPageBreaks: 0,
     })
+  })
+})
+
+describe('buildManuscript: blank-line scene breaks (fix round 1)', () => {
+  const sub = (text: string): DocNodeJSON => ({ type: 'heading', attrs: { level: 2 }, content: [t(text)] })
+  const list: DocNodeJSON = { type: 'bulletList', content: [{ type: 'listItem', content: [p('item')] }] }
+
+  it('reads a blank line as a scene break only between two prose paragraphs', () => {
+    const ir = build(doc(h1('A'), p('x'), p(), sub('Sub'), p('Epi', { styleId: 'epigraph' }), p(), p('y'), list, p(), p('z'), p('Centred', { textAlign: 'center' }), p(), p('w')))
+    expect(kinds(ir.chapters[0].blocks)).toEqual(['first:x', 'subheading:Sub', 'blockQuote:Epi', 'first:y', 'listItem:item', 'body:z', 'aligned:Centred', 'body:w'])
+    expect(ir.report.manualSceneBreaks).toEqual([])
+    expect(ir.report.emptyParagraphs).toBe(4)
+  })
+
+  it('treats blanks as spacing when they separate most paragraphs (pasted text), and says so', () => {
+    const spaced: DocNodeJSON[] = [h1('A')]
+    for (let i = 0; i < 10; i++) spaced.push(p(`P${i}.`), p())
+    spaced.push(p('***'), p('After.'))
+    const ir = build(doc(...spaced))
+    expect(kinds(ir.chapters[0].blocks)).toEqual([...Array.from({ length: 10 }, (_, i) => `${i === 0 ? 'first' : 'body'}:P${i}.`), 'scene(manual:***)', 'first:After.'])
+    expect(ir.report.blankLineSpacing).toBe(true)
+    expect(ir.report.manualSceneBreaks).toEqual([{ chapter: 0, kind: 'symbol', original: '***' }])
+    expect(ir.report.emptyParagraphs).toBe(10)
+  })
+
+  it("blankLineSceneBreaks: 'off' never reads a blank line as a break", () => {
+    const ir = build(doc(h1('A'), p('x'), p(), p('y')), { blankLineSceneBreaks: 'off' })
+    expect(kinds(ir.chapters[0].blocks)).toEqual(['first:x', 'body:y'])
+    expect(ir.report.emptyParagraphs).toBe(1)
+    expect(ir.report.manualSceneBreaks).toEqual([])
+  })
+})
+
+describe('buildManuscript: fix round 1 (M1-M5, M7)', () => {
+  it('numbers a footnote in a Chapter Number block in that chapter (M1)', () => {
+    const num: DocNodeJSON = { type: 'heading', attrs: { level: 1, styleId: 'chapter-number' }, content: [t('Two'), { type: 'footnote', content: [t('n')] }] }
+    const ir = build(doc(h1('One'), p('x'), num, h1('Second')), { footnotes: { numbering: 'chapter' } })
+    expect(ir.footnotes.map((f) => [f.chapter, f.number])).toEqual([[1, 1]])
+  })
+
+  it('keeps a Scene Break paragraph holding a footnote as a paragraph, with its note (M2)', () => {
+    const ir = build(doc(h1('A'), p('x'), { type: 'paragraph', attrs: { styleId: 'scene-break' }, content: [t('* * *'), { type: 'footnote', content: [t('n')] }] }))
+    expect(ir.footnotes).toHaveLength(1)
+    expect(ir.chapters[0].blocks[1]).toMatchObject({ kind: 'paragraph', runs: [{ kind: 'text', text: '* * *' }, { kind: 'footnoteRef', footnote: 0 }] })
+  })
+
+  it('keeps the first paragraph after an epigraph, block quote or centred line at a chapter opening (M3)', () => {
+    const ir = build(doc(h1('A'), p('Epi', { styleId: 'epigraph' }), p('Quote', { styleId: 'block-quote' }), p('Centred', { textAlign: 'center' }), p('x'), p('Quote', { styleId: 'block-quote' }), p('y')))
+    expect(kinds(ir.chapters[0].blocks)).toEqual(['blockQuote:Epi', 'blockQuote:Quote', 'aligned:Centred', 'first:x', 'blockQuote:Quote', 'body:y'])
+  })
+
+  it('reads a style based on First Paragraph as first (M4)', () => {
+    const styles = { 'custom-2': { name: 'Opening', kind: 'paragraph', basedOn: 'first-paragraph', builtIn: false } }
+    const ir = buildManuscript(doc(h1('A'), p('x'), p('y', { styleId: 'custom-2' })), styles)
+    expect(kinds(ir.chapters[0].blocks)).toEqual(['first:x', 'first:y'])
+  })
+
+  it('breaks once for a heading group (a breaking style followed by its breaking next style) (M5)', () => {
+    const styles = {
+      'custom-a': { name: 'Half Title', kind: 'paragraph', basedOn: 'body', breakBefore: 'page', nextStyle: 'custom-b', builtIn: false },
+      'custom-b': { name: 'Half Subtitle', kind: 'paragraph', basedOn: 'body', breakBefore: 'page', builtIn: false },
+    }
+    const ir = buildManuscript(doc(p('x'), p('Half', { styleId: 'custom-a' }), p('Sub', { styleId: 'custom-b' }), p('y', { styleId: 'custom-b' })), styles)
+    expect(kinds(ir.frontMatter)).toEqual(['first:x', 'sectionBreak', 'body:Half', 'body:Sub', 'sectionBreak', 'body:y'])
+  })
+
+  it('keeps the style id and marks epigraphs and dedications, with the epigraph style italic as emphasis (M7)', () => {
+    const ir = build(doc(p('For M.', { styleId: 'dedication' }), p('Wander.', { styleId: 'epigraph' }), h1('A'), p('x')))
+    expect(ir.frontMatter).toEqual([
+      { kind: 'sectionBreak', start: 'recto' },
+      { kind: 'paragraph', role: 'aligned', align: 'center', styleId: 'dedication', variant: 'dedication', runs: [{ kind: 'text', text: 'For M.' }] },
+      { kind: 'paragraph', role: 'blockQuote', styleId: 'epigraph', variant: 'epigraph', runs: [{ kind: 'text', text: 'Wander.', italic: true }] },
+    ])
+    expect(ir.chapters[0].blocks).toEqual([{ kind: 'paragraph', role: 'first', styleId: 'body', runs: [{ kind: 'text', text: 'x' }] }])
   })
 })
