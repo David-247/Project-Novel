@@ -18,7 +18,7 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getDocJSON, getEditor, getFootnotes, getResolvedStyles, setDocJSON } from '@/features/editor'
-import { buildManuscript } from '@/features/export'
+import { buildManuscript, createMockExportRenderers, setExportRenderers, type ExportRenderer, type WizardFormat } from '@/features/export'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition, turnSpread, goToEdgeSpread, showPage } from '@/features/pagination'
@@ -121,6 +121,27 @@ function showNativeMessage(args: MessageDialogArgs): Promise<string> {
   })
 }
 
+// ---- Export renderers (the wizard's; mocks until the real generators are wired) -----------------
+
+/**
+ * Mock DOCX / PDF renderers for the export wizard in the e2e build: the bytes are the manuscript's
+ * plain text. Tests slow them down (`delayMs` per chapter, to cancel mid-render) or make the next
+ * renders fail (`fail`: a message). The composition root's real renderers, once wired, replace these.
+ */
+const mockRender = { delayMs: 0, fail: null as string | null }
+function installMockRenderers(): void {
+  const wrap = (format: WizardFormat): ExportRenderer => ({
+    format,
+    render: async (job, options) => {
+      const inner = createMockExportRenderers({ delayMs: mockRender.delayMs })[format]
+      const bytes = await inner.render(job, options)
+      if (mockRender.fail) throw new Error(mockRender.fail)
+      return bytes
+    },
+  })
+  setExportRenderers({ docx: wrap('docx'), pdf: wrap('pdf') })
+}
+
 // ---- Install ---------------------------------------------------------------
 
 /** Test control surface (window.__nvE2E). */
@@ -137,6 +158,13 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
      * `cancels`, `reveals`.
      */
     exports: core.exports,
+    /** The wizard's mock renderers: per-chapter delay and a failure message for the next renders. */
+    mockRender,
+    /** Text of a file the export wrote (the mock renderers write the manuscript as text). */
+    exportedText: (path: string) => {
+      const bytes = core.exports.written.get(path)
+      return bytes ? new TextDecoder().decode(bytes) : null
+    },
     /** Fire a Tauri event, e.g. a native File menu item ('menu://new-project'). */
     emit(event: string, payload?: unknown) {
       return window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event, payload })
@@ -488,5 +516,6 @@ export async function installE2EBackend(): Promise<void> {
     { shouldMockEvents: true },
   )
   ;(globalThis as unknown as { isTauri: boolean }).isTauri = true
+  installMockRenderers()
   window.__nvE2E = controlFor(core)
 }

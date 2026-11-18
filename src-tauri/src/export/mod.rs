@@ -169,6 +169,8 @@ pub struct PickedPath {
 
 /// Show the native Save dialog for a PDF or DOCX (Rust side, with that file type's filter). The
 /// picked path becomes writable by exports through the returned token. `None` if cancelled.
+/// `directory`: the folder the dialog opens in (the project's last export folder), used only when it
+/// is an existing absolute folder; it grants nothing, the user still picks the path.
 #[tauri::command]
 pub async fn export_pick_save_path<R: Runtime>(
     app: AppHandle<R>,
@@ -176,10 +178,12 @@ pub async fn export_pick_save_path<R: Runtime>(
     kind: FileKind,
     default_name: String,
     title: Option<String>,
+    directory: Option<String>,
 ) -> Result<Option<PickedPath>> {
     use tauri_plugin_dialog::DialogExt;
     let dialog_app = app.clone();
     let name = files::safe_file_name(&default_name, kind);
+    let start = directory.as_deref().and_then(files::start_directory);
     let picked = tauri::async_runtime::spawn_blocking(move || {
         let mut builder = dialog_app
             .dialog()
@@ -188,6 +192,9 @@ pub async fn export_pick_save_path<R: Runtime>(
             .set_file_name(name);
         if let Some(title) = title {
             builder = builder.set_title(title);
+        }
+        if let Some(dir) = start {
+            builder = builder.set_directory(dir);
         }
         if let Some(window) = dialog_app.get_webview_window("main") {
             builder = builder.set_parent(&window);
@@ -468,6 +475,14 @@ pub fn export_cancel_render(state: State<'_, ExportState>, job_id: String) -> Re
 pub fn export_reveal_in_folder(state: State<'_, ExportState>, path: String) -> Result<()> {
     let file = state.targets.lock().map_err(ExportError::internal)?.exported_file(&path)?;
     files::reveal(&file)
+}
+
+/// Open an exported file in its default app (Word, a PDF viewer). Refused for any path this app did
+/// not just export, and for any file that is not a .docx or .pdf.
+#[tauri::command]
+pub fn export_open_file(state: State<'_, ExportState>, path: String) -> Result<()> {
+    let file = state.targets.lock().map_err(ExportError::internal)?.exported_file(&path)?;
+    files::open_exported(&file)
 }
 
 #[cfg(test)]

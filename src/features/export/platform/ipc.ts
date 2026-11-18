@@ -16,6 +16,7 @@ export const EXPORT_COMMANDS = {
   renderPdf: 'export_render_pdf',
   cancelRender: 'export_cancel_render',
   revealInFolder: 'export_reveal_in_folder',
+  openFile: 'export_open_file',
 } as const
 
 /** Headers of the raw-body `export_write_file` call. */
@@ -100,15 +101,22 @@ async function call<T>(run: () => Promise<T>): Promise<T> {
 
 /**
  * Show the native Save dialog for a PDF or DOCX (with that file type's filter). Returns the chosen
- * target, or null if the user cancelled.
+ * target, or null if the user cancelled. `directory`: the folder the dialog opens in (e.g. the
+ * project's last export folder); ignored by Rust unless it is an existing absolute folder.
  */
 export async function pickSavePath(
   kind: ExportFileKind,
   defaultName: string,
   title?: string,
+  directory?: string | null,
 ): Promise<SaveTarget | null> {
   const picked = await call(() =>
-    invoke<{ token: string; path: string } | null>(EXPORT_COMMANDS.pickSavePath, { kind, defaultName, title }),
+    invoke<{ token: string; path: string } | null>(EXPORT_COMMANDS.pickSavePath, {
+      kind,
+      defaultName,
+      title,
+      ...(directory ? { directory } : {}),
+    }),
   )
   return picked ? { ...picked, kind } : null
 }
@@ -255,4 +263,9 @@ export async function renderPdf(options: RenderPdfOptions): Promise<RenderPdfRes
 /** Show an exported file in Explorer / Finder. Rust refuses any path this app did not just export. */
 export async function revealInFolder(path: string): Promise<void> {
   await call(() => invoke<null>(EXPORT_COMMANDS.revealInFolder, { path }))
+}
+
+/** Open an exported .docx / .pdf in its default app. Rust refuses any path this app did not just export. */
+export async function openExportedFile(path: string): Promise<void> {
+  await call(() => invoke<null>(EXPORT_COMMANDS.openFile, { path }))
 }

@@ -114,6 +114,16 @@ pub fn safe_file_name(name: &str, kind: FileKind) -> String {
     }
 }
 
+/// The Save dialog's starting folder: `dir` when it is an absolute path to an existing folder, else
+/// none (the dialog's own default). A hint only: it grants no write.
+pub fn start_directory(dir: &str) -> Option<PathBuf> {
+    let path = Path::new(dir);
+    if dir.trim().is_empty() || !path.is_absolute() || !path.is_dir() {
+        return None;
+    }
+    Some(path.to_path_buf())
+}
+
 /// Write export bytes atomically (storage's temp file + fsync + rename, symlink refused): a failure
 /// leaves the previous file, or nothing, never a partial file.
 pub fn write_export(target: &Path, bytes: &[u8]) -> Result<(), ExportError> {
@@ -159,6 +169,41 @@ pub fn reveal(path: &Path) -> Result<(), ExportError> {
     };
     let mut child = cmd.spawn().map_err(spawn_err)?;
     // Reap it off-thread (explorer's exit code means nothing; this only avoids a zombie on Unix).
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+/// Open an exported file with its default app. Callers check it was exported first; only .docx and
+/// .pdf files are opened (an exported file is always one of them), so nothing else can be launched.
+pub fn open_exported(path: &Path) -> Result<(), ExportError> {
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    if !matches!(ext.as_deref(), Some("docx") | Some("pdf")) {
+        return Err(ExportError::new("not_exported", "Novel only opens the DOCX and PDF files it exported."));
+    }
+    let spawn_err = |e: std::io::Error| ExportError::new("io", format!("Could not open the file: {e}"));
+    #[cfg(windows)]
+    let mut cmd = {
+        // explorer.exe <file> opens it with the program associated with its type.
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let mut cmd = std::process::Command::new(Path::new(&root).join("explorer.exe"));
+        cmd.arg(explorer_path(&path.to_string_lossy()));
+        cmd
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut cmd = std::process::Command::new("/usr/bin/open");
+        cmd.arg(path);
+        cmd
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut cmd = std::process::Command::new("/usr/bin/xdg-open");
+        cmd.arg(path);
+        cmd
+    };
+    let mut child = cmd.spawn().map_err(spawn_err)?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });
@@ -253,6 +298,24 @@ mod tests {
         assert_eq!(explorer_path(r"\\?\UNC\server\share\Novel.pdf"), r"\\server\share\Novel.pdf");
         assert_eq!(explorer_path(r"C:\Books\Novel.pdf"), r"C:\Books\Novel.pdf");
         assert_eq!(explorer_path(r"\\server\share\Novel.pdf"), r"\\server\share\Novel.pdf");
+    }
+
+    #[test]
+    fn start_directory_only_for_an_existing_absolute_folder() {
+        let dir = temp_dir("start");
+        assert_eq!(start_directory(&dir.to_string_lossy()), Some(dir.clone()));
+        assert_eq!(start_directory("relative/folder"), None);
+        assert_eq!(start_directory(""), None);
+        assert_eq!(start_directory(&dir.join("missing").to_string_lossy()), None);
+        fs::write(dir.join("file.txt"), b"x").unwrap();
+        assert_eq!(start_directory(&dir.join("file.txt").to_string_lossy()), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn open_exported_refuses_other_file_types() {
+        assert_eq!(open_exported(Path::new("/x/run.exe")).unwrap_err().kind, "not_exported");
+        assert_eq!(open_exported(Path::new("/x/notes")).unwrap_err().kind, "not_exported");
     }
 
     #[test]

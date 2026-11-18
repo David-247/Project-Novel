@@ -12,6 +12,7 @@ export const EXPORT_COMMAND_NAMES = [
   'export_render_pdf',
   'export_cancel_render',
   'export_reveal_in_folder',
+  'export_open_file',
 ] as const
 
 type Kind = 'pdf' | 'docx'
@@ -47,6 +48,11 @@ export function createFakeExport(installedFonts: () => readonly string[]) {
     running: new Map<string, () => void>(),
     cancels: [] as string[],
     reveals: [] as string[],
+    opens: [] as string[],
+    /** Every Save dialog shown: its kind, default name and starting folder. */
+    dialogs: [] as { kind: Kind; defaultName: string; directory: string | null }[],
+    /** Thrown by the next export_write_file calls (e.g. `{ kind: 'disk_full', ... }`). */
+    failWrite: null as ExportFakeError | null,
   }
 
   function reset() {
@@ -60,6 +66,9 @@ export function createFakeExport(installedFonts: () => readonly string[]) {
     state.running.clear()
     state.cancels = []
     state.reveals = []
+    state.opens = []
+    state.dialogs = []
+    state.failWrite = null
   }
 
   const safeName = (name: string, kind: Kind) => {
@@ -87,6 +96,7 @@ export function createFakeExport(installedFonts: () => readonly string[]) {
     switch (cmd) {
       case 'export_pick_save_path': {
         const kind = a.kind === 'docx' ? 'docx' : 'pdf'
+        state.dialogs.push({ kind, defaultName: String(a.defaultName ?? ''), directory: typeof a.directory === 'string' ? a.directory : null })
         const path =
           state.savePath === undefined ? `/exports/${safeName(String(a.defaultName ?? ''), kind)}` : state.savePath
         if (path === null) return null
@@ -96,15 +106,19 @@ export function createFakeExport(installedFonts: () => readonly string[]) {
         return { token, path }
       }
       case 'export_write_file': {
-        if (!(args instanceof Uint8Array)) throw fail('invalid_request', 'Expected the file bytes as the raw request body.')
+        // Any realm's Uint8Array (jsdom tests get Node's from TextEncoder).
+        const isBytes = args instanceof Uint8Array || Object.prototype.toString.call(args) === '[object Uint8Array]'
+        if (!isBytes) throw fail('invalid_request', 'Expected the file bytes as the raw request body.')
+        const body = args as Uint8Array
         // mockIPC drops invoke options (headers): then the latest pick is the target.
         const headers = (options?.headers ?? {}) as Record<string, string>
         const last = state.picks[state.picks.length - 1]
         const token = headers['x-export-token'] ?? last?.token
         const kind = (headers['x-export-kind'] ?? last?.kind) as Kind
         const path = target(token, kind)
-        state.written.set(path, args.slice())
-        return { path, bytes: args.length }
+        if (state.failWrite) throw state.failWrite
+        state.written.set(path, Uint8Array.from(body))
+        return { path, bytes: body.length }
       }
       case 'export_render_pdf': {
         const req = (a.request ?? null) as Record<string, unknown> | null
@@ -141,6 +155,12 @@ export function createFakeExport(installedFonts: () => readonly string[]) {
         const path = String(a.path)
         if (!state.written.has(path)) throw fail('not_exported', 'Novel only shows files it has just exported.')
         state.reveals.push(path)
+        return null
+      }
+      case 'export_open_file': {
+        const path = String(a.path)
+        if (!state.written.has(path)) throw fail('not_exported', 'Novel only shows files it has just exported.')
+        state.opens.push(path)
         return null
       }
       default:

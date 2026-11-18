@@ -57,7 +57,7 @@ import {
   TrackChangesNotice,
 } from '@/features/track-changes'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
-import { registerExportSideFile } from '@/features/export'
+import { ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile } from '@/features/export'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -122,6 +122,7 @@ export function App() {
       registerCommentsCommands(),
       registerTrackChangesCommands(),
       registerRewriteCommands(),
+      registerExportCommands(),
       // The toolbar's tabs and groups (Word-style ribbon; commands join groups by their `ribbon` field).
       registerAppRibbon(),
     ]
@@ -205,6 +206,7 @@ export function App() {
             <RecoveryStatus />
             <TrackChangesNotice />
             <ChangesIndicator />
+            <ExportStatus />
             <span className="flex-1" />
             <NoProjectActions />
             <WordCountIndicator />
@@ -225,6 +227,10 @@ export function App() {
       <WordCountDialog />
       {/* Tracked change details with Accept / Reject (portal). */}
       <ChangePopover />
+      {/* File > Export > Manuscript… (portal). The DOCX / PDF generators are injected with
+          setExportRenderers (wired at the Wave 2 integration; until then no format is available
+          outside the e2e build, which registers the mock renderers). */}
+      <ExportWizard />
     </TooltipProvider>
   )
 }

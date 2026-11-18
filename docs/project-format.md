@@ -467,7 +467,8 @@ file is created only when the user changes a setting.
     "endMarker": "none",
     "titlePage": { "include": true, "showContact": true, "showAgent": false, "showWordCount": true, "bylineStyle": "a-novel-by" },
     "wordCountRounding": "auto",
-    "outputs": { "docx": true, "pdf": true }
+    "outputs": { "docx": true, "pdf": true },
+    "checks": { "genre": "", "debut": false, "normalizeSpaces": false, "blankLineSceneBreaks": "auto" }
   },
   "contact": { "email": "book@example.com" }
 }
@@ -491,6 +492,7 @@ file is created only when the user changes a setting.
 | `settings.titlePage` | `include`, `showContact`, `showAgent`, `showWordCount`: boolean; `bylineStyle`: `a-novel-by`, `by`, `name-only` | Title page content. |
 | `settings.wordCountRounding` | `auto`, `nearest-100`, `nearest-500`, `nearest-1000`, `exact` | Rounding rule of the title-page word count. |
 | `settings.outputs` | `docx`, `pdf`: boolean | Formats the wizard exports. |
+| `settings.checks` | `genre`: a genre id (`literary`, `fantasy` ...) or `""`; `debut`, `normalizeSpaces`: boolean; `blankLineSceneBreaks`: `auto`, `off` | The export wizard's choices: the genre (and debut range) of the length check; export two or more spaces after a full stop as one; whether blank lines between paragraphs are scene breaks. Export only: the manuscript is never changed. |
 | `contact` | object with any of `legalName`, `penName`, `address`, `phone`, `email`, `agent` (text) | **Per-project override of the author profile.** Only the fields the user set for this project; absent when nothing is overridden. |
 
 Rules:

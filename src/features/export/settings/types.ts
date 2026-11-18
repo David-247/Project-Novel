@@ -59,6 +59,24 @@ export interface OutputSettings {
   pdf: boolean
 }
 
+/**
+ * The export wizard's check choices (docs/manuscript-format.md, "Word counts by genre"). Export only:
+ * none of them ever changes the manuscript.
+ */
+export interface CheckSettings {
+  /** A `GENRE_WORD_COUNTS` id for the length check; '' = no genre chosen (no length check). */
+  genre: string
+  /** Compare with the genre's debut range where the sources give one. */
+  debut: boolean
+  /** Export two or more spaces after a full stop (., !, ?) as one. The manuscript keeps its spaces. */
+  normalizeSpaces: boolean
+  /**
+   * Empty paragraphs between prose paragraphs: `'auto'` reads them as scene breaks (unless they space every
+   * paragraph), `'off'` leaves them out (`BuildManuscriptOptions.blankLineSceneBreaks`).
+   */
+  blankLineSceneBreaks: 'auto' | 'off'
+}
+
 export interface ManuscriptSettings {
   preset: PresetId
   paper: PaperId
@@ -83,6 +101,7 @@ export interface ManuscriptSettings {
   titlePage: TitlePageSettings
   wordCountRounding: WordCountRounding
   outputs: OutputSettings
+  checks: CheckSettings
   // The folder of the last export is NOT a project setting (an absolute path, often with the OS user
   // name, must not enter a shareable folder): see getLastOutputFolder() / setLastOutputFolder(), kept in
   // the app's preferences.json by project id.

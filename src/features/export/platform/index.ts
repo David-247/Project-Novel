@@ -8,6 +8,7 @@ export {
   EXPORT_COMMANDS,
   EXPORT_HEADERS,
   ExportPlatformError,
+  openExportedFile,
   pickSavePath,
   renderPdf,
   revealInFolder,

@@ -87,9 +87,14 @@ export function getLastOutputFolder(): string | null {
   return id ? (useStore.getState().preferences.exportFolders[id] ?? null) : null
 }
 
-/** Reactive `getLastOutputFolder()`. */
+/**
+ * Reactive `getLastOutputFolder()`: re-renders when the folders change and when another project opens
+ * or the project closes. The project id is not in the store, so the hook subscribes to the project path
+ * (storage sets the project's metadata before it publishes the path, and clears it before the close).
+ */
 export function useLastOutputFolder(): string | null {
   const folders = useStore((s) => s.preferences.exportFolders)
+  useStore((s) => s.project.path)
   const id = getCurrentProjectMeta()?.id
   return id ? (folders[id] ?? null) : null
 }

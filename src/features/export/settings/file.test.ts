@@ -25,6 +25,7 @@ describe('parseExportFile', () => {
       titlePage: { ...D().titlePage, showAgent: true, bylineStyle: 'by' as const },
       wordCountRounding: 'nearest-1000' as const,
       outputs: { docx: false, pdf: true },
+      checks: { genre: 'fantasy', debut: true, normalizeSpaces: true, blankLineSceneBreaks: 'off' as const },
     }
     const text = JSON.stringify(serializeExportFile({ settings: s, contact: { email: 'x@y.z' }, extra: {} }))
     const back = parseExportFile(JSON.parse(text), 'en-US')
@@ -45,6 +46,12 @@ describe('parseExportFile', () => {
       chapterDropFraction: 1 / 3,
       preset: 'classic',
     })
+  })
+  it('checks: a bad value falls back field by field; an unknown genre id is kept, a malformed one is not', () => {
+    const p = parseExportFile({ settings: { checks: { genre: 'space-opera', debut: 'yes', blankLineSceneBreaks: 'never' } } }, 'en-US')
+    expect(p.settings.checks).toEqual({ genre: 'space-opera', debut: false, normalizeSpaces: false, blankLineSceneBreaks: 'auto' })
+    expect(parseExportFile({ settings: { checks: { genre: '<script>' } } }, 'en-US').settings.checks.genre).toBe('')
+    expect(parseExportFile({ settings: { checks: 3 } }, 'en-US').settings.checks).toEqual(D().checks)
   })
   it('chapterDropFraction is 0 to 0.5 everywhere: 0.5 is kept, more falls back to one third', () => {
     expect(parseExportFile({ settings: { chapterDropFraction: 0.5 } }, 'en-US').settings.chapterDropFraction).toBe(0.5)

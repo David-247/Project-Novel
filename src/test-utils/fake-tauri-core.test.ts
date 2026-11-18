@@ -57,7 +57,7 @@ describe('fake Tauri command core', () => {
 
   it('handles every export platform command (EXPORT_COMMANDS in export/platform/ipc.ts)', async () => {
     const names = Object.values(EXPORT_COMMANDS)
-    expect(names).toHaveLength(5)
+    expect(names).toHaveLength(6)
     for (const cmd of names) {
       expect(HANDLED_COMMANDS, cmd).toContain(cmd)
       expect(await handles(cmd), cmd).toBe(true)
