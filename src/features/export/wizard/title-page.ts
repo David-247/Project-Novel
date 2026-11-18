@@ -1,4 +1,4 @@
-import { bylineName, formatWordCount, runningHeader, surnameOf } from '../settings'
+import { bylineName, formatWordCount, headerShortTitle, runningHeader, surnameOf } from '../settings'
 import type { BylineStyle, ContactDetails, ManuscriptSettings } from '../settings'
 
 /**
@@ -51,7 +51,7 @@ export function titlePageData(settings: ManuscriptSettings, contact: ContactDeta
     name,
     byline: bylineText(settings.titlePage.bylineStyle, name),
     surname: surnameOf(name),
-    shortTitle: settings.header.shortTitle.trim() || t,
+    shortTitle: headerShortTitle(settings.header, t),
     wordCount,
     wordCountText: formatWordCount(wordCount, settings.wordCountRounding),
     genre: settings.checks.genre,

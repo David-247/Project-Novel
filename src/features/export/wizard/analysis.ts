@@ -1,39 +1,11 @@
-import { countText } from '@/shared/text'
 import { runsText } from '../ir'
 import type { InlineRun, ManuscriptBlock, ManuscriptChapter, ManuscriptIR, NoteRun } from '../ir'
 
 /**
- * What the export wizard reads from a manuscript IR (pure): its word count, chapter problems (empty,
- * untitled, numbering gaps) and double spaces after a full stop, and the export-only normalisation
+ * What the export wizard reads from a manuscript IR (pure; the word count is `manuscriptWordCount` in
+ * ../ir): chapter problems (empty, untitled, numbering gaps) and double spaces after a full stop, and the export-only normalisation
  * of those spaces. The IR is never changed; `normalizeSentenceSpaces` returns a new one.
  */
-
-export interface ManuscriptWordCount {
-  /** Words of the text: front matter, chapter numbers and titles, paragraphs (list markers excluded). */
-  body: number
-  footnotes: number
-  /** `body + footnotes` (Word's Word Count with "Include footnotes", its default). */
-  total: number
-}
-
-const words = (runs: readonly (InlineRun | NoteRun)[]) => countText(runsText(runs)).words
-
-function blockWords(list: readonly ManuscriptBlock[]): number {
-  let n = 0
-  for (const b of list) if (b.kind === 'paragraph') n += words(b.runs)
-  return n
-}
-
-/**
- * The word count of the exported text, counted from the IR's runs (docs/word-count.md rules), so it is
- * the live count (`countManuscript`) of the same document: body + footnotes.
- */
-export function manuscriptWordCount(ir: ManuscriptIR): ManuscriptWordCount {
-  let body = blockWords(ir.frontMatter)
-  for (const c of ir.chapters) body += words(c.number) + words(c.title) + blockWords(c.blocks)
-  const footnotes = ir.footnotes.reduce((n, f) => n + words(f.runs), 0)
-  return { body, footnotes, total: body + footnotes }
-}
 
 // ---- chapter numbers ------------------------------------------------------------------------------
 

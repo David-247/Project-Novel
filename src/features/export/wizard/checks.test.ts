@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildManuscript, FEATURE_FIXTURE_FOOTNOTES, FEATURE_FIXTURE_STYLES, FIXTURE_MANUSCRIPT_IR } from '../ir'
 import { defaultManuscriptSettings, type ContactDetails, type ManuscriptSettings } from '../settings'
-import { manuscriptWordCount } from './analysis'
+import { manuscriptWordCount } from '../ir'
 import { hasBlocking, runChecks, sortChecks, type CheckId, type CheckInput } from './checks'
 import { WIZARD_FIXTURE_DOC } from './fixtures'
 

@@ -2,7 +2,8 @@ import { getSchema } from '@tiptap/core'
 import { describe, expect, it } from 'vitest'
 import { countManuscript, createEditorExtensions } from '@/features/editor'
 import { buildManuscript, FEATURE_FIXTURE_DOC, FEATURE_FIXTURE_FOOTNOTES, FEATURE_FIXTURE_STYLES, FIXTURE_MANUSCRIPT_IR, type ManuscriptIR } from '../ir'
-import { chapterIssues, chapterNumberOf, countDoubleSpaces, manuscriptWordCount, normalizeSentenceSpaces } from './analysis'
+import { manuscriptWordCount } from '../ir'
+import { chapterIssues, chapterNumberOf, countDoubleSpaces, normalizeSentenceSpaces } from './analysis'
 import { WIZARD_FIXTURE_DOC } from './fixtures'
 
 const schema = getSchema(createEditorExtensions())

@@ -52,7 +52,7 @@ export * from './docx'
 // - setExportRenderers({ docx, pdf }): the composition root injects the DOCX / PDF generators, wrapped
 //   by fromManuscriptRenderer(format, renderer, toSettings?); createMockExportRenderers() for tests / e2e
 // - EXPORT_WIZARD_CONTROLS: control ids, names and descriptions (the tooltips registry reads them)
-// - the pure parts: runChecks(), manuscriptWordCount(), chapterIssues(), normalizeSentenceSpaces(),
+// - the pure parts: runChecks(), chapterIssues(), normalizeSentenceSpaces(),
 //   titlePageData(), manuscriptFileName(), runExport()
 export * from './wizard'
 // --- end of the export wizard block --------------------------------------------------------------
