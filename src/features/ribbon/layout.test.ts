@@ -93,6 +93,19 @@ describe('chooseStep', () => {
     expect(chooseStep([undefined, 800, 700], 1, 2000, 3)).toEqual({ step: 0, probe: true })
   })
 
+  it('grows past a wider step that does not fit to a larger step that does (non-monotonic widths)', () => {
+    // Step 3 (a one-button group moved into More, adding the More button) is wider than step 2 (icon only).
+    const w = [1500, 1400, 1300, 1340, 1000]
+    expect(chooseStep(w, 0, 1310, 5)).toEqual({ step: 2, probe: false })
+    expect(chooseStep(w, 0, 1290, 5)).toEqual({ step: 4, probe: false })
+    // Back at the same width, from the narrowest step: step 2 fits with slack; step 3 does not.
+    expect(chooseStep(w, 4, 1300 + HYSTERESIS_PX, 5)).toEqual({ step: 2, probe: false })
+    expect(chooseStep(w, 2, 1300 + HYSTERESIS_PX, 5)).toEqual({ step: 2, probe: false })
+    // Growing still needs the slack, and an unmeasured larger step is tried first.
+    expect(chooseStep(w, 4, 1300 + HYSTERESIS_PX - 1, 5)).toEqual({ step: 4, probe: false })
+    expect(chooseStep([1500, undefined, 1300, 1340, 1000], 4, 2000, 5)).toEqual({ step: 1, probe: true })
+  })
+
   it('stays on the last step when nothing fits', () => {
     expect(chooseStep(widths, 4, 100, 5)).toEqual({ step: 4, probe: false })
   })

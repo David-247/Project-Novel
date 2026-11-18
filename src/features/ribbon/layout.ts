@@ -92,13 +92,14 @@ export function chooseStep(
     }
     return { step: last, probe: false }
   }
-  // Fits: grow while the next larger step fits with slack.
+  // Fits: grow to the largest step that fits with slack. Step widths are not always monotonic (a
+  // one-button group moving into More adds the More button, so that step can be wider than the one
+  // before it): a larger step that does not fit does not stop the search for a still larger one.
   let best = cur
   for (let n = cur - 1; n >= 0; n--) {
     const wn = widths[n]
     if (wn === undefined) return { step: n, probe: true }
     if (wn + HYSTERESIS_PX <= available) best = n
-    else break
   }
   return { step: best, probe: false }
 }
