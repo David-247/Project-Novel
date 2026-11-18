@@ -401,6 +401,32 @@ describe('final-review minors (B-M1, B-M2, B-M3)', () => {
     expect(ctl(C.stepTitle.id)).not.toHaveAttribute('aria-disabled')
   })
 
+  it('B-M6: with two files, Alt+O and Alt+F move between the rows\' buttons (Word: a shared key cycles, pressing none)', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
+    const open = dialog()!.querySelectorAll<HTMLElement>(`[data-control-id="${C.openFile.id}"]`)
+    const show = dialog()!.querySelectorAll<HTMLElement>(`[data-control-id="${C.showInFolder.id}"]`)
+    alt('KeyO')
+    expect(document.activeElement).toBe(open[0])
+    alt('KeyO')
+    expect(document.activeElement).toBe(open[1])
+    alt('KeyO')
+    expect(document.activeElement).toBe(open[0])
+    alt('KeyF')
+    expect(document.activeElement).toBe(show[0])
+    alt('KeyF')
+    expect(document.activeElement).toBe(show[1])
+    await flush()
+    expect(ex.opens).toEqual([])
+    expect(ex.reveals).toEqual([])
+    // A key no other control shares still runs its control (Alt+N... is Back/Next; here Alt+B: Back).
+    alt('KeyB')
+    expect(getWizardState().step).toBe('checks')
+  })
+
   it('B-M2: a cleared title stays cleared (no snap back to a deleted letter) and shows Required', async () => {
     await renderApp('')
     openWizard()
@@ -812,6 +838,38 @@ describe('Export Manuscript Again: error states (fix round 1)', () => {
     act(() => fireEvent.click(status()!.querySelector(`[data-control-id="${C.statusRetry.id}"]`)!))
     await waitFor(() => expect(status()!.textContent).toMatch(/Exported Waight_THE_LONG_NIGHT_manuscript\.docx/))
     expect(ex.written.size).toBe(2)
+  })
+
+  it('B-M7: a full disk in the status bar also offers Choose another location, which exports there', async () => {
+    await renderApp()
+    await exportOnce()
+    ex.written.clear()
+    ex.failWrite = { kind: 'disk_full', message: 'full', diagnostics: [] }
+    ex.failWriteMatch = '/exports/'
+    backend.answer = 'Replace'
+    await act(async () => getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(status()?.querySelector('[role="alert"]')?.textContent).toMatch(/The disk is full/))
+    const choose = status()!.querySelector<HTMLElement>(`[data-control-id="${C.statusChooseLocation.id}"]`)
+    expect(choose).not.toBeNull()
+    expect(auditTooltipCoverage(status()!)).toEqual([])
+    ex.savePath = '/other/Night.docx'
+    act(() => fireEvent.click(choose!))
+    await waitFor(() => expect(ex.written.has('/other/Night.docx')).toBe(true))
+    expect(dialog()).toBeNull()
+  })
+
+  it('B-M7: a Typst error offers Retry only (another place would not help)', async () => {
+    await renderApp()
+    await exportOnce()
+    ex.failRender = { kind: 'compile', message: 'bad', diagnostics: [] }
+    backend.answer = 'Replace'
+    offRenderers()
+    __resetExportRenderersForTests()
+    offRenderers = setExportRenderers({ pdf: createManuscriptExportRenderers().pdf })
+    await act(async () => getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(status()?.querySelector('[role="alert"]')).not.toBeNull())
+    expect(status()!.querySelector(`[data-control-id="${C.statusRetry.id}"]`)).not.toBeNull()
+    expect(status()!.querySelector(`[data-control-id="${C.statusChooseLocation.id}"]`)).toBeNull()
   })
 
   it('Cancel in the status bar stops the export, writing nothing', async () => {

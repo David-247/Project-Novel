@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Tooltip } from '@/shared/ui'
 import { revealInFolder } from '../platform'
 import { EXPORT_WIZARD_CONTROLS as C } from './controls'
-import { cancelExport, dismissRun, retryExport, useWizardState, type RunState } from './controller'
+import { cancelExport, chooseOtherLocation, dismissRun, retryExport, useWizardState, type RunState } from './controller'
 import { fileActionProblem } from './file-actions'
 import { usedFontNote } from './font-note'
 import { fileNameOf } from './title-page'
@@ -51,6 +51,8 @@ export function ExportStatus() {
       </span>
       {run.phase === 'rendering' ? button(C.statusCancel, cancelExport) : null}
       {run.phase === 'error' ? button(C.statusRetry, () => void retryExport()) : null}
+      {/* A full disk or a folder Novel may not write to fails again on Retry: offer another place, as the wizard does. */}
+      {run.phase === 'error' && run.error?.changeLocation ? button(C.statusChooseLocation, () => void chooseOtherLocation()) : null}
       {run.phase === 'done' && first
         ? button(C.statusShow, () => {
             setFailed(null)

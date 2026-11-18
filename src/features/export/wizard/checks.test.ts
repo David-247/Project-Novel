@@ -44,7 +44,7 @@ describe('runChecks on the wizard fixture', () => {
     const empty: ContactDetails = { legalName: '', penName: '', address: '', phone: '', email: '', agent: '' }
     const c = byId(input({ title: '  ', contact: empty }))
     expect(c.title).toMatchObject({ severity: 'blocking', actions: [{ kind: 'fix', field: 'title' }] })
-    expect(c.name).toMatchObject({ severity: 'blocking', actions: [{ kind: 'fix', field: 'penName' }] })
+    expect(c.name).toMatchObject({ severity: 'blocking', actions: [{ kind: 'fix', field: 'legalName' }] })
     expect(c.contact).toMatchObject({ severity: 'blocking', actions: [{ kind: 'fix', field: 'legalName' }, { kind: 'fix', field: 'email' }] })
     expect(hasBlocking(runChecks(input({ title: '' })))).toBe(true)
     // A pen name gives a by-line, but the contact block still needs the legal name.

@@ -42,9 +42,10 @@ function isTextEntry(target: EventTarget | null): boolean {
 }
 
 /**
- * Alt+<key> inside `root`: the first visible, enabled element marked `data-mnemonic="<key>"` is
- * focused; a button, checkbox or radio is also pressed (Word: an access key on a button runs it).
- * Returns true when it handled the key.
+ * Alt+<key> inside `root`: the visible, enabled element marked `data-mnemonic="<key>"` is focused; a
+ * button, checkbox or radio is also pressed (Word: an access key on a button runs it). When several
+ * share the key (Open file on each exported file), Word's rule: each press moves the focus to the next
+ * of them, pressing none, and Enter or Space then runs the focused one. Returns true when it handled the key.
  *
  * On macOS, Option+<key> in a text field types a character (ø, ß, the ñ dead key), so it is left to
  * the field there: Word for Mac has no access keys, and a press meant as a letter must never run a
@@ -56,10 +57,16 @@ export function handleAccessKey(e: ReactKeyboardEvent, root: HTMLElement | null)
   if (detectPlatform() === 'mac' && isTextEntry(e.target)) return false
   const candidates = Array.from(root.querySelectorAll<HTMLElement>(`[data-mnemonic="${key}"]`))
   const visible = (c: HTMLElement) => (typeof c.checkVisibility === 'function' ? c.checkVisibility() : !c.closest('[hidden]'))
-  const el = candidates.find((c) => !(c as HTMLButtonElement).disabled && c.getAttribute('aria-disabled') !== 'true' && visible(c))
-  if (!el) return false
+  const matches = candidates.filter((c) => !(c as HTMLButtonElement).disabled && c.getAttribute('aria-disabled') !== 'true' && visible(c))
+  if (!matches.length) return false
   e.preventDefault()
   e.stopPropagation()
+  if (matches.length > 1) {
+    const at = matches.indexOf(document.activeElement as HTMLElement)
+    matches[(at + 1) % matches.length].focus()
+    return true
+  }
+  const el = matches[0]
   el.focus()
   const type = (el as HTMLInputElement).type
   if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && (type === 'checkbox' || type === 'radio'))) el.click()
