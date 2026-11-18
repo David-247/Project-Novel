@@ -370,6 +370,37 @@ describe('final-review minors (B-M1, B-M2, B-M3)', () => {
     await waitFor(() => expect(document.querySelector('[data-testid="export-status"]')!.textContent).toMatch(/Exported Waight_THE_LONG_NIGHT_manuscript\.docx and/))
   })
 
+  it('B-M4: while it exports, the other steps stay focusable (aria-disabled, their tooltips reachable) but do not move', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    ex.renderDelayMs = 0
+    const handle = core.handle
+    let checked = false
+    const spy = vi.spyOn(core, 'handle').mockImplementation(async (cmd, args, options) => {
+      if (cmd === 'export_write_file' && !checked) {
+        checked = true
+        const step = ctl(C.stepTitle.id)!
+        expect(step).not.toBeDisabled()
+        expect(step).toHaveAttribute('aria-disabled', 'true')
+        act(() => step.focus())
+        expect(document.activeElement).toBe(step)
+        act(() => fireEvent.click(step))
+        expect(getWizardState().step).toBe('export')
+        expect(ctl(C.formatDocx.id)).toHaveAttribute('aria-disabled', 'true')
+      }
+      return handle(cmd, args, options)
+    })
+    try {
+      alt('KeyE')
+      await waitFor(() => expect(getWizardState().run.phase).toBe('done'))
+    } finally {
+      spy.mockRestore()
+    }
+    expect(checked).toBe(true)
+    expect(ctl(C.stepTitle.id)).not.toHaveAttribute('aria-disabled')
+  })
+
   it('B-M2: a cleared title stays cleared (no snap back to a deleted letter) and shows Required', async () => {
     await renderApp('')
     openWizard()
@@ -498,7 +529,14 @@ describe('exporting', () => {
     offRenderers = setExportRenderers({ docx: createMockExportRenderers().docx })
     openWizard()
     alt('Digit4')
-    expect(ctl(C.formatPdf.id)).toBeDisabled()
+    // Unavailable but focusable (B-M4): aria-disabled, its tooltip reachable; a click changes nothing.
+    const pdf = ctl(C.formatPdf.id) as HTMLInputElement
+    expect(pdf).not.toBeDisabled()
+    expect(pdf).toHaveAttribute('aria-disabled', 'true')
+    act(() => pdf.focus())
+    expect(document.activeElement).toBe(pdf)
+    act(() => fireEvent.click(pdf))
+    expect(pdf.checked).toBe(false)
     alt('KeyE')
     await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
     expect([...ex.written.keys()]).toEqual(['/exports/Waight_THE_LONG_NIGHT_manuscript.docx'])

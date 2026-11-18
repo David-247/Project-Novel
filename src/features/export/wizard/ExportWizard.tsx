@@ -246,11 +246,14 @@ function StepList({ step, checks, disabled }: { step: WizardStep; checks: CheckR
                   data-mnemonic={meta.mnemonic}
                   aria-current={current ? 'step' : undefined}
                   aria-label={`Step ${i + 1}: ${meta.label}${badge ? `, ${badge}` : ''}`}
-                  disabled={disabled && !current}
-                  onClick={() => setStep(s)}
+                  // aria-disabled, not disabled: still focusable, so its tooltip can be read (as FooterButton).
+                  aria-disabled={(disabled && !current) || undefined}
+                  onClick={() => {
+                    if (!(disabled && !current)) setStep(s)
+                  }}
                   className={cn(
                     'flex min-h-control w-full min-w-control items-center gap-2 rounded-control px-2 text-left text-ui-sm',
-                    'disabled:cursor-not-allowed disabled:opacity-50',
+                    disabled && !current && 'cursor-not-allowed opacity-50',
                     current ? 'bg-accent-soft font-semibold text-accent' : 'text-text hover:bg-surface-hover',
                     focusRing,
                   )}
@@ -628,7 +631,7 @@ function ExportStep({ settings, data, run, blocked }: { settings: ManuscriptSett
   const chosen = WIZARD_FORMATS.filter((f) => settings.outputs[f])
   return (
     <div className="flex flex-col gap-4">
-      <fieldset className="flex flex-col gap-1" disabled={running}>
+      <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 text-ui-sm font-medium">Formats</legend>
         {WIZARD_FORMATS.map((f) => (
           <div key={f} className="flex flex-col">

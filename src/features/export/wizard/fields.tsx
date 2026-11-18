@@ -220,6 +220,10 @@ export interface CheckFieldProps {
   className?: string
 }
 
+/**
+ * A labelled checkbox with its tooltip and access key. Disabled is `aria-disabled` (still focusable, so
+ * a keyboard user reaches its tooltip and learns why), and a click or Space then changes nothing.
+ */
 export function CheckField({ meta, checked, onChange, disabled, label, className }: CheckFieldProps) {
   return (
     <Tooltip wrap>
@@ -229,9 +233,11 @@ export function CheckField({ meta, checked, onChange, disabled, label, className
         data-control-id={meta.id}
         data-mnemonic={meta.mnemonic}
         checked={checked}
-        disabled={disabled}
-        onCheckedChange={onChange}
-        className={className}
+        aria-disabled={disabled || undefined}
+        onCheckedChange={(on) => {
+          if (!disabled) onChange(on)
+        }}
+        className={cn(disabled && 'cursor-not-allowed opacity-50', className)}
       />
     </Tooltip>
   )
