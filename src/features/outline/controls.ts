@@ -28,6 +28,11 @@ export const OUTLINE_CONTROLS = {
     label: 'Heading',
     description: 'Go to this part of the manuscript. Arrows move through the list; Left and Right fold a chapter.',
   },
+  fold: {
+    id: 'outline.fold',
+    label: 'Fold chapter',
+    description: "Hide or show this chapter's subheadings. Left and Right on the row do the same.",
+  },
   resize: {
     id: 'outline.resize',
     label: 'Resize navigation pane',

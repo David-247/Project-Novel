@@ -5,6 +5,7 @@ import { clampNavPaneWidth, NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH, useStore } f
 import { cn, focusRing, IconButton, Tooltip } from '@/shared/ui'
 import { closeNavigationPane, dismissOverlay, focusManuscript, onFocusRequest, PANE_ATTR, takeFocusRequest } from './commands'
 import { OUTLINE_CONTROLS as C } from './controls'
+import { resolveEntry } from './identity'
 import { jumpTo } from './jump'
 import { buildOutline, entryAt, pageRange, pageRangeSpoken, pageRangeText, type OutlineEntry } from './model'
 import { usePresentation } from './presentation'
@@ -23,6 +24,8 @@ const wordsText = (n: number) => `${formatCount(n)} ${n === 1 ? 'word' : 'words'
 
 interface Row {
   entry: OutlineEntry
+  /** The entry's stable id: what folding and jumping follow (its key is its place in the tree). */
+  id: string
   words: number
   pages: { first: number; last: number } | null
   hasChildren: boolean
@@ -47,6 +50,8 @@ const CloseIcon = () => (
 interface TreeRowProps {
   id: string
   entryKey: string
+  /** Stable across edits (what the callbacks take); `entryKey` is its place in the tree. */
+  stableId: string
   label: string
   number: number | null
   level: 1 | 2
@@ -72,7 +77,9 @@ const TreeRow = memo(function TreeRow(p: TreeRowProps) {
   const facts = [wordsText(p.words), p.pagesSpoken].filter(Boolean).join(', ')
   const copy = {
     title: name,
-    description: `Go to this ${kind === 'part' ? 'part of the manuscript' : kind}. ${[wordsText(p.words), p.pagesText].filter(Boolean).join(', ')}.`,
+    description: `Go to this ${kind === 'part' ? 'part of the manuscript' : kind}. ${[wordsText(p.words), p.pagesText].filter(Boolean).join(', ')}.${
+      p.hasChildren ? ' Left and Right, or the arrow, fold its subheadings.' : ''
+    }`,
   }
   return (
     <Tooltip copy={copy} side="right">
@@ -91,7 +98,7 @@ const TreeRow = memo(function TreeRow(p: TreeRowProps) {
         aria-disabled={p.disabled || undefined}
         tabIndex={p.focusable ? 0 : -1}
         onFocus={() => p.onFocusRow(p.entryKey)}
-        onClick={() => p.onActivate(p.entryKey)}
+        onClick={() => p.onActivate(p.stableId)}
         className={cn(
           'group flex min-h-control cursor-pointer select-none items-start gap-1 rounded-control py-1 pr-2 text-left',
           p.level === 2 ? 'pl-7' : 'pl-1',
@@ -102,17 +109,26 @@ const TreeRow = memo(function TreeRow(p: TreeRowProps) {
       >
         {/* The fold control: pointer and touch only (keyboard: Left / Right on the row). */}
         {p.level === 1 ? (
-          <span
-            aria-hidden="true"
-            data-outline-toggle=""
-            className={cn('-my-1 inline-flex size-8 shrink-0 items-center justify-center rounded-control', p.hasChildren ? 'hover:bg-surface-hover' : 'invisible')}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (p.hasChildren) p.onToggle(p.entryKey)
-            }}
-          >
-            <ChevronIcon open={p.expanded} />
-          </span>
+          p.hasChildren ? (
+            // Its own tooltip on hover (the row's says where it goes). Not a tab stop: the keyboard folds
+            // with Left / Right on the row, whose tooltip says so on focus.
+            <Tooltip controlId={C.fold.id} side="right">
+              <span
+                aria-hidden="true"
+                data-control-id={C.fold.id}
+                data-outline-toggle=""
+                className="-my-1 inline-flex size-8 shrink-0 items-center justify-center rounded-control hover:bg-surface-hover"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  p.onToggle(p.stableId)
+                }}
+              >
+                <ChevronIcon open={p.expanded} />
+              </span>
+            </Tooltip>
+          ) : (
+            <span aria-hidden="true" data-outline-toggle="" className="-my-1 inline-flex size-8 shrink-0 items-center justify-center invisible" />
+          )
         ) : null}
         <span className="flex min-w-0 flex-1 flex-col pt-0.5">
           <span className="flex min-w-0 items-baseline gap-1.5">
@@ -151,11 +167,12 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
     const out: Row[] = []
     const top = data.outline.entries
     top.forEach((e, i) => {
-      const expanded = !collapsed.has(e.key)
-      out.push({ entry: e, words: data.words.get(e.key) ?? 0, pages: pageRange(pages, e.from, e.to), hasChildren: e.children.length > 0, expanded, pos: i + 1, size: top.length })
+      const id = data.ids.get(e.key) ?? e.key
+      const expanded = !collapsed.has(id)
+      out.push({ entry: e, id, words: data.words.get(e.key) ?? 0, pages: pageRange(pages, e.from, e.to), hasChildren: e.children.length > 0, expanded, pos: i + 1, size: top.length })
       if (expanded) {
         e.children.forEach((c, j) =>
-          out.push({ entry: c, words: data.words.get(c.key) ?? 0, pages: pageRange(pages, c.from, c.to), hasChildren: false, expanded: false, pos: j + 1, size: e.children.length }),
+          out.push({ entry: c, id: data.ids.get(c.key) ?? c.key, words: data.words.get(c.key) ?? 0, pages: pageRange(pages, c.from, c.to), hasChildren: false, expanded: false, pos: j + 1, size: e.children.length }),
         )
       }
     })
@@ -169,7 +186,7 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
     if (!e) return null
     if (e.level === 2) {
       const parent = data.outline.entries.find((p) => p.children.includes(e))
-      if (parent && collapsed.has(parent.key)) return parent.key
+      if (parent && collapsed.has(data.ids.get(parent.key) ?? parent.key)) return parent.key
     }
     return e.key
   }, [data, currentPos, collapsed])
@@ -216,29 +233,30 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
 
   // What activate reads, kept current outside render so the callback (a row prop) stays stable and the
   // memoized rows do not re-render when the tree is rebuilt.
-  const live = useRef({ rewriteOpen, overlay, editor })
+  const live = useRef({ rewriteOpen, overlay, editor, data })
   useLayoutEffect(() => {
-    live.current = { rewriteOpen, overlay, editor }
+    live.current = { rewriteOpen, overlay, editor, data }
   })
 
-  const activate = useCallback((key: string) => {
-    const { rewriteOpen, overlay, editor } = live.current
-    if (rewriteOpen || !editor || editor.isDestroyed) return
+  const activate = useCallback((id: string) => {
+    const { rewriteOpen, overlay, editor, data } = live.current
+    if (rewriteOpen || !editor || editor.isDestroyed || !data) return
     // The entry in the document as it is now (the tree shown may be an idle callback behind the last
-    // keystroke): the outline of the current document, cached per document so this is cheap.
+    // keystroke, with a chapter added or removed since): the shown entry's start carried through the
+    // edits since, in the outline of the current document (cached per document, so this is cheap).
     const s = useStore.getState()
-    const entry = buildOutline(editor.state.doc, undefined, s.trackChanges.markupView).flat.find((e) => e.key === key)
+    const entry = resolveEntry(data, id, buildOutline(editor.state.doc, undefined, s.trackChanges.markupView))
     if (!entry) return
-    setFocusKey(key)
+    setFocusKey(entry.key)
     jumpTo(entry.from, { firstPage: pageRange(s.layout.pages, entry.from, entry.to)?.first ?? null })
     if (overlay) dismissOverlay()
   }, [])
 
-  const toggle = useCallback((key: string) => {
+  const toggle = useCallback((id: string) => {
     setCollapsed((s) => {
       const n = new Set(s)
-      if (n.has(key)) n.delete(key)
-      else n.add(key)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
       return n
     })
   }, [])
@@ -263,13 +281,13 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
       case 'ArrowRight':
         e.preventDefault()
         if (!row) return
-        if (row.hasChildren && !row.expanded) toggle(row.entry.key)
+        if (row.hasChildren && !row.expanded) toggle(row.id)
         else if (row.hasChildren) focusRow(keys[at + 1])
         return
       case 'ArrowLeft': {
         e.preventDefault()
         if (!row) return
-        if (row.hasChildren && row.expanded) toggle(row.entry.key)
+        if (row.hasChildren && row.expanded) toggle(row.id)
         else if (row.entry.level === 2) {
           for (let i = at - 1; i >= 0; i--) if (rows[i].entry.level === 1) return focusRow(keys[i])
         }
@@ -277,7 +295,7 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
       }
       case 'Enter':
         e.preventDefault()
-        if (row) activate(row.entry.key)
+        if (row) activate(row.id)
         return
       case 'Escape':
         e.preventDefault()
@@ -288,7 +306,7 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
         // Space activates, unless it continues a type-ahead ("the s…").
         if (!typeahead.current.text || performance.now() - typeahead.current.at > TYPEAHEAD_MS) {
           e.preventDefault()
-          if (row) activate(row.entry.key)
+          if (row) activate(row.id)
           return
         }
         break
@@ -309,7 +327,16 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
     }
   }
 
-  if (!data) return <p className="px-3 py-2 text-ui-sm text-text-muted">No manuscript is open.</p>
+  if (!data) {
+    // No manuscript: say so. A manuscript whose tree is still being built (the first idle callback after
+    // the pane opened) is not "no manuscript".
+    if (!editor) return <p className="px-3 py-2 text-ui-sm text-text-muted">No manuscript is open.</p>
+    return (
+      <p className="px-3 py-2 text-ui-sm text-text-muted" role="status" aria-busy="true">
+        Loading headings…
+      </p>
+    )
+  }
   const tree = (
     <div ref={treeRef} role="tree" aria-label="Headings" tabIndex={tabKey ? -1 : 0} onKeyDown={onKeyDown} className="flex flex-col gap-px px-1 py-1">
       {rows.map((r) => (
@@ -317,6 +344,7 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
           key={r.entry.key}
           id={domId(r.entry.key)}
           entryKey={r.entry.key}
+          stableId={r.id}
           label={r.entry.label}
           number={r.entry.number}
           level={r.entry.level}

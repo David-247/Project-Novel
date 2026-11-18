@@ -303,9 +303,15 @@ const COMMENT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   ]),
 )
 
-/** The navigation pane: close, the heading rows (their own copy names the heading), the resize handle (outline slice). */
+/**
+ * The navigation pane: close, the heading rows (their own copy names the heading), the fold arrow, the
+ * resize handle (outline slice). The toggle (`view.navigationPane`: menu item, ribbon button) reads its
+ * copy from the registry command.
+ */
 const OUTLINE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
-  Object.values(OUTLINE_CONTROLS).map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined }]),
+  Object.values(OUTLINE_CONTROLS)
+    .filter((c) => c.id !== OUTLINE_CONTROLS.toggle.id)
+    .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: 'shortcut' in c ? (c.shortcut as string) : undefined }]),
 )
 
 /** Review: Track Changes and the markup view picker with its choices (track-changes slice). */

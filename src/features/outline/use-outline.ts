@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react'
 import type { Editor } from '@tiptap/core'
+import { Mapping } from '@tiptap/pm/transform'
 import { useStore } from '@/shared/store'
 import { countOutline } from './counts'
+import { assignIds } from './identity'
 import { buildOutline, type Outline } from './model'
 
 export interface OutlineData {
   outline: Outline
   /** Words per entry key. */
   words: Map<string, number>
+  /** Stable id per entry key: a chapter keeps its id when others are added or removed above it (identity.ts). */
+  ids: ReadonlyMap<string, string>
+  /** The edits since this build: carries its positions to the document as it is now (read when a row is activated). */
+  since: Mapping
 }
 
 type IdleWindow = Window & {
@@ -44,6 +50,14 @@ export function useOutline(editor: Editor | null, enabled: boolean): OutlineData
     if (!enabled || !editor) return
     let cancel: (() => void) | null = null
     let last: { doc: unknown; outline: Outline; wc: unknown; data: OutlineData } | null = null
+    let minted = 0
+    const mint = (kind: string) => `${kind}#${++minted}`
+    // The edits since the last build (its `since`), for the ids of the next build and for activating a row.
+    let since = new Mapping()
+    const onTransaction = ({ transaction }: { transaction: { docChanged: boolean; mapping: Mapping } }) => {
+      if (transaction.docChanged) since.appendMapping(transaction.mapping)
+    }
+    editor.on('transaction', onTransaction)
     const run = () => {
       cancel = null
       if (editor.isDestroyed) return
@@ -56,7 +70,16 @@ export function useOutline(editor: Editor | null, enabled: boolean): OutlineData
       const words = countOutline(doc, outline, s.wordCount, s.editor.docVersion)
       const prev = last?.data
       const same = prev && prev.outline === outline && prev.words.size === words.size && [...words].every(([k, n]) => prev.words.get(k) === n)
-      const next = same ? prev : { outline, words }
+      let next: OutlineData
+      if (same) next = prev
+      else if (prev && prev.outline === outline) next = { ...prev, words }
+      else {
+        // A new outline: its ids continue the last build's through the edits since (`since`), and it
+        // starts its own run of edits.
+        const ids = assignIds(prev ?? null, outline, mint)
+        since = new Mapping()
+        next = { outline, words, ids, since }
+      }
       last = { doc, outline, wc: s.wordCount, data: next }
       outlineDebug.builds++
       outlineDebug.lastBuildMs = performance.now() - t0
@@ -72,6 +95,7 @@ export function useOutline(editor: Editor | null, enabled: boolean): OutlineData
     })
     return () => {
       off()
+      editor.off('transaction', onTransaction)
       cancel?.()
     }
   }, [editor, enabled])

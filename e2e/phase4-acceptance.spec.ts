@@ -492,6 +492,7 @@ test('offline: with the network disabled, DOCX and PDF export, and nothing is re
   // as the installed app's do (Tauri's asset protocol): every request is answered from dist-e2e/ by
   // this handler, or refused and recorded when it is not for the app itself.
   const outbound: string[] = []
+  const served: string[] = []
   const appFiles = join(ROOT, 'dist-e2e')
   await context.setOffline(true)
   await context.route('**/*', async (route) => {
@@ -502,6 +503,7 @@ test('offline: with the network disabled, DOCX and PDF export, and nothing is re
     }
     const file = join(appFiles, decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname))
     if (!file.startsWith(appFiles) || !existsSync(file)) return route.fulfill({ status: 404, body: '' })
+    served.push(url.pathname)
     return route.fulfill({ status: 200, body: readFileSync(file), contentType: MIME[extname(file)] ?? 'application/octet-stream' })
   })
   context.on('request', (r) => {
@@ -516,6 +518,11 @@ test('offline: with the network disabled, DOCX and PDF export, and nothing is re
   await expect(wizard(page).getByTestId('export-done')).toBeVisible({ timeout: 60_000 })
   expect(await written(page)).toEqual([DOCX, PDF])
   expect(readDocx(await exported(page, DOCX)).paragraphs.some((p) => p.text === 'The Storm')).toBe(true)
+  // The DOCX was built in its Web Worker, offline: the worker's script was served, and the page never
+  // fell back to loading the builder itself (the renderer retries in the page when the worker fails to
+  // start, which would also pass the checks above).
+  expect(served.filter((p) => /\/worker-[\w-]+\.js$/.test(p)), 'the DOCX worker script was loaded').not.toHaveLength(0)
+  expect(served.filter((p) => /\/build-[\w-]+\.js$/.test(p)), 'the page did not build the DOCX itself').toEqual([])
   // The PDF: the sidecar run as Rust runs it (empty package folders, a dead proxy, bundled fonts only;
   // src-tauri/src/export/tests.rs also proves it with the network blocked).
   const pdf = await realPdf(page, testInfo, 'offline')
