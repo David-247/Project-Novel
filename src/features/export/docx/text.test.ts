@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { docxFontReport } from './font'
 import { doubleSentenceSpaces, xmlSafe } from './text'
+
+describe('docxFontReport (as the PDF render report)', () => {
+  it('the trimmed family; substituted when it is not a known manuscript family', () => {
+    expect(docxFontReport({ fontFamily: '  Times New Roman ' })).toEqual({ requested: 'Times New Roman', substituted: false })
+    expect(docxFontReport({ fontFamily: 'cousine' })).toEqual({ requested: 'cousine', substituted: false })
+    expect(docxFontReport({ fontFamily: 'Garamond' })).toEqual({ requested: 'Garamond', substituted: true })
+  })
+})
 
 describe('xmlSafe', () => {
   it('drops what XML 1.0 cannot hold and keeps tab, line feeds and emoji', () => {

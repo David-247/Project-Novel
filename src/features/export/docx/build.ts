@@ -302,7 +302,8 @@ export async function renderDocx(ir: ManuscriptIR, settings: DocxRenderSettings,
   if (body.sections.length === 0) body.push(new Paragraph({}))
 
   const footnotes: Record<string, { children: Paragraph[] }> = {}
-  for (const f of ir.footnotes) footnotes[String(f.index + 1)] = { children: [new Paragraph({ style: STYLE.footnoteText, children: inlineRuns(f.runs, ctx) })] }
+  // Word writes the note's number mark first; a no-break space keeps it with the text (as the PDF does).
+  for (const f of ir.footnotes) footnotes[String(f.index + 1)] = { children: [new Paragraph({ style: STYLE.footnoteText, children: [new TextRun(' '), ...inlineRuns(f.runs, ctx)] })] }
   done++
   report(BUILD_SHARE, 'footnotes')
 

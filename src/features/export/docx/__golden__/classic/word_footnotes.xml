@@ -44,6 +44,9 @@
 <w:footnoteRef/>
 </w:r>
 <w:r>
+<w:t xml:space="preserve"> </w:t>
+</w:r>
+<w:r>
 <w:t xml:space="preserve">First told in </w:t>
 </w:r>
 <w:r>
@@ -67,6 +70,9 @@
 <w:rStyle w:val="FootnoteReference"/>
 </w:rPr>
 <w:footnoteRef/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve"> </w:t>
 </w:r>
 <w:r>
 <w:t xml:space="preserve">Second note.</w:t>

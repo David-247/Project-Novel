@@ -349,7 +349,7 @@ describe('footnotes', () => {
     const notes = parseXml(files['word/footnotes.xml'])
     const real = wAll(notes, 'footnote').filter((f) => !wAttr(f, 'type'))
     expect(real.map((f) => wAttr(f, 'id'))).toEqual(['1', '2'])
-    expect(real.map((f) => pText(wAll(f, 'p')[0]))).toEqual(['First told in 1902.', 'Second note.'])
+    expect(real.map((f) => pText(wAll(f, 'p')[0]))).toEqual([' First told in 1902.', ' Second note.']) // a no-break space after Word's number mark
     expect(wAll(real[0], 'footnoteRef')).toHaveLength(1)
     expect(pStyle(wAll(real[0], 'p')[0])).toBe('FootnoteText')
     expect(wAll(document, 'footnoteReference').map((r) => wAttr(r, 'id'))).toEqual(['1', '2'])
@@ -381,7 +381,7 @@ describe('user text is escaped safely', () => {
     expect(titlePage.map(pText)).toContain('A & B <C> "D"')
     expect(pText(titlePage[0])).toBe('Ann & <Co>\tabout 0 words') // a dozen words round to 0 (nearest 100)
     expect(parseXml(files['docProps/core.xml']).getElementsByTagName('dc:title')[0].textContent).toBe('A & B <C> "D"')
-    expect(pText(wAll(parseXml(files['word/footnotes.xml']), 'footnote').filter((f) => !wAttr(f, 'type'))[0])).toBe('<note> & ')
+    expect(pText(wAll(parseXml(files['word/footnotes.xml']), 'footnote').filter((f) => !wAttr(f, 'type'))[0])).toBe(' <note> & ')
   })
 })
 
