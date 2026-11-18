@@ -462,6 +462,194 @@ describe('Export Manuscript Again', () => {
   })
 })
 
+const DOCX = '/exports/Waight_THE_LONG_NIGHT_manuscript.docx'
+const PDF = '/exports/Waight_THE_LONG_NIGHT_manuscript.pdf'
+const status = () => document.querySelector<HTMLElement>('[data-testid="export-status"]')
+const confirms = () => backend.messages.filter((m) => m.text.startsWith('Replace ')).length
+
+/** Export both formats through the wizard and close it. */
+async function exportOnce() {
+  openWizard()
+  alt('Digit4')
+  alt('KeyE')
+  await waitFor(() => expect(getWizardState().run.phase).toBe('done'))
+  closeWizard()
+}
+
+describe('Show me on every check that finds something (fix round 1)', () => {
+  it('a scene break: the caret goes to its chapter', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit3')
+    const rows = checkEl('scene-breaks')!.querySelectorAll<HTMLElement>(`[data-control-id="${C.checkShowChapter.id}"]`)
+    expect(Array.from(rows, (r) => r.getAttribute('aria-label'))).toEqual([
+      'Show me: "* * *" in Chapter One · The Arrival',
+      'Show me: A blank line in The Storm',
+      'Show me: "#" in The Storm',
+    ])
+    act(() => fireEvent.click(rows[1]))
+    expect(dialog()).toBeNull()
+    const ed = getEditor()!
+    const storm = getChapters(ed.state.doc, getResolvedStyles(), 'none').find((c) => c.index === 1)!
+    await waitFor(() => expect(ed.state.selection.from).toBe(storm.from + 1))
+  })
+
+  it('double spaces: Show me selects the first two spaces after a full stop', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit3')
+    act(() => fireEvent.click(checkEl('double-spaces')!.querySelector(`[data-control-id="${C.checkShowText.id}"]`)!))
+    const ed = getEditor()!
+    await waitFor(() => expect(ed.state.selection.empty).toBe(false))
+    const { from, to } = ed.state.selection
+    expect(ed.state.doc.textBetween(from - 'waited.'.length, to + 'Nobody'.length)).toBe('waited.  Nobody')
+  })
+
+  it('book formatting: Show me puts the caret at the first formatting left out (the run in Georgia)', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit3')
+    act(() => fireEvent.click(checkEl('formatting')!.querySelector(`[data-control-id="${C.checkShowText.id}"]`)!))
+    const ed = getEditor()!
+    await waitFor(() => expect(ed.state.doc.nodeAt(ed.state.selection.from)?.text).toBe(' and '))
+    openWizard()
+    expect(getWizardState().step).toBe('checks')
+  })
+})
+
+describe('error states (fix round 1)', () => {
+  it('a Save dialog that fails shows the error with Retry, which asks again', async () => {
+    await renderApp()
+    ex.failPick = { kind: 'io', message: 'dialog plugin failed', diagnostics: [] }
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-error"]')).not.toBeNull())
+    expect(dialog()!.querySelector('[data-testid="export-error"]')!.textContent).toMatch(/dialog plugin failed/)
+    expect(ex.written.size).toBe(0)
+    ex.failPick = null
+    act(() => fireEvent.click(ctl(C.retry.id)!))
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
+    expect(ex.written.size).toBe(2)
+  })
+
+  it('Choose another location, cancelled, puts the error and its Retry back', async () => {
+    await renderApp()
+    ex.failWrite = { kind: 'read_only', message: 'read-only volume', diagnostics: [] }
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(ctl(C.chooseLocation.id)).not.toBeNull())
+    ex.savePath = null
+    await act(async () => fireEvent.click(ctl(C.chooseLocation.id)!))
+    await waitFor(() => expect(getWizardState().run.phase).toBe('error'))
+    expect(dialog()!.querySelector('[data-testid="export-error"]')).toHaveAttribute('data-problem', 'permission')
+    expect(ctl(C.retry.id)).not.toBeNull()
+  })
+
+  it('a write failing after the first file was saved says that file was saved', async () => {
+    await renderApp()
+    ex.failWrite = { kind: 'disk_full', message: 'full', diagnostics: [] }
+    ex.failWriteMatch = '.pdf'
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-error"]')).not.toBeNull())
+    expect(dialog()!.querySelector('[data-testid="export-error"]')!.textContent).toMatch(/Waight_THE_LONG_NIGHT_manuscript\.docx was saved\./)
+    expect([...ex.written.keys()]).toEqual([DOCX])
+  })
+
+  it('Open file and Show in folder failures are shown by the file, as an alert', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
+    // The files were moved after the export (Rust refuses: not an exported file any more).
+    ex.written.clear()
+    const rows = dialog()!.querySelectorAll('[data-testid="export-done"] li')
+    act(() => fireEvent.click(rows[0].querySelector(`[data-control-id="${C.openFile.id}"]`)!))
+    await waitFor(() => expect(rows[0].querySelector('[role="alert"]')).not.toBeNull())
+    expect(rows[0].querySelector('[role="alert"]')!.textContent).toBe(
+      'Novel could not open Waight_THE_LONG_NIGHT_manuscript.docx: it is no longer where it was exported (moved, renamed or deleted).',
+    )
+    act(() => fireEvent.click(rows[1].querySelector(`[data-control-id="${C.showInFolder.id}"]`)!))
+    await waitFor(() => expect(rows[1].querySelector('[role="alert"]')).not.toBeNull())
+    expect(rows[1].querySelector('[role="alert"]')!.textContent).toMatch(/could not show Waight_THE_LONG_NIGHT_manuscript\.pdf/)
+    expect(ex.opens).toEqual([])
+    audit('file action errors')
+  })
+})
+
+describe('Export Manuscript Again: error states (fix round 1)', () => {
+  it('a failed write shows the error in the status bar with Retry; Retry exports', async () => {
+    await renderApp()
+    await exportOnce()
+    ex.written.clear()
+    ex.failWrite = { kind: 'disk_full', message: 'full', diagnostics: [] }
+    backend.answer = 'Replace'
+    await act(async () => getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(status()?.querySelector('[role="alert"]')?.textContent).toMatch(/Export failed: The disk is full/))
+    expect(auditTooltipCoverage(status()!)).toEqual([])
+    ex.failWrite = null
+    act(() => fireEvent.click(status()!.querySelector(`[data-control-id="${C.statusRetry.id}"]`)!))
+    await waitFor(() => expect(status()!.textContent).toMatch(/Exported Waight_THE_LONG_NIGHT_manuscript\.docx/))
+    expect(ex.written.size).toBe(2)
+  })
+
+  it('Cancel in the status bar stops the export, writing nothing', async () => {
+    await renderApp()
+    await exportOnce()
+    ex.written.clear()
+    offRenderers()
+    offRenderers = setExportRenderers(createMockExportRenderers({ delayMs: 40 }))
+    backend.answer = 'Replace'
+    await act(async () => void getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(status()?.querySelector(`[data-control-id="${C.statusCancel.id}"]`)).not.toBeNull())
+    act(() => fireEvent.click(status()!.querySelector(`[data-control-id="${C.statusCancel.id}"]`)!))
+    await waitFor(() => expect(status()!.textContent).toMatch(/Export cancelled\. No file was written\./))
+    await act(async () => new Promise((r) => setTimeout(r, 300)))
+    expect(ex.written.size).toBe(0)
+  })
+
+  it('grants Rust has forgotten: it asks where to save, then exports', async () => {
+    await renderApp()
+    await exportOnce()
+    ex.written.clear()
+    core.restartExportSession()
+    const before = ex.dialogs.length
+    backend.answer = 'Replace'
+    await act(async () => getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(ex.written.size).toBe(2))
+    expect(ex.dialogs.length).toBe(before + 2)
+  })
+
+  it('a second Export Again while the first one asks is ignored (one question)', async () => {
+    await renderApp()
+    await exportOnce()
+    backend.answer = 'Replace'
+    const again = getCommand(EXPORT_COMMAND_IDS.again)!
+    await act(async () => {
+      again.run()
+      again.run()
+    })
+    await waitFor(() => expect(status()?.textContent ?? '').toMatch(/Exported/))
+    expect(confirms()).toBe(1)
+  })
+
+  it('Show in folder failing in the status bar is shown as an alert', async () => {
+    await renderApp()
+    await exportOnce()
+    backend.answer = 'Replace'
+    await act(async () => getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(status()?.textContent ?? '').toMatch(/Exported/))
+    ex.written.clear()
+    act(() => fireEvent.click(status()!.querySelector(`[data-control-id="${C.statusShow.id}"]`)!))
+    await waitFor(() => expect(status()!.querySelector('[data-testid="file-action-error"]')).not.toBeNull())
+    expect(status()!.querySelector('[data-testid="file-action-error"]')).toHaveAttribute('role', 'alert')
+  })
+})
+
 /** Open a project, discarding what an earlier test left unsaved (book styles) if asked. */
 async function open(folder: string) {
   const answer = backend.answer
@@ -526,6 +714,45 @@ describe('with a project', () => {
     alt('KeyN')
     await waitFor(() => expect(useStore.getState().project.title).toBe('The Longest Night'))
     expect(JSON.parse(backend.files.get(`${FOLDER}/project.json`)!).title).toBe('The Longest Night')
+  })
+
+  /** A relaunch: Rust forgets its grants, the wizard its session; Rust's export-folders record stays. */
+  function relaunch() {
+    core.restartExportSession()
+    act(() => __resetWizardForTests())
+  }
+
+  it('Export Again after a restart: no grants, so the Save dialog asks, opening in the last folder (Rust’s record)', async () => {
+    seed()
+    render(<App />)
+    await waitFor(() => expect(getEditor()).not.toBeNull())
+    await setProfile()
+    await open(FOLDER)
+    await exportOnce()
+    relaunch()
+    ex.written.clear()
+    const again = getCommand(EXPORT_COMMAND_IDS.again)!
+    expect(isCommandEnabled(again)).toBe(true)
+    await act(async () => again.run())
+    await waitFor(() => expect(ex.written.size).toBe(2))
+    // No replace question (the OS Save dialog asks about overwriting); both dialogs start in /exports.
+    expect(confirms()).toBe(0)
+    expect(ex.dialogs.slice(-2).map((d) => d.directory)).toEqual(['/exports', '/exports'])
+    expect([...ex.written.keys()]).toEqual([DOCX, PDF])
+  })
+
+  it('Export Again after a restart with a failing Save dialog: the error is in the status bar', async () => {
+    seed()
+    render(<App />)
+    await waitFor(() => expect(getEditor()).not.toBeNull())
+    await setProfile()
+    await open(FOLDER)
+    await exportOnce()
+    relaunch()
+    ex.failPick = { kind: 'io', message: 'dialog plugin failed', diagnostics: [] }
+    await act(async () => getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(status()?.querySelector('[role="alert"]')?.textContent).toMatch(/dialog plugin failed/))
+    expect(status()!.querySelector(`[data-control-id="${C.statusRetry.id}"]`)).not.toBeNull()
   })
 
   it('useLastOutputFolder follows a project switch', async () => {

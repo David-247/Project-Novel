@@ -1,12 +1,15 @@
 import { isAbortError, throwIfAborted, type RenderProgress } from '../ir'
 import { ExportPlatformError, writeExportFile, type ExportErrorKind, type SaveTarget, type TypstDiagnostic } from '../platform'
 import type { ExportJob, ExportRenderer, WizardFormat } from './renderers'
+import { fileNameOf } from './title-page'
 
 /**
  * Run one export: render every chosen format to bytes, then write them to their Save-dialog targets.
  * Nothing is written until every render succeeded, and each write is atomic (Rust: temp file +
- * rename), so a cancel or a failure never leaves a partial file. Cancelling is possible until the
- * writes start (they take milliseconds); `onPhase('saving')` says when that is.
+ * rename), so a cancel or a failed render writes nothing and no file is ever partial. A write can
+ * still fail after an earlier one succeeded (the second file's disk is full): the first file is then
+ * complete and saved, and the error says so (`ExportRunError.saved`). Cancelling is possible until the
+ * writes start (they take milliseconds); progress `stage: 'save'` says when that is.
  */
 
 export interface WrittenFile {
@@ -37,8 +40,16 @@ export class ExportRunError extends Error {
   readonly diagnostics: readonly TypstDiagnostic[]
   /** Choosing another place in the Save dialog may help (permissions, a full disk, a folder gone). */
   readonly changeLocation: boolean
-  constructor(problem: ExportProblem, format: WizardFormat, message: string, opts: { kind?: ExportErrorKind | null; diagnostics?: readonly TypstDiagnostic[]; cause?: unknown } = {}) {
+  /** Files of this export already saved when a later write failed (complete files). */
+  readonly saved: readonly WrittenFile[]
+  constructor(
+    problem: ExportProblem,
+    format: WizardFormat,
+    message: string,
+    opts: { kind?: ExportErrorKind | null; diagnostics?: readonly TypstDiagnostic[]; cause?: unknown; saved?: readonly WrittenFile[] } = {},
+  ) {
     super(message, { cause: opts.cause })
+    this.saved = opts.saved ?? []
     this.name = 'ExportRunError'
     this.problem = problem
     this.format = format
@@ -118,7 +129,15 @@ export async function runExport(
       const w = await writeExportFile(target, bytes)
       written.push({ format, path: w.path, bytes: w.bytes })
     } catch (e) {
-      throw describeExportError(e, format, 'save')
+      const err = describeExportError(e, format, 'save')
+      if (!written.length) throw err
+      const names = written.map((w) => fileNameOf(w.path)).join(' and ')
+      throw new ExportRunError(err.problem, format, `${err.message} ${names} ${written.length === 1 ? 'was' : 'were'} saved.`, {
+        kind: err.kind,
+        diagnostics: err.diagnostics,
+        cause: err,
+        saved: written,
+      })
     }
   }
   onProgress?.({ fraction: 1, format: rendered[rendered.length - 1]?.format ?? 'docx', stage: 'save' })

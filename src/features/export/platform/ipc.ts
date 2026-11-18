@@ -101,22 +101,16 @@ async function call<T>(run: () => Promise<T>): Promise<T> {
 
 /**
  * Show the native Save dialog for a PDF or DOCX (with that file type's filter). Returns the chosen
- * target, or null if the user cancelled. `directory`: the folder the dialog opens in (e.g. the
- * project's last export folder); ignored by Rust unless it is an existing absolute folder.
+ * target, or null if the user cancelled. Rust chooses the folder it opens in (the last one granted
+ * this session, else the project's last export folder it recorded); the webview passes no path.
  */
 export async function pickSavePath(
   kind: ExportFileKind,
   defaultName: string,
   title?: string,
-  directory?: string | null,
 ): Promise<SaveTarget | null> {
   const picked = await call(() =>
-    invoke<{ token: string; path: string } | null>(EXPORT_COMMANDS.pickSavePath, {
-      kind,
-      defaultName,
-      title,
-      ...(directory ? { directory } : {}),
-    }),
+    invoke<{ token: string; path: string } | null>(EXPORT_COMMANDS.pickSavePath, { kind, defaultName, title }),
   )
   return picked ? { ...picked, kind } : null
 }

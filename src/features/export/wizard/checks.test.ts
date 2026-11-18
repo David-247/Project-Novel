@@ -31,7 +31,8 @@ describe('runChecks on the wizard fixture', () => {
     expect(c['scene-breaks']).toMatchObject({ severity: 'info' })
     expect(c['scene-breaks'].summary).toBe('2 typed breaks and 1 blank line will be exported as "#".')
     expect(c.formatting).toMatchObject({ severity: 'info', summary: 'Book formatting is left out: 1 font change, 1 size change, 1 paragraph layout.' })
-    expect(c['double-spaces']).toMatchObject({ severity: 'info', summary: '1 place has two spaces after a full stop.' })
+    expect(c['double-spaces'].severity).toBe('info')
+    expect(c['double-spaces'].summary).toMatch(/^1 place has two spaces after a full stop\./)
     // With a complete title page nothing blocks.
     expect(c.title.severity).toBe('pass')
     expect(c.name.severity).toBe('pass')
@@ -80,5 +81,41 @@ describe('runChecks on the wizard fixture', () => {
 
   it('the scene-break marker named is the trimmed setting', () => {
     expect(byId(input({}, { sceneBreak: ' * * * ' }))['scene-breaks'].summary).toMatch(/exported as "\* \* \*"/)
+  })
+})
+
+describe('every check that finds something has a Show me or a Fix', () => {
+  const located = { doubleSpace: { from: 120, to: 121 }, formatting: 40 }
+
+  it('scene breaks: a Show me for each manual and blank-line break, at its chapter', () => {
+    expect(byId(input({ locations: located }))['scene-breaks'].actions).toEqual([
+      { kind: 'show-chapter', chapter: 0, issue: 'scene-break', label: '"* * *" in Chapter One · The Arrival' },
+      { kind: 'show-chapter', chapter: 1, issue: 'scene-break', label: 'A blank line in The Storm' },
+      { kind: 'show-chapter', chapter: 1, issue: 'scene-break', label: '"#" in The Storm' },
+    ])
+  })
+
+  it('scene breaks read as spacing: the Fix is to never read blank lines as breaks', () => {
+    const spaced = { ...ir, report: { ...ir.report, manualSceneBreaks: [], blankLineSpacing: true } }
+    expect(byId(input({ ir: spaced }))['scene-breaks'].actions).toEqual([{ kind: 'option', option: 'blankLinesOff' }])
+    // Once it is set, nothing is left to fix.
+    const off = { ...defaultManuscriptSettings('en-US').checks, blankLineSceneBreaks: 'off' as const }
+    expect(byId(input({ ir: spaced }, { checks: off }))['scene-breaks'].actions).toEqual([])
+  })
+
+  it('double spaces: Show me selects the first one; when it cannot be located, the export-only option is the Fix', () => {
+    expect(byId(input({ locations: located }))['double-spaces'].actions).toEqual([{ kind: 'show-position', pos: 120, to: 121, label: 'the first two spaces after a full stop' }])
+    const unlocated = byId(input({ locations: { doubleSpace: null, formatting: 40 } }))['double-spaces']
+    expect(unlocated.actions).toEqual([{ kind: 'option', option: 'normalizeSpaces' }])
+    expect(unlocated.summary).toMatch(/cannot point to it in the text .* export one space instead/)
+  })
+
+  it('formatting: Show me goes to the first formatting left out', () => {
+    expect(byId(input({ locations: located })).formatting.actions).toEqual([{ kind: 'show-position', pos: 40, label: 'the first book formatting left out' }])
+  })
+
+  it('on the wizard fixture with its locations, no check that is not a pass is without an action', () => {
+    const results = runChecks(input({ locations: located }, { checks: { genre: 'thriller', debut: false, normalizeSpaces: false, blankLineSceneBreaks: 'auto' } }))
+    expect(results.filter((c) => c.severity !== 'pass' && c.actions.length === 0).map((c) => c.id)).toEqual([])
   })
 })

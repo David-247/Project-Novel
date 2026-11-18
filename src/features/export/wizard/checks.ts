@@ -1,7 +1,8 @@
 import { bylineName, checkWordCount, formatWordCount, GENRE_WORD_COUNTS } from '../settings'
 import type { ContactDetails, ManuscriptSettings } from '../settings'
 import type { ManuscriptIR } from '../ir'
-import { chapterIssues, countDoubleSpaces, type ChapterIssue } from './analysis'
+import { chapterIssues, chapterLabel, countDoubleSpaces, type ChapterIssue } from './analysis'
+import type { DocLocations } from './locate'
 
 /**
  * The export wizard's publisher-standard checks (pure). Each check says, in plain words taken from
@@ -32,7 +33,12 @@ export type CheckAction =
   | { kind: 'review-changes' }
   | { kind: 'show-comments' }
   | { kind: 'open-rewrite' }
-  | { kind: 'show-chapter'; chapter: number; label: string; issue: ChapterIssue['kind'] }
+  /** Show me a chapter (-1: the front matter), for a chapter issue or a manual scene break in it. */
+  | { kind: 'show-chapter'; chapter: number; label: string; issue: ChapterIssue['kind'] | 'scene-break' }
+  /** Show me a place in the manuscript (document positions; `to`: select up to it). */
+  | { kind: 'show-position'; pos: number; to?: number; label: string }
+  /** Fix by an export-only option (the manuscript is not changed). */
+  | { kind: 'option'; option: 'normalizeSpaces' | 'blankLinesOff' }
 
 export interface CheckResult {
   id: CheckId
@@ -53,6 +59,8 @@ export interface CheckInput {
   contact: ContactDetails
   /** The word count of the exported text (`manuscriptWordCount(ir).total`). */
   wordCount: number
+  /** Where the double space and the stripped formatting are in the manuscript (`locateInDoc`); none: no Show me. */
+  locations?: DocLocations
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
@@ -200,19 +208,29 @@ function sceneBreakCheck({ ir, settings }: CheckInput): CheckResult {
   const blank = manual.filter((m) => m.kind === 'blank').length
   const explanation = `A scene break is "${marker}" centred on a line of its own. A blank line alone is not enough: at the foot of a page it vanishes. Lines such as "* * *" and blank lines between paragraphs are exported as the marker.`
   if (!manual.length) {
+    const spacing = ir.report.blankLineSpacing
     return {
       id: 'scene-breaks',
-      severity: ir.report.blankLineSpacing ? 'info' : 'pass',
-      summary: ir.report.blankLineSpacing ? 'Blank lines separate most paragraphs, so they were read as spacing and left out.' : 'No typed scene breaks needed changing.',
+      severity: spacing ? 'info' : 'pass',
+      summary: spacing
+        ? 'Blank lines separate most paragraphs, so they were read as spacing and left out. To be sure none becomes a scene break, never read blank lines as breaks.'
+        : 'No typed scene breaks needed changing.',
       explanation,
-      actions: [],
+      actions: spacing && settings.checks.blankLineSceneBreaks !== 'off' ? [{ kind: 'option', option: 'blankLinesOff' }] : [],
     }
   }
   const parts = [manual.length - blank ? plural(manual.length - blank, 'typed break') : '', blank ? plural(blank, 'blank line') : ''].filter(Boolean)
-  return { id: 'scene-breaks', severity: 'info', summary: `${parts.join(' and ')} will be exported as "${marker}".`, explanation, actions: [] }
+  const where = (chapter: number) => (chapter < 0 ? 'the front matter' : chapterLabel(ir.chapters[chapter] ?? { index: chapter, numberText: '', titleText: '' }))
+  const actions: CheckAction[] = manual.map((m) => ({
+    kind: 'show-chapter',
+    chapter: m.chapter,
+    issue: 'scene-break',
+    label: m.kind === 'blank' ? `A blank line in ${where(m.chapter)}` : `"${m.original}" in ${where(m.chapter)}`,
+  }))
+  return { id: 'scene-breaks', severity: 'info', summary: `${parts.join(' and ')} will be exported as "${marker}".`, explanation, actions }
 }
 
-function formattingCheck({ ir, settings }: CheckInput): CheckResult {
+function formattingCheck({ ir, settings, locations }: CheckInput): CheckResult {
   const s = ir.report.strippedFormatting
   const parts = [s.fontFamily ? plural(s.fontFamily, 'font change') : '', s.fontSize ? plural(s.fontSize, 'size change') : '', s.blockLayout ? plural(s.blockLayout, 'paragraph layout') : ''].filter(Boolean)
   const font = `${settings.fontFamily.trim() || 'Times New Roman'} ${settings.fontSizePt} pt`
@@ -221,22 +239,31 @@ function formattingCheck({ ir, settings }: CheckInput): CheckResult {
     severity: parts.length ? 'info' : 'pass',
     summary: parts.length ? `Book formatting is left out: ${parts.join(', ')}.` : 'No book formatting needs to be left out.',
     explanation: `A manuscript is not typeset: every page is ${font}, black, double-spaced with an indented first line. Fonts, sizes, colours and spacing you gave the book are left out of the export; italics and bold are kept. The book itself does not change.`,
-    actions: [],
+    actions: parts.length && locations?.formatting != null ? [{ kind: 'show-position', pos: locations.formatting, label: 'the first book formatting left out' }] : [],
   }
 }
 
-function spacesCheck({ ir, settings }: CheckInput): CheckResult {
+function spacesCheck({ ir, settings, locations }: CheckInput): CheckResult {
   const n = countDoubleSpaces(ir)
   const fixed = settings.checks.normalizeSpaces
   const explanation =
     'Manuscripts today use one space after a full stop (the Classic, typewriter style used two). Novel can export them as one space; the manuscript keeps the spaces you typed.'
   if (!n) return { id: 'double-spaces', severity: 'pass', summary: 'No double spaces after full stops.', explanation, actions: [] }
+  const at = locations?.doubleSpace ?? null
+  const found = `${plural(n, 'place')} ${n === 1 ? 'has' : 'have'} two spaces after a full stop${fixed ? ': exported as one space' : ''}.`
+  // Show me the first one; a gap that crosses a change of formatting cannot be pointed to, then the
+  // export-only option is the fix.
+  const actions: CheckAction[] = at
+    ? [{ kind: 'show-position', pos: at.from, to: at.to, label: 'the first two spaces after a full stop' }]
+    : fixed
+      ? []
+      : [{ kind: 'option', option: 'normalizeSpaces' }]
   return {
     id: 'double-spaces',
     severity: 'info',
-    summary: `${plural(n, 'place')} ${n === 1 ? 'has' : 'have'} two spaces after a full stop${fixed ? ': exported as one space' : ''}.`,
+    summary: at || fixed ? found : `${found} Novel cannot point to it in the text (it crosses a change of formatting); export one space instead.`,
     explanation,
-    actions: [],
+    actions,
   }
 }
 

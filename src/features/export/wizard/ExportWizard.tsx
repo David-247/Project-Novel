@@ -44,6 +44,7 @@ import {
 import { CheckField, DraftField, handleAccessKey, Mn, SelectField } from './fields'
 import { ChapterPagePreview, HeaderPreview, TitlePagePreview } from './previews'
 import { useExportRenderers, WIZARD_FORMATS, type WizardFormat } from './renderers'
+import { fileActionProblem } from './file-actions'
 import { fileNameOf, manuscriptFileName, titlePageData, type TitlePageData } from './title-page'
 
 /**
@@ -503,11 +504,16 @@ function SeverityIcon({ severity }: { severity: CheckSeverity }) {
   )
 }
 
-const ACTION_META: Record<Exclude<CheckAction['kind'], 'show-chapter'>, ExportControlMeta> = {
+const ACTION_META: Record<Exclude<CheckAction['kind'], 'show-chapter' | 'option'>, ExportControlMeta> = {
   fix: C.checkFix,
   'review-changes': C.checkReviewChanges,
   'show-comments': C.checkShowComments,
   'open-rewrite': C.checkOpenRewrite,
+  'show-position': C.checkShowText,
+}
+const OPTION_META: Record<Extract<CheckAction, { kind: 'option' }>['option'], ExportControlMeta> = {
+  normalizeSpaces: C.checkFixSpaces,
+  blankLinesOff: C.checkFixBlankLines,
 }
 
 const FIX_LABEL: Record<WizardField, string> = {
@@ -521,11 +527,12 @@ const FIX_LABEL: Record<WizardField, string> = {
 }
 
 function ActionButton({ action }: { action: CheckAction }) {
-  const meta = action.kind === 'show-chapter' ? C.checkShowChapter : ACTION_META[action.kind]
+  const meta = action.kind === 'show-chapter' ? C.checkShowChapter : action.kind === 'option' ? OPTION_META[action.option] : ACTION_META[action.kind]
   const label = action.kind === 'fix' ? FIX_LABEL[action.field] : meta.label
+  const name = action.kind === 'show-chapter' || action.kind === 'show-position' ? `Show me: ${action.label}` : label
   return (
     <Tooltip side="top">
-      <Button data-control-id={meta.id} aria-label={action.kind === 'show-chapter' ? `Show me: ${action.label}` : label} onClick={() => runCheckAction(action)}>
+      <Button data-control-id={meta.id} aria-label={name} onClick={() => runCheckAction(action)}>
         {label}
       </Button>
     </Tooltip>
@@ -559,7 +566,8 @@ function ChecksStep({ checks, settings, prepared }: { checks: CheckResult[]; set
                   <span className="font-medium text-text">{c.summary}</span>
                 </p>
                 <p className="m-0 mt-1 text-ui-xs text-text-muted">{c.explanation}</p>
-                {c.id === 'chapters' && c.actions.length ? (
+                {/* Show me per chapter (chapter problems, scene breaks): one row each; other actions: buttons. */}
+                {c.actions.some((a) => a.kind === 'show-chapter') ? (
                   <ul className="mt-2 flex flex-col gap-1.5">
                     {c.actions.map((a, i) =>
                       a.kind === 'show-chapter' ? (
@@ -570,11 +578,10 @@ function ChecksStep({ checks, settings, prepared }: { checks: CheckResult[]; set
                       ) : null,
                     )}
                   </ul>
-                ) : c.actions.length ? (
+                ) : null}
+                {c.actions.some((a) => a.kind !== 'show-chapter') ? (
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {c.actions.map((a, i) => (
-                      <ActionButton key={i} action={a} />
-                    ))}
+                    {c.actions.map((a, i) => (a.kind === 'show-chapter' ? null : <ActionButton key={i} action={a} />))}
                   </div>
                 ) : null}
                 {c.id === 'double-spaces' && (doubleSpaces > 0 || settings.checks.normalizeSpaces) ? (
@@ -642,7 +649,7 @@ function ExportStep({ settings, data, run, blocked }: { settings: ManuscriptSett
           ))}
         </ul>
         <p className="m-0 mt-1 text-ui-xs text-text-muted">
-          You choose where to save {chosen.length > 1 ? 'each file' : 'the file'} in the Save dialog{folder ? `, which opens in ${folder}` : ''}.
+          You choose where to save {chosen.length > 1 ? 'each file' : 'the file'} in the Save dialog.{folder ? ` The last export went to ${folder}.` : ''}
         </p>
       </div>
       {blocked && !running ? (
@@ -656,6 +663,32 @@ function ExportStep({ settings, data, run, blocked }: { settings: ManuscriptSett
 const PHASE_TEXT: Partial<Record<RunState['phase'], string>> = {
   choosing: 'Choose where to save in the Save dialog…',
   saving: 'Saving…',
+}
+
+/** An exported file with Open file and Show in folder; a failure is shown by the row. */
+function FileRow({ path }: { path: string }) {
+  const [problem, setProblem] = useState<string | null>(null)
+  const name = fileNameOf(path)
+  const act = (fn: (p: string) => Promise<void>, what: 'open' | 'show') => () => {
+    setProblem(null)
+    fn(path).catch((e: unknown) => setProblem(fileActionProblem(e, what, name)))
+  }
+  return (
+    <li className="flex flex-col gap-1 text-ui-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 break-all font-mono text-ui-xs" title={path}>
+          {name}
+        </span>
+        <RunButton meta={C.openFile} label={`Open ${name}`} onClick={act(openExportedFile, 'open')} />
+        <RunButton meta={C.showInFolder} label={`Show ${name} in folder`} onClick={act(revealInFolder, 'show')} />
+      </div>
+      {problem ? (
+        <p role="alert" className="m-0 text-ui-xs text-danger" data-testid="file-action-error">
+          {problem}
+        </p>
+      ) : null}
+    </li>
+  )
 }
 
 /** Progress, error, cancel and success of the wizard's export. */
@@ -716,13 +749,7 @@ function RunPanel({ run }: { run: RunState }) {
         </p>
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {run.written.map((f) => (
-            <li key={f.path} className="flex flex-wrap items-center gap-2 text-ui-sm">
-              <span className="min-w-0 flex-1 break-all font-mono text-ui-xs" title={f.path}>
-                {fileNameOf(f.path)}
-              </span>
-              <RunButton meta={C.openFile} label={`Open ${fileNameOf(f.path)}`} onClick={() => void openExportedFile(f.path).catch(() => undefined)} />
-              <RunButton meta={C.showInFolder} label={`Show ${fileNameOf(f.path)} in folder`} onClick={() => void revealInFolder(f.path).catch(() => undefined)} />
-            </li>
+            <FileRow key={f.path} path={f.path} />
           ))}
         </ul>
       </div>

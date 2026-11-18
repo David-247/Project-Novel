@@ -20,11 +20,9 @@ const font = { requested: 'Times New Roman', family: 'Liberation Serif', source:
 beforeEach(() => invoke.mockReset())
 
 describe('export platform ipc', () => {
-  it('passes the starting folder to the Save dialog only when there is one', async () => {
+  it('names no folder for the Save dialog (Rust chooses where it opens)', async () => {
     invoke.mockResolvedValue(null)
-    await pickSavePath('docx', 'Novel', undefined, String.raw`C:\Books`)
-    expect(invoke).toHaveBeenLastCalledWith(EXPORT_COMMANDS.pickSavePath, { kind: 'docx', defaultName: 'Novel', title: undefined, directory: String.raw`C:\Books` })
-    await pickSavePath('docx', 'Novel', undefined, null)
+    await pickSavePath('docx', 'Novel')
     expect(invoke).toHaveBeenLastCalledWith(EXPORT_COMMANDS.pickSavePath, { kind: 'docx', defaultName: 'Novel', title: undefined })
   })
 

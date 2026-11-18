@@ -7,9 +7,10 @@ import { getCommand, notifyCommandStateChanged, runCommand } from '@/shared/comm
 import { useStore } from '@/shared/store'
 import { buildManuscript, type ManuscriptIR } from '../ir'
 import { pickSavePath, type SaveTarget } from '../platform'
-import { getContactOverride, getLastOutputFolder, getManuscriptSettings, getResolvedContact, setLastOutputFolder } from '../settings'
+import { getContactOverride, getLastOutputFolder, getManuscriptSettings, getResolvedContact, setLastOutputFolder, updateManuscriptSettings } from '../settings'
 import type { ManuscriptSettings } from '../settings'
 import { manuscriptWordCount, normalizeSentenceSpaces } from './analysis'
+import { locateInDoc, type DocLocations } from './locate'
 import { hasBlocking, runChecks, type CheckAction, type CheckResult, type WizardField } from './checks'
 import { getExportRenderer, type ExportJob, type WizardFormat, WIZARD_FORMATS } from './renderers'
 import { describeExportError, ExportRunError, runExport, type WrittenFile } from './run'
@@ -123,6 +124,8 @@ export async function commitTitle(): Promise<void> {
 export interface PreparedManuscript {
   ir: ManuscriptIR
   wordCount: number
+  /** Where the checks' Show me actions go in the manuscript (document positions). */
+  locations: DocLocations
 }
 
 /**
@@ -139,12 +142,12 @@ export function prepareManuscript(settings: ManuscriptSettings = getManuscriptSe
     openRewriteAnchors,
     blankLineSceneBreaks: settings.checks.blankLineSceneBreaks,
   })
-  return { ir, wordCount: manuscriptWordCount(ir).total }
+  return { ir, wordCount: manuscriptWordCount(ir).total, locations: locateInDoc(ed.state.doc) }
 }
 
 /** The checks for a prepared manuscript with the current title, contact and settings. */
 export function checksFor(prepared: PreparedManuscript, settings: ManuscriptSettings = getManuscriptSettings()): CheckResult[] {
-  return runChecks({ ir: prepared.ir, settings, title: getManuscriptTitle(), contact: getResolvedContact(), wordCount: prepared.wordCount })
+  return runChecks({ ir: prepared.ir, settings, title: getManuscriptTitle(), contact: getResolvedContact(), wordCount: prepared.wordCount, locations: prepared.locations })
 }
 
 /** The job an export renders: the IR with the export-only options applied, the settings, the title page. */
@@ -226,24 +229,36 @@ export function focusField(field: WizardField): void {
 /** After the wizard's dialog is gone (its focus return and scroll lock undone). */
 const afterClose = (fn: () => void) => setTimeout(() => requestAnimationFrame(fn), 0)
 
-/** Put the caret at the start of chapter `index` (the No Markup chapters, as the IR counts them) and show it. */
-export function showChapter(index: number): boolean {
+/** Close the wizard, then put the caret at document position `pos` (or select `pos..to`) and show it. */
+export function showPosition(pos: number, to?: number): boolean {
   const ed = getEditor()
-  if (!ed) return false
-  const chapter = getChapters(ed.state.doc, getResolvedStyles(), 'none').find((c) => c.index === index)
-  if (!chapter) return false
+  if (!ed || pos < 0 || pos > ed.state.doc.content.size) return false
   resumeAtChecks = true
   closeWizard({ restoreFocus: false })
   afterClose(() => {
     const view = getEditor()?.view
     if (!view) return
     const doc = view.state.doc
-    const sel = TextSelection.near(doc.resolve(Math.min(chapter.from + 1, doc.content.size)))
+    const from = Math.min(pos, doc.content.size)
+    const sel = to !== undefined && to > from && to <= doc.content.size ? TextSelection.create(doc, from, to) : TextSelection.near(doc.resolve(from))
     view.dispatch(view.state.tr.setSelection(sel).scrollIntoView())
     view.focus()
     revealPosition(sel.from)
   })
   return true
+}
+
+/**
+ * Put the caret at the start of chapter `index` (the No Markup chapters, as the IR counts them) and
+ * show it; -1 is the front matter (the start of the manuscript).
+ */
+export function showChapter(index: number): boolean {
+  const ed = getEditor()
+  if (!ed) return false
+  if (index < 0) return showPosition(0)
+  const chapter = getChapters(ed.state.doc, getResolvedStyles(), 'none').find((c) => c.index === index)
+  if (!chapter) return false
+  return showPosition(chapter.from + 1)
 }
 
 /** Close the wizard and run a review command (Next Change, the comments panel, Next Re-write). */
@@ -262,6 +277,14 @@ export function runCheckAction(action: CheckAction): void {
     case 'show-chapter':
       showChapter(action.chapter)
       return
+    case 'show-position':
+      showPosition(action.pos, action.to)
+      return
+    case 'option': {
+      const checks = getManuscriptSettings().checks
+      updateManuscriptSettings({ checks: action.option === 'normalizeSpaces' ? { ...checks, normalizeSpaces: true } : { ...checks, blankLineSceneBreaks: 'off' } })
+      return
+    }
     case 'review-changes':
       return closeAndRun(['review.change.next'])
     case 'show-comments': {
@@ -277,17 +300,38 @@ export function runCheckAction(action: CheckAction): void {
 
 const busy = () => ['choosing', 'rendering', 'saving'].includes(state.run.phase)
 
-/** Ask where to save each format (one Save dialog each, the next starting in the folder just chosen). */
+/**
+ * Ask where to save each format (one Save dialog each). Rust opens each dialog in the folder of the
+ * last grant (so the second starts where the first was saved), else where this project's last export
+ * went. Null when the user cancelled; a failing dialog rejects (an ExportRunError).
+ */
 async function chooseTargets(job: ExportJob, formats: readonly WizardFormat[], title: string): Promise<Partial<Record<WizardFormat, SaveTarget>> | null> {
   const targets: Partial<Record<WizardFormat, SaveTarget>> = {}
-  let folder = getLastOutputFolder()
   for (const format of formats) {
-    const picked = await pickSavePath(format, manuscriptFileName(job.titlePage, format), title, folder)
+    let picked: SaveTarget | null
+    try {
+      picked = await pickSavePath(format, manuscriptFileName(job.titlePage, format), title)
+    } catch (e) {
+      throw describeExportError(e, format, 'save')
+    }
     if (!picked) return null
     targets[format] = picked
-    folder = folderOf(picked.path) ?? folder
   }
   return targets
+}
+
+/**
+ * Ask where to save; on a failing Save dialog show the error (the run's error state, with Retry and
+ * Choose another location) and resolve null, as for a cancel.
+ */
+async function chooseTargetsOrShow(job: ExportJob, formats: readonly WizardFormat[], title: string, origin: RunState['origin']) {
+  try {
+    return { targets: await chooseTargets(job, formats, title), failed: false }
+  } catch (e) {
+    lastAttempt = { job, formats: [...formats], targets: {}, origin }
+    updateRun({ phase: 'error', origin, error: describeExportError(e, formats[0] ?? 'docx', 'save') })
+    return { targets: null, failed: true }
+  }
 }
 
 async function run(job: ExportJob, formats: WizardFormat[], targets: Partial<Record<WizardFormat, SaveTarget>>, origin: RunState['origin']): Promise<boolean> {
@@ -340,13 +384,8 @@ export async function startExport(): Promise<boolean> {
   await commitTitle()
   const job = exportJob(prepared, settings)
   updateRun({ phase: 'choosing', origin: 'wizard', error: null, written: [], progress: 0 })
-  let targets: Partial<Record<WizardFormat, SaveTarget>> | null
-  try {
-    targets = await chooseTargets(job, formats, 'Export Manuscript')
-  } catch (e) {
-    updateRun({ phase: 'error', error: describeExportError(e, formats[0], 'save') })
-    return false
-  }
+  const { targets, failed } = await chooseTargetsOrShow(job, formats, 'Export Manuscript', 'wizard')
+  if (failed) return false
   if (!targets) {
     updateRun({ phase: 'ready' })
     return false
@@ -354,21 +393,27 @@ export async function startExport(): Promise<boolean> {
   return run(job, formats, targets, 'wizard')
 }
 
-/** Export again to the same files after an error (same job and targets). */
+/** Export again to the same files after an error (same job and targets; asks where when it had none). */
 export async function retryExport(): Promise<boolean> {
   if (busy() || !lastAttempt) return false
   const { job, formats, targets, origin } = lastAttempt
+  if (!formats.every((f) => targets[f])) return chooseOtherLocation()
   return run(job, formats, targets, origin)
 }
 
-/** After an error: choose other places to save, then export the same job. */
+/**
+ * After an error: choose other places to save, then export the same job. Cancelling the Save dialog
+ * puts the error (and its Retry) back.
+ */
 export async function chooseOtherLocation(): Promise<boolean> {
   if (busy() || !lastAttempt) return false
   const { job, formats, origin } = lastAttempt
-  updateRun({ phase: 'choosing', error: null })
-  const targets = await chooseTargets(job, formats, 'Export Manuscript').catch(() => null)
+  const previous = state.run.error
+  updateRun({ phase: 'choosing', origin, error: null })
+  const { targets, failed } = await chooseTargetsOrShow(job, formats, origin === 'again' ? 'Export Manuscript Again' : 'Export Manuscript', origin)
+  if (failed) return false
   if (!targets) {
-    updateRun({ phase: state.run.error ? 'error' : 'ready' })
+    updateRun(previous ? { phase: 'error', error: previous } : origin === 'again' ? { ...IDLE_RUN } : { phase: 'ready' })
     return false
   }
   return run(job, formats, targets, origin)
@@ -399,8 +444,21 @@ export function canExportAgain(): boolean {
  * restart (Save-dialog grants are per session) the Save dialog asks, starting in the last folder.
  * A blocking check opens the wizard at its Checks step instead.
  */
+/** Export Again is between its command and its run (the confirm question, the Save dialogs). */
+let againPending = false
+
 export async function exportAgain(): Promise<boolean> {
-  if (state.open || busy()) return false
+  // A second Export Again (its shortcut pressed twice) while the first one asks is ignored.
+  if (state.open || busy() || againPending) return false
+  againPending = true
+  try {
+    return await exportAgainUnguarded()
+  } finally {
+    againPending = false
+  }
+}
+
+async function exportAgainUnguarded(): Promise<boolean> {
   const settings = getManuscriptSettings()
   const prepared = prepareManuscript(settings)
   if (!prepared) return false
@@ -422,7 +480,9 @@ export async function exportAgain(): Promise<boolean> {
     if (!ok) return false
   } else {
     updateRun({ phase: 'choosing', origin: 'again', error: null, written: [], progress: 0 })
-    targets = await chooseTargets(job, formats, 'Export Manuscript Again').catch(() => null)
+    const chosen = await chooseTargetsOrShow(job, formats, 'Export Manuscript Again', 'again')
+    if (chosen.failed) return false
+    targets = chosen.targets
     if (!targets) {
       updateRun({ ...IDLE_RUN })
       return false
@@ -440,6 +500,7 @@ export function __resetWizardForTests(): void {
   controller = null
   lastExport = null
   lastAttempt = null
+  againPending = false
   unsavedTitle = ''
   resumeAtChecks = false
   returnFocusTo = null

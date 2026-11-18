@@ -133,6 +133,16 @@ test.describe('export wizard', () => {
       .toBe('')
     await openWizard(page)
     await expect(ctl(page, 'export.step.checks')).toHaveAttribute('aria-current', 'step')
+    // Double spaces: Show me selects the first two spaces after a full stop; a scene break goes to its chapter.
+    await check(page, 'double-spaces').locator('[data-control-id="export.check.showText"]').click()
+    await expect(wizard(page)).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? null)).toBe('  ')
+    await openWizard(page)
+    await expect(check(page, 'scene-breaks').locator('[data-control-id="export.check.showChapter"]')).toHaveCount(3)
+    await check(page, 'formatting').locator('[data-control-id="export.check.showText"]').click()
+    await expect(wizard(page)).toHaveCount(0)
+    await expect(editor(page)).toBeFocused()
+    await openWizard(page)
     // Review changes: the next pending change is selected.
     await check(page, 'tracked-changes').locator('[data-control-id="export.check.reviewChanges"]').click()
     await expect(wizard(page)).toHaveCount(0)

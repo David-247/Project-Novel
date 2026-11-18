@@ -167,10 +167,55 @@ pub struct PickedPath {
     pub path: String,
 }
 
+/// The open project's key in Rust's record of export folders (its canonical root; "" with none open).
+fn project_key<R: Runtime>(app: &AppHandle<R>) -> String {
+    app.state::<crate::storage::ProjectRoot>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|slots| slots.active.as_ref().map(|r| r.canonical.to_string_lossy().into_owned()))
+        .unwrap_or_default()
+}
+
+fn export_folders_file<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join(files::EXPORT_FOLDERS_FILE))
+}
+
+/// Where the Save dialog opens: the folder of this session's last grant (of this kind, else any),
+/// else the folder of this project's last export in an earlier session (Rust's own record), if it
+/// still exists. The webview names no folder.
+fn dialog_start<R: Runtime>(app: &AppHandle<R>, state: &ExportState, kind: FileKind) -> Option<PathBuf> {
+    let session = state.targets.lock().ok().and_then(|t| t.last_folder(kind));
+    let remembered = || {
+        let file = export_folders_file(app)?;
+        let text = std::fs::read_to_string(file).ok();
+        files::RememberedFolders::parse(text.as_deref()).folder_for(&project_key(app))
+    };
+    session.or_else(remembered).and_then(|d| files::start_directory(&d))
+}
+
+/// After a successful export write: remember its folder for this project (best effort; a failure only
+/// means the next session's first dialog opens in the OS default).
+fn remember_export_folder<R: Runtime>(app: &AppHandle<R>, written: &Path) {
+    let (Some(file), Some(folder)) = (export_folders_file(app), written.parent()) else { return };
+    let mut folders = files::RememberedFolders::parse(std::fs::read_to_string(&file).ok().as_deref());
+    folders.remember(&project_key(app), folder);
+    let result = serde_json::to_vec_pretty(&folders)
+        .map_err(ExportError::internal)
+        .and_then(|bytes| {
+            if let Some(dir) = file.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| ExportError::io(dir, e))?;
+            }
+            files::write_export(&file, &bytes)
+        });
+    if let Err(e) = result {
+        eprintln!("export: could not remember the export folder: {}", e.message);
+    }
+}
+
 /// Show the native Save dialog for a PDF or DOCX (Rust side, with that file type's filter). The
-/// picked path becomes writable by exports through the returned token. `None` if cancelled.
-/// `directory`: the folder the dialog opens in (the project's last export folder), used only when it
-/// is an existing absolute folder; it grants nothing, the user still picks the path.
+/// picked path becomes writable by exports through the returned token. `None` if cancelled. The
+/// dialog opens in the folder Rust chooses (`dialog_start`); the webview passes no path.
 #[tauri::command]
 pub async fn export_pick_save_path<R: Runtime>(
     app: AppHandle<R>,
@@ -178,12 +223,11 @@ pub async fn export_pick_save_path<R: Runtime>(
     kind: FileKind,
     default_name: String,
     title: Option<String>,
-    directory: Option<String>,
 ) -> Result<Option<PickedPath>> {
     use tauri_plugin_dialog::DialogExt;
     let dialog_app = app.clone();
     let name = files::safe_file_name(&default_name, kind);
-    let start = directory.as_deref().and_then(files::start_directory);
+    let start = dialog_start(&app, state.inner(), kind);
     let picked = tauri::async_runtime::spawn_blocking(move || {
         let mut builder = dialog_app
             .dialog()
@@ -225,7 +269,11 @@ pub const KIND_HEADER: &str = "x-export-kind";
 /// Atomically write export bytes (the raw request body, e.g. a DOCX from the frontend) to the path
 /// behind the `x-export-token` header. The file I/O runs off the main thread.
 #[tauri::command]
-pub async fn export_write_file(state: State<'_, ExportState>, request: tauri::ipc::Request<'_>) -> Result<WrittenFile> {
+pub async fn export_write_file<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, ExportState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<WrittenFile> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err(ExportError::new("invalid_request", "Expected the file bytes as the raw request body."));
     };
@@ -242,6 +290,7 @@ pub async fn export_write_file(state: State<'_, ExportState>, request: tauri::ip
         .await
         .map_err(ExportError::internal)??;
     state.targets.lock().map_err(ExportError::internal)?.mark_exported(&target);
+    remember_export_folder(&app, &target);
     Ok(WrittenFile { path: target.to_string_lossy().into_owned(), bytes: len })
 }
 
@@ -444,7 +493,7 @@ pub async fn export_render_pdf<R: Runtime>(
     state: State<'_, ExportState>,
     request: RenderRequest,
 ) -> Result<RenderResult> {
-    render_pdf_with(
+    let result = render_pdf_with(
         state.inner(),
         request,
         || {
@@ -460,7 +509,11 @@ pub async fn export_render_pdf<R: Runtime>(
                 .unwrap_or_default()
         },
     )
-    .await
+    .await?;
+    if let Some(path) = &result.path {
+        remember_export_folder(&app, Path::new(path));
+    }
+    Ok(result)
 }
 
 /// Cancel a running render (its Typst process is killed and its temp dir removed). Returns false

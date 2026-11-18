@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Tooltip } from '@/shared/ui'
 import { revealInFolder } from '../platform'
 import { EXPORT_WIZARD_CONTROLS as C } from './controls'
 import { cancelExport, dismissRun, retryExport, useWizardState } from './controller'
+import { fileActionProblem } from './file-actions'
 import { fileNameOf } from './title-page'
 
 /** How long the "Exported" notice stays (ms). */
@@ -15,6 +16,8 @@ export const EXPORT_DONE_NOTICE_MS = 12_000
  */
 export function ExportStatus() {
   const { run, open } = useWizardState()
+  // A Show in folder failure, for the file it is about (a later run's notice shows none).
+  const [failed, setFailed] = useState<{ path: string; text: string } | null>(null)
   const show = run.origin === 'again' && !open && run.phase !== 'ready' && run.phase !== 'choosing'
   useEffect(() => {
     if (!show || (run.phase !== 'done' && run.phase !== 'cancelled')) return
@@ -30,6 +33,7 @@ export function ExportStatus() {
     </Tooltip>
   )
   const first = run.written[0]
+  const problem = failed && first && failed.path === first.path ? failed.text : null
   return (
     <span className="flex min-w-0 items-center gap-2 text-ui-xs" data-testid="export-status">
       <span role={run.phase === 'error' ? 'alert' : 'status'} className="min-w-0 truncate" title={run.error?.message}>
@@ -43,7 +47,17 @@ export function ExportStatus() {
       </span>
       {run.phase === 'rendering' ? button(C.statusCancel, cancelExport) : null}
       {run.phase === 'error' ? button(C.statusRetry, () => void retryExport()) : null}
-      {run.phase === 'done' && first ? button(C.statusShow, () => void revealInFolder(first.path).catch(() => undefined)) : null}
+      {run.phase === 'done' && first
+        ? button(C.statusShow, () => {
+            setFailed(null)
+            revealInFolder(first.path).catch((e: unknown) => setFailed({ path: first.path, text: fileActionProblem(e, 'show', fileNameOf(first.path)) }))
+          })
+        : null}
+      {problem ? (
+        <span role="alert" className="text-danger" data-testid="file-action-error">
+          {problem}
+        </span>
+      ) : null}
       {run.phase === 'done' || run.phase === 'error' || run.phase === 'cancelled' ? button(C.statusDismiss, dismissRun) : null}
     </span>
   )

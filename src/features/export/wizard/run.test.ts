@@ -63,6 +63,16 @@ describe('runExport', () => {
     expect(ex.written.size).toBe(0)
   })
 
+  it('the second write failing leaves the first file complete, and the error says it was saved', async () => {
+    const t = await targets()
+    ex.failWrite = { kind: 'disk_full', message: 'No space left on device', diagnostics: [] }
+    ex.failWriteMatch = '.pdf'
+    const err = (await runExport(job, ['docx', 'pdf'], t, createMockExportRenderers()).catch((e: ExportRunError) => e)) as ExportRunError
+    expect(err).toMatchObject({ problem: 'disk-full', format: 'pdf', saved: [{ format: 'docx', path: '/exports/Waight_THE_LONG_NIGHT_manuscript.docx' }] })
+    expect(err.message).toMatch(/disk is full, so the PDF could not be saved.*Waight_THE_LONG_NIGHT_manuscript\.docx was saved\./)
+    expect([...ex.written.keys()]).toEqual(['/exports/Waight_THE_LONG_NIGHT_manuscript.docx'])
+  })
+
   it('a target the Save dialog did not grant is refused', async () => {
     const err = await runExport(job, ['docx'], { docx: { token: 'forged', path: '/etc/x.docx', kind: 'docx' } }, createMockExportRenderers()).catch((e) => e)
     expect(err).toMatchObject({ problem: 'not-granted', changeLocation: true })

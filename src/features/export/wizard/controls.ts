@@ -52,6 +52,9 @@ export const EXPORT_WIZARD_CONTROLS = {
   checkShowComments: { id: 'export.check.showComments', label: 'Show comments', description: 'Close the wizard and show the comments beside the pages.' },
   checkOpenRewrite: { id: 'export.check.openRewrite', label: 'Open re-write', description: 'Close the wizard and open the next re-write beside its original.' },
   checkShowChapter: { id: 'export.check.showChapter', label: 'Show me', description: 'Close the wizard and put the cursor at the start of this chapter.' },
+  checkShowText: { id: 'export.check.showText', label: 'Show me', description: 'Close the wizard and put the cursor there in the manuscript.' },
+  checkFixSpaces: { id: 'export.check.fixSpaces', label: 'Export one space', description: 'Export two or more spaces after a full stop as one. The manuscript keeps its spaces.' },
+  checkFixBlankLines: { id: 'export.check.fixBlankLines', label: 'Never read blank lines as breaks', description: 'Leave empty paragraphs out of the export; none becomes a scene break.' },
   normalizeSpaces: { id: 'export.normalizeSpaces', label: 'Export one space after a full stop', description: 'Two or more spaces after a full stop are exported as one. The manuscript keeps its spaces.', ...alt('z') },
   blankLines: { id: 'export.blankLines', label: 'Read blank lines between paragraphs as scene breaks', description: 'On: an empty paragraph between two paragraphs becomes a scene break. Off: it is left out.', ...alt('y') },
   // ---- 4. Export
