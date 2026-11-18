@@ -20,3 +20,8 @@ coverage/
 *.log
 .DS_Store
 .claude/worktrees/
+
+# Typst sidecar + bundled fonts (scripts/fetch-typst.mjs)
+.cache/
+src-tauri/binaries/
+src-tauri/resources/fonts/

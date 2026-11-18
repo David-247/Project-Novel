@@ -105,6 +105,8 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
     expect(names(model[3].children)).toEqual(['Chapter Break', 'Page Break', 'Scene Break', '—', 'Footnote', 'Comment'])
     expect(names(model[2].children)).toContain('Markup ▸')
     expect(names(model[5].children)).toEqual([
+      'Word Count…',
+      '—',
       'Track Changes',
       '—',
       'Previous Change',

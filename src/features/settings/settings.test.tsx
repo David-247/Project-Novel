@@ -12,6 +12,7 @@ import {
   closeSettings,
   ensureAuthorName,
   getAuthor,
+  getAuthorProfile,
   openSettings,
   prefersReducedMotion,
   registerSettingsCommands,
@@ -30,7 +31,7 @@ const actions = () => useStore.getState().preferencesActions
 function resetStore() {
   setSystemAuthorName('')
   actions().reset()
-  useStore.setState((s) => ({ preferences: { ...s.preferences, loaded: false, extra: {}, authorPrompted: false, authorName: '' } }))
+  useStore.setState((s) => ({ preferences: { ...s.preferences, loaded: false, extra: {}, authorPrompted: false, authorName: '', profileLegalName: '', profilePenName: '', profileAddress: '', profilePhone: '', profileEmail: '', profileAgent: '' } }))
 }
 
 beforeEach(() => {
@@ -190,7 +191,23 @@ describe('writing preferences.json', () => {
     act(() => actions().set('authorName', 'X'))
     await flushPreferences()
     expect(Object.keys(JSON.parse(backend.preferences!)).sort()).toEqual(
-      ['authorColor', 'authorName', 'authorPrompted', 'defaultPaper', 'defaultTrimSize', 'pageNavigation', 'reduceMotion', 'version'],
+      [
+        'authorColor',
+        'authorName',
+        'authorPrompted',
+        'defaultPaper',
+        'defaultTrimSize',
+        'exportFolders',
+        'pageNavigation',
+        'profileAddress',
+        'profileAgent',
+        'profileEmail',
+        'profileLegalName',
+        'profilePenName',
+        'profilePhone',
+        'reduceMotion',
+        'version',
+      ],
     )
     stop()
   })
@@ -426,5 +443,33 @@ describe('reduced motion', () => {
     expect(prefersReducedMotion()).toBe(true)
     actions().set('reduceMotion', 'off')
     expect(prefersReducedMotion()).toBe(false)
+  })
+})
+
+describe('author profile (manuscript contact block)', () => {
+  it('is edited in Settings, applies at once, and reads as one stable object', async () => {
+    render(<SettingsDialog />)
+    act(() => openSettings())
+    await screen.findByRole('dialog', { name: 'Settings' })
+    fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Augusta Ada King' } })
+    fireEvent.change(screen.getByLabelText('Pen name'), { target: { value: 'Ada Lovelace' } })
+    fireEvent.change(screen.getByLabelText('Address'), { target: { value: '1 Analytical Way\nLondon' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+44 20 7946 0000' } })
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@example.com' } })
+    fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'Babbage & Co.' } })
+    const profile = getAuthorProfile()
+    expect(profile).toEqual({
+      legalName: 'Augusta Ada King',
+      penName: 'Ada Lovelace',
+      address: '1 Analytical Way\nLondon',
+      phone: '+44 20 7946 0000',
+      email: 'ada@example.com',
+      agent: 'Babbage & Co.',
+    })
+    expect(getAuthorProfile()).toBe(profile)
+  })
+
+  it('is empty on a fresh install', () => {
+    expect(getAuthorProfile()).toEqual({ legalName: '', penName: '', address: '', phone: '', email: '', agent: '' })
   })
 })

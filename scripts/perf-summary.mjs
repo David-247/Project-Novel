@@ -143,6 +143,28 @@ export function toMarkdown(results, dir = 'perf-results') {
     md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...rows, '')
   }
 
+  // Phase 4 (export): the manuscript IR build (e2e/perf-export.spec.ts).
+  const exportRows = []
+  for (const r of results) {
+    const row = (measure, n, limit) => n !== undefined && n !== null && exportRows.push(`| ${r.scenario} | ${measure} | ${pair(r)} | ${cell(r, n, limit)} | ${limit} |`)
+    if (r.irBuild) row('manuscript IR build (median)', r.irBuild.medianMs, 500)
+    if (r.irBuildTracked) row('manuscript IR build, 2,000 pending changes (median)', r.irBuildTracked.medianMs, 500)
+  }
+  if (exportRows.length) {
+    md.push('#### Export', '')
+    md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...exportRows, '')
+  }
+
+  // Phase 4: live word counts (e2e/perf.spec.ts). Typing with the counts on is in the typing table
+  // (blocking on Windows Chromium like plain typing); the count's catch-up is reported, not a budget.
+  const counts = results.filter((r) => r.wordCount && typeof r.wordCount === 'object')
+  if (counts.length) {
+    md.push('#### Live word count (status bar update after typing; reported, no budget)', '')
+    md.push('| scenario | engine / OS | one keystroke to count shown ms | after typing, caught up ms |', '| --- | --- | --- | --- |')
+    for (const r of counts) md.push(`| ${r.scenario} | ${pair(r)} | ${v(r.wordCount.updateMs)} | ${v(r.wordCount.caughtUpMs)} |`)
+    md.push('')
+  }
+
   const broken = results.filter((r) => r.error)
   for (const r of broken) md.push(`- ${r.file}: unreadable (${r.error})`)
   return md.join('\n') + '\n'

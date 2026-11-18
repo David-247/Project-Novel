@@ -17,7 +17,8 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { getDocJSON, getEditor, getFootnotes, setDocJSON } from '@/features/editor'
+import { getDocJSON, getEditor, getFootnotes, getResolvedStyles, setDocJSON } from '@/features/editor'
+import { buildManuscript } from '@/features/export'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition, turnSpread, goToEdgeSpread, showPage } from '@/features/pagination'
@@ -130,6 +131,12 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     setNextPick(path: string | null) {
       state.pick = path
     },
+    /**
+     * Export platform fake (src/test-utils/fake-export.ts): set `savePath` (undefined = default,
+     * null = Save dialog cancelled), `renderDelayMs`, `failRender`; read `written`, `renders`,
+     * `cancels`, `reveals`.
+     */
+    exports: core.exports,
     /** Fire a Tauri event, e.g. a native File menu item ('menu://new-project'). */
     emit(event: string, payload?: unknown) {
       return window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event, payload })
@@ -336,6 +343,29 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     syncSelection: () => {
       const view = getEditor()?.view as unknown as { domObserver?: { flush(): void } } | undefined
       view?.domObserver?.flush()
+    },
+    // ---- Export (Phase 4) ----
+    /**
+     * Build the manuscript IR of the open document `runs` times (after one warm-up), from the editor's
+     * document and from its JSON (the worker path: JSON parsed into the schema first). Times in ms.
+     */
+    buildManuscriptTimes: (runs = 5) => {
+      const ed = getEditor()
+      if (!ed) return null
+      const doc = ed.state.doc
+      const json = doc.toJSON()
+      const styles = getResolvedStyles()
+      const footnotes = useStore.getState().book.footnotes
+      const time = (fn: () => unknown) => {
+        const t0 = performance.now()
+        fn()
+        return +(performance.now() - t0).toFixed(1)
+      }
+      const ir = buildManuscript(doc, styles, { footnotes })
+      const ms = Array.from({ length: runs }, () => time(() => buildManuscript(doc, styles, { footnotes })))
+      const fromJsonMs = Array.from({ length: runs }, () => time(() => buildManuscript(json, styles, { footnotes })))
+      const blocks = ir.frontMatter.length + ir.chapters.reduce((n, c) => n + c.blocks.length, 0)
+      return { ms, fromJsonMs, chapters: ir.chapters.length, blocks, footnotes: ir.footnotes.length, trackedChanges: ir.report.trackedChanges.total }
     },
     // ---- Comments (Phase 3) ----
     /** Start recording when each layoutVersion is published (performance.now()); returns the record. */

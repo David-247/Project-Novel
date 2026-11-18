@@ -1,9 +1,9 @@
 import { useId, useRef, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
-import { PAPER_SURFACES, MAX_AUTHOR_NAME, useStore } from '@/shared/store'
+import { PAPER_SURFACES, MAX_AUTHOR_NAME, PROFILE_MAX, useStore } from '@/shared/store'
 import type { PreferenceValues } from '@/shared/store'
 import { TRIM_SIZES } from '@/shared/book'
-import { Button, Dialog, Select, TextInput, Tooltip } from '@/shared/ui'
+import { Button, Dialog, Select, TextInput, Tooltip, cn, fieldBase } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
 import { answerAuthorPrompt } from './author'
 import { SETTINGS_CONTROLS as C } from './controls'
@@ -202,6 +202,69 @@ function SettingsForm() {
               Colours your changes and comments. Automatic picks one for you.
             </p>
           </div>
+        </>,
+      )}
+      {section(
+        'profile',
+        'Author profile',
+        <>
+          <p className="m-0 text-ui-xs text-text-muted">
+            The contact block on the title page of an exported manuscript. It is kept on this computer, not in your projects, unless you
+            change it for one project when you export.
+          </p>
+          {field(
+            'profileLegalName',
+            (p) => (
+              <TextInput {...p} value={prefs.profileLegalName} maxLength={PROFILE_MAX.profileLegalName} autoComplete="name" onChange={(e) => set('profileLegalName', e.target.value)} />
+            ),
+            'Printed in the upper left of the title page.',
+          )}
+          {field(
+            'profilePenName',
+            (p) => (
+              <TextInput {...p} value={prefs.profilePenName} maxLength={PROFILE_MAX.profilePenName} onChange={(e) => set('profilePenName', e.target.value)} />
+            ),
+            'The by-line under the title and the name in the page header. Empty: your legal name.',
+          )}
+          {field(
+            'profileAddress',
+            (p) => (
+              <textarea
+                {...p}
+                rows={3}
+                value={prefs.profileAddress}
+                maxLength={PROFILE_MAX.profileAddress}
+                autoComplete="street-address"
+                className={cn(fieldBase, 'w-full min-w-0 resize-y py-1')}
+                onChange={(e) => set('profileAddress', e.target.value)}
+              />
+            ),
+            'One line per line of the address.',
+          )}
+          {field(
+            'profilePhone',
+            (p) => <TextInput {...p} type="tel" value={prefs.profilePhone} maxLength={PROFILE_MAX.profilePhone} autoComplete="tel" onChange={(e) => set('profilePhone', e.target.value)} />,
+            'Optional. Many agents ask for it.',
+          )}
+          {field(
+            'profileEmail',
+            (p) => <TextInput {...p} type="email" value={prefs.profileEmail} maxLength={PROFILE_MAX.profileEmail} autoComplete="email" onChange={(e) => set('profileEmail', e.target.value)} />,
+            'Printed in the contact block.',
+          )}
+          {field(
+            'profileAgent',
+            (p) => (
+              <textarea
+                {...p}
+                rows={2}
+                value={prefs.profileAgent}
+                maxLength={PROFILE_MAX.profileAgent}
+                className={cn(fieldBase, 'w-full min-w-0 resize-y py-1')}
+                onChange={(e) => set('profileAgent', e.target.value)}
+              />
+            ),
+            'Optional: your agent or agency, if you want it on the title page.',
+          )}
         </>,
       )}
       {section(

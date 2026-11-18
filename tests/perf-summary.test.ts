@@ -173,6 +173,30 @@ describe('perf summary', () => {
     expect(md).toMatch(/\| rewrite-chapter: Enter \/ Backspace \| chromium \/ win32 \(shipping\) \| 20 \|/)
   })
 
+  it('export: the manuscript IR build rows, clean and with pending changes, against 500 ms', () => {
+    const md = toMarkdown([
+      { scenario: 'perf-export', browser: 'perf-chromium', platform: 'win32', irBuild: { medianMs: 120.5 }, irBuildTracked: { medianMs: 510 } },
+    ])
+    const section = md.slice(md.indexOf('#### Export'))
+    expect(section).toMatch(/\| perf-export \| manuscript IR build \(median\) \| chromium \/ win32 \(shipping\) \| 120\.5 \| 500 \|/)
+    expect(section).toMatch(/\| perf-export \| manuscript IR build, 2,000 pending changes \(median\) \| chromium \/ win32 \(shipping\) \| \*\*510\*\* \(MISS\) \| 500 \|/)
+  })
+
+  it('live word counts: typing blocks on Windows Chromium like plain typing; the count update is reported (Phase 4)', () => {
+    const md = toMarkdown([
+      {
+        scenario: 'perf-word-count',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        typing: { medianMs: 52, p95Ms: 60, maxMs: 70 },
+        wordCount: { caughtUpMs: 180, updateMs: 171.4 },
+      },
+    ])
+    expect(md).toMatch(/\| perf-word-count \| chromium \/ win32 \(shipping\) \| \*\*52\*\* \(MISS\) \|/)
+    expect(md).toMatch(/#### Live word count/)
+    expect(md).toMatch(/\| perf-word-count \| chromium \/ win32 \(shipping\) \| 171\.4 \| 180 \|/)
+  })
+
   it('says so when there are no results', () => {
     expect(toMarkdown([], 'nowhere')).toMatch(/No perf results found in nowhere/)
   })

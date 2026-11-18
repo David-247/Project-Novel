@@ -40,3 +40,6 @@ export type { PageGeometry } from './geometry'
 export { breakPages, DEFAULT_WIDOWS, DEFAULT_ORPHANS, MAX_RESERVE_ITERATIONS } from './breaker'
 export type { BreakBefore } from './breaker'
 export { getPaginationDebug } from './debug'
+// Word Count's "Lines": countLines() for the book, countLines({ from, to }) for a selection; null
+// before the first layout. Body lines as laid out on the pages (docs/word-count.md).
+export { countLines } from './lines'

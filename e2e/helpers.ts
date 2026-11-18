@@ -334,5 +334,7 @@ export async function reveal(page: Page, id: string): Promise<Locator> {
   const panel = page.locator(`[data-ribbon-panel="${tab}"]`)
   const collapsed = panel.locator(`[data-control-id="ribbon.group.${group}"]`)
   await ((await collapsed.isVisible()) ? collapsed : panel.locator('[data-control-id="ribbon.more"]')).click()
-  return page.getByRole('menu').locator(`[data-control-id="${id}"]`)
+  // A dropdown item carries the bare command id: the ribbon button `ribbon.cmd.<command>` is `<command>` there.
+  const bare = id.startsWith('ribbon.cmd.') ? id.slice('ribbon.cmd.'.length) : id
+  return page.getByRole('menu').locator(bare === id ? `[data-control-id="${id}"]` : `[data-control-id="${id}"], [data-control-id="${bare}"]`)
 }

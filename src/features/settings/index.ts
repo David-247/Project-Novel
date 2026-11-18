@@ -24,6 +24,10 @@ export { registerSettingsCommands } from './commands'
 export { openSettings, closeSettings } from './dialog-state'
 export { getAuthor, useAuthor, ensureAuthorName } from './author'
 export type { Author } from './author'
+// getAuthorProfile() / useAuthorProfile(): the manuscript contact block (legal name, pen name, address,
+// phone, email, agent) from app Settings. The export slice layers a per-project override on it.
+export { getAuthorProfile, useAuthorProfile } from './author-profile'
+export type { AuthorProfile } from './author-profile'
 export { prefersReducedMotion, useReducedMotion } from './motion'
 // flushPreferences(): write pending changes now; await it in the quit / window-close path.
 export { flushPreferences } from './persistence'

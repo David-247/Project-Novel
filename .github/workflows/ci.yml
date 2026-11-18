@@ -75,9 +75,25 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
+      # The Typst PDF sidecar and bundled fonts (pinned, SHA-256 verified): tauri-build copies them at
+      # compile time, so every cargo build needs them. The downloaded archives are cached.
+      - name: Cache Typst sidecar and fonts
+        uses: actions/cache@v4
+        with:
+          path: .cache/sidecar
+          key: sidecar-${{ runner.os }}-${{ hashFiles('scripts/fetch-typst.mjs') }}
+      - name: Fetch Typst sidecar and fonts
+        run: node scripts/fetch-typst.mjs
       # tauri::generate_context! embeds ../dist at compile time.
       - run: pnpm build
-      - run: cargo test --locked
+      # Hello-world PDF with the bundled fallback font, the offline guarantees (package import refused,
+      # no fetch with the network blocked), timeout, cancel and temp cleanup: src-tauri/src/export/tests.rs.
+      - name: Typst sidecar smoke (export tests)
+        run: cargo test --locked "export::"
+        working-directory: src-tauri
+      # Everything else (the export tests already ran above).
+      - name: cargo test (other modules)
+        run: cargo test --locked -- --skip "export::"
         working-directory: src-tauri
 
   e2e:
@@ -203,6 +219,13 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
+      - name: Cache Typst sidecar and fonts
+        uses: actions/cache@v4
+        with:
+          path: .cache/sidecar
+          key: sidecar-${{ runner.os }}-${{ hashFiles('scripts/fetch-typst.mjs') }}
+      - name: Fetch Typst sidecar and fonts
+        run: node scripts/fetch-typst.mjs
       # No bundle signing: build the app binary only.
       - run: pnpm tauri build --no-bundle
       # The web bundle tauri build embedded (beforeBuildCommand `pnpm build` -> dist/) must not
