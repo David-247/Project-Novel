@@ -18,7 +18,7 @@ describe('PDF word count = countManuscript', () => {
     const live = countManuscript(schema.nodeFromJSON(FEATURE_FIXTURE_DOC))
     expect(manuscriptWordCount(ir).body).toBe(live.body.words)
     const settings = { ...defaultManuscriptSettings('en-US'), wordCountRounding: 'exact' as const }
-    expect(buildPdfData(ir, settings, { title: 'T', contact }).titlePage!.wordCount).toBe(formatWordCount(live.body.words, 'exact'))
+    expect(buildPdfData(ir, settings, { title: 'T', contact, wordCount: manuscriptWordCount(ir).body }).titlePage!.wordCount).toBe(formatWordCount(live.body.words, 'exact'))
   })
 
   it('the 100k-word fixture', () => {

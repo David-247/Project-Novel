@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FIXTURE_MANUSCRIPT_IR, type ManuscriptIR } from '../ir'
+import { FIXTURE_MANUSCRIPT_IR, manuscriptWordCount, type ManuscriptIR } from '../ir'
 import { applyPreset, defaultManuscriptSettings, runningHeader, type HeaderFormat, type ManuscriptSettings } from '../settings'
 import { applySentenceSpacing, buildPdfData, headerPrefix, PDF_TEMPLATE_ID, type ManuscriptMeta, type PdfBlock, type PdfRun } from './data'
 import { fontRoleOf, lineMetrics } from './metrics'
@@ -9,6 +9,8 @@ import { fontRoleOf, lineMetrics } from './metrics'
 const ROOT = resolve(__dirname, '../../../..')
 const META: ManuscriptMeta = {
   title: 'The Long Night',
+  // The wizard passes the count; here, the fixture's text words.
+  wordCount: manuscriptWordCount(FIXTURE_MANUSCRIPT_IR).body,
   contact: { legalName: 'Perry Slaughter', penName: '', address: '123 Main Street\n\n  Springfield, IL 62701  ', phone: '(555) 555-0100', email: 'perry@example.com', agent: 'Ann Agent\nAgency Ltd' },
 }
 const settings = (): ManuscriptSettings => defaultManuscriptSettings('en-US')

@@ -5,7 +5,7 @@ import { applyPreset, defaultManuscriptSettings } from '../settings'
 import { buildPdfData, PDF_TEMPLATE_ID, type ManuscriptMeta } from './data'
 import { createPdfRenderer } from './renderer'
 
-const META: ManuscriptMeta = { title: 'The Long Night', contact: { legalName: 'Perry Slaughter', penName: '', address: '', phone: '', email: '', agent: '' } }
+const META: ManuscriptMeta = { title: 'The Long Night', contact: { legalName: 'Perry Slaughter', penName: '', address: '', phone: '', email: '', agent: '' }, wordCount: 1000 }
 const ir = (): ManuscriptIR => structuredClone(FIXTURE_MANUSCRIPT_IR)
 const settings = defaultManuscriptSettings('en-US')
 const PDF = new Uint8Array([37, 80, 68, 70])

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FIXTURE_MANUSCRIPT_IR } from '../ir/fixtures'
 import { MANUSCRIPT_IR_VERSION, type ManuscriptIR } from '../ir/types'
+import { manuscriptWordCount } from '../ir/word-count'
 import { renderDocx } from './build'
 import { parseXml, pStyle, pText, styleById, testSettings, unzipDocx, wAll, wAttr } from './test-helpers'
 import type { DocxRenderSettings } from './types'
@@ -379,7 +380,7 @@ describe('user text is escaped safely', () => {
   ir.chapters[0].blocks.push({ kind: 'paragraph', role: 'body', runs: [{ kind: 'text', text: 'tab\there' }, { kind: 'footnoteRef', footnote: 0 }] })
 
   it('XML specials, control characters, lone surrogates and emoji', async () => {
-    const settings = testSettings({ sceneBreak: '<#>' }, { title: 'A & B <C> "D"\u0007', contact: { ...testSettings().info.contact, legalName: 'Ann & <Co>' } })
+    const settings = testSettings({ sceneBreak: '<#>' }, { title: 'A & B <C> "D"\u0007', contact: { ...testSettings().info.contact, legalName: 'Ann & <Co>' }, wordCount: manuscriptWordCount(ir).total })
     const { files, text, titlePage } = await render(settings, ir)
     for (const [path, xml] of Object.entries(files)) if (path.endsWith('.xml')) parseXml(xml)
     expect(pText(text[0])).toBe('Fish & <chips> "quoted" \'single\' ]]>  bell 😀 👩‍👩‍👧 lone')

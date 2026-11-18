@@ -87,7 +87,8 @@ export function ExportWizard() {
   // The IR is built when the wizard opens and when an option that changes it does (the manuscript
   // cannot change while the modal wizard is open).
   const blank = settings.checks.blankLineSceneBreaks
-  const prepared = useMemo(() => (w.open ? prepareManuscript() : null), [w.open, blank]) // eslint-disable-line react-hooks/exhaustive-deps
+  const includeFootnotes = useStore((s) => s.wordCount.includeFootnotes)
+  const prepared = useMemo(() => (w.open ? prepareManuscript() : null), [w.open, blank, includeFootnotes]) // eslint-disable-line react-hooks/exhaustive-deps
   const title = w.titleDraft ?? (projectPath ? (projectTitle ?? '') : getManuscriptTitle())
   const checks = useMemo(() => (prepared ? checksFor(prepared, settings) : []), [prepared, settings, contact, title]) // eslint-disable-line react-hooks/exhaustive-deps
   const data = useMemo(() => titlePageData(settings, contact, title, prepared?.wordCount ?? 0), [settings, contact, title, prepared])
@@ -305,6 +306,8 @@ interface TitleStepProps {
 }
 
 function TitleStep({ settings, contact, data, title, overrideContact }: TitleStepProps) {
+  // The count follows Word Count's "Include footnotes" (the status bar's and the dialog's rule).
+  const withNotes = useStore((s) => s.wordCount.includeFootnotes)
   const contactField = (field: keyof ContactDetails, extra: { multiline?: boolean; type?: string; autoComplete?: string; className?: string } = {}) => (
     <div data-field={field} className={extra.className}>
       <DraftField
@@ -372,7 +375,7 @@ function TitleStep({ settings, contact, data, title, overrideContact }: TitleSte
           <div className="flex flex-col justify-end text-ui-sm" data-testid="wizard-wordcount">
             <span className="font-semibold">{data.wordCountText}</span>
             <span className="text-ui-xs text-text-muted">
-              {data.wordCount.toLocaleString('en-US')} words counted (text and footnotes, tracked changes accepted).
+              {data.wordCount.toLocaleString('en-US')} words counted ({withNotes ? 'text and footnotes' : 'text, footnotes excluded'}, tracked changes accepted).
             </span>
           </div>
         </div>

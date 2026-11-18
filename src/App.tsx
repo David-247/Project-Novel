@@ -57,7 +57,7 @@ import {
   TrackChangesNotice,
 } from '@/features/track-changes'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
-import { ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile } from '@/features/export'
+import { createManuscriptExportRenderers, ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile, setExportRenderers } from '@/features/export'
 import { NavigationPane, registerOutlineCommands } from '@/features/outline'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
@@ -137,6 +137,8 @@ export function App() {
   useEffect(() => registerRewritesSideFile(), [])
   // export.json (manuscript export settings) likewise; a project without it opens with the defaults.
   useEffect(() => registerExportSideFile(), [])
+  // The export wizard's DOCX and PDF generators (File > Export > Manuscript…).
+  useEffect(() => setExportRenderers(createManuscriptExportRenderers()), [])
   // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.
   useEffect(() => {
     setRewriteConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
@@ -230,9 +232,7 @@ export function App() {
       <WordCountDialog />
       {/* Tracked change details with Accept / Reject (portal). */}
       <ChangePopover />
-      {/* File > Export > Manuscript… (portal). The DOCX / PDF generators are injected with
-          setExportRenderers (wired at the Wave 2 integration; until then no format is available
-          outside the e2e build, which registers the mock renderers). */}
+      {/* File > Export > Manuscript… (portal); its DOCX / PDF generators are registered above. */}
       <ExportWizard />
     </TooltipProvider>
   )

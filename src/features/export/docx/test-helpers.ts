@@ -1,4 +1,6 @@
 import { strFromU8, unzipSync } from 'fflate'
+import { FIXTURE_MANUSCRIPT_IR } from '../ir/fixtures'
+import { manuscriptWordCount } from '../ir/word-count'
 import { defaultManuscriptSettings } from '../settings/presets'
 import type { ManuscriptSettings } from '../settings/types'
 import type { DocxRenderSettings, ManuscriptExportInfo } from './types'
@@ -16,6 +18,8 @@ export const TEST_INFO: ManuscriptExportInfo = {
     agent: 'Jo Agent, Example Agency',
   },
   language: 'en-US',
+  // The wizard passes the count; here, the fixture's (text and footnotes).
+  wordCount: manuscriptWordCount(FIXTURE_MANUSCRIPT_IR).total,
 }
 
 export function testSettings(patch: Partial<ManuscriptSettings> = {}, info: Partial<ManuscriptExportInfo> = {}): DocxRenderSettings {

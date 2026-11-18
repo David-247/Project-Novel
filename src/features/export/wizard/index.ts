@@ -26,7 +26,7 @@ export {
 export type { ExportJob, ExportRenderer, WizardFormat } from './renderers'
 export { runChecks, hasBlocking, sortChecks, GENRE_OPTIONS } from './checks'
 export type { CheckResult, CheckSeverity, CheckId, CheckAction, CheckInput, WizardField } from './checks'
-export { chapterIssues, chapterNumberOf, countDoubleSpaces, normalizeSentenceSpaces } from './analysis'
+export { titlePageWordCount, chapterIssues, chapterNumberOf, countDoubleSpaces, normalizeSentenceSpaces } from './analysis'
 export type { ChapterIssue } from './analysis'
 export { titlePageData, manuscriptFileName, headerText, bylineText, contactLines } from './title-page'
 export type { TitlePageData } from './title-page'

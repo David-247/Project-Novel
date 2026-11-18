@@ -22,17 +22,14 @@ import {
   applyPreset,
   buildManuscript,
   createDocxRenderer,
-  createMockExportRenderers,
   defaultManuscriptSettings,
   getWizardState,
   isAbortError,
-  setExportRenderers,
+  manuscriptWordCount,
   WIZARD_FIXTURE_COMMENTS,
   WIZARD_FIXTURE_DOC,
   WIZARD_FIXTURE_REWRITES,
   WIZARD_FIXTURE_STYLES,
-  type ExportRenderer,
-  type WizardFormat,
 } from '@/features/export'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
@@ -137,27 +134,6 @@ function showNativeMessage(args: MessageDialogArgs): Promise<string> {
   })
 }
 
-// ---- Export renderers (the wizard's; mocks until the real generators are wired) -----------------
-
-/**
- * Mock DOCX / PDF renderers for the export wizard in the e2e build: the bytes are the manuscript's
- * plain text. Tests slow them down (`delayMs` per chapter, to cancel mid-render) or make the next
- * renders fail (`fail`: a message). The composition root's real renderers, once wired, replace these.
- */
-const mockRender = { delayMs: 0, fail: null as string | null }
-function installMockRenderers(): void {
-  const wrap = (format: WizardFormat): ExportRenderer => ({
-    format,
-    render: async (job, options) => {
-      const inner = createMockExportRenderers({ delayMs: mockRender.delayMs })[format]
-      const bytes = await inner.render(job, options)
-      if (mockRender.fail) throw new Error(mockRender.fail)
-      return bytes
-    },
-  })
-  setExportRenderers({ docx: wrap('docx'), pdf: wrap('pdf') })
-}
-
 // ---- Install ---------------------------------------------------------------
 
 /** Test control surface (window.__nvE2E). */
@@ -174,8 +150,6 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
      * `cancels`, `reveals`.
      */
     exports: core.exports,
-    /** The wizard's mock renderers: per-chapter delay and a failure message for the next renders. */
-    mockRender,
     /** The export wizard's fixture: manuscript.json, comments.json, rewrites.json and the book's styles. */
     exportWizardFixture: () => ({ doc: WIZARD_FIXTURE_DOC, comments: WIZARD_FIXTURE_COMMENTS, rewrites: WIZARD_FIXTURE_REWRITES, styles: WIZARD_FIXTURE_STYLES }),
     /** The export wizard's state (open, step, the run's phase). */
@@ -183,10 +157,10 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const w = getWizardState()
       return { open: w.open, step: w.step, phase: w.run.phase, problem: w.run.error?.problem ?? null }
     },
-    /** Text of a file the export wrote (the mock renderers write the manuscript as text). */
-    exportedText: (path: string) => {
+    /** The bytes of a file the export wrote (the real DOCX; the PDF is the fake core's stub), or null. */
+    exportedBytes: (path: string) => {
       const bytes = core.exports.written.get(path)
-      return bytes ? new TextDecoder().decode(bytes) : null
+      return bytes ? Array.from(bytes) : null
     },
     /** Fire a Tauri event, e.g. a native File menu item ('menu://new-project'). */
     emit(event: string, payload?: unknown) {
@@ -432,11 +406,12 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const styles = getResolvedStyles()
       const footnotes = useStore.getState().book.footnotes
       const renderer = createDocxRenderer()
-      const settings = { ...applyPreset(defaultManuscriptSettings('en-US'), preset), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' } } }
+      const settings = { ...applyPreset(defaultManuscriptSettings('en-US'), preset), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' }, wordCount: 0 } }
       const once = async (onProgress?: (p: { fraction: number }) => void) => {
         const t0 = performance.now()
         const ir = buildManuscript(ed.state.doc, styles, { footnotes })
-        const bytes = await renderer.render(ir, settings, { onProgress })
+        // The wizard counts once, then renders (the count is part of the export time).
+        const bytes = await renderer.render(ir, { ...settings, info: { ...settings.info, wordCount: manuscriptWordCount(ir).total } }, { onProgress })
         return { ms: +(performance.now() - t0).toFixed(1), bytes: bytes.length }
       }
       await once()
@@ -463,7 +438,7 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const ed = getEditor()
       if (!ed) return null
       const ir = buildManuscript(ed.state.doc, getResolvedStyles(), { footnotes: useStore.getState().book.footnotes })
-      const settings = { ...defaultManuscriptSettings('en-US'), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' } } }
+      const settings = { ...defaultManuscriptSettings('en-US'), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' }, wordCount: 0 } }
       const ac = new AbortController()
       let progressAfterCancel = 0
       setTimeout(() => ac.abort(), afterMs)
@@ -599,6 +574,5 @@ export async function installE2EBackend(): Promise<void> {
   const mockedInvoke = internals.invoke
   internals.invoke = (cmd, args, options) => (cmd === 'export_write_file' ? core.handle(cmd, args as Record<string, unknown>, options) : mockedInvoke(cmd, args, options))
   ;(globalThis as unknown as { isTauri: boolean }).isTauri = true
-  installMockRenderers()
   window.__nvE2E = controlFor(core)
 }

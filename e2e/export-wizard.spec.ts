@@ -1,13 +1,15 @@
 import { expect, test, type Page } from '@playwright/test'
+import { strFromU8, unzipSync } from 'fflate'
 import { editor, launch, nativeDialog, openRecent, pressTab, readFile, saveStatus, seedPreferences, waitForLayout, writeFile, reveal } from './helpers'
 
 /**
  * The export wizard (Phase 4 T8): File > Export > Manuscript… on the wizard fixture (the IR feature
  * fixture plus a double space and a chapter-numbering gap, with its comments and open re-write).
- * The renderers are the e2e build's mock (the bytes are the manuscript as text) until the DOCX / PDF
- * generators are wired at the Wave 2 integration; everything around them is real: the Save dialog
- * grants, the atomic writes, cancel, errors, Export Again, persistence, and the tooltip, keyboard and
- * contrast audits at every step in light and dark.
+ * The renderers are the real ones the app registers: the DOCX generator (in its Web Worker) and the
+ * PDF generator, whose Typst render is the fake core's (src/test-utils/fake-export.ts: a stub PDF, a
+ * settable delay and failure). Everything around them is real too: the Save dialog grants, the atomic
+ * writes, cancel, errors, Export Again, persistence, and the tooltip, keyboard and contrast audits at
+ * every step in light and dark.
  */
 
 const FOLDER = '/projects/Night'
@@ -20,6 +22,11 @@ const wizard = (page: Page) => page.getByTestId('export-wizard')
 const ctl = (page: Page, id: string) => wizard(page).locator(`[data-control-id="${id}"]`)
 const check = (page: Page, id: string) => wizard(page).locator(`[data-check="${id}"]`)
 const written = (page: Page) => page.evaluate(() => [...window.__nvE2E.exports.written.keys()])
+const exported = async (page: Page, path: string) => {
+  const bytes = await page.evaluate((p) => window.__nvE2E.exportedBytes(p), path)
+  expect(bytes, path).not.toBeNull()
+  return Uint8Array.from(bytes!)
+}
 
 async function seed(page: Page) {
   await seedPreferences(page, { profileLegalName: 'Ann Waight', profileEmail: 'ann@example.com', profileAddress: '1 Quay Street\nPort Town' })
@@ -93,7 +100,12 @@ test.describe('export wizard', () => {
     await page.keyboard.press('Alt+KeyE')
     await expect(wizard(page).getByTestId('export-done')).toBeVisible()
     expect(await written(page)).toEqual([DOCX, PDF])
-    expect(await page.evaluate((p) => window.__nvE2E.exportedText(p), DOCX)).toContain('The Arrival')
+    // A real .docx (a zip holding word/document.xml with the title page and the chapters) and a PDF.
+    const docx = unzipSync(await exported(page, DOCX))
+    const documentXml = strFromU8(docx['word/document.xml'])
+    expect(documentXml).toContain(TITLE)
+    expect(documentXml).toContain('The Storm')
+    expect(strFromU8((await exported(page, PDF)).slice(0, 5))).toBe('%PDF-')
     // Open file and Show in folder.
     await ctl(page, 'export.openFile').first().click()
     await ctl(page, 'export.showInFolder').last().click()
@@ -185,7 +197,8 @@ test.describe('export wizard', () => {
 
   test('Cancel during the export leaves no file', async ({ page }) => {
     await seed(page)
-    await page.evaluate(() => (window.__nvE2E.mockRender.delayMs = 150))
+    // The PDF's Typst render (the fake core's) takes long enough to cancel; the DOCX renders first.
+    await page.evaluate(() => (window.__nvE2E.exports.renderDelayMs = 5000))
     await openWizard(page)
     await exportNow(page)
     await expect(ctl(page, 'export.cancelRun')).toBeVisible()
@@ -212,11 +225,11 @@ test.describe('export wizard', () => {
       await expect(wizard(page).getByTestId('export-done')).toBeVisible()
       await page.evaluate(() => window.__nvE2E.exports.written.clear())
     }
-    await page.evaluate(() => (window.__nvE2E.mockRender.fail = 'Typst: unknown font family'))
+    await page.evaluate(() => (window.__nvE2E.exports.failRender = { kind: 'compile', message: 'unknown font family', diagnostics: [] }))
     await exportNow(page)
     await expect(wizard(page).getByTestId('export-error')).toContainText('Typst: unknown font family')
     expect(await written(page)).toEqual([])
-    await page.evaluate(() => (window.__nvE2E.mockRender.fail = null))
+    await page.evaluate(() => (window.__nvE2E.exports.failRender = null))
     await page.keyboard.press('Alt+KeyR')
     await expect(wizard(page).getByTestId('export-done')).toBeVisible()
   })

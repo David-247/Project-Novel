@@ -56,3 +56,9 @@ export * from './docx'
 //   titlePageData(), manuscriptFileName(), runExport()
 export * from './wizard'
 // --- end of the export wizard block --------------------------------------------------------------
+
+// --- Wiring (src/features/export/generators.ts) ----------------------------------------------------
+// createManuscriptExportRenderers(): the DOCX and PDF generators adapted to the wizard's jobs, for
+// setExportRenderers at the composition root; docxSettingsOf(job) / pdfMetaOf(job).
+export * from './generators'
+// --- end of the wiring block -----------------------------------------------------------------------

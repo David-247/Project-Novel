@@ -1,4 +1,4 @@
-import { runsText } from '../ir'
+import { manuscriptWordCount, runsText } from '../ir'
 import type { InlineRun, ManuscriptBlock, ManuscriptChapter, ManuscriptIR, NoteRun } from '../ir'
 
 /**
@@ -6,6 +6,16 @@ import type { InlineRun, ManuscriptBlock, ManuscriptChapter, ManuscriptIR, NoteR
  * ../ir): chapter problems (empty, untitled, numbering gaps) and double spaces after a full stop, and the export-only normalisation
  * of those spaces. The IR is never changed; `normalizeSentenceSpaces` returns a new one.
  */
+
+/**
+ * The title page's word count, the same for every format (docs/manuscript-format.md: the app's word
+ * count): the IR's text words, plus its footnote words exactly when Word Count's "Include footnotes" is
+ * on (the rule of the status bar and the Word Count dialog). The wizard passes it to each renderer.
+ */
+export function titlePageWordCount(ir: ManuscriptIR, includeFootnotes: boolean): number {
+  const wc = manuscriptWordCount(ir)
+  return includeFootnotes ? wc.total : wc.body
+}
 
 // ---- chapter numbers ------------------------------------------------------------------------------
 

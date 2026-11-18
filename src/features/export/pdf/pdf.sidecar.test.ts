@@ -29,6 +29,7 @@ const META: ManuscriptMeta = {
     agent: '',
   },
   language: 'en-US',
+  wordCount: 0, // per test: the IR's count (the wizard passes it)
 }
 
 const letter = (): ManuscriptSettings => defaultManuscriptSettings('en-US')
@@ -50,7 +51,7 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
     let title: PdfPage
     let body: PdfPage[]
     beforeAll(async () => {
-      const { pdf } = await renderWithSidecar(buildPdfData(ir, settings, META))
+      const { pdf } = await renderWithSidecar(buildPdfData(ir, settings, { ...META, wordCount: manuscriptWordCount(ir).body }))
       doc = await readPdf(pdf)
       ;[title, ...body] = doc.pages
     }, 60_000)
@@ -189,7 +190,7 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
       ['classic', 'mono', 27.19, 13.6, 13.59],
     ] as const) {
       const settings = { ...applyPreset(letter(), preset), titlePage: { ...letter().titlePage, include: false } }
-      const { pdf } = await renderWithSidecar(buildPdfData(ir, settings, META), role)
+      const { pdf } = await renderWithSidecar(buildPdfData(ir, settings, { ...META, wordCount: manuscriptWordCount(ir).body }), role)
       const page = (await readPdf(pdf)).pages[0]
       const lines = bodyLines(page)
       expect(lines.length).toBeGreaterThan(6)
@@ -225,7 +226,7 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
       ],
     }
     const settings = letter()
-    const meta = { ...META, title: '#title $t$ [x]', contact: { ...META.contact, legalName: '#name $n$' } }
+    const meta = { ...META, wordCount: manuscriptWordCount(ir).body, title: '#title $t$ [x]', contact: { ...META.contact, legalName: '#name $n$' } }
     const { pdf } = await renderWithSidecar(buildPdfData(ir, { ...settings, sceneBreak: ' $#$ ', header: { ...settings.header, shortTitle: ' #[short] ' } }, meta))
     const doc = await readPdf(pdf)
     const all = doc.pages.map((p) => p.text).join('\n').replace(/\s+/g, ' ')
@@ -243,7 +244,7 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
     const fixture = buildPaginationFixture()
     const ir = buildManuscript(fixture.doc as Parameters<typeof buildManuscript>[0], {})
     const settings = letter()
-    const data = buildPdfData(ir, settings, META)
+    const data = buildPdfData(ir, settings, { ...META, wordCount: manuscriptWordCount(ir).body })
     const { pdf, ms } = await renderWithSidecar(data)
     const doc = await readPdf(pdf)
     const [, ...body] = doc.pages

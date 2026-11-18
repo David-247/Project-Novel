@@ -13,10 +13,11 @@ export interface ManuscriptExportInfo {
   /** BCP 47 language of the text, for Word's proofing and the document properties (default 'en-US'). */
   language?: string
   /**
-   * The count the title page rounds. Default: the manuscript's own count from the IR with footnotes
-   * (`manuscriptWordCount(ir).total`), which equals the live word count with "Include footnotes".
+   * The count the title page rounds. The wizard computes it once for both formats (the app's word count:
+   * `manuscriptWordCount(ir)`, footnotes included exactly when Word Count's "Include footnotes" is on);
+   * the generator never counts on its own.
    */
-  wordCount?: number
+  wordCount: number
 }
 
 /** The DOCX renderer's settings: the export settings plus the manuscript's details. */

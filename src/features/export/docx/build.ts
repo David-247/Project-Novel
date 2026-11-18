@@ -21,7 +21,6 @@ import { docxLayout, HEADER_DISTANCE_TWIPS, type DocxLayout } from './layout'
 import { manuscriptStyles, STYLE } from './styles'
 import { doubleSentenceSpaces, sentenceContext, xmlSafe } from './text'
 import type { DocxRenderSettings } from './types'
-import { manuscriptWordCount } from '../ir/word-count'
 
 /**
  * The DOCX manuscript generator (docs/manuscript-format.md, docs/docx-export.md): IR + settings ->
@@ -200,11 +199,10 @@ function contactLines(contact: ContactDetails, settings: DocxRenderSettings): st
 /** The manuscript title as printed and in the properties: trimmed, "Untitled" when empty. */
 const manuscriptTitle = (settings: DocxRenderSettings) => settings.info.title.trim() || 'Untitled'
 
-function titlePage(ir: ManuscriptIR, settings: DocxRenderSettings): { paragraphs: Paragraph[]; linesAboveTitle: number } {
+function titlePage(settings: DocxRenderSettings): { paragraphs: Paragraph[]; linesAboveTitle: number } {
   const { info, titlePage: tp } = settings
   const lines = contactLines(info.contact, settings)
-  const count = info.wordCount ?? manuscriptWordCount(ir).total
-  const wordCount = tp.showWordCount ? formatWordCount(count, settings.wordCountRounding) : ''
+  const wordCount = tp.showWordCount ? formatWordCount(info.wordCount, settings.wordCountRounding) : ''
   const paragraphs: Paragraph[] = []
   if (lines.length || wordCount) {
     const [first = '', ...rest] = lines
@@ -312,7 +310,7 @@ export async function renderDocx(ir: ManuscriptIR, settings: DocxRenderSettings,
 
   const language = languageTag(settings.info.language)
   const hasTitlePage = settings.titlePage.include
-  const tp = hasTitlePage ? titlePage(ir, settings) : null
+  const tp = hasTitlePage ? titlePage(settings) : null
   const head = header(settings)
   const page = (numberFromOne: boolean) => ({
     size: { width: layout.page.width, height: layout.page.height },

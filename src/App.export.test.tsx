@@ -102,6 +102,10 @@ async function renderApp(title = 'The Long Night') {
   render(<App />)
   await waitFor(() => expect(getEditor()).not.toBeNull())
   await waitFor(() => expect(getCommand(EXPORT_COMMAND_IDS.manuscript)).toBeDefined())
+  // App registers the real DOCX / PDF generators (e2e and generators.test.ts cover them); these tests
+  // read the mock's plain-text output, so the mock goes back on top.
+  offRenderers()
+  offRenderers = setExportRenderers(createMockExportRenderers())
   await setProfile()
   act(() => {
     useStore.getState().bookActions.setStyles(() => WIZARD_FIXTURE_STYLES as never)
@@ -316,6 +320,8 @@ describe('exporting', () => {
   it('only the formats chosen; a format with no renderer cannot be chosen', async () => {
     await renderApp()
     offRenderers()
+    // Drop App's real renderers too: this build has a DOCX renderer only.
+    __resetExportRenderersForTests()
     offRenderers = setExportRenderers({ docx: createMockExportRenderers().docx })
     openWizard()
     alt('Digit4')

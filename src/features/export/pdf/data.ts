@@ -12,7 +12,6 @@ import {
   type ManuscriptSettings,
 } from '../settings'
 import { fontRoleOf, lineMetrics } from './metrics'
-import { manuscriptWordCount } from '../ir/word-count'
 
 /**
  * The data file (data.json) the bundled Typst template `manuscript.typ` reads
@@ -119,8 +118,12 @@ export interface ManuscriptMeta {
   title: string
   /** The resolved contact details (app author profile + the project's override). */
   contact: ContactDetails
-  /** Body word count for the title page; default: counted from the IR (`manuscriptWordCount`). */
-  wordCount?: number
+  /**
+   * The count the title page rounds. The wizard computes it once for both formats (the app's word count:
+   * `manuscriptWordCount(ir)`, footnotes included exactly when Word Count's "Include footnotes" is on);
+   * the generator never counts on its own.
+   */
+  wordCount: number
   /** BCP 47 language of the text (PDF metadata, hyphenation data is never used); default 'en'. */
   language?: string
 }
@@ -300,7 +303,7 @@ export function buildPdfData(ir: ManuscriptIR, settings: ManuscriptSettings, met
   const titlePage: PdfTitlePage | null = tp.include
     ? {
         contact: tp.showContact ? contactLines(meta.contact, tp.showAgent) : [],
-        wordCount: tp.showWordCount ? formatWordCount(meta.wordCount ?? manuscriptWordCount(ir).body, settings.wordCountRounding) : '',
+        wordCount: tp.showWordCount ? formatWordCount(meta.wordCount, settings.wordCountRounding) : '',
         title,
         byline: author ? BYLINE[tp.bylineStyle](author) : '',
         drop: r2(textHeight * TITLE_DROP_FRACTION),

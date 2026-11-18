@@ -5,11 +5,11 @@ import { revealPosition } from '@/features/pagination'
 import { askConfirm, getCurrentProjectPath, updateProjectDetails } from '@/features/storage'
 import { getCommand, notifyCommandStateChanged, runCommand } from '@/shared/commands'
 import { useStore } from '@/shared/store'
-import { buildManuscript, manuscriptWordCount, type ManuscriptIR } from '../ir'
+import { buildManuscript, type ManuscriptIR } from '../ir'
 import { pickSavePath, type SaveTarget } from '../platform'
 import { getContactOverride, getLastOutputFolder, getManuscriptSettings, getResolvedContact, setLastOutputFolder, updateManuscriptSettings } from '../settings'
 import type { ManuscriptSettings } from '../settings'
-import { normalizeSentenceSpaces } from './analysis'
+import { normalizeSentenceSpaces, titlePageWordCount } from './analysis'
 import { locateInDoc, type DocLocations } from './locate'
 import { hasBlocking, runChecks, type CheckAction, type CheckResult, type WizardField } from './checks'
 import { getExportRenderer, type ExportJob, type WizardFormat, WIZARD_FORMATS } from './renderers'
@@ -123,7 +123,9 @@ export async function commitTitle(): Promise<void> {
 
 export interface PreparedManuscript {
   ir: ManuscriptIR
+  /** The title page's count (`titlePageWordCount`): footnotes included when Word Count's "Include footnotes" is on. */
   wordCount: number
+  includesFootnotes: boolean
   /** Where the checks' Show me actions go in the manuscript (document positions). */
   locations: DocLocations
 }
@@ -142,7 +144,8 @@ export function prepareManuscript(settings: ManuscriptSettings = getManuscriptSe
     openRewriteAnchors,
     blankLineSceneBreaks: settings.checks.blankLineSceneBreaks,
   })
-  return { ir, wordCount: manuscriptWordCount(ir).total, locations: locateInDoc(ed.state.doc) }
+  const includesFootnotes = s.wordCount.includeFootnotes
+  return { ir, wordCount: titlePageWordCount(ir, includesFootnotes), includesFootnotes, locations: locateInDoc(ed.state.doc) }
 }
 
 /** The checks for a prepared manuscript with the current title, contact and settings. */

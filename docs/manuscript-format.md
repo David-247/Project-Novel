@@ -161,7 +161,8 @@ A novel has a separate title page. [S-shunn-novel]
   nearest hundred" (e.g. 1,507 words becomes 1,500); "if you're edging into novella territory, round to the nearest 500".
   [S-shunn-story] [S-shunn-checklist]. Use the computer-generated count, not the old rule of thumb. [S-shunn-wordcount]
   Shunn's novel title page reads "about 80,000 words". [S-shunn-novel-pdf]
-- **Rounding rule (exact).** Take the app's word count (the word-count ticket's counter) and round half up to the step:
+- **Rounding rule (exact).** Take the app's word count (the word-count ticket's counter; the export wizard counts once
+  for both formats, footnotes included exactly when Word Count's "Include footnotes" is on) and round half up to the step:
   under 20,000 words the step is 100; from 20,000 words (novella and up, so every novel) it is 500. 79,874 words prints
   "about 80,000 words"; 82,260 prints "about 82,500 words". Format with thousands separators and the words "about" and
   "words"; "1 word" is singular. (`roundWordCount()`, `formatWordCount()`.)

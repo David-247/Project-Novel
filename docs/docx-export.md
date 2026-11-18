@@ -12,9 +12,9 @@ await writeExportFile(target, bytes)             // the caller writes; a cancell
 ```
 
 - `DocxRenderSettings` is `ManuscriptSettings` plus `info`: the title, the resolved contact block
-  (`getResolvedContact()`), the language (BCP 47, default `en-US`) and optionally the word count to round on
-  the title page (default: `manuscriptWordCount(ir).total`, the IR's count with footnotes, which equals
-  `countManuscript` on the document).
+  (`getResolvedContact()`), the language (BCP 47, default `en-US`) and the word count to round on the title
+  page (required). The wizard computes it once for both formats (`titlePageWordCount`: `manuscriptWordCount(ir)`,
+  footnotes included exactly when Word Count's "Include footnotes" is on); the generator never counts.
 - `render` builds the file in a Web Worker (`worker.ts`; one worker per render, terminated afterwards). Where
   there is no Worker (Vitest) it builds in the page, loading the `docx` library on demand and yielding to the
   event loop between chapters. Either way the `docx` library is not in the app's main bundle.
