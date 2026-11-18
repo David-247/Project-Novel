@@ -95,6 +95,25 @@ jobs:
       - name: cargo test (other modules)
         run: cargo test --locked -- --skip "export::"
         working-directory: src-tauri
+      # The PDF manuscript (src/features/export/pdf/pdf.sidecar.test.ts): the bundled template rendered
+      # by this sidecar and read back with pdfjs-dist (title page, headers, chapter pages, footnotes,
+      # line pitch, injection), and the 100k-word fixture against its 15 s budget (blocking on Windows,
+      # recorded on macOS: decisions 1cedc290, f040009b). NOVEL_REQUIRE_TYPST makes a missing sidecar fail.
+      - name: PDF manuscript (Typst sidecar + pdfjs)
+        run: pnpm exec vitest run src/features/export/pdf
+        env:
+          NOVEL_REQUIRE_TYPST: '1'
+      - name: PDF perf numbers to the job summary
+        if: ${{ !cancelled() }}
+        run: node scripts/perf-summary.mjs
+      - name: Upload PDF perf results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results-pdf-${{ matrix.os }}
+          path: perf-results/pdf-export-*.json
+          if-no-files-found: warn
+          retention-days: 90
 
   e2e:
     name: Playwright e2e (${{ matrix.os }})

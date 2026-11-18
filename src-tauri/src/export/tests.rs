@@ -462,3 +462,33 @@ fn shutdown_kills_a_running_render() {
     assert_eq!(err.kind, "cancelled");
     assert_empty(&parent);
 }
+
+/// The PDF manuscript template (templates.rs "manuscript") renders the feature fixture's data
+/// (templates/manuscript.sample.json, kept in step with `buildPdfData` by the Vitest suite) through
+/// the command body, offline, with the bundled fonts and no warnings; and in the mono role.
+#[test]
+fn the_manuscript_template_renders_the_sample_data() {
+    let sample = include_str!("../../templates/manuscript.sample.json");
+    let parent = temp_parent("manuscript");
+    let state = ExportState::default();
+    let mut req = request("manuscript", None);
+    req.template = "manuscript".into();
+    req.data = sample.into();
+    req.prefer_installed_font = Some(false);
+    let r = tauri::async_runtime::block_on(render_pdf_with(&state, req, env_in(&parent), || async { Vec::new() })).unwrap();
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert_eq!((r.font.family, r.font.source), ("Liberation Serif", FontSource::Bundled));
+    for f in ["LiberationSerif", "LiberationSerif-Italic", "LiberationSerif-Bold"] {
+        assert!(r.font.embedded.iter().any(|e| e == f), "{f} not embedded: {:?}", r.font.embedded);
+    }
+    let pdf = base64::engine::general_purpose::STANDARD.decode(r.pdf_base64.unwrap()).unwrap();
+    assert!(pdf.starts_with(b"%PDF-"));
+    assert_empty(&parent);
+
+    // Mono: the Classic preset's role.
+    let parent = temp_parent("manuscript-mono");
+    let mono = RenderJob { template: templates::get("manuscript").unwrap().source, data: sample.into(), ..job(FontRole::Mono, &parent) };
+    let (_, font) = run_job(&mono, &AtomicBool::new(false)).unwrap();
+    assert!(font.embedded.iter().all(|f| f.starts_with("LiberationMono")), "{:?}", font.embedded);
+    assert_empty(&parent);
+}
