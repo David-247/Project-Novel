@@ -60,6 +60,40 @@ describe('the title-page word count is the same in the DOCX and the PDF', () => 
   }
 })
 
+describe('the text language reaches both generators', () => {
+  const languages = async (language?: () => string) => {
+    const pdfData: PdfData[] = []
+    const render = async (o: RenderPdfOptions): Promise<RenderPdfResult> => {
+      pdfData.push(o.data as PdfData)
+      return { font: { requested: 'Times New Roman', family: 'Liberation Serif', source: 'bundled', embedded: [] }, warnings: [], bytes: 4, pdf: new Uint8Array([37, 80, 68, 70]) }
+    }
+    const renderers = createManuscriptExportRenderers({ docx: { worker: 'never' }, pdf: { render }, language })
+    const settings = defaultManuscriptSettings('en-GB')
+    const job: ExportJob = { ir, settings, titlePage: titlePageData(settings, contact, 'The Long Night', 100) }
+    const docx = unzipDocx(await renderers.docx.render(job))
+    await renderers.pdf.render(job)
+    const core = parseXml(docx['docProps/core.xml']).getElementsByTagName('dc:language')[0].textContent
+    const proofing = /<w:lang [^>]*w:val="([^"]+)"/.exec(docx['word/styles.xml'])?.[1]
+    return { core, proofing, pdf: pdfData[0].document.lang }
+  }
+
+  it('a UK author: en-GB proofing in the DOCX, English in the PDF', async () => {
+    expect(await languages(() => 'en-GB')).toEqual({ core: 'en-GB', proofing: 'en-GB', pdf: 'en' })
+    expect(await languages(() => 'fr-CA')).toEqual({ core: 'fr-CA', proofing: 'fr-CA', pdf: 'fr' })
+  })
+
+  it('by default, the OS locale (the source of the default paper size)', async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'languages')
+    Object.defineProperty(navigator, 'languages', { configurable: true, get: () => ['de-DE'] })
+    try {
+      expect(await languages()).toEqual({ core: 'de-DE', proofing: 'de-DE', pdf: 'de' })
+    } finally {
+      if (original) Object.defineProperty(navigator, 'languages', original)
+      else delete (navigator as { languages?: unknown }).languages
+    }
+  })
+})
+
 describe('the DOCX and the PDF build the title page and header by one rule', () => {
   const docxTitlePage = (files: Record<string, string>) => {
     const ps = wAll(parseXml(files['word/document.xml']), 'p')
