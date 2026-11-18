@@ -222,7 +222,7 @@ const PAGE_SLOT = '\u0000PAGE\u0000'
 
 function header(settings: DocxRenderSettings): Header | null {
   if (settings.header.format === 'none') return null
-  const surname = surnameOf(bylineName(settings.info.contact))
+  const surname = surnameOf(xmlSafe(bylineName(settings.info.contact)))
   const shortTitle = settings.header.shortTitle.trim() || settings.info.title.trim()
   const text = runningHeader(settings.header, { surname, shortTitle: xmlSafe(shortTitle), page: PAGE_SLOT as unknown as number })
   const [before, after = ''] = text.split(PAGE_SLOT)
