@@ -13,11 +13,6 @@
 // - OUTLINE_CONTROLS: tooltip copy (the tooltips registry reads it).
 // Open state and width: preferences.json (`navigationPane`, `navigationPaneWidth`; shared store).
 export { NavigationPane } from './NavigationPane'
-export { OVERLAY_MAX_WIDTH } from './presentation'
-export { registerOutlineCommands, outlineCommands, toggleNavigationPane, openNavigationPane, closeNavigationPane } from './commands'
-export { OUTLINE_CONTROLS, NAVIGATION_PANE_SHORTCUT } from './controls'
-export type { OutlineControlMeta, OutlineControlKey } from './controls'
-export { buildOutline, entryAt, pageRange, pageRangeText } from './model'
-export type { Outline, OutlineEntry, OutlineKind } from './model'
-export { jumpTo } from './jump'
+export { registerOutlineCommands } from './commands'
+export { OUTLINE_CONTROLS } from './controls'
 export { outlineDebug } from './use-outline'

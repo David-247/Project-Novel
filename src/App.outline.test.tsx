@@ -197,6 +197,61 @@ describe('navigation pane (View ▸ Navigation Pane)', () => {
     expect(within(pane()).getByTestId('outline-total')).toHaveTextContent('16 words')
   })
 
+  it('a manuscript that is open never reads "No manuscript is open." while the tree is being built', async () => {
+    await renderApp()
+    act(() => runCommand('view.navigationPane'))
+    // The first idle build has not run yet: the pane says it is loading, not that nothing is open.
+    expect(within(pane()).queryByText('No manuscript is open.')).toBeNull()
+    expect(within(pane()).getByText('Loading headings…')).toBeTruthy()
+    await waitFor(() => expect(rows()).toHaveLength(4))
+    expect(within(pane()).queryByText('Loading headings…')).toBeNull()
+  })
+
+  const insertChapterAbove = () => {
+    const ed = getEditor()!
+    const { heading, text } = { heading: ed.schema.nodes.heading, text: (s: string) => ed.schema.text(s) }
+    ed.view.dispatch(ed.state.tr.insert(0, heading.create({ level: 1 }, text('Prologue'))))
+  }
+
+  it('a click lands on the chapter clicked after a chapter was added above it in the idle gap (entries follow identity, not index)', async () => {
+    await renderApp()
+    act(() => runCommand('view.navigationPane'))
+    await waitFor(() => expect(rows()).toHaveLength(4))
+    const storm = rows()[1]
+    expect(storm.getAttribute('aria-label')).toMatch(/^Chapter 1: The Storm/)
+    // The tree shown is still the old one: a chapter appeared above and the rebuild has not run.
+    act(() => insertChapterAbove())
+    fireEvent.click(storm)
+    const ed = getEditor()!
+    expect(ed.state.doc.resolve(ed.state.selection.head).parent.textContent).toBe('The Storm')
+  })
+
+  it('folding a chapter sticks to that chapter when another is added above it', async () => {
+    await renderApp()
+    act(() => runCommand('view.navigationPane'))
+    await waitFor(() => expect(rows()).toHaveLength(4))
+    fireEvent.click(rows()[1].querySelector('[data-outline-toggle]')!)
+    await waitFor(() => expect(rows()).toHaveLength(3))
+    act(() => insertChapterAbove())
+    act(() => flushWordCount())
+    await waitFor(() => expect(within(pane()).getByRole('treeitem', { name: /^Chapter 1: Prologue/ })).toBeTruthy())
+    const storm = within(pane()).getByRole('treeitem', { name: /^Chapter 2: The Storm/ })
+    expect(storm).toHaveAttribute('aria-expanded', 'false')
+    expect(within(pane()).getByRole('treeitem', { name: /^Chapter 1: Prologue/ }).hasAttribute('aria-expanded')).toBe(false)
+    expect(within(pane()).queryByRole('treeitem', { name: /^At sea/ })).toBeNull()
+  })
+
+  it('the fold arrow has its own tooltip, and the chapter row names the fold keys', async () => {
+    await renderApp()
+    act(() => runCommand('view.navigationPane'))
+    await waitFor(() => expect(rows()).toHaveLength(4))
+    const arrow = rows()[1].querySelector('[data-outline-toggle]')!
+    expect(arrow.getAttribute('data-control-id')).toBe('outline.fold')
+    expect(document.getElementById(arrow.getAttribute('aria-describedby')!)?.textContent).toMatch(/Left and Right on the row do the same/)
+    // A chapter with subheadings says it on keyboard focus too (the row's own description).
+    expect(document.getElementById(rows()[1].getAttribute('aria-describedby')!)?.textContent).toMatch(/Left and Right, or the arrow, fold/)
+  })
+
   it('the resize handle: arrow keys change the width, kept in preferences within the limits', async () => {
     await renderApp()
     act(() => runCommand('view.navigationPane'))

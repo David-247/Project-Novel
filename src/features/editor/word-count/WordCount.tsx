@@ -49,10 +49,6 @@ export function closeWordCount(): void {
   setDialogOpen(false)
 }
 
-export function isWordCountOpen(): boolean {
-  return dialogOpen
-}
-
 function useDialogOpen(): boolean {
   return useSyncExternalStore(
     (cb) => {
