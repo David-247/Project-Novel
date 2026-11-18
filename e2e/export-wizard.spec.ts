@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { strFromU8, unzipSync } from 'fflate'
-import { editor, launch, nativeDialog, openRecent, pressTab, readFile, saveStatus, seedPreferences, waitForLayout, writeFile, reveal } from './helpers'
+import { editor, launch, nativeDialog, openRecent, pressAccessKey, pressTab, readFile, saveStatus, seedPreferences, waitForLayout, writeFile, reveal } from './helpers'
 
 /**
  * The export wizard (Phase 4 T8): File > Export > Manuscript… on the wizard fixture (the IR feature
@@ -74,11 +74,11 @@ test.describe('export wizard', () => {
     await expect(wizard(page).getByTestId('wizard-wordcount')).toContainText(/about \d+ words/)
     await ctl(page, 'export.genre').selectOption('thriller')
     // 2. Formatting (Alt+N): the header preview.
-    await page.keyboard.press('Alt+KeyN')
+    await pressAccessKey(page, 'KeyN')
     await expect(ctl(page, 'export.step.format')).toHaveAttribute('aria-current', 'step')
     await expect(wizard(page).getByTestId('preview-header')).toHaveText('Waight / The Long Night / 1')
     // 3. Checks: every check of the ticket fires.
-    await page.keyboard.press('Alt+KeyN')
+    await pressAccessKey(page, 'KeyN')
     for (const [id, severity] of [
       ['word-count', 'warning'],
       ['tracked-changes', 'warning'],
@@ -95,9 +95,9 @@ test.describe('export wizard', () => {
     }
     await expect(check(page, 'chapters').locator('[data-control-id="export.check.showChapter"]')).toHaveCount(3)
     // 4. Export.
-    await page.keyboard.press('Alt+KeyN')
+    await pressAccessKey(page, 'KeyN')
     await expect(wizard(page).getByTestId('export-file-names')).toHaveText('Waight_THE_LONG_NIGHT_manuscript.docxWaight_THE_LONG_NIGHT_manuscript.pdf')
-    await page.keyboard.press('Alt+KeyE')
+    await pressAccessKey(page, 'KeyE')
     await expect(wizard(page).getByTestId('export-done')).toBeVisible()
     expect(await written(page)).toEqual([DOCX, PDF])
     // A real .docx (a zip holding word/document.xml with the title page and the chapters) and a PDF.
@@ -230,7 +230,7 @@ test.describe('export wizard', () => {
     await expect(wizard(page).getByTestId('export-error')).toContainText('Typst: unknown font family')
     expect(await written(page)).toEqual([])
     await page.evaluate(() => (window.__nvE2E.exports.failRender = null))
-    await page.keyboard.press('Alt+KeyR')
+    await pressAccessKey(page, 'KeyR')
     await expect(wizard(page).getByTestId('export-done')).toBeVisible()
   })
 

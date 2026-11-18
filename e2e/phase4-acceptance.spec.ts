@@ -11,6 +11,7 @@ import {
   lineEnd,
   nativeDialog,
   openRecent,
+  pressAccessKey,
   projectNavigation,
   readFile,
   reopenProject,
@@ -299,12 +300,12 @@ test('the feature fixture: the wizard (a blocking check fixed), DOCX and PDF che
   await ctl(page, 'export.email').fill('')
   await ctl(page, 'export.address').fill('')
   // 2. Formatting (Alt+N, from inside the wizard): Standard on Letter.
-  await page.keyboard.press('Alt+KeyN')
+  await pressAccessKey(page, 'KeyN')
   await expect(ctl(page, 'export.step.format')).toHaveAttribute('aria-current', 'step')
   await expect(ctl(page, 'export.preset.standard')).toBeChecked()
   await expect(ctl(page, 'export.paper')).toHaveValue('letter')
   // 3. Checks: name and contact block the export.
-  await page.keyboard.press('Alt+KeyN')
+  await pressAccessKey(page, 'KeyN')
   await expect(check(page, 'name')).toHaveAttribute('data-severity', 'blocking')
   await expect(check(page, 'contact')).toHaveAttribute('data-severity', 'blocking')
   await goTo(page, 'export')
@@ -321,9 +322,9 @@ test('the feature fixture: the wizard (a blocking check fixed), DOCX and PDF che
   await expect(check(page, 'contact')).toHaveAttribute('data-severity', 'pass')
   await expect(check(page, 'word-count')).toHaveAttribute('data-severity', 'warning')
   // 4. Export (Alt+E): DOCX and PDF.
-  await page.keyboard.press('Alt+KeyN')
+  await pressAccessKey(page, 'KeyN')
   await expect(ctl(page, 'export.start')).not.toHaveAttribute('aria-disabled', 'true')
-  await page.keyboard.press('Alt+KeyE')
+  await pressAccessKey(page, 'KeyE')
   await expect(wizard(page).getByTestId('export-done')).toBeVisible()
   expect(await written(page)).toEqual([DOCX, PDF])
 

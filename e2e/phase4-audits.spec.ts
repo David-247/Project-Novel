@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { settled, type Probe } from './contrast'
-import { editor, launch, nativeDialog, openRecent, pressTab, reveal, ribbonTab, saveStatus, seedPreferences, waitForLayout, writeFile } from './helpers'
+import { editor, launch, nativeDialog, openRecent, pressAccessKey, pressTab, reveal, ribbonTab, saveStatus, seedPreferences, waitForLayout, writeFile } from './helpers'
 
 /**
  * Phase 4 acceptance, audits, on the export wizard's fixture (chapters, subheadings, footnotes,
@@ -436,21 +436,21 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
   for (const [i, step] of STEPS.entries()) {
     await expect(ctl(wizard(page), `export.step.${step}`)).toHaveAttribute('aria-current', 'step')
     await tabThrough(page, step)
-    if (i < STEPS.length - 1) await page.keyboard.press('Alt+KeyN')
+    if (i < STEPS.length - 1) await pressAccessKey(page, 'KeyN')
   }
   // A field changed from the keyboard (Alt+1 back to the Title page, Tab to the genre, type-ahead
   // "Fan" picks Fantasy: on a closed select it works on every platform, where an arrow key opens the
   // popup on macOS).
-  await page.keyboard.press('Alt+Digit1')
+  await pressAccessKey(page, 'Digit1')
   await expect(ctl(wizard(page), 'export.step.title')).toHaveAttribute('aria-current', 'step')
   await tabTo(page, 'export.genre')
   await expect(ctl(wizard(page), 'export.genre')).not.toHaveValue('fantasy')
   await page.keyboard.type('Fan')
   await expect(ctl(wizard(page), 'export.genre')).toHaveValue('fantasy')
-  await page.keyboard.press('Alt+Digit4')
+  await pressAccessKey(page, 'Digit4')
   await expect(ctl(wizard(page), 'export.step.export')).toHaveAttribute('aria-current', 'step')
   // Export (Alt+E); then Tab to Close and Enter: back in the manuscript.
-  await page.keyboard.press('Alt+KeyE')
+  await pressAccessKey(page, 'KeyE')
   await expect(wizard(page).getByTestId('export-done')).toBeVisible()
   await expect.poll(() => page.evaluate(() => [...window.__nvE2E.exports.written.keys()].length)).toBe(2)
   await tabTo(page, 'export.finish')

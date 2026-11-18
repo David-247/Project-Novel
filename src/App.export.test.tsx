@@ -170,6 +170,53 @@ describe('File > Export > Manuscript…', () => {
     expect(ctl(C.stepChecks.id)).toHaveAttribute('aria-current', 'step')
   })
 
+  it('on macOS, Option+letter in a text field types its character: no access key runs (B-I1)', async () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
+    try {
+      await renderApp()
+      openWizard()
+      const legal = ctl(C.legalName.id) as HTMLInputElement
+      act(() => legal.focus())
+      // "Søren": Option+O types "ø"; it must not toggle "Use other details for this project".
+      let typed = true
+      act(() => {
+        typed = fireEvent.keyDown(legal, { key: 'ø', code: 'KeyO', altKey: true })
+      })
+      expect(typed).toBe(true)
+      expect(getWizardState().overrideContact).toBe(false)
+      expect(document.activeElement).toBe(legal)
+      // "Peña": Option+N (the dead key) does not jump to Formatting; nor Option+2 (™) to step 2.
+      act(() => void fireEvent.keyDown(legal, { key: 'Dead', code: 'KeyN', altKey: true }))
+      act(() => void fireEvent.keyDown(legal, { key: '™', code: 'Digit2', altKey: true }))
+      expect(getWizardState().step).toBe('title')
+      // The address (a textarea) is a text field too.
+      const address = ctl(C.address.id) as HTMLTextAreaElement
+      act(() => address.focus())
+      act(() => void fireEvent.keyDown(address, { key: 'ß', code: 'KeyS', altKey: true }))
+      expect(getManuscriptSettings().titlePage.showAgent).toBe(false)
+      // Off a text field (the genre list) the access keys still work.
+      act(() => ctl(C.genre.id)!.focus())
+      alt('KeyN')
+      expect(getWizardState().step).toBe('format')
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
+  it('on Windows, Alt+letter in a text field is the access key (Word)', async () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
+    try {
+      await renderApp()
+      openWizard()
+      const legal = ctl(C.legalName.id) as HTMLInputElement
+      act(() => legal.focus())
+      alt('KeyN')
+      expect(getWizardState().step).toBe('format')
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
   it('the title page preview, the word count with its rounding and the header preview follow the fields', async () => {
     await renderApp()
     openWizard()

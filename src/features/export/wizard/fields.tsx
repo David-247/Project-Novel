@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref } from 'react'
-import { Checkbox, cn, fieldBase, Select, TextInput, Tooltip } from '@/shared/ui'
+import { Checkbox, cn, detectPlatform, fieldBase, Select, TextInput, Tooltip } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
 import type { ExportControlMeta } from './controls'
 
@@ -32,14 +32,28 @@ function accessKey(e: KeyboardEvent | ReactKeyboardEvent): string | null {
   return null
 }
 
+const NOT_TEXT = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image', 'hidden'])
+
+/** A control where a key types text (Option+letter types a character there on macOS). */
+function isTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.tagName === 'TEXTAREA' || target.isContentEditable) return true
+  return target.tagName === 'INPUT' && !NOT_TEXT.has((target as HTMLInputElement).type)
+}
+
 /**
  * Alt+<key> inside `root`: the first visible, enabled element marked `data-mnemonic="<key>"` is
  * focused; a button, checkbox or radio is also pressed (Word: an access key on a button runs it).
  * Returns true when it handled the key.
+ *
+ * On macOS, Option+<key> in a text field types a character (ø, ß, the ñ dead key), so it is left to
+ * the field there: Word for Mac has no access keys, and a press meant as a letter must never run a
+ * control. From any other control (a list, a checkbox, a button) the access keys work on macOS too.
  */
 export function handleAccessKey(e: ReactKeyboardEvent, root: HTMLElement | null): boolean {
   const key = accessKey(e)
   if (!key || !root) return false
+  if (detectPlatform() === 'mac' && isTextEntry(e.target)) return false
   const candidates = Array.from(root.querySelectorAll<HTMLElement>(`[data-mnemonic="${key}"]`))
   const visible = (c: HTMLElement) => (typeof c.checkVisibility === 'function' ? c.checkVisibility() : !c.closest('[hidden]'))
   const el = candidates.find((c) => !(c as HTMLButtonElement).disabled && c.getAttribute('aria-disabled') !== 'true' && visible(c))
