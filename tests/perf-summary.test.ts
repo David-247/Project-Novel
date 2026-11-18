@@ -182,6 +182,20 @@ describe('perf summary', () => {
     expect(section).toMatch(/\| perf-export \| manuscript IR build, 2,000 pending changes \(median\) \| chromium \/ win32 \(shipping\) \| \*\*510\*\* \(MISS\) \| 500 \|/)
   })
 
+  it('every number the export and outline specs write is tabulated, the reported-only ones with no budget', () => {
+    const md = toMarkdown([
+      { scenario: 'perf-export', browser: 'perf-chromium', platform: 'win32', irBuild: { medianMs: 120, maxMs: 150, fromJsonMedianMs: 33 } },
+      { scenario: 'perf-export-docx', browser: 'perf-chromium', platform: 'win32', docxExport: { medianMs: 800, maxMs: 900, framesDuringLastRun: 41 }, docxExportClassic: { medianMs: 700, maxMs: 760 } },
+      { scenario: 'perf-navigation-pane', browser: 'perf-chromium', platform: 'win32', outline: { caughtUpMs: 26, lastBuildMs: 4.321 } },
+    ])
+    expect(md).toContain('| perf-export | manuscript IR build (slowest run; reported) | chromium / win32 (shipping) | 150 | – |')
+    expect(md).toContain('| perf-export | manuscript IR from the stored JSON, no editor (median; reported) | chromium / win32 (shipping) | 33 | – |')
+    expect(md).toContain('| perf-export-docx | DOCX export (slowest run; reported) | chromium / win32 (shipping) | 900 | – |')
+    expect(md).toContain('| perf-export-docx | DOCX export: animation frames painted during the last run (reported) | chromium / win32 (shipping) | 41 | – |')
+    expect(md).toContain('| perf-export-docx | DOCX export, Classic preset (slowest run; reported) | chromium / win32 (shipping) | 760 | – |')
+    expect(md).toContain('| perf-navigation-pane | last outline build (reported) | chromium / win32 (shipping) | 4.3 | – |')
+  })
+
   it('export: the PDF render of the 100k fixture against 15 s, blocking on Windows, a warning on macOS', () => {
     const md = toMarkdown([
       { scenario: 'pdf-export', browser: 'typst', platform: 'win32', pdfRender: { ms: 2300, pages: 363 } },
