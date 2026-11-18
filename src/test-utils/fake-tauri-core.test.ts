@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { COMMANDS } from '@/features/storage/ipc'
-import { EXPORT_COMMANDS } from '@/features/export/platform'
+import { EXPORT_COMMANDS } from '@/features/export'
 import { createFakeTauriCore, HANDLED_COMMANDS, memoryPersistence } from './fake-tauri-core'
 
 /** Plugin commands the app sends, with the plugin file that defines each name. */

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
 
 import { core } from '@/test-utils/fake-tauri'
-import { pickSavePath, renderPdf, revealInFolder, writeExportFile } from '@/features/export/platform'
+import { pickSavePath, renderPdf, revealInFolder, writeExportFile } from '@/features/export'
 import { FAKE_PDF } from './fake-export'
 
 // The export platform wrapper running against the fake core (the path Wave 2's tests use).

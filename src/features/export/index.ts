@@ -26,3 +26,10 @@ export * from './settings'
 // - manuscriptPlainText() / runsText(), createMockRenderer(), and the feature fixtures
 export * from './ir'
 // --- end of the manuscript IR block --------------------------------------------------------------
+
+// --- Export platform (src/features/export/platform/*) --------------------------------------------
+// The Rust side of export over IPC: pickSavePath() (Save dialog), writeExportFile() (atomic write),
+// renderPdf() / cancelRender() (the bundled, offline Typst sidecar), revealInFolder(), base64ToBytes(),
+// ExportPlatformError, EXPORT_COMMANDS / EXPORT_HEADERS and their types.
+export * from './platform'
+// --- end of the export platform block ------------------------------------------------------------
