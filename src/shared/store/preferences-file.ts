@@ -29,6 +29,18 @@ export interface PreferenceValues {
   reduceMotion: ReduceMotion
   /** The one-time author-name question has been asked (answered or dismissed). */
   authorPrompted: boolean
+  /**
+   * Author profile (Phase 4): the contact block of an exported manuscript's title page. App-level, like
+   * Word's user information, so personal details stay out of project folders unless a project
+   * overrides them. '' = not set. Line breaks are kept in `profileAddress` and `profileAgent`.
+   */
+  profileLegalName: string
+  /** The name on the by-line (a pen name); '' = the legal name. */
+  profilePenName: string
+  profileAddress: string
+  profilePhone: string
+  profileEmail: string
+  profileAgent: string
 }
 
 export interface Preferences extends PreferenceValues {
@@ -40,6 +52,19 @@ export interface Preferences extends PreferenceValues {
 
 export const MAX_AUTHOR_NAME = 120
 
+/** Longest value of each author-profile field (a project's contact override has the same limits). */
+export const PROFILE_MAX = {
+  profileLegalName: 120,
+  profilePenName: 120,
+  profileAddress: 400,
+  profilePhone: 60,
+  profileEmail: 200,
+  profileAgent: 300,
+} as const
+
+/** The author-profile keys, in the order of the title-page contact block. */
+export const PROFILE_KEYS = ['profileLegalName', 'profilePenName', 'profileAddress', 'profilePhone', 'profileEmail', 'profileAgent'] as const
+
 export function defaultPreferenceValues(authorName = ''): PreferenceValues {
   return {
     authorName,
@@ -49,6 +74,12 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     defaultTrimSize: DEFAULT_TRIM_SIZE,
     reduceMotion: 'system',
     authorPrompted: false,
+    profileLegalName: '',
+    profilePenName: '',
+    profileAddress: '',
+    profilePhone: '',
+    profileEmail: '',
+    profileAgent: '',
   }
 }
 
@@ -63,6 +94,12 @@ const READERS: { [K in keyof PreferenceValues]: (v: unknown) => PreferenceValues
   defaultTrimSize: (v) => (isTrimSizeId(v) ? v : undefined),
   reduceMotion: (v) => (v === 'system' || v === 'on' || v === 'off' ? v : undefined),
   authorPrompted: (v) => (typeof v === 'boolean' ? v : undefined),
+  profileLegalName: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileLegalName) : undefined),
+  profilePenName: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profilePenName) : undefined),
+  profileAddress: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileAddress) : undefined),
+  profilePhone: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profilePhone) : undefined),
+  profileEmail: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileEmail) : undefined),
+  profileAgent: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileAgent) : undefined),
 }
 
 const KNOWN_KEYS = new Set<string>(Object.keys(READERS))
@@ -124,6 +161,12 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     defaultTrimSize: p.defaultTrimSize,
     reduceMotion: p.reduceMotion,
     authorPrompted: p.authorPrompted,
+    profileLegalName: p.profileLegalName.trim(),
+    profilePenName: p.profilePenName.trim(),
+    profileAddress: p.profileAddress.trim(),
+    profilePhone: p.profilePhone.trim(),
+    profileEmail: p.profileEmail.trim(),
+    profileAgent: p.profileAgent.trim(),
   }
   return JSON.stringify(out, null, 2) + '\n'
 }

@@ -21,4 +21,8 @@ describe('cross-slice import rule', { timeout: 30_000 }, () => {
   it('allows import via the slice index', async () => {
     expect(await messages('tests/fixtures/features/editor/good-index-import.ts')).toHaveLength(0)
   })
+  it('the export slice is covered: a deep import into settings is rejected, its index is fine', async () => {
+    expect(await messages('tests/fixtures/features/export/bad-deep-import.ts')).toHaveLength(1)
+    expect(await messages('tests/fixtures/features/export/good-index-import.ts')).toHaveLength(0)
+  })
 })

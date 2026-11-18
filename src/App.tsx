@@ -54,6 +54,7 @@ import {
   TrackChangesNotice,
 } from '@/features/track-changes'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
+import { registerExportSideFile } from '@/features/export'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -128,6 +129,8 @@ export function App() {
   useEffect(() => registerCommentsSideFile(), [])
   // rewrites.json likewise (re-write versions are saved, autosaved and recovered with the manuscript).
   useEffect(() => registerRewritesSideFile(), [])
+  // export.json (manuscript export settings) likewise; a project without it opens with the defaults.
+  useEffect(() => registerExportSideFile(), [])
   // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.
   useEffect(() => {
     setRewriteConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))

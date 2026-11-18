@@ -10,6 +10,7 @@ My Novel/
 ├── book.json         book layout settings (trim size, margins, styles, ...); optional
 ├── comments.json     comment threads (a side file, Phase 3); optional
 ├── rewrites.json     re-writes of passages and their versions (a side file, Phase 3); optional
+├── export.json       manuscript export settings (a side file, Phase 4); optional
 ├── index.sqlite      index (revisions); can be rebuilt, never the only copy of text
 └── .recovery/        crash-recovery data
     ├── manuscript.json                 current snapshot (only while there are unsaved changes)
@@ -272,7 +273,7 @@ and crash recovery treat them exactly like unsaved text.
 ## Side files
 
 A side file is a JSON file beside manuscript.json that belongs to one feature: `comments.json` and `rewrites.json`
-(Phase 3). All side files follow the same rules, implemented once in the storage slice
+(Phase 3), `export.json` (Phase 4). All side files follow the same rules, implemented once in the storage slice
 (`src/features/storage/side-files.ts`):
 
 - **Optional.** A missing file is empty. A project without it (every Phase 1 and 2 project) opens unchanged, and
@@ -436,6 +437,77 @@ A re-write:
   `original`, versions and `kept`, so no block of manuscript.json or rewrites.json keeps the deleted id.
 - **Typing in a version** is an unsaved change of the project like any other (save status, prompts, autosave): the
   version being typed is written into the side file at every save and every recovery snapshot.
+
+## export.json
+
+The manuscript export settings of the project (Phase 4): the look of the exported DOCX / PDF and what its title page says.
+A side file (see "Side files"): optional, saved with the manuscript, in crash recovery, guarded when damaged or newer.
+The meaning of every setting, with its sources, default and alternatives, is in [manuscript-format.md](manuscript-format.md).
+
+**A project without export.json opens with the defaults** (the Standard preset on the paper of the OS locale), and the
+file is created only when the user changes a setting.
+
+```json
+{
+  "version": 1,
+  "settings": {
+    "preset": "standard",
+    "paper": "letter",
+    "fontFamily": "Times New Roman",
+    "fontSizePt": 12,
+    "lineSpacing": 2,
+    "margins": { "top": 1, "right": 1, "bottom": 1, "left": 1 },
+    "firstLineIndentIn": 0.5,
+    "indentFirstParagraph": true,
+    "italics": "italic",
+    "sentenceSpacing": 1,
+    "header": { "format": "surname-title-page", "titleCase": "as-typed", "startPage": 2, "shortTitle": "" },
+    "sceneBreak": "#",
+    "chapterDropFraction": 0.3333333333333333,
+    "endMarker": "none",
+    "titlePage": { "include": true, "showContact": true, "showAgent": false, "showWordCount": true, "bylineStyle": "a-novel-by" },
+    "wordCountRounding": "auto",
+    "outputs": { "docx": true, "pdf": true },
+    "lastOutputFolder": null
+  },
+  "contact": { "email": "book@example.com" }
+}
+```
+
+| Key | Values | Meaning |
+|---|---|---|
+| `version` | integer | File format version. Current: `1`. A higher one is read as far as understood and guarded. |
+| `settings.preset` | `"standard"`, `"classic"` | Which preset's look was last applied (the type: font, italics, sentence spacing). |
+| `settings.paper` | `"letter"`, `"a4"` | Paper size. Default from the OS locale when the file is created. |
+| `settings.fontFamily`, `fontSizePt` | text, 8 to 24 | Font as a word processor names it; size in points. |
+| `settings.lineSpacing` | `1`, `1.5`, `2` | Multiple of the font's line height. |
+| `settings.margins` | inches, 0 to 4 | `top`, `right`, `bottom`, `left`. |
+| `settings.firstLineIndentIn`, `indentFirstParagraph` | inches 0 to 2; boolean | Paragraph indent; whether the first paragraph of a chapter or scene is indented. |
+| `settings.italics` | `"italic"`, `"underline"` | How emphasis is rendered. |
+| `settings.sentenceSpacing` | `1`, `2` | Spaces after a sentence. |
+| `settings.header` | `format`: `surname-title-page`, `title-surname-page`, `surname-page`, `page`, `none`; `titleCase`: `as-typed`, `upper`; `startPage`: `1`, `2`; `shortTitle`: text | Running header. `startPage` 2 skips the title page. |
+| `settings.sceneBreak` | text, at most 20 characters | Centred marker between scenes. |
+| `settings.chapterDropFraction` | 0 to 0.75 | How far down the text area a chapter heading starts, as a fraction of its height. |
+| `settings.endMarker` | `"none"`, `"end"`, `"the-end"` | Marker after the last line. |
+| `settings.titlePage` | `include`, `showContact`, `showAgent`, `showWordCount`: boolean; `bylineStyle`: `a-novel-by`, `by`, `name-only` | Title page content. |
+| `settings.wordCountRounding` | `auto`, `nearest-100`, `nearest-500`, `nearest-1000`, `exact` | Rounding rule of the title-page word count. |
+| `settings.outputs` | `docx`, `pdf`: boolean | Formats the wizard exports. |
+| `settings.lastOutputFolder` | text or `null` | Folder of the last export, a machine-local hint (the wizard checks that it still exists). The only absolute path in a project; ignore it when it does not exist on this machine. |
+| `contact` | object with any of `legalName`, `penName`, `address`, `phone`, `email`, `agent` (text) | **Per-project override of the author profile.** Only the fields the user set for this project; absent when nothing is overridden. |
+
+Rules:
+
+- **Personal contact details are not stored in the project by default.** The contact block of the title page comes from
+  the author profile in app Settings (`preferences.json`, below). `contact` is written only when the user overrides a
+  field for this project, and holds only the overridden fields; clearing an override removes it.
+- **Reading never fails.** A wrongly typed or out-of-range value falls back to its default, key by key. Unknown keys
+  (top level and inside `settings`) are kept and written back unchanged. A `version` above 1 is used as far as
+  understood, the status bar says so, and the file is copied aside (`export.newer-<timestamp>.json`) before the first
+  overwrite. A damaged file loads as the defaults and is copied aside (`export.damaged-<timestamp>.json`) before it is
+  replaced. Writing always uses the current version.
+- **Saved with the manuscript.** Changing a setting is an unsaved change of the project (prompts, autosave); the file is
+  written in the save batch, snapshotted by autosave and restored by crash recovery (`sideFiles` in the snapshot), and
+  carried by Save a Copy.
 
 ## index.sqlite
 
@@ -647,7 +719,13 @@ Windows and Cmd+, on macOS).
   "defaultPaper": "auto",
   "defaultTrimSize": "us-5.5x8.5",
   "reduceMotion": "system",
-  "authorPrompted": false
+  "authorPrompted": false,
+  "profileLegalName": "Augusta Ada King",
+  "profilePenName": "Ada Lovelace",
+  "profileAddress": "1 Analytical Way\nLondon",
+  "profilePhone": "",
+  "profileEmail": "ada@example.com",
+  "profileAgent": ""
 }
 ```
 
@@ -660,6 +738,9 @@ Windows and Cmd+, on macOS).
 | `defaultTrimSize` | a trim size id from the catalog | Trim size a **new** project starts with, with that size's default margins. Existing projects keep theirs. |
 | `reduceMotion` | `"system"`, `"on"`, `"off"` | Reduce animation (`"system"` follows the OS setting). |
 | `authorPrompted` | `true`/`false` | The one-time "who is writing?" question has been asked (answered or dismissed); it is never asked again. |
+| `profileLegalName`, `profilePenName` | text, at most 120 characters each | **Author profile** (Phase 4): the legal name and the by-line (pen) name for the title page of an exported manuscript. `""`: not set (an empty pen name means the legal name). |
+| `profileAddress`, `profileAgent` | text, at most 400 and 300 characters; line breaks kept | Postal address and agent / agency for the title-page contact block. |
+| `profilePhone`, `profileEmail` | text, at most 60 and 200 characters | Phone and email for the contact block. |
 
 Rules:
 
@@ -677,7 +758,9 @@ Rules:
   and nothing is written while it stays unreadable. A change made before the file was read at startup is kept over
   the value read.
 - **Saved as you change.** Changes apply immediately (no OK button) and are written about 300 ms after the last one.
-- Not in a project: Save As, backups and recovery never include it.
+- Not in a project: Save As, backups and recovery never include it. The author profile is the app-level source of the
+  title-page contact block (like Word's user information); a project holds contact details only as the per-project
+  override in `export.json`. Reset to defaults leaves the profile as it is (it is typed data, not a preference).
 
 ## Save a Copy
 

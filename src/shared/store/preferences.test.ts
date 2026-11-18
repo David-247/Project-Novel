@@ -54,6 +54,12 @@ describe('preferences.json', () => {
       defaultTrimSize: 'us-6x9',
       reduceMotion: 'on' as const,
       authorPrompted: true,
+      profileLegalName: 'Augusta Ada King',
+      profilePenName: 'Ada Lovelace',
+      profileAddress: '1 Analytical Way\nLondon',
+      profilePhone: '+44 20 7946 0000',
+      profileEmail: 'ada@example.com',
+      profileAgent: 'Babbage & Co.',
     }
     const parsed = parsePreferences(serializePreferences({ ...values, extra: {} }))
     expect(parsed).toMatchObject({ values, extra: {}, authorNameMissing: false, fallback: null })
@@ -123,6 +129,22 @@ describe('preferences.json', () => {
 
   it('caps the author name length', () => {
     expect(parsePreferences(JSON.stringify({ authorName: 'x'.repeat(500) })).values.authorName).toHaveLength(120)
+  })
+
+  it('author profile: empty by default, trimmed on write, wrongly typed values default, long ones are capped', () => {
+    expect(defaultPreferenceValues()).toMatchObject({ profileLegalName: '', profilePenName: '', profileAddress: '', profilePhone: '', profileEmail: '', profileAgent: '' })
+    const json = JSON.parse(serializePreferences({ ...defaultPreferenceValues(), profileEmail: '  a@b.c ', extra: {} }))
+    expect(json.profileEmail).toBe('a@b.c')
+    const parsed = parsePreferences(JSON.stringify({ version: 1, profilePhone: 5, profileAddress: 'x'.repeat(900) }))
+    expect(parsed.values.profilePhone).toBe('')
+    expect(parsed.values.profileAddress).toHaveLength(400)
+  })
+
+  it('Reset to defaults keeps the author profile (it is typed data, not a preference)', () => {
+    a().set('profileLegalName', 'Ada King')
+    a().set('pageNavigation', 'scroll')
+    a().reset()
+    expect(prefs()).toMatchObject({ profileLegalName: 'Ada King', pageNavigation: 'book' })
   })
 })
 
