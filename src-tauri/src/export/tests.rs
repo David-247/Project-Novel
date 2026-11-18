@@ -303,7 +303,7 @@ fn grant_write_then_reveal_check() {
     let dir = temp_parent("grant");
     let target = dir.join("Book.pdf");
     let mut t = files::Targets::default();
-    let token = t.grant(target.clone(), FileKind::Pdf);
+    let token = t.grant(target.clone(), FileKind::Pdf, "");
     let path = t.target(&token, FileKind::Pdf).unwrap();
     files::write_export(&path, b"%PDF-1.7 test").unwrap();
     assert_eq!(t.exported_file(&target.to_string_lossy()).unwrap_err().kind, "not_exported");
@@ -337,7 +337,7 @@ fn a_cancel_during_the_font_scan_stops_the_job_with_no_output() {
     let out = temp_parent("scan-cancel-out");
     let state = ExportState::default();
     let target = out.join("Book.pdf");
-    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf);
+    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf, "");
     let result = tauri::async_runtime::block_on(render_pdf_with(
         &state,
         request("job-scan", Some(token)),
@@ -362,7 +362,7 @@ fn a_cancel_from_another_thread_while_fonts_are_scanned_is_not_lost() {
     let out = temp_parent("scan-race-out");
     let state = ExportState::default();
     let target = out.join("Book.pdf");
-    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf);
+    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf, "");
     let result = std::thread::scope(|s| {
         s.spawn(|| {
             // Issued as soon as the render is invoked; retried only until the job is visible.
@@ -390,7 +390,7 @@ fn the_command_body_renders_writes_and_records_the_export() {
     let out = temp_parent("cmd-ok-out");
     let state = ExportState::default();
     let target = out.join("Book.pdf");
-    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf);
+    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf, "");
     let r = tauri::async_runtime::block_on(render_pdf_with(&state, request("job-ok", Some(token)), env_in(&parent), || async {
         Vec::new()
     }))

@@ -42,16 +42,26 @@ const MAX_EXPORTED: usize = 32;
 #[derive(Default, Debug)]
 pub struct Targets {
     next: u64,
-    picked: Vec<(String, PathBuf, FileKind)>,
+    picked: Vec<Grant>,
     exported: Vec<PathBuf>,
 }
 
+/// A Save-dialog grant: its token, the picked path, the file kind, and the project it was picked for
+/// (the active ProjectRoot's key, "" with none open).
+#[derive(Debug)]
+struct Grant {
+    token: String,
+    path: PathBuf,
+    kind: FileKind,
+    project: String,
+}
+
 impl Targets {
-    /// Record a path the user picked in the Save dialog; returns its token.
-    pub fn grant(&mut self, path: PathBuf, kind: FileKind) -> String {
+    /// Record a path the user picked in the Save dialog while `project` was open; returns its token.
+    pub fn grant(&mut self, path: PathBuf, kind: FileKind, project: &str) -> String {
         self.next += 1;
         let token = format!("export-{}", self.next);
-        self.picked.push((token.clone(), path, kind));
+        self.picked.push(Grant { token: token.clone(), path, kind, project: project.to_string() });
         if self.picked.len() > MAX_PICKED {
             self.picked.remove(0);
         }
@@ -62,18 +72,20 @@ impl Targets {
     pub fn target(&self, token: &str, kind: FileKind) -> Result<PathBuf, ExportError> {
         self.picked
             .iter()
-            .find(|(t, _, k)| t == token && *k == kind)
-            .map(|(_, p, _)| p.clone())
+            .find(|g| g.token == token && g.kind == kind)
+            .map(|g| g.path.clone())
             .ok_or_else(|| {
                 ExportError::new("invalid_token", "Choose where to save the file first (the Save dialog was not used).")
             })
     }
 
-    /// The folder of the most recent grant, of any kind: where the next Save dialog starts, so the
-    /// PDF dialog of a DOCX + PDF export opens where the DOCX was just saved. Rust's own record; the
-    /// webview names no folder.
-    pub fn last_folder(&self) -> Option<PathBuf> {
-        self.picked.last().and_then(|(_, p, _)| p.parent().map(Path::to_path_buf))
+    /// The folder of `project`'s most recent grant this session, of any kind: where its next Save
+    /// dialog starts, so the PDF dialog of a DOCX + PDF export opens where the DOCX was just saved, and
+    /// the next export's first dialog opens where its last file went (decision 56847bb9 as corrected).
+    /// Another project's grants never count: after a switch, its own record decides. Rust's own record;
+    /// the webview names no folder.
+    pub fn last_folder(&self, project: &str) -> Option<PathBuf> {
+        self.picked.iter().rev().find(|g| g.project == project).and_then(|g| g.path.parent().map(Path::to_path_buf))
     }
 
     pub fn mark_exported(&mut self, path: &Path) {
@@ -96,13 +108,19 @@ impl Targets {
     }
 }
 
-/// The Save dialog's path with the kind's extension added when the user typed none.
+/// The Save dialog's path, always ending in the kind's extension: kept when the name already ends in
+/// it (any case, "Book.PDF"), else appended, so "Draft v1.2" becomes "Draft v1.2.pdf" (never
+/// "Draft v1.pdf", and never a file Open file would then refuse for its type).
 pub fn with_extension(path: PathBuf, kind: FileKind) -> PathBuf {
-    if path.extension().is_some() {
-        path
-    } else {
-        path.with_extension(kind.extension())
+    let ext = kind.extension();
+    if path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(ext)) {
+        return path;
     }
+    // "Book." (a typed trailing dot) takes the extension after that dot.
+    let trailing_dot = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with('.'));
+    let mut name = path.into_os_string();
+    name.push(if trailing_dot { ext.to_string() } else { format!(".{ext}") });
+    PathBuf::from(name)
 }
 
 /// A default file name safe to offer in the dialog (no folders, no characters Windows refuses).
@@ -157,6 +175,11 @@ impl RememberedFolders {
     pub fn folder_for(&self, project: &str) -> Option<PathBuf> {
         self.folders.iter().find(|f| f.project == project).map(|f| PathBuf::from(&f.folder))
     }
+    /// Read the record at `file` (missing or damaged: empty). Blocking file I/O: call it off the
+    /// async command thread.
+    pub fn load(file: &Path) -> Self {
+        Self::parse(std::fs::read_to_string(file).ok().as_deref())
+    }
     /// Remember `folder` for `project` (most recent last, at most MAX_REMEMBERED).
     pub fn remember(&mut self, project: &str, folder: &Path) {
         self.folders.retain(|f| f.project != project);
@@ -164,6 +187,29 @@ impl RememberedFolders {
         let extra = self.folders.len().saturating_sub(MAX_REMEMBERED);
         self.folders.drain(..extra);
     }
+}
+
+/// Where the Save dialog opens (decision 56847bb9 as corrected): `session`, the folder of this
+/// project's most recent grant this session (`Targets::last_folder`), else `project`'s folder in the
+/// record at `folders_file`; each only when it is still an existing absolute folder; else none (the
+/// OS default). Blocking file I/O: call it off the async command thread.
+pub fn dialog_start(session: Option<PathBuf>, folders_file: Option<&Path>, project: &str) -> Option<PathBuf> {
+    session
+        .and_then(|d| start_directory(&d))
+        .or_else(|| folders_file.and_then(|f| RememberedFolders::load(f).folder_for(project)).and_then(|d| start_directory(&d)))
+}
+
+/// After a successful export write of `written`: remember its folder for `project` in the record at
+/// `folders_file` (atomically). Blocking file I/O: runs in the export's background write.
+pub fn remember_export_folder(folders_file: &Path, project: &str, written: &Path) -> Result<(), ExportError> {
+    let Some(folder) = written.parent() else { return Ok(()) };
+    let mut folders = RememberedFolders::load(folders_file);
+    folders.remember(project, folder);
+    let bytes = serde_json::to_vec_pretty(&folders).map_err(ExportError::internal)?;
+    if let Some(dir) = folders_file.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| ExportError::io(dir, e))?;
+    }
+    write_export(folders_file, &bytes)
 }
 
 /// Write export bytes atomically (storage's temp file + fsync + rename, symlink refused): a failure
@@ -289,12 +335,12 @@ mod tests {
     #[test]
     fn tokens_map_only_to_granted_paths_of_their_kind() {
         let mut t = Targets::default();
-        let tok = t.grant(PathBuf::from("/x/book.pdf"), FileKind::Pdf);
+        let tok = t.grant(PathBuf::from("/x/book.pdf"), FileKind::Pdf, "");
         assert_eq!(t.target(&tok, FileKind::Pdf).unwrap(), PathBuf::from("/x/book.pdf"));
         assert_eq!(t.target(&tok, FileKind::Docx).unwrap_err().kind, "invalid_token");
         assert_eq!(t.target("export-999", FileKind::Pdf).unwrap_err().kind, "invalid_token");
         for i in 0..MAX_PICKED {
-            t.grant(PathBuf::from(format!("/x/{i}.pdf")), FileKind::Pdf);
+            t.grant(PathBuf::from(format!("/x/{i}.pdf")), FileKind::Pdf, "");
         }
         assert_eq!(t.target(&tok, FileKind::Pdf).unwrap_err().kind, "invalid_token", "oldest grant forgotten");
     }
@@ -372,15 +418,56 @@ mod tests {
     #[test]
     fn the_next_dialog_starts_in_the_folder_of_the_most_recent_grant_of_any_kind() {
         let mut t = Targets::default();
-        assert_eq!(t.last_folder(), None);
+        let p = "/p/one";
+        assert_eq!(t.last_folder(p), None);
         // A DOCX + PDF export: the PDF dialog opens where the DOCX was just saved.
-        t.grant(PathBuf::from("/a/book.docx"), FileKind::Docx);
-        assert_eq!(t.last_folder(), Some(PathBuf::from("/a")));
-        t.grant(PathBuf::from("/b/book.pdf"), FileKind::Pdf);
+        t.grant(PathBuf::from("/a/book.docx"), FileKind::Docx, p);
+        assert_eq!(t.last_folder(p), Some(PathBuf::from("/a")));
+        t.grant(PathBuf::from("/b/book.pdf"), FileKind::Pdf, p);
         // The next export: its DOCX dialog opens where the last file (the PDF) went, not the last DOCX.
-        assert_eq!(t.last_folder(), Some(PathBuf::from("/b")));
-        t.grant(PathBuf::from("/c/other.docx"), FileKind::Docx);
-        assert_eq!(t.last_folder(), Some(PathBuf::from("/c")));
+        assert_eq!(t.last_folder(p), Some(PathBuf::from("/b")));
+        t.grant(PathBuf::from("/c/other.docx"), FileKind::Docx, p);
+        assert_eq!(t.last_folder(p), Some(PathBuf::from("/c")));
+    }
+
+    #[test]
+    fn after_a_project_switch_the_other_projects_grants_never_set_the_start_folder() {
+        let mut t = Targets::default();
+        t.grant(PathBuf::from("/out/one/book.docx"), FileKind::Docx, "/p/one");
+        // Switched to project two in the same session: no grant of its own yet, so not project one's.
+        assert_eq!(t.last_folder("/p/two"), None);
+        t.grant(PathBuf::from("/out/two/book.pdf"), FileKind::Pdf, "/p/two");
+        assert_eq!(t.last_folder("/p/two"), Some(PathBuf::from("/out/two")));
+        // Back to project one: its own most recent grant, though project two's is newer.
+        assert_eq!(t.last_folder("/p/one"), Some(PathBuf::from("/out/one")));
+        // Tokens stay valid whatever project is open (Export Again names its own grants).
+        let tok = t.grant(PathBuf::from("/out/one/b.pdf"), FileKind::Pdf, "/p/one");
+        assert_eq!(t.target(&tok, FileKind::Pdf).unwrap(), PathBuf::from("/out/one/b.pdf"));
+    }
+
+    #[test]
+    fn dialog_start_prefers_the_session_grant_then_the_projects_record_then_none() {
+        let dir = temp_dir("dialog-start");
+        let (session, remembered, other) = (dir.join("session"), dir.join("remembered"), dir.join("other"));
+        for d in [&session, &remembered, &other] {
+            fs::create_dir_all(d).unwrap();
+        }
+        let file = dir.join("app").join(EXPORT_FOLDERS_FILE);
+        // Nothing yet: the OS default.
+        assert_eq!(dialog_start(None, Some(&file), "/p/one"), None);
+        // Two projects' records, written as the export write does.
+        remember_export_folder(&file, "/p/one", &remembered.join("book.pdf")).unwrap();
+        remember_export_folder(&file, "/p/two", &other.join("book.pdf")).unwrap();
+        assert_eq!(dialog_start(None, Some(&file), "/p/one"), Some(remembered.clone()));
+        assert_eq!(dialog_start(None, Some(&file), "/p/two"), Some(other.clone()));
+        assert_eq!(dialog_start(None, Some(&file), "/p/three"), None);
+        assert_eq!(dialog_start(Some(session.clone()), Some(&file), "/p/one"), Some(session.clone()));
+        // A session folder that is gone falls back to the record; a recorded one that is gone, to none.
+        assert_eq!(dialog_start(Some(dir.join("gone")), Some(&file), "/p/one"), Some(remembered.clone()));
+        fs::remove_dir_all(&other).unwrap();
+        assert_eq!(dialog_start(None, Some(&file), "/p/two"), None);
+        assert_eq!(dialog_start(None, None, "/p/one"), None);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -423,5 +510,25 @@ mod tests {
         assert_eq!(safe_file_name("Book.PDF", FileKind::Pdf), "Book.PDF");
         assert_eq!(with_extension(PathBuf::from("/x/book"), FileKind::Docx), PathBuf::from("/x/book.docx"));
         assert_eq!(with_extension(PathBuf::from("/x/book.pdf"), FileKind::Pdf), PathBuf::from("/x/book.pdf"));
+    }
+
+    #[test]
+    fn a_typed_name_always_ends_in_the_kinds_extension() {
+        let ext = |p: &str, k| with_extension(PathBuf::from(p), k);
+        // A dot in the name is not an extension: it is kept and the kind's extension appended.
+        assert_eq!(ext("/x/Draft v1.2", FileKind::Pdf), PathBuf::from("/x/Draft v1.2.pdf"));
+        assert_eq!(ext("/x/Dr. Smith", FileKind::Docx), PathBuf::from("/x/Dr. Smith.docx"));
+        // The other kind's extension is not this file's type.
+        assert_eq!(ext("/x/book.docx", FileKind::Pdf), PathBuf::from("/x/book.docx.pdf"));
+        assert_eq!(ext("/x/book.txt", FileKind::Docx), PathBuf::from("/x/book.txt.docx"));
+        // The right one in any case is kept as typed.
+        assert_eq!(ext("/x/Book.PDF", FileKind::Pdf), PathBuf::from("/x/Book.PDF"));
+        assert_eq!(ext("/x/Book.Docx", FileKind::Docx), PathBuf::from("/x/Book.Docx"));
+        assert_eq!(ext("/x/book.", FileKind::Pdf), PathBuf::from("/x/book.pdf"));
+        // Open file accepts every result.
+        for p in ["/x/Draft v1.2", "/x/book.docx", "/x/book."] {
+            let e = ext(p, FileKind::Pdf);
+            assert_eq!(e.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("pdf"));
+        }
     }
 }
