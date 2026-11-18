@@ -182,7 +182,13 @@ export function closeWizard({ restoreFocus = true }: { restoreFocus?: boolean } 
   update({ open: false, focus: null })
   const target = returnFocusTo
   returnFocusTo = null
-  if (restoreFocus && target) setTimeout(() => target.isConnected && target.focus(), 0)
+  if (!restoreFocus) return
+  // Back where it was; opened from the ribbon or a menu (which keep no focus) or with nothing focused,
+  // back to the manuscript.
+  setTimeout(() => {
+    if (target && target !== document.body && target.isConnected) target.focus()
+    else getEditor()?.view.focus()
+  }, 0)
 }
 
 export function setStep(step: WizardStep): void {

@@ -416,7 +416,7 @@ function FormatStep({ settings, data, prepared }: { settings: ManuscriptSettings
           {(Object.keys(PRESETS) as PresetId[]).map((id) => {
             const meta = id === 'standard' ? C.presetStandard : C.presetClassic
             return (
-              <Tooltip key={id} wrap side="right" controlId={meta.id}>
+              <Tooltip key={id} wrap controlId={meta.id}>
                 <PresetRadio meta={meta} name={radioName} checked={settings.preset === id} description={PRESETS[id].description} onSelect={() => setPreset(id)} />
               </Tooltip>
             )

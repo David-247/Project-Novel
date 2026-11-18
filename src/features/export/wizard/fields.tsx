@@ -154,7 +154,7 @@ export function DraftField({ meta, multiline, hint, placeholder, maxLength, type
   }
   return (
     <FieldShell meta={meta} htmlFor={id} hint={hint} hintId={hintId} className={className}>
-      <Tooltip side="right">
+      <Tooltip>
         {multiline ? (
           <textarea {...common} ref={inputRef} rows={3} className={cn(fieldBase, 'w-full min-w-0 resize-y py-1.5 leading-snug')} />
         ) : (
@@ -180,7 +180,7 @@ export function SelectField({ meta, value, options, onChange, hint, className, s
   const hintId = `${id}-hint`
   return (
     <FieldShell meta={meta} htmlFor={id} hint={hint} hintId={hintId} className={className}>
-      <Tooltip side="right">
+      <Tooltip>
         <Select
           id={id}
           ref={selectRef}
@@ -208,7 +208,7 @@ export interface CheckFieldProps {
 
 export function CheckField({ meta, checked, onChange, disabled, label, className }: CheckFieldProps) {
   return (
-    <Tooltip wrap side="right">
+    <Tooltip wrap>
       <Checkbox
         label={<Mn text={label ?? meta.label} k={meta.mnemonic} />}
         aria-label={label ?? meta.label}

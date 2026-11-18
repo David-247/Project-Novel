@@ -246,10 +246,10 @@ describe('File > Export > Manuscript…', () => {
     expect(showMe).toHaveLength(3)
     act(() => fireEvent.click(showMe[0]))
     expect(dialog()).toBeNull()
-    await flush()
     const ed = getEditor()!
     const untitled = getChapters(ed.state.doc, getResolvedStyles(), 'none').find((c) => c.index === 2)!
-    expect(ed.state.selection.from).toBe(untitled.from + 1)
+    // After the dialog is gone (a task and a frame).
+    await waitFor(() => expect(ed.state.selection.from).toBe(untitled.from + 1))
     openWizard()
     expect(getWizardState().step).toBe('checks')
   })
@@ -265,8 +265,7 @@ describe('File > Export > Manuscript…', () => {
       if (getWizardState().step !== 'checks') alt('Digit3')
       act(() => fireEvent.click(checkEl(check)!.querySelector(`[data-control-id="${action}"]`)!))
       expect(dialog(), check).toBeNull()
-      await flush()
-      after()
+      await waitFor(after)
       act(() => getCommand('rewrite.close')?.run())
     }
   })
