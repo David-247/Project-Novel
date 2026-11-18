@@ -91,7 +91,9 @@ jobs:
       - name: Typst sidecar smoke (export tests)
         run: cargo test --locked "export::"
         working-directory: src-tauri
-      - run: cargo test --locked
+      # Everything else (the export tests already ran above).
+      - name: cargo test (other modules)
+        run: cargo test --locked -- --skip "export::"
         working-directory: src-tauri
 
   e2e:

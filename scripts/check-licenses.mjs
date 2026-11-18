@@ -30,7 +30,7 @@ export const ALLOWED = new Set([
 ])
 
 /** True when the SPDX expression can be satisfied with allowlisted licenses. */
-export function allowedExpression(expr) {
+export function allowedExpression(expr, allowed = ALLOWED) {
   const tokens = String(expr).replace(/[()]/g, (p) => ` ${p} `).trim().split(/\s+/).filter(Boolean)
   let i = 0
   // or := and ('OR' and)* ; and := atom ('AND' atom)* ; atom := LICENSE ['WITH' EXC] | '(' or ')'
@@ -42,7 +42,7 @@ export function allowedExpression(expr) {
       return v
     }
     if (tokens[i] === 'WITH') i += 2
-    return ALLOWED.has(t?.replace(/\+$/, ''))
+    return allowed.has(t?.replace(/\+$/, ''))
   }
   const and = () => {
     let v = atom()
@@ -73,7 +73,10 @@ export const BUNDLED = [
   {
     name: 'Typst CLI',
     version: TYPST_VERSION,
-    license: 'Apache-2.0',
+    // LPPL-1.3c: data inside the binary (translation tables adapted from Babel/Cleveref, per Typst's
+    // NOTICE), redistributed unmodified. Licence decision logged by the Phase 4 controller.
+    license: 'Apache-2.0 AND LPPL-1.3c',
+    note: 'LPPL-1.3c covers embedded language data, shipped unmodified',
     externalBin: 'binaries/typst',
     texts: ['typst-LICENSE.txt', 'typst-NOTICE.txt'],
   },
@@ -86,8 +89,12 @@ export const BUNDLED = [
   },
 ]
 
-/** Fonts may also be under the SIL Open Font License (constraint: fonts OFL or similar). */
-export const BUNDLED_ALLOWED = new Set([...ALLOWED, 'OFL-1.1'])
+/**
+ * Bundled files may also be under the SIL Open Font License (fonts: constraint "OFL or similar") and
+ * the LaTeX Project Public License 1.3c (OSI-approved; only for data shipped unmodified inside the
+ * Typst binary). Neither is allowed for npm packages or crates.
+ */
+export const BUNDLED_ALLOWED = new Set([...ALLOWED, 'OFL-1.1', 'LPPL-1.3c'])
 
 /** Problems with the bundled assets (empty = OK). `root` is the repo root. */
 export function checkBundled(root, bundled = BUNDLED) {
@@ -95,11 +102,12 @@ export function checkBundled(root, bundled = BUNDLED) {
   const conf = JSON.parse(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'))
   const notices = readFileSync(join(root, 'THIRD_PARTY_LICENSES.md'), 'utf8')
   for (const b of bundled) {
-    if (!BUNDLED_ALLOWED.has(b.license)) problems.push(`${b.name}: licence ${b.license} is not allowed`)
+    if (!allowedExpression(b.license, BUNDLED_ALLOWED)) problems.push(`${b.name}: licence ${b.license} is not allowed`)
     for (const t of b.texts) {
       if (!existsSync(join(root, 'src-tauri', 'resources', 'licenses', t))) problems.push(`${b.name}: missing licence text ${t}`)
     }
     if (!notices.includes(`${b.name} ${b.version}`)) problems.push(`${b.name} ${b.version} is not in THIRD_PARTY_LICENSES.md`)
+    else if (!notices.includes(`\`${b.license}\``)) problems.push(`${b.name}: licence \`${b.license}\` is not stated in THIRD_PARTY_LICENSES.md`)
   }
   // Nothing may be bundled without an entry above.
   for (const bin of conf.bundle?.externalBin ?? []) {

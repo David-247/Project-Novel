@@ -35,6 +35,16 @@ const ROOT = join(__dirname, '..')
 describe('license gate (bundled sidecar and fonts)', () => {
   it('passes for the files the app bundles', () => {
     expect(checkBundled(ROOT)).toEqual([])
+    expect(BUNDLED[0].license).toBe('Apache-2.0 AND LPPL-1.3c')
+  })
+
+  it('allows LPPL-1.3c only for bundled files, never for packages', () => {
+    expect(allowedExpression('LPPL-1.3c')).toBe(false)
+    expect(allowedExpression('Apache-2.0 AND LPPL-1.3c')).toBe(false)
+    const [typst, fonts] = BUNDLED
+    expect(checkBundled(ROOT, [{ ...typst, license: 'Apache-2.0 AND GPL-3.0' }, fonts])).toContain(
+      'Typst CLI: licence Apache-2.0 AND GPL-3.0 is not allowed',
+    )
   })
 
   it('fails for a disallowed licence, a missing text, or a bundled file with no entry', () => {

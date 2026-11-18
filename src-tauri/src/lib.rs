@@ -56,6 +56,11 @@ pub fn run() {
             // NOT covered: macOS Dock > Quit, logging off, and Windows shutdown end
             // the process without reaching the quit flow; there crash recovery
             // limits the loss to the last <= 30 s (docs/project-format.md).
+            // Quitting mid-export: kill any running Typst process (bounded wait) so none outlives the app.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<export::ExportState>().shutdown(std::time::Duration::from_secs(2));
+                return;
+            }
             if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
                 if !storage::allow_exit(code, app.webview_windows().len()) {
                     api.prevent_exit();

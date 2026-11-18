@@ -198,8 +198,12 @@ export async function cancelRender(jobId: string): Promise<boolean> {
   return call(() => invoke<boolean>(EXPORT_COMMANDS.cancelRender, { jobId }))
 }
 
+/**
+ * Safety net only: Rust registers the job before any other work (font scan, token lookup), so a
+ * cancel can miss only while the render invoke itself is still in flight to Rust.
+ */
 const CANCEL_RETRY_MS = 50
-const CANCEL_RETRIES = 40
+const CANCEL_RETRIES = 5
 
 /**
  * Render a bundled template to PDF with the Typst sidecar, fully offline. With a `target` the PDF is
@@ -212,7 +216,7 @@ export async function renderPdf(options: RenderPdfOptions): Promise<RenderPdfRes
   const data = typeof options.data === 'string' ? options.data : JSON.stringify(options.data)
   let settled = false
   const onAbort = () => {
-    // The abort can arrive before Rust has registered the job: retry briefly until it is found.
+    // The abort can beat the render invoke to Rust: retry briefly until the job is found.
     void (async () => {
       for (let i = 0; i < CANCEL_RETRIES && !settled; i++) {
         if (await cancelRender(jobId).catch(() => false)) return

@@ -311,3 +311,154 @@ fn grant_write_then_reveal_check() {
     assert!(t.exported_file(&target.to_string_lossy()).is_ok());
     fs::remove_dir_all(dir).unwrap();
 }
+
+fn request(id: &str, output_token: Option<String>) -> RenderRequest {
+    RenderRequest {
+        job_id: id.into(),
+        template: "hello".into(),
+        data: DATA.into(),
+        font: FontRole::Serif,
+        prefer_installed_font: Some(true),
+        output_token,
+        timeout_ms: None,
+    }
+}
+
+fn env_in(parent: &Path) -> impl FnOnce() -> Result<RenderEnv> {
+    let parent = parent.to_path_buf();
+    move || Ok(RenderEnv { sidecar: sidecar(), fonts: fonts_dir(), temp_parent: parent })
+}
+
+/// Important 1: the job is registered before the (first-call, possibly slow) font scan, so a cancel
+/// that arrives during it is honoured: no Typst run, no output file, the job entry removed.
+#[test]
+fn a_cancel_during_the_font_scan_stops_the_job_with_no_output() {
+    let parent = temp_parent("scan-cancel");
+    let out = temp_parent("scan-cancel-out");
+    let state = ExportState::default();
+    let target = out.join("Book.pdf");
+    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf);
+    let result = tauri::async_runtime::block_on(render_pdf_with(
+        &state,
+        request("job-scan", Some(token)),
+        env_in(&parent),
+        || async {
+            assert!(state.cancel("job-scan"), "the job must already be registered during the font scan");
+            vec!["Times New Roman".to_string()]
+        },
+    ));
+    assert_eq!(result.unwrap_err().kind, "cancelled");
+    assert!(!target.exists(), "a cancelled export wrote its file");
+    assert!(state.jobs.lock().unwrap().is_empty());
+    assert_eq!(state.targets.lock().unwrap().exported_file(&target.to_string_lossy()).unwrap_err().kind, "not_exported");
+    assert_empty(&parent);
+    assert_empty(&out);
+}
+
+/// The same with a real concurrent canceller (the UI's Cancel) racing a slow font scan.
+#[test]
+fn a_cancel_from_another_thread_while_fonts_are_scanned_is_not_lost() {
+    let parent = temp_parent("scan-race");
+    let out = temp_parent("scan-race-out");
+    let state = ExportState::default();
+    let target = out.join("Book.pdf");
+    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf);
+    let result = std::thread::scope(|s| {
+        s.spawn(|| {
+            // Issued as soon as the render is invoked; retried only until the job is visible.
+            let started = Instant::now();
+            while !state.cancel("job-race") {
+                assert!(started.elapsed() < Duration::from_secs(10), "job never registered");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        tauri::async_runtime::block_on(render_pdf_with(&state, request("job-race", Some(token)), env_in(&parent), || async {
+            std::thread::sleep(Duration::from_millis(300)); // a slow first fontdb scan
+            Vec::new()
+        }))
+    });
+    assert_eq!(result.unwrap_err().kind, "cancelled");
+    assert!(!target.exists());
+    assert!(state.jobs.lock().unwrap().is_empty());
+    assert_empty(&parent);
+    assert_empty(&out);
+}
+
+#[test]
+fn the_command_body_renders_writes_and_records_the_export() {
+    let parent = temp_parent("cmd-ok");
+    let out = temp_parent("cmd-ok-out");
+    let state = ExportState::default();
+    let target = out.join("Book.pdf");
+    let token = state.targets.lock().unwrap().grant(target.clone(), FileKind::Pdf);
+    let r = tauri::async_runtime::block_on(render_pdf_with(&state, request("job-ok", Some(token)), env_in(&parent), || async {
+        Vec::new()
+    }))
+    .unwrap();
+    assert_eq!(r.path.as_deref(), Some(target.to_string_lossy().as_ref()));
+    assert!(r.pdf_base64.is_none());
+    assert!(fs::read(&target).unwrap().starts_with(b"%PDF-"));
+    assert!(state.targets.lock().unwrap().exported_file(&target.to_string_lossy()).is_ok());
+    assert!(state.jobs.lock().unwrap().is_empty());
+    assert_empty(&parent);
+    fs::remove_dir_all(out).unwrap();
+}
+
+#[test]
+fn the_job_is_registered_first_and_removed_on_every_error() {
+    let parent = temp_parent("cmd-err");
+    let state = ExportState::default();
+    fn no_scan() -> std::future::Ready<Vec<String>> {
+        panic!("the font scan must not run")
+    }
+    // A duplicate id is refused before anything else runs.
+    let (_flag, held) = state.register("dup").unwrap();
+    let err = tauri::async_runtime::block_on(render_pdf_with(&state, request("dup", None), env_in(&parent), no_scan));
+    assert_eq!(err.unwrap_err().kind, "busy");
+    drop(held);
+    assert!(state.jobs.lock().unwrap().is_empty());
+    // Errors after registration (unknown template, bad token) still remove the entry.
+    let mut bad = request("bad-template", None);
+    bad.template = "nope".into();
+    let err = tauri::async_runtime::block_on(render_pdf_with(&state, bad, env_in(&parent), no_scan));
+    assert_eq!(err.unwrap_err().kind, "unknown_template");
+    let err = tauri::async_runtime::block_on(render_pdf_with(
+        &state,
+        request("bad-token", Some("export-404".into())),
+        env_in(&parent),
+        no_scan,
+    ));
+    assert_eq!(err.unwrap_err().kind, "invalid_token");
+    assert!(state.jobs.lock().unwrap().is_empty());
+    assert_empty(&parent);
+}
+
+/// M5: quitting mid-render cancels every job and waits until Typst is killed and reaped.
+#[test]
+fn shutdown_kills_a_running_render() {
+    let parent = temp_parent("shutdown");
+    let (side, fonts) = (sidecar(), [fonts_dir()]);
+    let ins = inputs("Liberation Serif", "Liberation Serif");
+    let state = ExportState::default();
+    let (flag, _guard) = state.register("slow").unwrap();
+    let pid = AtomicU32::new(0);
+    let record = |p: u32| pid.store(p, Ordering::SeqCst);
+    let err = std::thread::scope(|s| {
+        let worker = s.spawn(|| {
+            let mut sp = spec(&side, &fonts, SLOW, &ins, &parent);
+            sp.on_spawn = Some(&record);
+            render(&sp, &flag)
+        });
+        let started = Instant::now();
+        while pid.load(Ordering::SeqCst) == 0 {
+            assert!(started.elapsed() < Duration::from_secs(10), "typst never started");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        state.shutdown(Duration::from_secs(10));
+        let p = pid.load(Ordering::SeqCst);
+        assert!(!alive(p), "typst ({p}) survived shutdown");
+        worker.join().unwrap().unwrap_err()
+    });
+    assert_eq!(err.kind, "cancelled");
+    assert_empty(&parent);
+}

@@ -303,15 +303,82 @@ fn run_job(job: &RenderJob, cancel: &AtomicBool) -> Result<(render::Rendered, Fo
     Ok((rendered, report))
 }
 
-/// Render a bundled template to PDF with the Typst sidecar, offline, in a private temp dir. Writes
-/// the PDF atomically to the Save-dialog path when `outputToken` is given. Cancel with
-/// `export_cancel_render(jobId)`.
-#[tauri::command]
-pub async fn export_render_pdf<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, ExportState>,
+/// Removes a render's job entry on every exit path (success, error, cancel, panic).
+struct JobGuard<'a> {
+    jobs: &'a Mutex<HashMap<String, Arc<AtomicBool>>>,
+    id: String,
+}
+
+impl Drop for JobGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut jobs) = self.jobs.lock() {
+            jobs.remove(&self.id);
+        }
+    }
+}
+
+impl ExportState {
+    /// Register a render under `id` (refusing a duplicate) and return its cancel flag and guard.
+    fn register(&self, id: &str) -> Result<(Arc<AtomicBool>, JobGuard<'_>)> {
+        let mut jobs = self.jobs.lock().map_err(ExportError::internal)?;
+        if jobs.contains_key(id) {
+            return Err(ExportError::new("busy", format!("Export {id} is already running.")));
+        }
+        let flag = Arc::new(AtomicBool::new(false));
+        jobs.insert(id.to_string(), flag.clone());
+        Ok((flag, JobGuard { jobs: &self.jobs, id: id.to_string() }))
+    }
+
+    /// Set the cancel flag of the render `id`; false when no such render is running.
+    pub fn cancel(&self, id: &str) -> bool {
+        match self.jobs.lock() {
+            Ok(jobs) => match jobs.get(id) {
+                Some(flag) => {
+                    flag.store(true, Ordering::SeqCst);
+                    true
+                }
+                None => false,
+            },
+            Err(_) => false,
+        }
+    }
+
+    /// App exit: cancel every render and wait (bounded) until their Typst processes are killed and
+    /// reaped, so no child outlives the app.
+    pub fn shutdown(&self, wait: Duration) {
+        if let Ok(jobs) = self.jobs.lock() {
+            for flag in jobs.values() {
+                flag.store(true, Ordering::SeqCst);
+            }
+        }
+        if !render::wait_for_children(wait) {
+            eprintln!("export: a PDF engine process was still running at exit");
+        }
+    }
+}
+
+/// Where the sidecar, the bundled fonts and the temp dirs are (resolved per render).
+pub(crate) struct RenderEnv {
+    pub sidecar: PathBuf,
+    pub fonts: PathBuf,
+    pub temp_parent: PathBuf,
+}
+
+/// The render command's body, with its environment and the installed-font scan injected (tests).
+/// The job is registered FIRST, so a cancel that arrives during the (possibly slow, first-call)
+/// font scan or the token lookup is never lost; the flag is checked again before Typst starts.
+pub(crate) async fn render_pdf_with<E, S, F>(
+    state: &ExportState,
     request: RenderRequest,
-) -> Result<RenderResult> {
+    env: E,
+    scan_fonts: S,
+) -> Result<RenderResult>
+where
+    E: FnOnce() -> Result<RenderEnv>,
+    S: FnOnce() -> F,
+    F: std::future::Future<Output = Vec<String>>,
+{
+    let (cancel, _guard) = state.register(&request.job_id)?;
     let template = templates::get(&request.template)?.source;
     if request.data.len() > MAX_DATA_BYTES {
         return Err(ExportError::new("invalid_request", "The manuscript data is too large to export."));
@@ -320,34 +387,25 @@ pub async fn export_render_pdf<R: Runtime>(
         Some(token) => Some(state.targets.lock().map_err(ExportError::internal)?.target(token, FileKind::Pdf)?),
         None => None,
     };
-    let installed = if request.prefer_installed_font.unwrap_or(true) {
-        tauri::async_runtime::spawn_blocking(crate::fonts::cached_system_families)
-            .await
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let prefer = request.prefer_installed_font.unwrap_or(true);
+    let installed = if prefer { scan_fonts().await } else { Vec::new() };
+    if cancel.load(Ordering::SeqCst) {
+        return Err(ExportError::cancelled());
+    }
+    let env = env()?;
     let job = RenderJob {
-        sidecar: sidecar_path()?,
-        fonts: bundled_fonts_dir(&app)?,
+        sidecar: env.sidecar,
+        fonts: env.fonts,
         template,
         data: request.data,
         font: request.font,
-        chosen: choose_font(request.font, request.prefer_installed_font.unwrap_or(true), &installed),
+        chosen: choose_font(request.font, prefer, &installed),
         timeout: timeout(request.timeout_ms),
-        temp_parent: std::env::temp_dir(),
+        temp_parent: env.temp_parent,
     };
-
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut jobs = state.jobs.lock().map_err(ExportError::internal)?;
-        if jobs.contains_key(&request.job_id) {
-            return Err(ExportError::new("busy", format!("Export {} is already running.", request.job_id)));
-        }
-        jobs.insert(request.job_id.clone(), cancel.clone());
-    }
     let flag = cancel.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || -> Result<RenderResult> {
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<RenderResult> {
+        // run_job -> render checks the flag again right before spawning Typst.
         let (rendered, font) = run_job(&job, &flag)?;
         let bytes = rendered.pdf.len();
         let (path, pdf_base64) = match &target {
@@ -363,29 +421,46 @@ pub async fn export_render_pdf<R: Runtime>(
         Ok(RenderResult { font, warnings: rendered.warnings, path, pdf_base64, bytes })
     })
     .await
-    .map_err(ExportError::internal);
-    if let Ok(mut jobs) = state.jobs.lock() {
-        jobs.remove(&request.job_id);
-    }
-    let result = outcome??;
+    .map_err(ExportError::internal)??;
     if let Some(path) = &result.path {
         state.targets.lock().map_err(ExportError::internal)?.mark_exported(Path::new(path));
     }
     Ok(result)
 }
 
+/// Render a bundled template to PDF with the Typst sidecar, offline, in a private temp dir. Writes
+/// the PDF atomically to the Save-dialog path when `outputToken` is given. Cancel with
+/// `export_cancel_render(jobId)`, which works from the moment this command is invoked.
+#[tauri::command]
+pub async fn export_render_pdf<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, ExportState>,
+    request: RenderRequest,
+) -> Result<RenderResult> {
+    render_pdf_with(
+        state.inner(),
+        request,
+        || {
+            Ok(RenderEnv {
+                sidecar: sidecar_path()?,
+                fonts: bundled_fonts_dir(&app)?,
+                temp_parent: std::env::temp_dir(),
+            })
+        },
+        || async {
+            tauri::async_runtime::spawn_blocking(crate::fonts::cached_system_families)
+                .await
+                .unwrap_or_default()
+        },
+    )
+    .await
+}
+
 /// Cancel a running render (its Typst process is killed and its temp dir removed). Returns false
 /// when no render with that id is running.
 #[tauri::command]
 pub fn export_cancel_render(state: State<'_, ExportState>, job_id: String) -> Result<bool> {
-    let jobs = state.jobs.lock().map_err(ExportError::internal)?;
-    Ok(match jobs.get(&job_id) {
-        Some(flag) => {
-            flag.store(true, Ordering::SeqCst);
-            true
-        }
-        None => false,
-    })
+    Ok(state.cancel(&job_id))
 }
 
 /// Show an exported file in Explorer / Finder. Refused for any path this app did not just export.

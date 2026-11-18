@@ -130,6 +130,12 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     setNextPick(path: string | null) {
       state.pick = path
     },
+    /**
+     * Export platform fake (src/test-utils/fake-export.ts): set `savePath` (undefined = default,
+     * null = Save dialog cancelled), `renderDelayMs`, `failRender`; read `written`, `renders`,
+     * `cancels`, `reveals`.
+     */
+    exports: core.exports,
     /** Fire a Tauri event, e.g. a native File menu item ('menu://new-project'). */
     emit(event: string, payload?: unknown) {
       return window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event, payload })

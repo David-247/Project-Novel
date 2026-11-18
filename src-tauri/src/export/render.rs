@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -169,6 +169,49 @@ fn kill(child: &mut Child) {
 
 const POLL: Duration = Duration::from_millis(15);
 
+/// Typst processes started and not yet reaped (app exit waits for this to reach zero).
+static LIVE_CHILDREN: AtomicUsize = AtomicUsize::new(0);
+
+struct LiveChild;
+
+impl LiveChild {
+    fn new() -> Self {
+        LIVE_CHILDREN.fetch_add(1, Ordering::SeqCst);
+        LiveChild
+    }
+}
+
+impl Drop for LiveChild {
+    fn drop(&mut self) {
+        LIVE_CHILDREN.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Wait until no Typst process is running (after the cancel flags were set), up to `max`.
+/// True when none is left.
+pub fn wait_for_children(max: Duration) -> bool {
+    let started = Instant::now();
+    while LIVE_CHILDREN.load(Ordering::SeqCst) > 0 {
+        if started.elapsed() >= max {
+            return false;
+        }
+        std::thread::sleep(POLL);
+    }
+    true
+}
+
+/// stderr read back at most this much (a runaway template cannot make us load a huge file).
+const MAX_STDERR_BYTES: u64 = 1024 * 1024;
+
+fn read_stderr(path: &Path) -> String {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    if let Ok(f) = fs::File::open(path) {
+        let _ = f.take(MAX_STDERR_BYTES).read_to_end(&mut buf);
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 fn run_in(dir: &Path, spec: &RenderSpec, cancel: &AtomicBool) -> Result<Rendered, ExportError> {
     let write = |name: &str, contents: &str| {
         let p = dir.join(name);
@@ -192,6 +235,8 @@ fn run_in(dir: &Path, spec: &RenderSpec, cancel: &AtomicBool) -> Result<Rendered
     let mut child = cmd
         .spawn()
         .map_err(|e| ExportError::new("spawn", format!("Could not start the PDF engine: {e}")))?;
+    // Counted until reaped (every path below either sees the exit or kills and waits).
+    let _live = LiveChild::new();
     if let Some(f) = spec.on_spawn {
         f(child.id());
     }
@@ -219,7 +264,7 @@ fn run_in(dir: &Path, spec: &RenderSpec, cancel: &AtomicBool) -> Result<Rendered
         std::thread::sleep(POLL);
     };
 
-    let diagnostics = parse_diagnostics(&fs::read_to_string(&stderr_path).unwrap_or_default());
+    let diagnostics = parse_diagnostics(&read_stderr(&stderr_path));
     let out = dir.join("out.pdf");
     if status.success() && out.is_file() {
         let pdf = fs::read(&out).map_err(|e| ExportError::io(&out, e))?;

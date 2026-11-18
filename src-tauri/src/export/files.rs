@@ -120,29 +120,40 @@ pub fn write_export(target: &Path, bytes: &[u8]) -> Result<(), ExportError> {
     storage::write_atomic(target, bytes).map_err(ExportError::from)
 }
 
+/// A Windows path as Explorer accepts it: verbatim prefixes dropped, `\\?\UNC\server\share\x`
+/// mapped back to `\\server\share\x` (stripping only `\\?\` would leave `UNC\server\...`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn explorer_path(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
+}
+
 /// Show `path` selected in Explorer / Finder. Callers check it was exported first.
 pub fn reveal(path: &Path) -> Result<(), ExportError> {
     let spawn_err = |e: std::io::Error| ExportError::new("io", format!("Could not open the folder: {e}"));
+    // Full paths: never whatever `explorer` / `open` the PATH or working folder would find.
     #[cfg(windows)]
     let mut cmd = {
         use std::os::windows::process::CommandExt;
         // explorer wants `/select,"<path>"` as one raw argument (Rust's quoting would wrap all of it).
-        // Paths cannot contain `"` on Windows. A verbatim prefix (\\?\) is dropped: explorer ignores it.
-        let shown = path.to_string_lossy();
-        let shown = shown.strip_prefix(r"\\?\").unwrap_or(&shown).to_string();
-        let mut cmd = std::process::Command::new("explorer");
+        // Paths cannot contain `"` on Windows.
+        let shown = explorer_path(&path.to_string_lossy());
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let mut cmd = std::process::Command::new(Path::new(&root).join("explorer.exe"));
         cmd.raw_arg(format!("/select,\"{shown}\""));
         cmd
     };
     #[cfg(target_os = "macos")]
     let mut cmd = {
-        let mut cmd = std::process::Command::new("open");
+        let mut cmd = std::process::Command::new("/usr/bin/open");
         cmd.arg("-R").arg(path);
         cmd
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut cmd = {
-        let mut cmd = std::process::Command::new("xdg-open");
+        let mut cmd = std::process::Command::new("/usr/bin/xdg-open");
         cmd.arg(path.parent().unwrap_or(path));
         cmd
     };
@@ -234,6 +245,14 @@ mod tests {
         assert_eq!(write_export(&missing, b"x").unwrap_err().kind, "not_found");
         assert!(!dir.join("gone").exists());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn explorer_paths_drop_verbatim_prefixes_and_keep_unc_shares() {
+        assert_eq!(explorer_path(r"\\?\C:\Books\Novel.pdf"), r"C:\Books\Novel.pdf");
+        assert_eq!(explorer_path(r"\\?\UNC\server\share\Novel.pdf"), r"\\server\share\Novel.pdf");
+        assert_eq!(explorer_path(r"C:\Books\Novel.pdf"), r"C:\Books\Novel.pdf");
+        assert_eq!(explorer_path(r"\\server\share\Novel.pdf"), r"\\server\share\Novel.pdf");
     }
 
     #[test]

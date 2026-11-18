@@ -229,7 +229,7 @@ Every dependency must be MIT-compatible (no GPL/AGPL/proprietary). CI enforces t
   CC-BY-4.0 for data-only packages such as caniuse-lite, Unlicense, BlueOak-1.0.0).
 - Rust: `cargo deny check licenses` in `src-tauri/` with the allowlist in `src-tauri/deny.toml` (adds Zlib,
   Unicode-3.0, BSL-1.0 and `Apache-2.0 WITH LLVM-exception`).
-- Bundled files that are not packages (the Typst CLI sidecar, Apache-2.0; the Liberation fonts, OFL-1.1): the same
+- Bundled files that are not packages (the Typst CLI sidecar, `Apache-2.0 AND LPPL-1.3c`; the Liberation fonts, OFL-1.1): the same
   script checks each is listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) with its licence text in
   `src-tauri/resources/licenses/` (installed with the app), and that nothing in `bundle.externalBin` or
   `bundle.resources` is unlisted.
