@@ -295,8 +295,7 @@ async function run(job: ExportJob, formats: WizardFormat[], targets: Partial<Rec
   const ctl = new AbortController()
   controller = ctl
   const renderers = Object.fromEntries(formats.map((f) => [f, getExportRenderer(f)]))
-  state = { ...state, run: { phase: 'rendering', origin, progress: 0, format: formats[0] ?? null, error: null, written: [] } }
-  emit()
+  updateRun({ phase: 'rendering', origin, progress: 0, format: formats[0] ?? null, error: null, written: [] })
   lastAttempt = { job, formats, targets, origin }
   try {
     const written = await runExport(job, formats, targets, renderers, {

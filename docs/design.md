@@ -412,7 +412,7 @@ control's tooltip). Nothing in the registry assumes a menu bar (tablet ports).
   `buildMenuModel`, so labels, order and shortcuts match. Menu `app` (About, Settings, Quit) is the macOS app menu;
   elsewhere About moves to Help and the rest to the end of File. An empty menu is left out.
 - **Structure**: File (New Project…, Open Project…, Open Recent ▸, Close Project | Save, Save a Copy… | Book
-  Details…, Page Setup ▸ | Settings… | Quit Novel; on macOS Settings… and Quit are in the Novel menu), Edit (Undo, Redo | Cut, Copy, Paste, Paste as Plain Text, Select All | Find…,
+  Details…, Page Setup ▸ | Export ▸ (Manuscript…, Export Manuscript Again) | Settings… | Quit Novel; on macOS Settings… and Quit are in the Novel menu), Edit (Undo, Redo | Cut, Copy, Paste, Paste as Plain Text, Select All | Find…,
   Replace… | Go to Page…), View (Single Page, Two-Page Spread | Zoom In, Zoom Out, Fit Spread, Fit Width, Actual
   Size | Paper ▸ | Markup ▸ (All Markup, Simple Markup, No Markup, Original) | Comments Panel | Full Screen), Insert (Chapter Break, Page Break, Scene Break | Footnote,
   Comment), Format (Bold, Italic,
@@ -485,6 +485,7 @@ What Word does, and what we took from it:
 | Layout | Header & Footer | Headers & page numbers |
 | Layout | Paper | The paper surface picker |
 | Layout | Book | Book Details |
+| Layout | Export | Manuscript… (the export wizard), Export Manuscript Again (Word keeps Export in its File view; Novel has no File tab) |
 | Review | Proofing | Word Count (Phase 4, docs/word-count.md; Ctrl/Cmd+Shift+G) |
 | Review | Tracking | Track Changes, Markup |
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
@@ -497,7 +498,7 @@ What Word does, and what we took from it:
 
 Priorities (higher keeps its size longer): Home Font 90, Styles 80, Paragraph 75, Editing 60 (never collapses: two
 small buttons); Insert Breaks 90, Footnotes 80, Comments 70; Layout Page Setup 90, Header & Footer 80, Paper 70, Book
-60; Review Tracking 90, Changes 85, Comments 80, Re-write 70, Proofing 60; View Views 90, Zoom 80, Show 70, Window 60. A group
+60, Export 50; Review Tracking 90, Changes 85, Comments 80, Re-write 70, Proofing 60; View Views 90, Zoom 80, Show 70, Window 60. A group
 whose own controls are no wider than its group button (one icon) never collapses either; it only moves into More.
 
 **Model** (`src/shared/ribbon`, data only; any slice may use it):
