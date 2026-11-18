@@ -17,9 +17,10 @@ const desktop = (name: 'Desktop Chrome' | 'Desktop Safari') => {
 // PW_PORT overrides the port (use a unique one when several worktrees run e2e at once).
 const port = Number(process.env.PW_PORT ?? 4174)
 const baseURL = `http://127.0.0.1:${port}`
-// Serial (perf) projects: the perf specs, and the Phase 2 acceptance scenario, whose reflow budgets
-// (blocking on the shipping pairs) need a quiet CPU, not one shared with parallel functional tests.
-const PERF = /(perf|phase2-acceptance)\.spec\.ts$/
+// Serial (perf) projects: the perf specs (*perf.spec.ts, and perf-<area>.spec.ts such as perf-export),
+// and the Phase 2 acceptance scenario, whose reflow budgets (blocking on the shipping pairs) need a
+// quiet CPU, not one shared with parallel functional tests.
+const PERF = /(perf|perf-[a-z-]+|phase2-acceptance)\.spec\.ts$/
 // Page navigation modes (Phase 3): the default is Book (one spread, page turns). The suites about the
 // pages also run in continuous scroll (the Phase 2 view): projects *-scroll seed preferences.json with
 // pageNavigation 'scroll' (metadata, read by seedProjectNavigation in e2e/helpers.ts).

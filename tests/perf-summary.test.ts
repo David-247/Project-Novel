@@ -173,6 +173,15 @@ describe('perf summary', () => {
     expect(md).toMatch(/\| rewrite-chapter: Enter \/ Backspace \| chromium \/ win32 \(shipping\) \| 20 \|/)
   })
 
+  it('export: the manuscript IR build rows, clean and with pending changes, against 500 ms', () => {
+    const md = toMarkdown([
+      { scenario: 'perf-export', browser: 'perf-chromium', platform: 'win32', irBuild: { medianMs: 120.5 }, irBuildTracked: { medianMs: 510 } },
+    ])
+    const section = md.slice(md.indexOf('#### Export'))
+    expect(section).toMatch(/\| perf-export \| manuscript IR build \(median\) \| chromium \/ win32 \(shipping\) \| 120\.5 \| 500 \|/)
+    expect(section).toMatch(/\| perf-export \| manuscript IR build, 2,000 pending changes \(median\) \| chromium \/ win32 \(shipping\) \| \*\*510\*\* \(MISS\) \| 500 \|/)
+  })
+
   it('says so when there are no results', () => {
     expect(toMarkdown([], 'nowhere')).toMatch(/No perf results found in nowhere/)
   })
