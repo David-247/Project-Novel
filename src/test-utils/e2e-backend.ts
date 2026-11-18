@@ -18,7 +18,7 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getDocJSON, getEditor, getFootnotes, getResolvedStyles, setDocJSON } from '@/features/editor'
-import { buildManuscript } from '@/features/export'
+import { applyPreset, buildManuscript, createDocxRenderer, defaultManuscriptSettings, isAbortError } from '@/features/export'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition, turnSpread, goToEdgeSpread, showPage } from '@/features/pagination'
@@ -366,6 +366,60 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const fromJsonMs = Array.from({ length: runs }, () => time(() => buildManuscript(json, styles, { footnotes })))
       const blocks = ir.frontMatter.length + ir.chapters.reduce((n, c) => n + c.blocks.length, 0)
       return { ms, fromJsonMs, chapters: ir.chapters.length, blocks, footnotes: ir.footnotes.length, trackedChanges: ir.report.trackedChanges.total }
+    },
+    /**
+     * Export the open document as DOCX with the real renderer (in its Web Worker) `runs` times after
+     * one warm-up: the IR build plus the render, as the wizard runs them. Times in ms; the progress
+     * fractions of the last run; whether the page kept painting frames during it. `preset` 'classic'
+     * adds the two-spaces-after-a-sentence pass and underline for italics.
+     */
+    renderDocxTimes: async (runs = 3, preset: 'standard' | 'classic' = 'standard') => {
+      const ed = getEditor()
+      if (!ed) return null
+      const styles = getResolvedStyles()
+      const footnotes = useStore.getState().book.footnotes
+      const renderer = createDocxRenderer()
+      const settings = { ...applyPreset(defaultManuscriptSettings('en-US'), preset), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' } } }
+      const once = async (onProgress?: (p: { fraction: number }) => void) => {
+        const t0 = performance.now()
+        const ir = buildManuscript(ed.state.doc, styles, { footnotes })
+        const bytes = await renderer.render(ir, settings, { onProgress })
+        return { ms: +(performance.now() - t0).toFixed(1), bytes: bytes.length }
+      }
+      await once()
+      const ms: number[] = []
+      let bytes = 0
+      const fractions: number[] = []
+      let frames = 0
+      let counting = true
+      const tick = () => {
+        frames++
+        if (counting) requestAnimationFrame(tick)
+      }
+      for (let i = 0; i < runs; i++) {
+        if (i === runs - 1) requestAnimationFrame(tick)
+        const r = await once(i === runs - 1 ? (p) => fractions.push(p.fraction) : undefined)
+        ms.push(r.ms)
+        bytes = r.bytes
+      }
+      counting = false
+      return { ms, bytes, fractions, frames }
+    },
+    /** Start a DOCX export of the open document, cancel it after `afterMs`; what the render settled with. */
+    cancelDocxRender: async (afterMs = 20) => {
+      const ed = getEditor()
+      if (!ed) return null
+      const ir = buildManuscript(ed.state.doc, getResolvedStyles(), { footnotes: useStore.getState().book.footnotes })
+      const settings = { ...defaultManuscriptSettings('en-US'), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' } } }
+      const ac = new AbortController()
+      let progressAfterCancel = 0
+      setTimeout(() => ac.abort(), afterMs)
+      const t0 = performance.now()
+      const outcome = await createDocxRenderer()
+        .render(ir, settings, { signal: ac.signal, onProgress: () => ac.signal.aborted && progressAfterCancel++ })
+        .then((b) => ({ resolved: true, bytes: b.length, error: null as string | null }))
+        .catch((e: unknown) => ({ resolved: false, bytes: 0, error: isAbortError(e) ? 'AbortError' : String(e) }))
+      return { ...outcome, settledMs: +(performance.now() - t0).toFixed(1), progressAfterCancel }
     },
     // ---- Comments (Phase 3) ----
     /** Start recording when each layoutVersion is published (performance.now()); returns the record. */

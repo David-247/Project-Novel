@@ -156,6 +156,8 @@ export function toMarkdown(results, dir = 'perf-results') {
       const miss = ms >= 15000 ? ` (${r.platform === 'win32' ? 'MISS' : 'miss, warning'})` : ''
       exportRows.push(`| ${r.scenario} | PDF render, Typst sidecar (${v(pages)} pages) | typst / ${r.platform}${r.platform === 'win32' ? ' (blocking)' : ''} | ${miss ? `**${ms}**${miss}` : v(ms)} | 15000 |`)
     }
+    if (r.docxExport) row('DOCX export, 100k words: IR + render in the worker (median)', r.docxExport.medianMs, 5000)
+    if (r.docxExportClassic) row('DOCX export, 100k words, Classic preset (median)', r.docxExportClassic.medianMs, 5000)
   }
   if (exportRows.length) {
     md.push('#### Export', '')

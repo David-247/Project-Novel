@@ -1,0 +1,481 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document mc:Ignorable="w14 w15 wp14" xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex" xmlns:cx1="http://schemas.microsoft.com/office/drawing/2015/9/8/chartex" xmlns:cx2="http://schemas.microsoft.com/office/drawing/2015/10/21/chartex" xmlns:cx3="http://schemas.microsoft.com/office/drawing/2016/5/9/chartex" xmlns:cx4="http://schemas.microsoft.com/office/drawing/2016/5/10/chartex" xmlns:cx5="http://schemas.microsoft.com/office/drawing/2016/5/11/chartex" xmlns:cx6="http://schemas.microsoft.com/office/drawing/2016/5/12/chartex" xmlns:cx7="http://schemas.microsoft.com/office/drawing/2016/5/13/chartex" xmlns:cx8="http://schemas.microsoft.com/office/drawing/2016/5/14/chartex" xmlns:aink="http://schemas.microsoft.com/office/drawing/2016/ink" xmlns:am3d="http://schemas.microsoft.com/office/drawing/2017/model3d" xmlns:w16cex="http://schemas.microsoft.com/office/word/2018/wordml/cex" xmlns:w16cid="http://schemas.microsoft.com/office/word/2016/wordml/cid" xmlns:w16="http://schemas.microsoft.com/office/word/2018/wordml" xmlns:w16sdtdh="http://schemas.microsoft.com/office/word/2020/wordml/sdtdatahash" xmlns:w16se="http://schemas.microsoft.com/office/word/2015/wordml/symex">
+<w:body>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="TitlePageContact"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Ann Example</w:t>
+</w:r>
+<w:r>
+<w:tab/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">about 100 words</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="TitlePageContact"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">1 Main Street</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="TitlePageContact"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Springfield, IL 62701</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="TitlePageContact"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">555-0100</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="TitlePageContact"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">ann@example.com</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="TitlePageTitle"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">The Long Night</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="TitlePageByline"/>
+<w:sectPr>
+<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>
+<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+<w:pgNumType w:start="1"/>
+<w:docGrid w:linePitch="360"/>
+</w:sectPr>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">A Novel by Perry Slaughter</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Centered"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">THE LONG NIGHT</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Centered"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">A </w:t>
+</w:r>
+<w:r>
+<w:rPr>
+<w:i/>
+<w:iCs/>
+</w:rPr>
+<w:t xml:space="preserve">novel</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Dedication"/>
+<w:pageBreakBefore/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">For M.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Epigraph"/>
+<w:sectPr>
+<w:headerReference w:type="default" r:id="rId6"/>
+<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>
+<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+<w:pgNumType w:start="1"/>
+<w:docGrid w:linePitch="360"/>
+</w:sectPr>
+</w:pPr>
+<w:r>
+<w:rPr>
+<w:i/>
+<w:iCs/>
+</w:rPr>
+<w:t xml:space="preserve">Not all who wander are lost.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Heading1"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Chapter One</w:t>
+</w:r>
+<w:r>
+<w:br/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">The </w:t>
+</w:r>
+<w:r>
+<w:rPr>
+<w:i/>
+<w:iCs/>
+</w:rPr>
+<w:t xml:space="preserve">Arrival</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FirstParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">It was </w:t>
+</w:r>
+<w:r>
+<w:rPr>
+<w:b/>
+<w:bCs/>
+</w:rPr>
+<w:t xml:space="preserve">night</w:t>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">.</w:t>
+</w:r>
+<w:r>
+<w:rPr>
+<w:rStyle w:val="FootnoteReference"/>
+</w:rPr>
+<w:footnoteReference w:id="1"/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve"> The rain fell </w:t>
+</w:r>
+<w:r>
+<w:rPr>
+<w:u w:val="single"/>
+</w:rPr>
+<w:t xml:space="preserve">hard</w:t>
+</w:r>
+<w:r>
+<w:t xml:space="preserve"> and </w:t>
+</w:r>
+<w:r>
+<w:rPr>
+<w:i/>
+<w:iCs/>
+</w:rPr>
+<w:t xml:space="preserve">cold</w:t>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:r>
+<w:t xml:space="preserve">She waited.</w:t>
+</w:r>
+<w:r>
+<w:br/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">Nobody came.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="SceneBreak"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">#</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FirstParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Morning came.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="SceneBreak"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">#</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FirstParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Later, a letter.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="BlockQuote"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Dear Ann, come home.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="ListParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">•</w:t>
+</w:r>
+<w:r>
+<w:tab/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">Bread</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="ListParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">•</w:t>
+</w:r>
+<w:r>
+<w:tab/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">Salt</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="ListParagraph"/>
+<w:ind w:left="1440" w:hanging="360"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">3.</w:t>
+</w:r>
+<w:r>
+<w:tab/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">Pinch</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="ListParagraph"/>
+<w:ind w:left="1440" w:hanging="360"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">4.</w:t>
+</w:r>
+<w:r>
+<w:tab/>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">Dash</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:sectPr>
+<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>
+<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+<w:pgNumType/>
+<w:docGrid w:linePitch="360"/>
+</w:sectPr>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">She folded the list.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Heading1"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">The Storm</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FirstParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Thunder.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Heading2"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">At the Harbour</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FirstParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Boats rocked.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="SceneBreak"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">#</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FirstParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">The wind dropped.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="SceneBreak"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">#</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FirstParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">A gull cried over the water.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:r>
+<w:t xml:space="preserve">Then silence.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pageBreakBefore/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">The tide turned.</w:t>
+</w:r>
+<w:r>
+<w:rPr>
+<w:rStyle w:val="FootnoteReference"/>
+</w:rPr>
+<w:footnoteReference w:id="2"/>
+</w:r>
+</w:p>
+<w:p>
+<w:r>
+<w:t xml:space="preserve">They went home.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FlushRight"/>
+<w:sectPr>
+<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>
+<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+<w:pgNumType/>
+<w:docGrid w:linePitch="360"/>
+</w:sectPr>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">— end of part one —</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="PartTitle"/>
+<w:sectPr>
+<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>
+<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+<w:pgNumType/>
+<w:docGrid w:linePitch="360"/>
+</w:sectPr>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Part Two</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Heading1"/>
+</w:pPr>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="FirstParagraph"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Nothing has a name here.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:r>
+<w:t xml:space="preserve">Added later.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:sectPr>
+<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>
+<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+<w:pgNumType/>
+<w:docGrid w:linePitch="360"/>
+</w:sectPr>
+</w:pPr>
+<w:r>
+<w:rPr>
+<w:b/>
+<w:bCs/>
+</w:rPr>
+<w:t xml:space="preserve">Bold now</w:t>
+</w:r>
+<w:r>
+<w:t xml:space="preserve">.</w:t>
+</w:r>
+</w:p>
+<w:p>
+<w:pPr>
+<w:pStyle w:val="Heading1"/>
+</w:pPr>
+<w:r>
+<w:t xml:space="preserve">Epilogue</w:t>
+</w:r>
+</w:p>
+<w:sectPr>
+<w:pgSz w:w="12240" w:h="15840" w:orient="portrait"/>
+<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
+<w:pgNumType/>
+<w:docGrid w:linePitch="360"/>
+</w:sectPr>
+</w:body>
+</w:document>

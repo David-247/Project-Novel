@@ -192,6 +192,13 @@ describe('perf summary', () => {
     expect(section).toContain('| pdf-export | PDF render, Typst sidecar (363 pages) | typst / darwin | **15200** (miss, warning) | 15000 |')
   })
 
+  it('export: the DOCX export row against 5,000 ms', () => {
+    const md = toMarkdown([{ scenario: 'perf-export-docx', browser: 'perf-chromium', platform: 'win32', docxExport: { medianMs: 812.3 }, docxExportClassic: { medianMs: 901 } }])
+    const section = md.slice(md.indexOf('#### Export'))
+    expect(section).toMatch(/\| perf-export-docx \| DOCX export, 100k words: IR \+ render in the worker \(median\) \| chromium \/ win32 \(shipping\) \| 812\.3 \| 5000 \|/)
+    expect(section).toMatch(/\| perf-export-docx \| DOCX export, 100k words, Classic preset \(median\) \| chromium \/ win32 \(shipping\) \| 901 \| 5000 \|/)
+  })
+
   it('live word counts: typing blocks on Windows Chromium like plain typing; the count update is reported (Phase 4)', () => {
     const md = toMarkdown([
       {
