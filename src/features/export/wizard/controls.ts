@@ -43,7 +43,7 @@ export const EXPORT_WIZARD_CONTROLS = {
   presetStandard: { id: 'export.preset.standard', label: 'Standard (modern)', description: 'Times New Roman 12 pt, italics, one space after a sentence. What most agents expect today.', ...alt('s') },
   presetClassic: { id: 'export.preset.classic', label: 'Classic (Courier)', description: 'Courier New 12 pt, underline for italics, two spaces after a sentence, for markets that ask for it.', ...alt('c') },
   paper: { id: 'export.paper', label: 'Paper', description: 'Letter (the Americas) or A4 (everywhere else).', ...alt('p') },
-  font: { id: 'export.font', label: 'Font', description: 'The font as Word names it. If it is not installed, the PDF uses a free font with the same widths.', ...alt('f') },
+  font: { id: 'export.font', label: 'Font', description: 'The font the Word file names. The PDF can use only Times New Roman or Courier New.', ...alt('f') },
   sceneBreak: { id: 'export.sceneBreak', label: 'Scene-break marker', description: 'Printed centred on its own line between scenes. "#" is the standard.', ...alt('k') },
   endMarker: { id: 'export.endMarker', label: 'End marker', description: 'Optional END or THE END after the last line.', ...alt('d') },
   // ---- 3. Checks
@@ -69,6 +69,7 @@ export const EXPORT_WIZARD_CONTROLS = {
   // ---- status bar (Export Manuscript Again)
   statusCancel: { id: 'export.status.cancel', label: 'Cancel export', description: 'Stop the export. No file is written.' },
   statusRetry: { id: 'export.status.retry', label: 'Retry', description: 'Export again to the same files.' },
+  statusChooseLocation: { id: 'export.status.chooseLocation', label: 'Choose another location', description: 'Pick other places to save the files, then export.' },
   statusShow: { id: 'export.status.show', label: 'Show in folder', description: 'Show the exported file in its folder.' },
   statusDismiss: { id: 'export.status.dismiss', label: 'Dismiss', description: 'Hide this message.' },
 } as const satisfies Record<string, ExportControlMeta>

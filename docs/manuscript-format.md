@@ -67,11 +67,19 @@ The Classic preset changes only the type: Courier New 12 pt, underline for itali
 - **Rule.** 12 pt, black, a standard readable face: Times New Roman; Courier New is the accepted alternative ("on its way
   out, at least in fiction circles"). No sans-serif, nothing flashy. [S-shunn-story] [S-shunn-checklist]
   Agents: Times New Roman 12 [S-maria] [S-curtisbrown-au]. Shunn "Classic" means Courier. [S-shunn-classic]
-- **Default.** Times New Roman 12 pt. Where it is not installed the generator falls back, in order, to metric-compatible
-  free fonts (`FONT_FALLBACKS`): **Tinos**, **Liberation Serif** (Courier New: **Cousine**, **Liberation Mono**). Tinos and
-  Cousine are SIL OFL / Apache-2.0 and have Times New Roman's and Courier New's glyph widths, so line and page breaks
-  match.
-- **Options.** The Classic preset (Courier New 12 pt). `fontFamily` and `fontSizePt` (8 to 24) can be set freely.
+- **Default.** Times New Roman 12 pt.
+- **DOCX.** The Word file names `fontFamily` as set; Word substitutes a font on a computer without it. The
+  metric-compatible free fonts (`FONT_FALLBACKS`) are **Tinos** and **Liberation Serif** (Courier New: **Cousine** and
+  **Liberation Mono**). They have Times New Roman's and Courier New's glyph widths, so a manuscript set in one breaks its
+  lines and pages the same.
+- **PDF.** The PDF engine knows two fonts only (decision 558311e6, point 3). A `fontFamily` matching Courier, Cousine or
+  Liberation Mono is set in **Courier New**, and every other family in **Times New Roman**, when that font is installed.
+  Otherwise the bundled **Liberation Mono** or **Liberation Serif** is used (an installed Tinos or Cousine is never used).
+  Any other family, Garamond for example, applies to the DOCX only. The wizard's Formatting step says which font the PDF
+  will use, and its success screen names the font the PDF was actually set in whenever it differs from `fontFamily` or is
+  the bundled one.
+- **Options.** The Classic preset (Courier New 12 pt). `fontFamily` (DOCX; for the PDF only the two roles above) and
+  `fontSizePt` (8 to 24) can be set freely.
 
 ### Line spacing
 

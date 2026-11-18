@@ -1,6 +1,6 @@
 import { notifyCommandStateChanged, registerCommands } from '@/shared/commands'
 import { useStore } from '@/shared/store'
-import { canExportAgain, exportAgain, openWizard } from './controller'
+import { canExportAgain, documentChanged, exportAgain, openWizard } from './controller'
 import { EXPORT_COMMAND_IDS } from './controls'
 
 /** File > Export > Manuscript… */
@@ -38,6 +38,8 @@ export function registerExportCommands(): () => void {
   ])
   // Enabled state follows the project (its last export folder) and the export folders.
   const unsubscribe = useStore.subscribe((s, prev) => {
+    // Another document: forget the untitled one's title and last export (before the enabled state is read).
+    if (s.project.path !== prev.project.path) documentChanged()
     if (s.project.path !== prev.project.path || s.preferences.exportFolders !== prev.preferences.exportFolders) notifyCommandStateChanged()
   })
   return () => {

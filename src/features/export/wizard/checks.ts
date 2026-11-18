@@ -87,7 +87,8 @@ function nameCheck({ contact }: CheckInput): CheckResult {
     summary: name ? `By-line: ${name}` : 'There is no author name for the by-line and the header.',
     explanation:
       'The by-line under the title names the author who gets the credit (your pen name, if you use one), and the surname runs in the header ("Surname / Title / page"). Without a name neither can be printed.',
-    actions: name ? [] : [{ kind: 'fix', field: contact.penName.trim() ? 'legalName' : 'penName' }],
+    // No by-line name means no pen name either: Fix goes to Legal name, which the contact block needs too.
+    actions: name ? [] : [{ kind: 'fix', field: 'legalName' }],
   }
 }
 

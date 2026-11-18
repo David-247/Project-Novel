@@ -37,7 +37,8 @@ export const PRESETS: Record<PresetId, Preset> = { standard: STANDARD_PRESET, cl
 
 /**
  * Metric-compatible, freely licensed stand-ins (SIL OFL / Apache 2.0) for the fonts a manuscript names,
- * in order of preference: the generator (Typst) uses the first one that is installed or bundled.
+ * in order of preference. The PDF (Typst) uses the face when installed, else the bundled Liberation one (never Tinos /
+ * Cousine); see docs/manuscript-format.md, "Typeface and size".
  * Tinos / Cousine are the Chrome OS core fonts, metric-compatible with Times New Roman / Courier New.
  */
 export const FONT_FALLBACKS: Record<string, readonly string[]> = {

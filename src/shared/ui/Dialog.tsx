@@ -1,6 +1,7 @@
 import * as RadixDialog from '@radix-ui/react-dialog'
 import type { ReactNode } from 'react'
 import { IconButton } from './Button'
+import { loopOptionTab } from './option-tab'
 import { cn } from './styles'
 import { Tooltip } from './Tooltip'
 
@@ -25,7 +26,8 @@ export interface DialogProps {
 }
 
 /**
- * Modal dialog over Radix Dialog: focus trap, Escape to close, focus return, scroll lock.
+ * Modal dialog over Radix Dialog: focus trap (a plain Tab and Option+Tab both loop), Escape to close,
+ * focus return, scroll lock.
  * Width adapts to the window (max 28rem, never wider than viewport minus gutters).
  */
 export function Dialog({
@@ -49,6 +51,10 @@ export function Dialog({
         <RadixDialog.Overlay className="fixed inset-0 z-40 bg-scrim animate-[nv-fade_120ms_ease-out]" />
         <RadixDialog.Content
           onCloseAutoFocus={onCloseAutoFocus}
+          // Option+Tab (macOS WebKit's every-control Tab) loops like a plain Tab (Radix loops only that).
+          onKeyDown={(e) => {
+            loopOptionTab(e, e.currentTarget)
+          }}
           className={cn(
             'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)]',
             wide ? 'max-w-2xl' : 'max-w-md',
