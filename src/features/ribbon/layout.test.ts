@@ -33,6 +33,39 @@ describe('ribbonSteps', () => {
     expect(steps[0]).toEqual({ undo: 'full', font: 'full', paragraph: 'full', styles: 'full', editing: 'full' })
   })
 
+  it('a one-button group goes icon only, then into More, before a higher-priority group collapses', () => {
+    // Review: Proofing (one button, 60) | Tracking 90 | Changes 85 | Comments 80 | Re-write 70.
+    const steps = ribbonSteps([
+      { id: 'proofing', order: 5, priority: 60, oneButton: true },
+      { id: 'tracking', order: 10, priority: 90 },
+      { id: 'changes', order: 20, priority: 85 },
+      { id: 'comments', order: 30, priority: 80 },
+      { id: 'rewrite', order: 40, priority: 70 },
+    ])
+    const changes = steps.slice(1).map((s, i) => {
+      const id = Object.keys(s).find((k) => s[k] !== steps[i][k])!
+      return `${id}:${s[id]}`
+    })
+    expect(changes).toEqual([
+      'proofing:compact',
+      'rewrite:collapsed',
+      'proofing:overflow',
+      'comments:collapsed',
+      'changes:collapsed',
+      'tracking:collapsed',
+      'rewrite:overflow',
+      'comments:overflow',
+      'changes:overflow',
+      'tracking:overflow',
+    ])
+    // Never a dropdown of one, and it moves into More once only.
+    expect(steps.some((s) => s.proofing === 'collapsed')).toBe(false)
+    expect(changes.filter((c) => c.startsWith('proofing:overflow'))).toHaveLength(1)
+    // Comments is still full on every step until Proofing has given up all its room.
+    const commentsCollapse = changes.indexOf('comments:collapsed') + 1
+    expect(steps[commentsCollapse - 1].proofing).toBe('overflow')
+  })
+
   it('ties go to the rightmost group first', () => {
     const steps = ribbonSteps([
       { id: 'a', order: 1, priority: 50 },
