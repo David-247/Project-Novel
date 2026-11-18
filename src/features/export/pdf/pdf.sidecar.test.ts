@@ -8,13 +8,12 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { buildPaginationFixture } from '../../../../e2e/fixtures/pagination-manuscript'
-import { buildManuscript, FEATURE_FIXTURE_DOC, FEATURE_FIXTURE_FOOTNOTES, FEATURE_FIXTURE_STYLES } from '../ir'
+import { buildManuscript, manuscriptWordCount, FEATURE_FIXTURE_DOC, FEATURE_FIXTURE_FOOTNOTES, FEATURE_FIXTURE_STYLES } from '../ir'
 import type { ManuscriptIR } from '../ir'
 import { applyPreset, defaultManuscriptSettings, formatWordCount, type ManuscriptSettings } from '../settings'
 import { buildPdfData, type ManuscriptMeta } from './data'
 import { FONT_METRICS, lineMetrics } from './metrics'
 import { readPdf, renderWithSidecar, REQUIRE_TYPST, ROOT, SIDECAR, type PdfPage, type ReadPdf } from './test-harness'
-import { manuscriptWordCount } from './word-count'
 
 const enabled = SIDECAR !== null || REQUIRE_TYPST
 const PITCH = lineMetrics('serif', 12, 2).pitch
@@ -75,7 +74,7 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
         'The Long Night',
         'A Novel by Perry Slaughter',
       ])
-      expect(title.text).toContain(formatWordCount(manuscriptWordCount(ir), 'auto'))
+      expect(title.text).toContain(formatWordCount(manuscriptWordCount(ir).body, 'auto'))
       // First line at the top margin (baseline = 1 in + ascender), flush left; word count flush right.
       const first = title.items.find((i) => i.str.startsWith('Perry'))!
       expect(first.x).toBeCloseTo(72, 1)
@@ -173,7 +172,7 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
     })
 
     it('word count parity: the title page states the IR word count', () => {
-      expect(title.text).toContain(formatWordCount(manuscriptWordCount(ir), settings.wordCountRounding))
+      expect(title.text).toContain(formatWordCount(manuscriptWordCount(ir).body, settings.wordCountRounding))
     })
   })
 

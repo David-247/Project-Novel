@@ -1,4 +1,4 @@
-import type { ContactDetails, ContactOverride, HeaderSettings, WordCountRounding } from './types'
+import type { ContactDetails, ContactOverride, HeaderSettings, ManuscriptSettings, WordCountRounding } from './types'
 import { CONTACT_FIELDS } from './types'
 
 /** Below this many words the "auto" rule rounds to the nearest hundred, from it to the nearest 500. */
@@ -34,6 +34,16 @@ export function surnameOf(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean)
   while (words.length > 1 && SUFFIXES.has(words[words.length - 1].replace(/[.,]/g, '').toLowerCase())) words.pop()
   return words.length ? words[words.length - 1] : ''
+}
+
+/** The scene-break marker as printed: settings persist it untrimmed; blank means the default '#'. */
+export function sceneBreakText(settings: Pick<ManuscriptSettings, 'sceneBreak'>): string {
+  return settings.sceneBreak.trim() || '#'
+}
+
+/** The running header's short title: the trimmed setting, or else the (trimmed) manuscript title. */
+export function headerShortTitle(header: Pick<HeaderSettings, 'shortTitle'>, title: string): string {
+  return header.shortTitle.trim() || title.trim()
 }
 
 export interface HeaderContext {

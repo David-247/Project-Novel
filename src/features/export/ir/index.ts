@@ -35,6 +35,8 @@ export type {
 export { assertManuscriptVersion, abortError, isAbortError, throwIfAborted, UnsupportedManuscriptVersionError } from './renderer'
 export type { ManuscriptRenderer, RenderOptions, RenderProgress, ExportFormat } from './renderer'
 export { manuscriptPlainText, runsText } from './plain-text'
+export { manuscriptWordCount } from './word-count'
+export type { ManuscriptWordCount } from './word-count'
 export type { PlainTextOptions } from './plain-text'
 export { createMockRenderer } from './mock-renderer'
 export type { MockRenderer, MockRendererOptions } from './mock-renderer'

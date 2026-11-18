@@ -4,13 +4,15 @@ import { assertManuscriptVersion } from '../ir'
 import {
   bylineName,
   formatWordCount,
+  headerShortTitle,
+  sceneBreakText,
   surnameOf,
   type ContactDetails,
   type HeaderSettings,
   type ManuscriptSettings,
 } from '../settings'
 import { fontRoleOf, lineMetrics } from './metrics'
-import { manuscriptWordCount } from './word-count'
+import { manuscriptWordCount } from '../ir/word-count'
 
 /**
  * The data file (data.json) the bundled Typst template `manuscript.typ` reads
@@ -292,13 +294,13 @@ export function buildPdfData(ir: ManuscriptIR, settings: ManuscriptSettings, met
   const title = meta.title.trim()
   const author = bylineName(meta.contact)
   const ctx: RunContext = { ir, underlineItalics: settings.italics === 'underline', sentenceSpacing: settings.sentenceSpacing }
-  const scene = settings.sceneBreak.trim() || '#'
+  const scene = sceneBreakText(settings)
 
   const tp = settings.titlePage
   const titlePage: PdfTitlePage | null = tp.include
     ? {
         contact: tp.showContact ? contactLines(meta.contact, tp.showAgent) : [],
-        wordCount: tp.showWordCount ? formatWordCount(meta.wordCount ?? manuscriptWordCount(ir), settings.wordCountRounding) : '',
+        wordCount: tp.showWordCount ? formatWordCount(meta.wordCount ?? manuscriptWordCount(ir).body, settings.wordCountRounding) : '',
         title,
         byline: author ? BYLINE[tp.bylineStyle](author) : '',
         drop: r2(textHeight * TITLE_DROP_FRACTION),
@@ -306,7 +308,7 @@ export function buildPdfData(ir: ManuscriptIR, settings: ManuscriptSettings, met
     : null
 
   const h = settings.header
-  const shortTitle = h.shortTitle.trim() || title
+  const shortTitle = headerShortTitle(h, title)
   const header = {
     show: h.format !== 'none',
     prefix: headerPrefix(h, surnameOf(author), shortTitle),

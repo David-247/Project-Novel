@@ -36,11 +36,11 @@ export * from './platform'
 
 // --- PDF generator (src/features/export/pdf/*) ---------------------------------------------------
 // createPdfRenderer({ meta }) (ManuscriptRenderer for PDF via the bundled Typst template), buildPdfData(),
-// manuscriptWordCount(), lineMetrics() / fontRoleOf(); ManuscriptMeta, PdfRenderReport.
+// lineMetrics() / fontRoleOf(); ManuscriptMeta, PdfRenderReport.
 export * from './pdf'
 // --- end of the PDF generator block --------------------------------------------------------------
 // --- DOCX generator (src/features/export/docx/*) -------------------------------------------------
 // createDocxRenderer() -> ManuscriptRenderer<DocxRenderSettings> (built in a Web Worker),
-// DocxRenderSettings / ManuscriptExportInfo, DOCX_MIME_TYPE, manuscriptWordCount(). docs/docx-export.md.
+// DocxRenderSettings / ManuscriptExportInfo, DOCX_MIME_TYPE. docs/docx-export.md.
 export * from './docx'
 // --- end of the DOCX generator block -------------------------------------------------------------

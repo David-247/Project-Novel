@@ -6,11 +6,13 @@ import {
   defaultManuscriptSettings,
   formatWordCount,
   GENRE_WORD_COUNTS,
+  headerShortTitle,
   paperFromLocale,
   PRESETS,
   resolveContact,
   roundWordCount,
   runningHeader,
+  sceneBreakText,
   STANDARD_PRESET,
   surnameOf,
 } from './index'
@@ -115,6 +117,17 @@ describe('surnameOf', () => {
     ['', ''],
     ['J. R. R. Tolkien', 'Tolkien'],
   ])('%j -> %j', (name, surname) => expect(surnameOf(name)).toBe(surname))
+})
+
+describe('settings strings trimmed at use (both generators)', () => {
+  it('sceneBreakText trims the marker; blank means #', () => {
+    expect(sceneBreakText({ sceneBreak: '  * * *  ' })).toBe('* * *')
+    expect(sceneBreakText({ sceneBreak: '   ' })).toBe('#')
+  })
+  it('headerShortTitle trims the setting, else falls back to the trimmed title', () => {
+    expect(headerShortTitle({ shortTitle: ' Tide ' }, 'Silvertide')).toBe('Tide')
+    expect(headerShortTitle({ shortTitle: '  ' }, ' Silvertide ')).toBe('Silvertide')
+  })
 })
 
 describe('runningHeader', () => {

@@ -70,10 +70,14 @@ interface ManuscriptRenderer<TSettings> {
 Renderers print their own scene-break marker (never `original`), chapter openings from `number` / `title`,
 and number footnotes with `number` (`label` is the book's symbol form).
 
+`manuscriptWordCount(ir)` (`ir/word-count.ts`, shared by both generators) counts the IR's runs with the app's
+rules: `{ body, footnotes, total }`, where `body` equals `countManuscript(doc).body.words`. List and scene-break
+markers are not counted. It imports only IR leaf modules, so the DOCX worker can use it.
+
 ## PDF generator
 
 `createPdfRenderer({ meta })` (`src/features/export/pdf/`) implements the contract for PDF. `meta` gives what the
-IR and settings do not: the title, the resolved contact details, the word count (default `manuscriptWordCount(ir)`,
+IR and settings do not: the title, the resolved contact details, the word count (default `manuscriptWordCount(ir).body`,
 which equals `countManuscript(doc).body.words`) and the language. `buildPdfData` turns them into the data file of
 the bundled template `manuscript` (`src-tauri/templates/manuscript.typ`): lengths in pt and every string final, so the
 template only places them and manuscript text is never Typst markup. The Typst sidecar renders it offline; the font

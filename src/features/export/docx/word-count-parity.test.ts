@@ -6,7 +6,7 @@ import { buildManuscript } from '../ir/build'
 import { FEATURE_FIXTURE_DOC, FEATURE_FIXTURE_FOOTNOTES, FEATURE_FIXTURE_STYLES } from '../ir/fixtures'
 import { renderDocx } from './build'
 import { parseXml, pStyle, pText, testSettings, unzipDocx, wAll, wAttr } from './test-helpers'
-import { manuscriptWordCount } from './word-count'
+import { manuscriptWordCount } from '../ir/word-count'
 
 // Word-count parity (deferred from Wave 1): the exported word count equals countManuscript on the same
 // document. Counted from the IR's runs (manuscriptPlainText would count the list markers: 90 vs 88).

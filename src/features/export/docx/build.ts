@@ -15,13 +15,13 @@ import {
 // load the editor or the app store.
 import { assertManuscriptVersion, throwIfAborted, type RenderOptions } from '../ir/renderer'
 import type { InlineRun, ManuscriptBlock, ManuscriptIR, NoteRun, ParagraphBlock, TextRun as IRTextRun } from '../ir/types'
-import { bylineName, formatWordCount, runningHeader, surnameOf } from '../settings/text'
+import { bylineName, formatWordCount, headerShortTitle, runningHeader, sceneBreakText, surnameOf } from '../settings/text'
 import type { ContactDetails } from '../settings/types'
 import { docxLayout, HEADER_DISTANCE_TWIPS, type DocxLayout } from './layout'
 import { manuscriptStyles, STYLE } from './styles'
 import { doubleSentenceSpaces, sentenceContext, xmlSafe } from './text'
 import type { DocxRenderSettings } from './types'
-import { manuscriptWordCount } from './word-count'
+import { manuscriptWordCount } from '../ir/word-count'
 
 /**
  * The DOCX manuscript generator (docs/manuscript-format.md, docs/docx-export.md): IR + settings ->
@@ -135,7 +135,7 @@ function paragraph(b: ParagraphBlock, ctx: Ctx, pageBreakBefore: boolean): Parag
 }
 
 function sceneBreakMarker(ctx: Ctx): string {
-  return xmlSafe(ctx.settings.sceneBreak.trim()) || '#'
+  return xmlSafe(sceneBreakText(ctx.settings)) || '#'
 }
 
 /**
@@ -226,7 +226,7 @@ const PAGE_SLOT = '\u0000PAGE\u0000'
 function header(settings: DocxRenderSettings): Header | null {
   if (settings.header.format === 'none') return null
   const surname = surnameOf(xmlSafe(bylineName(settings.info.contact)))
-  const shortTitle = settings.header.shortTitle.trim() || settings.info.title.trim()
+  const shortTitle = headerShortTitle(settings.header, settings.info.title)
   const text = runningHeader(settings.header, { surname, shortTitle: xmlSafe(shortTitle), page: PAGE_SLOT })
   const [before, after = ''] = text.split(PAGE_SLOT)
   return new Header({
