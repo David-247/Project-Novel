@@ -45,6 +45,7 @@ import { CheckField, DraftField, handleAccessKey, Mn, SelectField } from './fiel
 import { ChapterPagePreview, HeaderPreview, TitlePagePreview } from './previews'
 import { useExportRenderers, WIZARD_FORMATS, type WizardFormat } from './renderers'
 import { fileActionProblem } from './file-actions'
+import { formatFontNote, usedFontNote } from './font-note'
 import { fileNameOf, manuscriptFileName, titlePageData, type TitlePageData } from './title-page'
 
 /**
@@ -406,12 +407,8 @@ function useInstalledFonts(): string[] | null {
 
 function FormatStep({ settings, data, prepared }: { settings: ManuscriptSettings; data: TitlePageData; prepared: PreparedManuscript | null }) {
   const fonts = useInstalledFonts()
-  const family = settings.fontFamily.trim()
-  const mono = /courier|mono/i.test(family)
-  const installed = fonts === null || fonts.length === 0 || fonts.some((f) => f.toLowerCase() === family.toLowerCase())
-  const fontHint = installed
-    ? 'The font the Word file names and the PDF is set in.'
-    : `${family} is not installed on this computer. The PDF uses ${mono ? 'Liberation Mono' : 'Liberation Serif'}, a free font with the same letter widths, so the pages break the same; the Word file still names ${family}.`
+  // What the PDF is really set in (it knows Times New Roman and Courier New only), not just whether the family is installed.
+  const fontHint = formatFontNote(settings.fontFamily, fonts)
   const radioName = useId()
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
@@ -756,6 +753,13 @@ function RunPanel({ run }: { run: RunState }) {
             <FileRow key={f.path} path={f.path} />
           ))}
         </ul>
+        {run.written.map((f) =>
+          usedFontNote(f.font) ? (
+            <p key={f.path} className="m-0 text-ui-xs text-text-muted" data-testid="export-font-note">
+              {usedFontNote(f.font)}
+            </p>
+          ) : null,
+        )}
       </div>
     )
   }

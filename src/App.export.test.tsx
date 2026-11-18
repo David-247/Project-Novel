@@ -5,6 +5,7 @@ import {
   __resetExportRenderersForTests,
   __resetExportSettingsForTests,
   __resetWizardForTests,
+  createManuscriptExportRenderers,
   createMockExportRenderers,
   EXPORT_COMMAND_IDS,
   EXPORT_WIZARD_CONTROLS as C,
@@ -380,6 +381,43 @@ describe('exporting', () => {
     await flush()
     expect(ex.opens).toEqual(['/exports/Waight_THE_LONG_NIGHT_manuscript.docx'])
     expect(ex.reveals).toEqual(['/exports/Waight_THE_LONG_NIGHT_manuscript.pdf'])
+  })
+
+  it('the font the PDF is really set in: "Garamond" is set in Times New Roman, and the wizard says so (B-I2)', async () => {
+    backend.fonts = ['Garamond', 'Times New Roman']
+    await renderApp()
+    // The real PDF generator (its Typst render is the fake core's), PDF only.
+    offRenderers()
+    __resetExportRenderersForTests()
+    const reports: string[] = []
+    offRenderers = setExportRenderers({ pdf: createManuscriptExportRenderers({ pdf: { onReport: (r) => reports.push(r.font.family) } }).pdf })
+    act(() => updateManuscriptSettings({ fontFamily: 'Garamond' }))
+    openWizard()
+    alt('Digit2')
+    const note = dialog()!.querySelector('[data-testid="font-note"]')!.textContent!
+    expect(note).not.toMatch(/names and the PDF is set in/)
+    expect(note).toMatch(/^The PDF is set in (Times New Roman|Liberation Serif)/)
+    expect(note).toMatch(/Garamond applies to the Word file only/)
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
+    expect(reports).toEqual(['Times New Roman'])
+    expect(dialog()!.querySelector('[data-testid="export-font-note"]')!.textContent).toBe(
+      'The PDF is set in Times New Roman, not Garamond: the PDF can use only Times New Roman or Courier New. The Word file names Garamond.',
+    )
+  })
+
+  it('the PDF set in the bundled Liberation Serif (no Times New Roman installed) is named on the success screen', async () => {
+    backend.fonts = ['Arial']
+    await renderApp()
+    offRenderers()
+    __resetExportRenderersForTests()
+    offRenderers = setExportRenderers({ pdf: createManuscriptExportRenderers().pdf })
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
+    expect(dialog()!.querySelector('[data-testid="export-font-note"]')!.textContent).toMatch(/^The PDF is set in Liberation Serif, a free font bundled with Novel/)
   })
 
   it('only the formats chosen; a format with no renderer cannot be chosen', async () => {

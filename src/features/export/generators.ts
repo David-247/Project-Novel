@@ -31,7 +31,16 @@ export function createManuscriptExportRenderers(options: ManuscriptExportRendere
     // A PDF renderer per render: its meta is the job's.
     pdf: {
       format: 'pdf',
-      render: (job, renderOptions) => createPdfRenderer({ ...options.pdf, meta: pdfMetaOf(job) }).render(job.ir, job.settings, renderOptions),
+      // Its font report goes to the caller's onReport and to the run (the success screen names the font).
+      render: (job, renderOptions) =>
+        createPdfRenderer({
+          ...options.pdf,
+          meta: pdfMetaOf(job),
+          onReport: (report) => {
+            options.pdf?.onReport?.(report)
+            renderOptions?.onFont?.(report.font)
+          },
+        }).render(job.ir, job.settings, renderOptions),
     },
   }
 }

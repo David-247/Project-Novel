@@ -1,5 +1,6 @@
 import { isAbortError, throwIfAborted, type RenderProgress } from '../ir'
 import { ExportPlatformError, writeExportFile, type ExportErrorKind, type SaveTarget, type TypstDiagnostic } from '../platform'
+import type { ExportFontNote } from './font-note'
 import type { ExportJob, ExportRenderer, WizardFormat } from './renderers'
 import { fileNameOf } from './title-page'
 
@@ -16,6 +17,8 @@ export interface WrittenFile {
   format: WizardFormat
   path: string
   bytes: number
+  /** The font the file was set in, when its renderer reports it (the PDF). */
+  font?: ExportFontNote
 }
 
 export interface RunProgress {
@@ -101,7 +104,7 @@ export async function runExport(
   { signal, onProgress }: RunOptions = {},
 ): Promise<WrittenFile[]> {
   const share = 0.95 / Math.max(1, formats.length)
-  const rendered: { format: WizardFormat; bytes: Uint8Array; target: SaveTarget }[] = []
+  const rendered: { format: WizardFormat; bytes: Uint8Array; target: SaveTarget; font?: ExportFontNote }[] = []
   for (const [i, format] of formats.entries()) {
     const renderer = renderers[format]
     const target = targets[format]
@@ -110,24 +113,26 @@ export async function runExport(
     try {
       throwIfAborted(signal)
       onProgress?.({ fraction: i * share, format, stage: 'render' })
+      let font: ExportFontNote | undefined
       const bytes = await renderer.render(job, {
         signal,
+        onFont: (f) => (font = f),
         onProgress: (p: RenderProgress) => onProgress?.({ fraction: (i + Math.min(1, Math.max(0, p.fraction))) * share, format, stage: 'render' }),
       })
       throwIfAborted(signal)
-      rendered.push({ format, bytes, target })
+      rendered.push({ format, bytes, target, ...(font ? { font } : {}) })
     } catch (e) {
       throw describeExportError(e, format, 'render')
     }
   }
   const written: WrittenFile[] = []
-  for (const { format, bytes, target } of rendered) {
+  for (const { format, bytes, target, font } of rendered) {
     try {
       // The last chance to cancel: after the first write the export completes.
       if (!written.length) throwIfAborted(signal)
       onProgress?.({ fraction: 0.95 + (0.05 * written.length) / rendered.length, format, stage: 'save' })
       const w = await writeExportFile(target, bytes)
-      written.push({ format, path: w.path, bytes: w.bytes })
+      written.push({ format, path: w.path, bytes: w.bytes, ...(font ? { font } : {}) })
     } catch (e) {
       const err = describeExportError(e, format, 'save')
       if (!written.length) throw err
