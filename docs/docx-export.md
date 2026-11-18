@@ -36,7 +36,8 @@ await writeExportFile(target, bytes)             // the caller writes; a cancell
 | Other roles | `Block Quote`, `Epigraph`, `Dedication`, `Centered`, `Flush Right`, `Heading 2` (subheadings), `Part Title` (page, drop), `List Paragraph` (the marker and a tab; nested items one indent deeper), `End Marker`. |
 | Page breaks | The next paragraph gets "page break before" (no empty paragraph). A recto start is a page break: manuscripts are one-sided. |
 | Emphasis | Bold, italic (underline in Classic, `italics: 'underline'`), underline, small caps, super- and subscript as run properties. Classic also puts two spaces after a sentence (not after Mr., Dr., initials...). |
-| Footnotes | Real Word footnotes, `Footnote Text` in the body font and size, single-spaced. Word numbers them 1, 2, 3 through the document. |
+| Footnotes | Real Word footnotes, `Footnote Text` in the body font and size, single-spaced, a no-break space between the number and the text (as in the PDF). Word numbers them 1, 2, 3 through the document. |
+| Font | Named as typed (trimmed). `docxFontReport(settings)` reports `{ requested, substituted }` like the PDF render report; in DOCX a substitution happens in Word on the reader's machine. |
 | Properties | `docProps/core.xml`: title, author (the by-line name), last modified by, language; the text's proofing language in the document defaults. |
 | Never | Tracked changes, comments, re-write versions (the IR has none). |
 
