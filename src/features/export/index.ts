@@ -33,3 +33,9 @@ export * from './ir'
 // ExportPlatformError, EXPORT_COMMANDS / EXPORT_HEADERS and their types.
 export * from './platform'
 // --- end of the export platform block ------------------------------------------------------------
+
+// --- PDF generator (src/features/export/pdf/*) ---------------------------------------------------
+// createPdfRenderer({ meta }) (ManuscriptRenderer for PDF via the bundled Typst template), buildPdfData(),
+// manuscriptWordCount(), lineMetrics() / fontRoleOf(); ManuscriptMeta, PdfRenderReport.
+export * from './pdf'
+// --- end of the PDF generator block --------------------------------------------------------------

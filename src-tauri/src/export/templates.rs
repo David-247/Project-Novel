@@ -9,8 +9,12 @@ pub struct Template {
     pub source: &'static str,
 }
 
-/// Every template the export command can render. The PDF generator adds its manuscript template here.
-pub const TEMPLATES: &[Template] = &[Template { id: "hello", source: include_str!("../../templates/hello.typ") }];
+/// Every template the export command can render: the sidecar smoke test and the PDF manuscript
+/// (data.json from src/features/export/pdf/data.ts, `buildPdfData`).
+pub const TEMPLATES: &[Template] = &[
+    Template { id: "hello", source: include_str!("../../templates/hello.typ") },
+    Template { id: "manuscript", source: include_str!("../../templates/manuscript.typ") },
+];
 
 pub fn get(id: &str) -> Result<&'static Template, ExportError> {
     TEMPLATES
@@ -53,6 +57,7 @@ mod tests {
             check_offline(t.source).unwrap_or_else(|e| panic!("template {}: {}", t.id, e.message));
         }
         assert!(get("hello").is_ok());
+        assert!(get("manuscript").is_ok());
         assert_eq!(get("nope").err().unwrap().kind, "unknown_template");
     }
 
