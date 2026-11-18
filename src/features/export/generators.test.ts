@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { parseXml, pText, unzipDocx, wAll } from './docx/test-helpers'
+import { STYLE } from './docx/styles'
+import { parseXml, pStyle, pText, unzipDocx, wAll } from './docx/test-helpers'
 import { createManuscriptExportRenderers } from './generators'
 import { buildManuscript, FEATURE_FIXTURE_DOC, FEATURE_FIXTURE_FOOTNOTES, FEATURE_FIXTURE_STYLES, manuscriptWordCount, type InlineRun, type ManuscriptIR } from './ir'
 import type { RenderPdfOptions, RenderPdfResult } from './platform'
@@ -57,6 +58,46 @@ describe('the title-page word count is the same in the DOCX and the PDF', () => 
       expect(exact.pdf).toBe(exact.docx)
     })
   }
+})
+
+describe('the DOCX and the PDF build the title page and header by one rule', () => {
+  const docxTitlePage = (files: Record<string, string>) => {
+    const ps = wAll(parseXml(files['word/document.xml']), 'p')
+    const contactLines = ps.filter((p) => pStyle(p) === STYLE.titleContact).map((p) => pText(p).split('\t')[0])
+    const title = pText(ps.find((p) => pStyle(p) === STYLE.titleTitle)!)
+    const header = Object.entries(files)
+      .filter(([k]) => /^word\/header\d+\.xml$/.test(k))
+      .map(([, v]) => wAll(parseXml(v), 'p').map(pText).join(''))
+      .find((t) => t !== '')
+    return { contactLines, title, header }
+  }
+
+  it('a multi-line contact field (CRLF, LF or a lone CR) gives the same lines in both', async () => {
+    const pasted: ContactDetails = { legalName: 'Ann\r\nWaight', penName: '', address: '1 Quay Street\rPort Town\n\n', phone: '555 0100\nmobile 555 0101', email: ' ann@example.com ', agent: 'Jo Agent\rAgency Ltd' }
+    const settings = defaultManuscriptSettings('en-US')
+    settings.titlePage = { ...settings.titlePage, showAgent: true }
+    const job: ExportJob = { ir, settings, titlePage: { ...titlePageData(settings, contact, 'The Long Night', 100), contact: pasted } }
+    const { renderers, pdfData } = setup()
+    const docx = docxTitlePage(unzipDocx(await renderers.docx.render(job)))
+    await renderers.pdf.render(job)
+    const lines = ['Ann', 'Waight', '1 Quay Street', 'Port Town', '555 0100', 'mobile 555 0101', 'ann@example.com', 'Jo Agent', 'Agency Ltd']
+    expect(docx.contactLines).toEqual(lines)
+    expect(pdfData[0].titlePage!.contact).toEqual(lines)
+  })
+
+  it('an empty title is "Untitled" on the title page and in the header of both', async () => {
+    const settings = defaultManuscriptSettings('en-US')
+    const job: ExportJob = { ir, settings, titlePage: titlePageData(settings, contact, '  ', 100) }
+    const { renderers, pdfData } = setup()
+    const docx = docxTitlePage(unzipDocx(await renderers.docx.render(job)))
+    await renderers.pdf.render(job)
+    expect(docx.title).toBe('Untitled')
+    expect(pdfData[0].titlePage!.title).toBe('Untitled')
+    expect(pdfData[0].document.title).toBe('Untitled')
+    expect(pdfData[0].header.prefix).toBe('Waight / Untitled / ')
+    // The DOCX's page number is a PAGE field (no text of its own).
+    expect(docx.header).toBe(pdfData[0].header.prefix)
+  })
 })
 
 describe('the DOCX and the PDF space sentences the same (one shared rule)', () => {

@@ -3,7 +3,9 @@ import type { InlineRun, ManuscriptBlock, ManuscriptIR, NoteRun, ParagraphBlock 
 import { assertManuscriptVersion } from '../ir'
 import {
   bylineName,
+  contactBlockLines,
   formatWordCount,
+  manuscriptTitle,
   headerShortTitle,
   sceneBreakText,
   surnameOf,
@@ -164,23 +166,6 @@ const BYLINE: Record<ManuscriptSettings['titlePage']['bylineStyle'], (name: stri
   'name-only': (n) => n,
 }
 
-/** Lines of a multi-line contact field, each trimmed, empty ones left out. */
-const splitLines = (s: string) =>
-  s
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-
-function contactLines(c: ContactDetails, showAgent: boolean): string[] {
-  return [
-    ...splitLines(c.legalName),
-    ...splitLines(c.address),
-    ...splitLines(c.phone),
-    ...splitLines(c.email),
-    ...(showAgent ? splitLines(c.agent) : []),
-  ]
-}
-
 /**
  * Sentence spacing (docs/manuscript-format.md), by the rule the DOCX uses (../settings/sentence-spacing):
  * Standard (1) leaves the text as typed; Classic (2) adds a second space after each sentence, across
@@ -282,7 +267,7 @@ export function buildPdfData(ir: ManuscriptIR, settings: ManuscriptSettings, met
     left: r2(settings.margins.left * PT_PER_IN),
   }
   const textHeight = PAPER_HEIGHT_PT[settings.paper] - margin.top - margin.bottom
-  const title = meta.title.trim()
+  const title = manuscriptTitle(meta.title)
   const author = bylineName(meta.contact)
   const ctx: RunContext = { ir, underlineItalics: settings.italics === 'underline', sentenceSpacing: settings.sentenceSpacing }
   const scene = sceneBreakText(settings)
@@ -290,7 +275,7 @@ export function buildPdfData(ir: ManuscriptIR, settings: ManuscriptSettings, met
   const tp = settings.titlePage
   const titlePage: PdfTitlePage | null = tp.include
     ? {
-        contact: tp.showContact ? contactLines(meta.contact, tp.showAgent) : [],
+        contact: contactBlockLines(meta.contact, tp),
         wordCount: tp.showWordCount ? formatWordCount(meta.wordCount, settings.wordCountRounding) : '',
         title,
         byline: author ? BYLINE[tp.bylineStyle](author) : '',
