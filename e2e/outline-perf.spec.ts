@@ -121,7 +121,9 @@ test('100k-word manuscript with the navigation pane open: typing stays within bu
  * behind the reflow is reported too. Budget: the pane shows the new pages within 1 s of the trim change
  * (the trim reflow budget: the writer sees the book and its outline change together).
  */
-const OUTLINE_TRIMS = ['us-5x8', 'uk-a5', 'us-6x9']
+// Alternating a small and a large trim, starting from the default (us-5.5x8.5): every change moves the
+// page count a long way (about 600 against 420 pages), so the row's end always has a new value to show.
+const OUTLINE_TRIMS = ['us-5x8', 'us-6x9', 'us-5x8']
 
 test('100k-word manuscript with the navigation pane open: the outline shows the new pages within the reflow budget after a trim change', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
@@ -136,13 +138,14 @@ test('100k-word manuscript with the navigation pane open: the outline shows the 
   await expect(page.getByRole('treeitem')).toHaveCount(chapters * 2, { timeout: 30_000 })
   await expect(page.getByTestId('outline-total')).toContainText('100,000 words')
 
-  const runs: { trim: string; pages: number; reflowMs: number; outlineMs: number; lagMs: number }[] = []
+  const runs: { trim: string; pages: number; pagesBefore: number; reflowMs: number; outlineMs: number; lagMs: number }[] = []
   for (const trim of OUTLINE_TRIMS) {
     await waitForLayout(page)
     const r = await page.evaluate(
       async ([id, last]) => {
         const e = window.__nvE2E
         const v = e.layout().layoutVersion
+        const pagesBefore = e.layout().pageCount
         const t0 = performance.now()
         e.setTrimSize(id)
         let reflowMs = 0
@@ -162,10 +165,12 @@ test('100k-word manuscript with the navigation pane open: the outline shows the 
         // Painted.
         await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
         const outlineMs = performance.now() - t0
-        return { reflowMs: +reflowMs.toFixed(1), outlineMs: +outlineMs.toFixed(1), lagMs: +(outlineMs - reflowMs).toFixed(1), pages: e.layout().pageCount }
+        return { reflowMs: +reflowMs.toFixed(1), outlineMs: +outlineMs.toFixed(1), lagMs: +(outlineMs - reflowMs).toFixed(1), pages: e.layout().pageCount, pagesBefore }
       },
       [trim, chapters - 1] as const,
     )
+    // The page count really changed: the outline had something new to show.
+    expect(r.pages, `${trim}: the page count changes`).not.toBe(r.pagesBefore)
     runs.push({ trim, ...r })
   }
   const outlineAfterReflow = {

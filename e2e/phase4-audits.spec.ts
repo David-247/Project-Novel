@@ -12,7 +12,9 @@ import { editor, launch, nativeDialog, openRecent, pressTab, reveal, ribbonTab, 
  *  - contrast: WCAG 2.1 AA (text 4.5:1, icons 3:1) of every text and icon of those surfaces, on the
  *    four paper surfaces in OS light and dark (the measurer of e2e/contrast.ts);
  *  - keyboard: the whole Phase 4 flow without a pointer: the pane, Word Count, the wizard from the
- *    menu bar, each step by Tab, the export, Export Manuscript Again and its confirmation, the ribbon.
+ *    menu bar, each step by Tab, the export, Export Manuscript Again, the ribbon. (Export Again's
+ *    confirmation is an OS message box in the app; the backend's stand-in is answered by a key sent to
+ *    its button, not reached by Tab: not a reachability check.)
  * (The macOS native menu bar is exempt from the tooltip rule and is not reachable from a page:
  * decision 4ec247fc. There, File > Export is checked through its shortcuts.)
  */
@@ -288,6 +290,45 @@ test('WCAG AA contrast of the Phase 4 UI: four paper surfaces x OS light and dar
         await page.mouse.move(0, 0)
         await take(`${where} wizard ${step}`, [[`wizard ${step}`, '[data-testid="export-wizard"]', 8]])
       }
+      // Hover and keyboard focus: the control's own text or icon in that state (the step list, a
+      // primary and a secondary button, a check's action).
+      await goTo(page, 'checks')
+      for (const id of ['export.step.format', 'export.next', 'export.back', 'export.check.showChapter', 'export.close']) {
+        const el = ctl(wizard(page), id).first()
+        await el.hover()
+        await take(`${where} wizard hover`, [[`hover ${id}`, `[data-testid="export-wizard"] [data-control-id="${id}"]:hover`, 1]])
+        await page.mouse.move(0, 0)
+        await el.focus()
+        await take(`${where} wizard focus`, [[`focus ${id}`, `[data-testid="export-wizard"] [data-control-id="${id}"]:focus`, 1]])
+      }
+      // A blocking check (no name, no contact): the red severity style, its text and its Fix button.
+      await goTo(page, 'title')
+      await ctl(wizard(page), 'export.legalName').fill('')
+      await ctl(wizard(page), 'export.email').fill('')
+      await ctl(wizard(page), 'export.address').fill('')
+      await goTo(page, 'checks')
+      await page.mouse.move(0, 0)
+      // (Two passes: one element carries one probe mark, so the whole-wizard pass would take these over.)
+      await take(`${where} wizard blocking`, [['blocking check', '[data-testid="export-wizard"] [data-check][data-severity="blocking"]', 4]])
+      await take(`${where} wizard blocking`, [['wizard checks (blocking)', '[data-testid="export-wizard"]', 8]])
+      await goTo(page, 'export')
+      await take(`${where} wizard export (blocked)`, [['wizard export (blocked)', '[data-testid="export-wizard"]', 6]])
+      await goTo(page, 'title')
+      await ctl(wizard(page), 'export.legalName').fill('Ann Waight')
+      await ctl(wizard(page), 'export.email').fill('ann@example.com')
+      await ctl(wizard(page), 'export.address').fill('1 Quay Street\nPort Town')
+      // The run's states: an error (with Retry and Choose location), then done (Open file, Show in folder).
+      await goTo(page, 'export')
+      await page.evaluate(() => (window.__nvE2E.exports.failWrite = { kind: 'disk_full', message: 'full', diagnostics: [] }))
+      await ctl(wizard(page), 'export.start').click()
+      await expect(wizard(page).getByTestId('export-error')).toBeVisible()
+      await page.mouse.move(0, 0)
+      await take(`${where} wizard error`, [['wizard error', '[data-testid="export-wizard"]', 8]])
+      await page.evaluate(() => (window.__nvE2E.exports.failWrite = null))
+      await ctl(wizard(page), 'export.retry').click()
+      await expect(wizard(page).getByTestId('export-done')).toBeVisible()
+      await page.mouse.move(0, 0)
+      await take(`${where} wizard done`, [['wizard done', '[data-testid="export-wizard"]', 6]])
       await ctl(wizard(page), 'export.close').click()
       await expect(wizard(page)).toHaveCount(0)
     }
@@ -397,11 +438,15 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
     await tabThrough(page, step)
     if (i < STEPS.length - 1) await page.keyboard.press('Alt+KeyN')
   }
-  // A field typed into from the keyboard (Alt+1 back to the Title page, Tab to the genre).
+  // A field changed from the keyboard (Alt+1 back to the Title page, Tab to the genre, type-ahead
+  // "Fan" picks Fantasy: on a closed select it works on every platform, where an arrow key opens the
+  // popup on macOS).
   await page.keyboard.press('Alt+Digit1')
   await expect(ctl(wizard(page), 'export.step.title')).toHaveAttribute('aria-current', 'step')
   await tabTo(page, 'export.genre')
-  await page.keyboard.press('ArrowDown')
+  await expect(ctl(wizard(page), 'export.genre')).not.toHaveValue('fantasy')
+  await page.keyboard.type('Fan')
+  await expect(ctl(wizard(page), 'export.genre')).toHaveValue('fantasy')
   await page.keyboard.press('Alt+Digit4')
   await expect(ctl(wizard(page), 'export.step.export')).toHaveAttribute('aria-current', 'step')
   // Export (Alt+E); then Tab to Close and Enter: back in the manuscript.
@@ -413,12 +458,12 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
   await expect(wizard(page)).toHaveCount(0)
   await expect(editor(page)).toBeFocused()
 
-  // Export Manuscript Again: the shortcut, and the confirmation answered from the keyboard.
+  // Export Manuscript Again from its shortcut. Its confirmation is the OS's own message box in the app
+  // (keyboard reachable by the OS); the e2e backend draws a stand-in, which this does not test for
+  // reachability: the key is sent to its button directly.
   await page.evaluate(() => window.__nvE2E.exports.written.clear())
   await page.keyboard.press('ControlOrMeta+Alt+Shift+X')
   await expect(nativeDialog(page)).toBeVisible()
-  // (In the app this is the OS's own message box, answered with its keys; the e2e backend draws a
-  // stand-in, so the key goes to its button.)
   await nativeDialog(page).getByRole('button', { name: 'Replace' }).press('Enter')
   await expect(page.getByTestId('export-status')).toContainText('Exported')
   expect(await page.evaluate(() => [...window.__nvE2E.exports.written.keys()].length)).toBe(2)

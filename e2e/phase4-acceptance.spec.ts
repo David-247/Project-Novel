@@ -430,7 +430,7 @@ test('the feature fixture: the wizard (a blocking check fixed), DOCX and PDF che
   const pdfAgain = await realPdf(page, testInfo, 'feature-classic-a4')
   if (pdfAgain) {
     expect(pdfAgain.pages[0].width).toBeCloseTo(595.28, 0)
-    expect(pdfAgain.pages[1].lines.some((l) => l.text === '* * *') || pdfAgain.pages.some((p) => p.lines.some((l) => l.text === '* * *'))).toBe(true)
+    expect(pdfAgain.pages.some((p) => p.lines.some((l) => l.text === '* * *'))).toBe(true)
     expect(pdfAgain.fonts.every((f) => f.startsWith('LiberationMono'))).toBe(true)
   }
 })
@@ -465,7 +465,8 @@ test('the 100k-word book exports to DOCX and PDF: every chapter on a new page, h
   const at = titles.map((t) => docx.paragraphs.findIndex((p) => p.text === t))
   expect(at.every((i) => i > 0)).toBe(true)
   expect(at).toEqual([...at].sort((a, b) => a - b))
-  // Every chapter after the first starts a new section (page), and the header is "Waight / Hundred / {PAGE}".
+  // Every chapter starts a new section (page), the first one too (the title page is a section of its
+  // own), and the header is "Waight / Hundred / {PAGE}".
   for (const i of at) expect(docx.paragraphs[i - 1].sectionBreak).toBe(true)
   expect(docx.headers.map(headerText)).toContain('Waight / Hundred / {PAGE}')
   expect(docx.paragraphs[0].text).toBe('Ann Waight\tabout 100,000 words')
