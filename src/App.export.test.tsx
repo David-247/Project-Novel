@@ -12,6 +12,7 @@ import {
   getManuscriptSettings,
   getWizardState,
   setExportRenderers,
+  updateManuscriptSettings,
   useLastOutputFolder,
   WIZARD_FIXTURE_DOC,
   WIZARD_FIXTURE_REWRITES,
@@ -291,6 +292,23 @@ describe('File > Export > Manuscript…', () => {
     expect(text).toContain('He waited. Nobody came.')
     // The manuscript keeps its two spaces.
     expect(getEditor()!.state.doc.textContent).toContain('He waited.  Nobody came.')
+  })
+})
+
+describe('the front matter title block (Wave 2 ruling)', () => {
+  const docxText = () => new TextDecoder().decode(ex.written.get('/exports/Waight_THE_LONG_NIGHT_manuscript.docx'))
+
+  it('with the generated title page, THE LONG NIGHT / A novel do not print again; without it, they do', async () => {
+    await renderApp()
+    await exportOnce()
+    expect(docxText()).not.toContain('THE LONG NIGHT')
+    expect(docxText()).not.toMatch(/^A novel$/m)
+    expect(docxText()).toContain('For M.')
+    act(() => updateManuscriptSettings({ titlePage: { ...getManuscriptSettings().titlePage, include: false } }))
+    ex.written.clear()
+    await exportOnce()
+    expect(docxText()).toContain('THE LONG NIGHT')
+    expect(docxText()).toContain('For M.')
   })
 })
 

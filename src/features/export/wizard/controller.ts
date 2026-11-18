@@ -15,6 +15,7 @@ import { hasBlocking, runChecks, type CheckAction, type CheckResult, type Wizard
 import { getExportRenderer, type ExportJob, type WizardFormat, WIZARD_FORMATS } from './renderers'
 import { describeExportError, ExportRunError, runExport, type WrittenFile } from './run'
 import { fileNameOf, folderOf, manuscriptFileName, titlePageData } from './title-page'
+import { withoutTitleBlock } from './title-block'
 
 /**
  * The export wizard's state and actions (module state: one window, one wizard). The dialog
@@ -153,10 +154,15 @@ export function checksFor(prepared: PreparedManuscript, settings: ManuscriptSett
   return runChecks({ ir: prepared.ir, settings, title: getManuscriptTitle(), contact: getResolvedContact(), wordCount: prepared.wordCount, locations: prepared.locations })
 }
 
-/** The job an export renders: the IR with the export-only options applied, the settings, the title page. */
+/**
+ * The job an export renders: the IR with the export-only options applied, the settings, the title page.
+ * With the generated title page on, the front matter's own title block is left out (withoutTitleBlock).
+ */
 export function exportJob(prepared: PreparedManuscript, settings: ManuscriptSettings = getManuscriptSettings()): ExportJob {
-  const ir = settings.checks.normalizeSpaces ? normalizeSentenceSpaces(prepared.ir) : prepared.ir
-  return { ir, settings, titlePage: titlePageData(settings, getResolvedContact(), getManuscriptTitle(), prepared.wordCount) }
+  const titlePage = titlePageData(settings, getResolvedContact(), getManuscriptTitle(), prepared.wordCount)
+  let ir = settings.checks.normalizeSpaces ? normalizeSentenceSpaces(prepared.ir) : prepared.ir
+  if (settings.titlePage.include) ir = withoutTitleBlock(ir, { title: titlePage.title, names: [titlePage.contact.penName, titlePage.contact.legalName] })
+  return { ir, settings, titlePage }
 }
 
 /** The formats the settings ask for that this build can make. */

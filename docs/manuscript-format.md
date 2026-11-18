@@ -182,6 +182,12 @@ A novel has a separate title page. [S-shunn-novel]
   double-spaced line, then the by-line centred. Nothing else on the page. Text starts on the next page.
 - **Default.** By-line `A Novel by <name>`, where the name is the pen name if the profile has one, else the legal name.
   **Options.** `bylineStyle`: `a-novel-by`, `by`, `name-only`. The title page has no header and no page number.
+- **The manuscript's own title lines.** With the generated title page on, the front matter's title block does not
+  print again after it (Phase 4 Wave 2 ruling; `withoutTitleBlock` in the export wizard). The block is recognised
+  only at the very start of the front matter: a paragraph that is the manuscript title (letters and digits,
+  case-insensitive), then at most one subtitle ("A novel", "A thriller novel", "A Novel by <name>") and one
+  by-line ("by <name>" or the name; with no name on file, a short "by ..." line), and the page breaks after them.
+  Anything else stays. Without the generated title page nothing is left out.
 
 ## Running header and page numbers
 
