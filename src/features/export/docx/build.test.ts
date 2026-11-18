@@ -58,6 +58,12 @@ describe('DOCX package', () => {
     expect(wAttr(wAll(wAll(styles, 'rPrDefault')[0], 'lang')[0], 'val')).toBe('en-US')
   })
 
+  it('an empty title is "Untitled" on the title page and in the properties alike', async () => {
+    const { files, titlePage } = await render(testSettings({}, { title: '   ' }))
+    expect(titlePage.map(pText)).toContain('Untitled')
+    expect(parseXml(files['docProps/core.xml']).getElementsByTagName('dc:title')[0].textContent).toBe('Untitled')
+  })
+
   it('writes the language given, and falls back to en-US for a malformed tag', async () => {
     const gb = await render(testSettings({}, { language: 'en_GB' }))
     expect(parseXml(gb.files['docProps/core.xml']).getElementsByTagName('dc:language')[0].textContent).toBe('en-GB')

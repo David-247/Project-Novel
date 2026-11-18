@@ -150,6 +150,7 @@ export function toMarkdown(results, dir = 'perf-results') {
     if (r.irBuild) row('manuscript IR build (median)', r.irBuild.medianMs, 500)
     if (r.irBuildTracked) row('manuscript IR build, 2,000 pending changes (median)', r.irBuildTracked.medianMs, 500)
     if (r.docxExport) row('DOCX export, 100k words: IR + render in the worker (median)', r.docxExport.medianMs, 5000)
+    if (r.docxExportClassic) row('DOCX export, 100k words, Classic preset (median)', r.docxExportClassic.medianMs, 5000)
   }
   if (exportRows.length) {
     md.push('#### Export', '')

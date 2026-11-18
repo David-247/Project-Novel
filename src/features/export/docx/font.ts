@@ -1,7 +1,9 @@
+// presets.ts imports only types: safe in the export worker.
+import { FONT_FALLBACKS } from '../settings/presets'
 import type { ManuscriptSettings } from '../settings/types'
 
-/** Families the manuscript format knows (docs/manuscript-format.md, FONT_FALLBACKS), compared without case. */
-const KNOWN = new Set(['times new roman', 'tinos', 'liberation serif', 'courier new', 'cousine', 'liberation mono'])
+/** Families the manuscript format knows: every face of FONT_FALLBACKS and its stand-ins, compared without case. */
+const KNOWN = new Set(Object.values(FONT_FALLBACKS).flatMap((families) => families.map((f) => f.toLowerCase())))
 
 export interface DocxFontReport {
   /** The settings' font family, trimmed: the name the .docx is written with. */

@@ -18,7 +18,7 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getDocJSON, getEditor, getFootnotes, getResolvedStyles, setDocJSON } from '@/features/editor'
-import { buildManuscript, createDocxRenderer, defaultManuscriptSettings, isAbortError } from '@/features/export'
+import { applyPreset, buildManuscript, createDocxRenderer, defaultManuscriptSettings, isAbortError } from '@/features/export'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition, turnSpread, goToEdgeSpread, showPage } from '@/features/pagination'
@@ -370,15 +370,16 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     /**
      * Export the open document as DOCX with the real renderer (in its Web Worker) `runs` times after
      * one warm-up: the IR build plus the render, as the wizard runs them. Times in ms; the progress
-     * fractions of the last run; whether the page kept painting frames during it.
+     * fractions of the last run; whether the page kept painting frames during it. `preset` 'classic'
+     * adds the two-spaces-after-a-sentence pass and underline for italics.
      */
-    renderDocxTimes: async (runs = 3) => {
+    renderDocxTimes: async (runs = 3, preset: 'standard' | 'classic' = 'standard') => {
       const ed = getEditor()
       if (!ed) return null
       const styles = getResolvedStyles()
       const footnotes = useStore.getState().book.footnotes
       const renderer = createDocxRenderer()
-      const settings = { ...defaultManuscriptSettings('en-US'), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' } } }
+      const settings = { ...applyPreset(defaultManuscriptSettings('en-US'), preset), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' } } }
       const once = async (onProgress?: (p: { fraction: number }) => void) => {
         const t0 = performance.now()
         const ir = buildManuscript(ed.state.doc, styles, { footnotes })

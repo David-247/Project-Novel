@@ -32,9 +32,22 @@ function errorFrom(msg: { name: string; message: string }): Error {
   return e
 }
 
+/** The worker failed before it reported anything (its script did not load or start): the page can build instead. */
+class WorkerUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'WorkerUnavailableError'
+  }
+}
+
 function renderInWorker(worker: Worker, ir: ManuscriptIR, settings: DocxRenderSettings, { signal, onProgress }: RenderOptions): Promise<Uint8Array> {
   return new Promise<Uint8Array>((resolve, reject) => {
     let settled = false
+    let heard = false
+    const fail = (what: string) => {
+      const message = `The DOCX export worker failed: ${what}`
+      finish(() => reject(heard ? new Error(message) : new WorkerUnavailableError(message)))
+    }
     const finish = (fn: () => void) => {
       if (settled) return
       settled = true
@@ -48,14 +61,17 @@ function renderInWorker(worker: Worker, ir: ManuscriptIR, settings: DocxRenderSe
     worker.onmessage = (e: MessageEvent<DocxWorkerResponse>) => {
       const msg = e.data
       if (settled) return
+      heard = true
       if (msg.type === 'progress') onProgress?.(msg.progress)
       else if (msg.type === 'done') finish(() => resolve(msg.bytes))
       else finish(() => reject(errorFrom(msg)))
     }
     worker.onerror = (e: ErrorEvent) => {
       e.preventDefault()
-      finish(() => reject(new Error(`The DOCX export worker failed: ${e.message || 'unknown error'}`)))
+      fail(e.message || 'unknown error')
     }
+    // A reply that cannot be deserialized.
+    worker.onmessageerror = () => fail('a message could not be read')
     const request: DocxWorkerRequest = { type: 'render', ir, settings }
     worker.postMessage(request)
   })
@@ -85,7 +101,15 @@ export function createDocxRenderer(options: DocxRendererOptions = {}): Manuscrip
           }
         : undefined
       const worker = mode === 'never' ? null : mode === 'auto' ? createWorker() : mode()
-      if (worker) return renderInWorker(worker, ir, settings, { signal: renderOptions.signal, onProgress })
+      if (worker) {
+        try {
+          return await renderInWorker(worker, ir, settings, { signal: renderOptions.signal, onProgress })
+        } catch (e) {
+          // 'auto': a worker that never got going (e.g. its script failed to load) falls back to the page.
+          if (!(mode === 'auto' && e instanceof WorkerUnavailableError)) throw e
+          throwIfAborted(renderOptions.signal)
+        }
+      }
       // Loaded on demand: the `docx` library stays out of the app's main bundle (the worker has its own copy).
       const { renderDocx } = await import('./build')
       return renderDocx(ir, settings, { signal: renderOptions.signal, onProgress, pause: yieldToEventLoop })

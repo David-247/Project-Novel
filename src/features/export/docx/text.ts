@@ -34,14 +34,24 @@ function endsSentence(before: string): boolean {
   return !ABBREVIATIONS.has(word.toLowerCase())
 }
 
+/** How much text before a sentence gap is looked at (longer than any abbreviation with its quotes). */
+const CONTEXT = 64
+
+/** The tail of a paragraph's earlier text that `doubleSentenceSpaces` needs as `previous`. */
+export function sentenceContext(text: string): string {
+  return text.length > CONTEXT ? text.slice(-CONTEXT) : text
+}
+
 /**
  * Two spaces after a sentence (the Classic preset): every single space after a sentence end gets a
  * second one. `previous` is the text before `text` in the same paragraph (another run), so a space
  * that starts this run after a sentence ending the previous one counts too.
  */
 export function doubleSentenceSpaces(text: string, previous = ''): string {
+  previous = sentenceContext(previous)
   let out = text.replace(SENTENCE_GAP, (match, end: string, offset: number) => {
-    const before = previous + text.slice(0, offset) + end
+    // Only the last word and its punctuation decide; a bounded tail keeps a long paragraph linear.
+    const before = offset >= CONTEXT ? text.slice(offset - CONTEXT, offset) + end : previous + text.slice(0, offset) + end
     return endsSentence(before) ? `${end}  ` : match
   })
   if (out.startsWith(' ') && !out.startsWith('  ') && endsSentence(previous) && /^ ["'“‘([]?[\p{Lu}\p{N}]/u.test(out)) out = ` ${out}`

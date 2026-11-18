@@ -74,6 +74,11 @@ test('100k-word manuscript: the DOCX export renders within budget', async ({ pag
   expect(r!.fractions[r!.fractions.length - 1]).toBe(1)
   for (let i = 1; i < r!.fractions.length; i++) expect(r!.fractions[i]).toBeGreaterThanOrEqual(r!.fractions[i - 1])
   const docxExport = { medianMs: median(r!.ms), maxMs: Math.max(...r!.ms), runs: r!.ms, bytes: r!.bytes, framesDuringLastRun: r!.frames }
-  await report(testInfo, 'perf-export-docx', { docxExport })
+  // Classic: the sentence-spacing pass on every run of text (the quadratic risk the unit guard covers too).
+  const c = await page.evaluate(() => window.__nvE2E.renderDocxTimes(3, 'classic'))
+  expect(c!.fractions[c!.fractions.length - 1]).toBe(1)
+  const docxExportClassic = { medianMs: median(c!.ms), maxMs: Math.max(...c!.ms), runs: c!.ms, bytes: c!.bytes }
+  await report(testInfo, 'perf-export-docx', { docxExport, docxExportClassic })
   budget(testInfo, 'DOCX export of 100k words (IR + render), median ms', docxExport.medianMs, 5000)
+  budget(testInfo, 'DOCX export of 100k words, Classic preset, median ms', docxExportClassic.medianMs, 5000)
 })

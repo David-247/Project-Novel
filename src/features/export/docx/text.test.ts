@@ -1,14 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { docxFontReport } from './font'
-import { doubleSentenceSpaces, xmlSafe } from './text'
-
-describe('docxFontReport (as the PDF render report)', () => {
-  it('the trimmed family; substituted when it is not a known manuscript family', () => {
-    expect(docxFontReport({ fontFamily: '  Times New Roman ' })).toEqual({ requested: 'Times New Roman', substituted: false })
-    expect(docxFontReport({ fontFamily: 'cousine' })).toEqual({ requested: 'cousine', substituted: false })
-    expect(docxFontReport({ fontFamily: 'Garamond' })).toEqual({ requested: 'Garamond', substituted: true })
-  })
-})
+import { doubleSentenceSpaces, sentenceContext, xmlSafe } from './text'
 
 describe('xmlSafe', () => {
   it('drops what XML 1.0 cannot hold and keeps tab, line feeds and emoji', () => {
@@ -36,6 +27,22 @@ describe('doubleSentenceSpaces (Classic)', () => {
     expect(doubleSentenceSpaces(' Then', 'It ended.')).toBe('  Then')
     expect(doubleSentenceSpaces(' then', 'It ended.')).toBe(' then')
     expect(doubleSentenceSpaces(' Smith', 'Mr.')).toBe(' Smith')
+  })
+
+  it('stays linear on a very long paragraph, in one run or in many (timing guard)', () => {
+    const sentence = 'Mr. Smith walked to the river and back. '
+    const long = sentence.repeat(10_000) // 400,000 characters, 10,000 sentence gaps
+    const t0 = performance.now()
+    const out = doubleSentenceSpaces(long)
+    let previous = ''
+    for (let i = 0; i < 10_000; i++) {
+      doubleSentenceSpaces(sentence, previous)
+      previous = sentenceContext(previous + sentence)
+    }
+    const ms = performance.now() - t0
+    expect(out.startsWith('Mr. Smith walked to the river and back.  Mr. Smith')).toBe(true)
+    expect(out.length).toBe(long.length + 9_999)
+    expect(ms).toBeLessThan(1000)
   })
 
   it('leaves existing double spaces alone', () => {

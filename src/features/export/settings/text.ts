@@ -39,7 +39,8 @@ export function surnameOf(name: string): string {
 export interface HeaderContext {
   surname: string
   shortTitle: string
-  page: number
+  /** The page number, or a placeholder string a generator replaces with a page field (DOCX: PAGE). */
+  page: number | string
 }
 
 /** The running-header text of one page: "Surname / Title / 13". Empty parts are left out. */

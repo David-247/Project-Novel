@@ -1,3 +1,5 @@
+// presets.ts imports only types: safe in the export worker.
+import { FONT_FALLBACKS } from '../settings/presets'
 import type { LineSpacing, ManuscriptSettings, PaperId } from '../settings/types'
 
 /**
@@ -30,17 +32,26 @@ export function autoLine(spacing: LineSpacing): number {
  * the research doc lists; other fonts get 1.15 (a typical text face). Used only to place the title
  * and the blank double-spaced lines (spacing before / after), never the body's line spacing.
  */
-const SINGLE_LINE_EM: Record<string, number> = {
-  'times new roman': 1.1499,
-  tinos: 1.1499,
-  'liberation serif': 1.1499,
-  'courier new': 1.1328,
-  cousine: 1.1328,
-  'liberation mono': 1.1328,
+const SINGLE_LINE_EM_BY_FACE: Record<string, number> = {
+  'Times New Roman': 1.1499,
+  'Courier New': 1.1328,
+}
+
+/** Every family of FONT_FALLBACKS (a face and its metric-compatible stand-ins), lower-cased, to its metric. */
+const SINGLE_LINE_EM = new Map<string, number>(
+  Object.entries(FONT_FALLBACKS).flatMap(([face, families]) => {
+    const em = SINGLE_LINE_EM_BY_FACE[face]
+    return em === undefined ? [] : families.map((f) => [f.toLowerCase(), em] as const)
+  }),
+)
+
+/** The metric of a known manuscript family, or undefined (tests assert FONT_FALLBACKS is covered). */
+export function knownSingleLineEm(fontFamily: string): number | undefined {
+  return SINGLE_LINE_EM.get(fontFamily.trim().toLowerCase())
 }
 
 export function singleLineEm(fontFamily: string): number {
-  return SINGLE_LINE_EM[fontFamily.trim().toLowerCase()] ?? 1.15
+  return knownSingleLineEm(fontFamily) ?? 1.15
 }
 
 const inches = (n: number, min: number, max: number) => Math.round(Math.min(max, Math.max(min, Number.isFinite(n) ? n : min)) * TWIPS_PER_INCH)

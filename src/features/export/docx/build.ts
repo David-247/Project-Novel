@@ -19,7 +19,7 @@ import { bylineName, formatWordCount, runningHeader, surnameOf } from '../settin
 import type { ContactDetails } from '../settings/types'
 import { docxLayout, HEADER_DISTANCE_TWIPS, type DocxLayout } from './layout'
 import { manuscriptStyles, STYLE } from './styles'
-import { doubleSentenceSpaces, xmlSafe } from './text'
+import { doubleSentenceSpaces, sentenceContext, xmlSafe } from './text'
 import type { DocxRenderSettings } from './types'
 import { manuscriptWordCount } from './word-count'
 
@@ -85,7 +85,7 @@ function inlineRuns(runs: readonly (InlineRun | NoteRun)[], ctx: Ctx): RunChild[
   for (const r of runs) {
     if (r.kind === 'text') {
       const text = classic ? doubleSentenceSpaces(r.text, previous) : r.text
-      previous += r.text
+      if (classic) previous = sentenceContext(previous + r.text)
       out.push(...textRuns(text, emphasis(r, ctx)))
     } else if (r.kind === 'lineBreak') {
       out.push(new TextRun({ break: 1 }))
@@ -197,6 +197,9 @@ function contactLines(contact: ContactDetails, settings: DocxRenderSettings): st
   return out.filter((l) => l !== '').map(xmlSafe)
 }
 
+/** The manuscript title as printed and in the properties: trimmed, "Untitled" when empty. */
+const manuscriptTitle = (settings: DocxRenderSettings) => settings.info.title.trim() || 'Untitled'
+
 function titlePage(ir: ManuscriptIR, settings: DocxRenderSettings): { paragraphs: Paragraph[]; linesAboveTitle: number } {
   const { info, titlePage: tp } = settings
   const lines = contactLines(info.contact, settings)
@@ -211,7 +214,7 @@ function titlePage(ir: ManuscriptIR, settings: DocxRenderSettings): { paragraphs
     )
   }
   const linesAboveTitle = paragraphs.length
-  paragraphs.push(new Paragraph({ style: STYLE.titleTitle, children: textRuns(info.title.trim() || 'Untitled', {}) }))
+  paragraphs.push(new Paragraph({ style: STYLE.titleTitle, children: textRuns(manuscriptTitle(settings), {}) }))
   const name = bylineName(info.contact)
   if (name) paragraphs.push(new Paragraph({ style: STYLE.titleByline, children: textRuns(BYLINE[tp.bylineStyle] + name, {}) }))
   return { paragraphs, linesAboveTitle }
@@ -224,7 +227,7 @@ function header(settings: DocxRenderSettings): Header | null {
   if (settings.header.format === 'none') return null
   const surname = surnameOf(xmlSafe(bylineName(settings.info.contact)))
   const shortTitle = settings.header.shortTitle.trim() || settings.info.title.trim()
-  const text = runningHeader(settings.header, { surname, shortTitle: xmlSafe(shortTitle), page: PAGE_SLOT as unknown as number })
+  const text = runningHeader(settings.header, { surname, shortTitle: xmlSafe(shortTitle), page: PAGE_SLOT })
   const [before, after = ''] = text.split(PAGE_SLOT)
   return new Header({
     children: [
@@ -342,7 +345,7 @@ export async function renderDocx(ir: ManuscriptIR, settings: DocxRenderSettings,
   })
 
   const author = bylineName(settings.info.contact)
-  const title = settings.info.title.trim()
+  const title = manuscriptTitle(settings)
   const doc = new Document({
     title,
     creator: author,
