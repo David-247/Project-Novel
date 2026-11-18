@@ -18,7 +18,22 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getDocJSON, getEditor, getFootnotes, getResolvedStyles, setDocJSON } from '@/features/editor'
-import { applyPreset, buildManuscript, createDocxRenderer, defaultManuscriptSettings, isAbortError } from '@/features/export'
+import {
+  applyPreset,
+  buildManuscript,
+  createDocxRenderer,
+  createMockExportRenderers,
+  defaultManuscriptSettings,
+  getWizardState,
+  isAbortError,
+  setExportRenderers,
+  WIZARD_FIXTURE_COMMENTS,
+  WIZARD_FIXTURE_DOC,
+  WIZARD_FIXTURE_REWRITES,
+  WIZARD_FIXTURE_STYLES,
+  type ExportRenderer,
+  type WizardFormat,
+} from '@/features/export'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition, turnSpread, goToEdgeSpread, showPage } from '@/features/pagination'
@@ -122,6 +137,27 @@ function showNativeMessage(args: MessageDialogArgs): Promise<string> {
   })
 }
 
+// ---- Export renderers (the wizard's; mocks until the real generators are wired) -----------------
+
+/**
+ * Mock DOCX / PDF renderers for the export wizard in the e2e build: the bytes are the manuscript's
+ * plain text. Tests slow them down (`delayMs` per chapter, to cancel mid-render) or make the next
+ * renders fail (`fail`: a message). The composition root's real renderers, once wired, replace these.
+ */
+const mockRender = { delayMs: 0, fail: null as string | null }
+function installMockRenderers(): void {
+  const wrap = (format: WizardFormat): ExportRenderer => ({
+    format,
+    render: async (job, options) => {
+      const inner = createMockExportRenderers({ delayMs: mockRender.delayMs })[format]
+      const bytes = await inner.render(job, options)
+      if (mockRender.fail) throw new Error(mockRender.fail)
+      return bytes
+    },
+  })
+  setExportRenderers({ docx: wrap('docx'), pdf: wrap('pdf') })
+}
+
 // ---- Install ---------------------------------------------------------------
 
 /** Test control surface (window.__nvE2E). */
@@ -138,6 +174,20 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
      * `cancels`, `reveals`.
      */
     exports: core.exports,
+    /** The wizard's mock renderers: per-chapter delay and a failure message for the next renders. */
+    mockRender,
+    /** The export wizard's fixture: manuscript.json, comments.json, rewrites.json and the book's styles. */
+    exportWizardFixture: () => ({ doc: WIZARD_FIXTURE_DOC, comments: WIZARD_FIXTURE_COMMENTS, rewrites: WIZARD_FIXTURE_REWRITES, styles: WIZARD_FIXTURE_STYLES }),
+    /** The export wizard's state (open, step, the run's phase). */
+    exportWizardState: () => {
+      const w = getWizardState()
+      return { open: w.open, step: w.step, phase: w.run.phase, problem: w.run.error?.problem ?? null }
+    },
+    /** Text of a file the export wrote (the mock renderers write the manuscript as text). */
+    exportedText: (path: string) => {
+      const bytes = core.exports.written.get(path)
+      return bytes ? new TextDecoder().decode(bytes) : null
+    },
     /** Fire a Tauri event, e.g. a native File menu item ('menu://new-project'). */
     emit(event: string, payload?: unknown) {
       return window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event, payload })
@@ -544,6 +594,11 @@ export async function installE2EBackend(): Promise<void> {
     },
     { shouldMockEvents: true },
   )
+  // mockIPC drops invoke options; the export write names its target in headers (as Rust reads them).
+  const internals = window.__TAURI_INTERNALS__ as unknown as { invoke: (cmd: string, args?: unknown, options?: { headers?: unknown }) => Promise<unknown> }
+  const mockedInvoke = internals.invoke
+  internals.invoke = (cmd, args, options) => (cmd === 'export_write_file' ? core.handle(cmd, args as Record<string, unknown>, options) : mockedInvoke(cmd, args, options))
   ;(globalThis as unknown as { isTauri: boolean }).isTauri = true
+  installMockRenderers()
   window.__nvE2E = controlFor(core)
 }

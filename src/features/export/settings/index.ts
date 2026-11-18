@@ -15,5 +15,6 @@ export {
   getContactOverride,
   useContactOverride,
   setContactOverride,
+  __resetExportSettingsForTests,
 } from './store'
 export { getResolvedContact, useResolvedContact } from './contact'

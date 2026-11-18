@@ -27,6 +27,7 @@ pub fn run() {
             export::export_render_pdf,
             export::export_cancel_render,
             export::export_reveal_in_folder,
+            export::export_open_file,
             menu::menu_set,
             storage::storage_pick_project_folder,
             storage::storage_open_recent_root,

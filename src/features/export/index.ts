@@ -44,3 +44,15 @@ export * from './pdf'
 // DocxRenderSettings / ManuscriptExportInfo, DOCX_MIME_TYPE. docs/docx-export.md.
 export * from './docx'
 // --- end of the DOCX generator block -------------------------------------------------------------
+// --- Export wizard (src/features/export/wizard/*) ------------------------------------------------
+// File > Export > Manuscript… (the wizard: title page, formatting, checks, export) and Export Manuscript
+// Again (the last export, same files, progress in the status bar):
+// - <ExportWizard /> (render once; portal) and <ExportStatus /> (the status bar's Export Again notice)
+// - registerExportCommands(): both commands (File > Export submenu, ribbon Layout > Export)
+// - setExportRenderers({ docx, pdf }): the composition root injects the DOCX / PDF generators, wrapped
+//   by fromManuscriptRenderer(format, renderer, toSettings?); createMockExportRenderers() for tests / e2e
+// - EXPORT_WIZARD_CONTROLS: control ids, names and descriptions (the tooltips registry reads them)
+// - the pure parts: runChecks(), manuscriptWordCount(), chapterIssues(), normalizeSentenceSpaces(),
+//   titlePageData(), manuscriptFileName(), runExport()
+export * from './wizard'
+// --- end of the export wizard block --------------------------------------------------------------

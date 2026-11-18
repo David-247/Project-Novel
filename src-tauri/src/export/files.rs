@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::ExportError;
 use crate::storage;
@@ -69,6 +69,14 @@ impl Targets {
             })
     }
 
+    /// The folder of the most recent grant of `kind` (else of any kind): where the next Save dialog
+    /// starts. Rust's own record; the webview names no folder.
+    pub fn last_folder(&self, kind: FileKind) -> Option<PathBuf> {
+        let of_kind = self.picked.iter().rev().find(|(_, _, k)| *k == kind);
+        let any = self.picked.last();
+        of_kind.or(any).and_then(|(_, p, _)| p.parent().map(Path::to_path_buf))
+    }
+
     pub fn mark_exported(&mut self, path: &Path) {
         self.exported.retain(|p| p != path);
         self.exported.push(path.to_path_buf());
@@ -114,6 +122,51 @@ pub fn safe_file_name(name: &str, kind: FileKind) -> String {
     }
 }
 
+/// The Save dialog's starting folder: `dir` when it is an absolute path to an existing folder, else
+/// none (the dialog's own default). A hint only: it grants no write.
+pub fn start_directory(dir: &Path) -> Option<PathBuf> {
+    if dir.as_os_str().is_empty() || !dir.is_absolute() || !dir.is_dir() {
+        return None;
+    }
+    Some(dir.to_path_buf())
+}
+
+/// Rust's record of the last export folder per project (app data dir), so the first Save dialog after
+/// a restart opens where the last export went. Written only by Rust, after a successful export write;
+/// the webview never names a folder. Keyed by the project's canonical root ("" with no project open).
+pub const EXPORT_FOLDERS_FILE: &str = "export-folders.json";
+/// Projects remembered (oldest forgotten first).
+const MAX_REMEMBERED: usize = 32;
+
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RememberedFolders {
+    #[serde(default)]
+    pub folders: Vec<RememberedFolder>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RememberedFolder {
+    pub project: String,
+    pub folder: String,
+}
+
+impl RememberedFolders {
+    /// Parse the file; a missing or damaged one is empty.
+    pub fn parse(text: Option<&str>) -> Self {
+        text.and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default()
+    }
+    pub fn folder_for(&self, project: &str) -> Option<PathBuf> {
+        self.folders.iter().find(|f| f.project == project).map(|f| PathBuf::from(&f.folder))
+    }
+    /// Remember `folder` for `project` (most recent last, at most MAX_REMEMBERED).
+    pub fn remember(&mut self, project: &str, folder: &Path) {
+        self.folders.retain(|f| f.project != project);
+        self.folders.push(RememberedFolder { project: project.to_string(), folder: folder.to_string_lossy().into_owned() });
+        let extra = self.folders.len().saturating_sub(MAX_REMEMBERED);
+        self.folders.drain(..extra);
+    }
+}
+
 /// Write export bytes atomically (storage's temp file + fsync + rename, symlink refused): a failure
 /// leaves the previous file, or nothing, never a partial file.
 pub fn write_export(target: &Path, bytes: &[u8]) -> Result<(), ExportError> {
@@ -130,6 +183,19 @@ pub fn explorer_path(path: &str) -> String {
     path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
 }
 
+/// Explorer's argument to show `path` selected: `/select,"<path>"` as one raw argument (the path in
+/// quotes, so commas and spaces in it are kept). Paths cannot contain `"` on Windows.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn explorer_select_arg(path: &str) -> String {
+    format!("/select,\"{}\"", explorer_path(path))
+}
+
+/// Explorer's argument to open `path` with its program: the path in quotes (commas and spaces kept).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn explorer_open_arg(path: &str) -> String {
+    format!("\"{}\"", explorer_path(path))
+}
+
 /// Show `path` selected in Explorer / Finder. Callers check it was exported first.
 pub fn reveal(path: &Path) -> Result<(), ExportError> {
     let spawn_err = |e: std::io::Error| ExportError::new("io", format!("Could not open the folder: {e}"));
@@ -139,10 +205,9 @@ pub fn reveal(path: &Path) -> Result<(), ExportError> {
         use std::os::windows::process::CommandExt;
         // explorer wants `/select,"<path>"` as one raw argument (Rust's quoting would wrap all of it).
         // Paths cannot contain `"` on Windows.
-        let shown = explorer_path(&path.to_string_lossy());
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
         let mut cmd = std::process::Command::new(Path::new(&root).join("explorer.exe"));
-        cmd.raw_arg(format!("/select,\"{shown}\""));
+        cmd.raw_arg(explorer_select_arg(&path.to_string_lossy()));
         cmd
     };
     #[cfg(target_os = "macos")]
@@ -159,6 +224,44 @@ pub fn reveal(path: &Path) -> Result<(), ExportError> {
     };
     let mut child = cmd.spawn().map_err(spawn_err)?;
     // Reap it off-thread (explorer's exit code means nothing; this only avoids a zombie on Unix).
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+/// Open an exported file with its default app. Callers check it was exported first; only .docx and
+/// .pdf files are opened (an exported file is always one of them), so nothing else can be launched.
+pub fn open_exported(path: &Path) -> Result<(), ExportError> {
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    if !matches!(ext.as_deref(), Some("docx") | Some("pdf")) {
+        return Err(ExportError::new("not_exported", "Novel only opens the DOCX and PDF files it exported."));
+    }
+    let spawn_err = |e: std::io::Error| ExportError::new("io", format!("Could not open the file: {e}"));
+    #[cfg(windows)]
+    let mut cmd = {
+        use std::os::windows::process::CommandExt;
+        // explorer.exe <file> opens it with the program associated with its type.
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let mut cmd = std::process::Command::new(Path::new(&root).join("explorer.exe"));
+        // Quoted by hand: Rust quotes only arguments with spaces, and Explorer splits an unquoted
+        // argument at a comma ("C:\\Smith,Ann\\x.pdf").
+        cmd.raw_arg(explorer_open_arg(&path.to_string_lossy()));
+        cmd
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut cmd = std::process::Command::new("/usr/bin/open");
+        cmd.arg(path);
+        cmd
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut cmd = std::process::Command::new("/usr/bin/xdg-open");
+        cmd.arg(path);
+        cmd
+    };
+    let mut child = cmd.spawn().map_err(spawn_err)?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });
@@ -253,6 +356,62 @@ mod tests {
         assert_eq!(explorer_path(r"\\?\UNC\server\share\Novel.pdf"), r"\\server\share\Novel.pdf");
         assert_eq!(explorer_path(r"C:\Books\Novel.pdf"), r"C:\Books\Novel.pdf");
         assert_eq!(explorer_path(r"\\server\share\Novel.pdf"), r"\\server\share\Novel.pdf");
+    }
+
+    #[test]
+    fn start_directory_only_for_an_existing_absolute_folder() {
+        let dir = temp_dir("start");
+        assert_eq!(start_directory(&dir), Some(dir.clone()));
+        assert_eq!(start_directory(Path::new("relative/folder")), None);
+        assert_eq!(start_directory(Path::new("")), None);
+        assert_eq!(start_directory(&dir.join("missing")), None);
+        fs::write(dir.join("file.txt"), b"x").unwrap();
+        assert_eq!(start_directory(&dir.join("file.txt")), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_next_dialog_starts_in_the_folder_of_the_last_grant_of_its_kind() {
+        let mut t = Targets::default();
+        assert_eq!(t.last_folder(FileKind::Pdf), None);
+        t.grant(PathBuf::from("/a/book.docx"), FileKind::Docx);
+        assert_eq!(t.last_folder(FileKind::Pdf), Some(PathBuf::from("/a")));
+        t.grant(PathBuf::from("/b/book.pdf"), FileKind::Pdf);
+        t.grant(PathBuf::from("/c/other.docx"), FileKind::Docx);
+        assert_eq!(t.last_folder(FileKind::Pdf), Some(PathBuf::from("/b")));
+        assert_eq!(t.last_folder(FileKind::Docx), Some(PathBuf::from("/c")));
+    }
+
+    #[test]
+    fn remembered_folders_per_project_most_recent_last_and_capped() {
+        let mut r = RememberedFolders::parse(None);
+        r.remember("/p/one", Path::new("/out/one"));
+        r.remember("/p/two", Path::new("/out/two"));
+        r.remember("/p/one", Path::new("/out/one-b"));
+        let text = serde_json::to_string(&r).unwrap();
+        let back = RememberedFolders::parse(Some(&text));
+        assert_eq!(back.folder_for("/p/one"), Some(PathBuf::from("/out/one-b")));
+        assert_eq!(back.folder_for("/p/two"), Some(PathBuf::from("/out/two")));
+        assert_eq!(back.folders.last().unwrap().project, "/p/one");
+        assert_eq!(RememberedFolders::parse(Some("not json")), RememberedFolders::default());
+        for i in 0..40 {
+            r.remember(&format!("/p/{i}"), Path::new("/x"));
+        }
+        assert_eq!(r.folders.len(), MAX_REMEMBERED);
+        assert_eq!(r.folder_for("/p/one"), None);
+    }
+
+    #[test]
+    fn explorer_arguments_quote_paths_with_commas_and_spaces() {
+        assert_eq!(explorer_select_arg(r"C:\Smith, Ann\Book.pdf"), r#"/select,"C:\Smith, Ann\Book.pdf""#);
+        assert_eq!(explorer_open_arg(r"C:\Smith,Ann\Book.docx"), r#""C:\Smith,Ann\Book.docx""#);
+        assert_eq!(explorer_open_arg(r"\\?\C:\Smith,Ann\Book.docx"), r#""C:\Smith,Ann\Book.docx""#);
+    }
+
+    #[test]
+    fn open_exported_refuses_other_file_types() {
+        assert_eq!(open_exported(Path::new("/x/run.exe")).unwrap_err().kind, "not_exported");
+        assert_eq!(open_exported(Path::new("/x/notes")).unwrap_err().kind, "not_exported");
     }
 
     #[test]

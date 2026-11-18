@@ -82,6 +82,8 @@ describe('app commands (one registry for menus, shortcuts and tooltips)', () => 
       'Book Details…',
       'Page Setup ▸',
       '—',
+      'Export ▸',
+      '—',
       'Settings…',
       '—',
       'Quit Novel',

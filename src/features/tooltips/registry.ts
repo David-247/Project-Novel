@@ -16,6 +16,7 @@ import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import { COMMENT_CONTROLS } from '@/features/comments'
 import { REWRITE_CONTROLS } from '@/features/rewrite'
 import { OUTLINE_CONTROLS } from '@/features/outline'
+import { EXPORT_WIZARD_CONTROLS } from '@/features/export'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
@@ -326,6 +327,14 @@ const REWRITE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   ]),
 )
 
+/** File > Export > Manuscript…: the export wizard and the status bar's Export Again notice (export slice). */
+const EXPORT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(EXPORT_WIZARD_CONTROLS).map((c): [string, TooltipCopy] => [
+    c.id,
+    { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+  ]),
+)
+
 /** Fallback for the close (X) button of a dialog that does not name its own id. */
 const DIALOG_TOOLTIPS: Record<string, TooltipCopy> = {
   'dialog.close': { title: 'Close', description: 'Close this dialog.', shortcut: 'Escape' },
@@ -343,7 +352,7 @@ const PAGINATION_DESCRIPTIONS: Record<keyof typeof PAGINATION_CONTROLS, string> 
 
 /** In-app menu bar titles and the menu slice's dialogs. (Menu items: see getTooltipCopy.) */
 const MENU_TOOLTIPS: Record<string, TooltipCopy> = {
-  'menu.file': { title: 'File', description: 'Projects: new, open, save, a copy, book details and page setup.' },
+  'menu.file': { title: 'File', description: 'Projects: new, open, save, a copy, book details, page setup and export.' },
   'menu.edit': { title: 'Edit', description: 'Undo, the clipboard, find and replace, and going to a page.' },
   'menu.view': { title: 'View', description: 'How the pages look on screen: spread, zoom, paper and full screen.' },
   'menu.insert': { title: 'Insert', description: 'Add chapter, page and scene breaks, and footnotes.' },
@@ -396,6 +405,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...COMMENT_TOOLTIPS,
   ...REWRITE_TOOLTIPS,
   ...OUTLINE_TOOLTIPS,
+  ...EXPORT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,
 })

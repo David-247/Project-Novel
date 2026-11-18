@@ -7,6 +7,7 @@ import {
   base64ToBytes,
   EXPORT_COMMANDS,
   ExportPlatformError,
+  openExportedFile,
   pickSavePath,
   renderPdf,
   revealInFolder,
@@ -19,6 +20,20 @@ const font = { requested: 'Times New Roman', family: 'Liberation Serif', source:
 beforeEach(() => invoke.mockReset())
 
 describe('export platform ipc', () => {
+  it('names no folder for the Save dialog (Rust chooses where it opens)', async () => {
+    invoke.mockResolvedValue(null)
+    await pickSavePath('docx', 'Novel')
+    expect(invoke).toHaveBeenLastCalledWith(EXPORT_COMMANDS.pickSavePath, { kind: 'docx', defaultName: 'Novel', title: undefined })
+  })
+
+  it('opens an exported file through Rust, which refuses others', async () => {
+    invoke.mockResolvedValueOnce(null)
+    await openExportedFile('/x/a.pdf')
+    expect(invoke).toHaveBeenCalledWith(EXPORT_COMMANDS.openFile, { path: '/x/a.pdf' })
+    invoke.mockRejectedValueOnce({ kind: 'not_exported', message: 'Novel only shows files it has just exported.' })
+    await expect(openExportedFile('/etc/passwd')).rejects.toMatchObject({ kind: 'not_exported' })
+  })
+
   it('picks a save path in Rust and keeps the kind with the token', async () => {
     invoke.mockResolvedValueOnce({ token: 'export-1', path: 'C:\\Books\\Novel.pdf' })
     const target = await pickSavePath('pdf', 'Novel', 'Export PDF')
