@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Tooltip } from '@/shared/ui'
 import { revealInFolder } from '../platform'
 import { EXPORT_WIZARD_CONTROLS as C } from './controls'
-import { cancelExport, dismissRun, retryExport, useWizardState } from './controller'
+import { cancelExport, dismissRun, retryExport, useWizardState, type RunState } from './controller'
 import { fileActionProblem } from './file-actions'
 import { fileNameOf } from './title-page'
 
@@ -16,8 +16,9 @@ export const EXPORT_DONE_NOTICE_MS = 12_000
  */
 export function ExportStatus() {
   const { run, open } = useWizardState()
-  // A Show in folder failure, for the file it is about (a later run's notice shows none).
-  const [failed, setFailed] = useState<{ path: string; text: string } | null>(null)
+  // A Show in folder failure, for the run it is about: shown only while that run is done, so a later
+  // run (even to the same path, as `written` is a new array for every run) or another phase shows none.
+  const [failed, setFailed] = useState<{ written: RunState['written']; text: string } | null>(null)
   const show = run.origin === 'again' && !open && run.phase !== 'ready' && run.phase !== 'choosing'
   useEffect(() => {
     if (!show || (run.phase !== 'done' && run.phase !== 'cancelled')) return
@@ -33,7 +34,7 @@ export function ExportStatus() {
     </Tooltip>
   )
   const first = run.written[0]
-  const problem = failed && first && failed.path === first.path ? failed.text : null
+  const problem = failed && failed.written === run.written && run.phase === 'done' ? failed.text : null
   return (
     <span className="flex min-w-0 items-center gap-2 text-ui-xs" data-testid="export-status">
       <span role={run.phase === 'error' ? 'alert' : 'status'} className="min-w-0 truncate" title={run.error?.message}>
@@ -50,7 +51,8 @@ export function ExportStatus() {
       {run.phase === 'done' && first
         ? button(C.statusShow, () => {
             setFailed(null)
-            revealInFolder(first.path).catch((e: unknown) => setFailed({ path: first.path, text: fileActionProblem(e, 'show', fileNameOf(first.path)) }))
+            const written = run.written
+            revealInFolder(first.path).catch((e: unknown) => setFailed({ written, text: fileActionProblem(e, 'show', fileNameOf(first.path)) }))
           })
         : null}
       {problem ? (

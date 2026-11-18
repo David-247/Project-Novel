@@ -672,6 +672,23 @@ describe('Export Manuscript Again: error states (fix round 1)', () => {
     await waitFor(() => expect(status()!.querySelector('[data-testid="file-action-error"]')).not.toBeNull())
     expect(status()!.querySelector('[data-testid="file-action-error"]')).toHaveAttribute('role', 'alert')
   })
+
+  it('a later Export Again to the same path does not bring the old Show in folder alert back', async () => {
+    await renderApp()
+    await exportOnce()
+    backend.answer = 'Replace'
+    const again = getCommand(EXPORT_COMMAND_IDS.again)!
+    await act(async () => again.run())
+    await waitFor(() => expect(status()?.textContent ?? '').toMatch(/Exported/))
+    ex.written.clear()
+    act(() => fireEvent.click(status()!.querySelector(`[data-control-id="${C.statusShow.id}"]`)!))
+    await waitFor(() => expect(status()!.querySelector('[data-testid="file-action-error"]')).not.toBeNull())
+    // The same files again: a new run, so no alert, while it runs or once it is done.
+    await act(async () => again.run())
+    await waitFor(() => expect(ex.written.size).toBe(2))
+    await waitFor(() => expect(status()?.textContent ?? '').toMatch(/Exported/))
+    expect(status()!.querySelector('[data-testid="file-action-error"]')).toBeNull()
+  })
 })
 
 /** Open a project, discarding what an earlier test left unsaved (book styles) if asked. */
