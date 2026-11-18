@@ -309,6 +309,12 @@ async function keyTo(page: Page, key: string, target: string, max = 60) {
   expect(await focusedId(page), `${target} reached with ${key}`).toBe(target)
 }
 
+/** Tab (Option+Tab in macOS WebKit: `pressTab`) until the focus is on `target`. */
+async function tabTo(page: Page, target: string, max = 40) {
+  for (let i = 0; i < max && (await focusedId(page)) !== target; i++) await pressTab(page)
+  expect(await focusedId(page), `${target} reached with Tab`).toBe(target)
+}
+
 /** Tab through the wizard's step: focus never leaves it, every enabled control is reached, each with a focus ring. */
 async function tabThrough(page: Page, where: string) {
   const expected = await page.evaluate(() =>
@@ -391,7 +397,7 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
   // A field typed into from the keyboard (Alt+1 back to the Title page, Tab to the genre).
   await page.keyboard.press('Alt+Digit1')
   await expect(ctl(wizard(page), 'export.step.title')).toHaveAttribute('aria-current', 'step')
-  await keyTo(page, 'Tab', 'export.genre')
+  await tabTo(page, 'export.genre')
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Alt+Digit4')
   await expect(ctl(wizard(page), 'export.step.export')).toHaveAttribute('aria-current', 'step')
@@ -399,7 +405,7 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
   await page.keyboard.press('Alt+KeyE')
   await expect(wizard(page).getByTestId('export-done')).toBeVisible()
   await expect.poll(() => page.evaluate(() => [...window.__nvE2E.exports.written.keys()].length)).toBe(2)
-  await keyTo(page, 'Tab', 'export.finish', 20)
+  await tabTo(page, 'export.finish')
   await page.keyboard.press('Enter')
   await expect(wizard(page)).toHaveCount(0)
   await expect(editor(page)).toBeFocused()

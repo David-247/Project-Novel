@@ -8,6 +8,7 @@ import {
   crashAndRestore,
   editor,
   launch,
+  lineEnd,
   nativeDialog,
   openRecent,
   projectNavigation,
@@ -258,7 +259,7 @@ test('the 100k-word book: the Navigation Pane jumps to chapters, and the word an
   // Type at chapter 3's start (after its title): its row, the pane total and the status bar follow.
   const wordsOf = async (key: string) => num((await rowCounts(page, key).textContent())!.match(/^([\d,]+) words?/)![1])
   const ch3 = await wordsOf('ch:2')
-  await page.keyboard.press('End')
+  await lineEnd(page) // (End scrolls on macOS: the helper uses Cmd+Right there)
   await page.keyboard.type(' and seven more words typed here')
   await expect(page.getByTestId('word-count')).toHaveText('100,006 words')
   await expect.poll(() => wordsOf('ch:2')).toBe(ch3 + 6)
