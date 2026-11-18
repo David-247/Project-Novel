@@ -24,6 +24,18 @@ export const FONT_METRICS: Record<ExportFontRole, FontMetrics> = {
   mono: { single: (1705 + 615) / 2048, ascender: 1705 / 2048, descender: 615 / 2048 },
 }
 
+/**
+ * The families the engine sets as they are named (or metric-identically): the two manuscript fonts and
+ * their bundled / Chrome OS stand-ins. Any other family is substituted by its role's font.
+ */
+export const KNOWN_FAMILIES: readonly string[] = ['Times New Roman', 'Tinos', 'Liberation Serif', 'Courier New', 'Cousine', 'Liberation Mono']
+
+/** Whether the (trimmed) settings family is one the engine renders as such (not substituted). */
+export function isKnownFamily(fontFamily: string): boolean {
+  const f = fontFamily.trim().toLowerCase()
+  return KNOWN_FAMILIES.some((k) => k.toLowerCase() === f)
+}
+
 /** Families set in the mono (Courier) role; everything else is set in the serif (Times) role. */
 const MONO = /courier|cousine|liberation mono|\bmono\b/i
 

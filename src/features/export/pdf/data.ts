@@ -95,7 +95,12 @@ export interface PdfData {
     from: number
     /** Printed number = physical page - offset. */
     offset: number
-    /** Typst `header-ascent`: header line box bottom to the top of the text area, pt. */
+    /**
+     * Typst `header-ascent`: header line box bottom to the top of the text area, pt. It puts the
+     * header's line box 0.5 in below the page's top edge. A top margin under 0.5 in + one line box
+     * (about 0.68 in at 12 pt) has no room for that: the ascent is then 0 and the header sits right
+     * above the text area, closer to the edge (documented limit; the settings allow 0 to 4 in).
+     */
     ascent: number
   }
   titlePage: PdfTitlePage | null
@@ -154,14 +159,20 @@ const BYLINE: Record<ManuscriptSettings['titlePage']['bylineStyle'], (name: stri
 }
 
 /** Lines of a multi-line contact field, each trimmed, empty ones left out. */
-const lines = (s: string) =>
+const splitLines = (s: string) =>
   s
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)
 
 function contactLines(c: ContactDetails, showAgent: boolean): string[] {
-  return [...lines(c.legalName), ...lines(c.address), ...lines(c.phone), ...lines(c.email), ...(showAgent ? lines(c.agent) : [])]
+  return [
+    ...splitLines(c.legalName),
+    ...splitLines(c.address),
+    ...splitLines(c.phone),
+    ...splitLines(c.email),
+    ...(showAgent ? splitLines(c.agent) : []),
+  ]
 }
 
 const SENTENCE_END = /[.!?]["'’”)\]]*$/
@@ -182,6 +193,8 @@ export function applySentenceSpacing(runs: PdfRun[], n: 1 | 2): PdfRun[] {
     }
     let s = r.s.replace(SENTENCE_GAP, `$1${gap}`)
     if (endsSentence && /^ +\S/.test(s)) s = s.replace(/^ +/, gap)
+    // A run of nothing but spaces right after a sentence's end (" " between "night." and "She") is that gap.
+    else if (endsSentence && /^ +$/.test(s)) s = gap
     if (/\S/.test(s)) endsSentence = SENTENCE_END.test(s)
     return s === r.s ? r : { ...r, s }
   })
@@ -306,8 +319,8 @@ export function buildPdfData(ir: ManuscriptIR, settings: ManuscriptSettings, met
 
   const body: PdfBlock[] = blocks(ir.frontMatter, settings, scene, ctx)
   for (const c of ir.chapters) {
-    const lines = [pdfRuns(c.number, ctx), pdfRuns(c.title, ctx)].filter((l) => l.length > 0)
-    body.push({ t: 'opening', lines })
+    const headingLines = [pdfRuns(c.number, ctx), pdfRuns(c.title, ctx)].filter((l) => l.length > 0)
+    body.push({ t: 'opening', lines: headingLines })
     body.push(...blocks(c.blocks, settings, scene, ctx))
   }
 

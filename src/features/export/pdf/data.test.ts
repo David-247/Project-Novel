@@ -138,6 +138,10 @@ describe('buildPdfData', () => {
     const runs: PdfRun[] = [{ s: 'It was ' }, { s: 'night', b: true }, { s: '.' }, { s: ' She  left. "Go!"   he said. Mr. X' }]
     expect(applySentenceSpacing(runs, 2).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('It was |night|.|  She  left.  "Go!"  he said.  Mr.  X')
     expect(applySentenceSpacing(runs, 1).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('It was |night|.| She  left. "Go!" he said. Mr. X')
+    // A run of only spaces after the sentence's end is the gap itself.
+    const spaced: PdfRun[] = [{ s: 'night.' }, { s: ' ' }, { s: 'She', i: true }, { s: ' went.' }]
+    expect(applySentenceSpacing(spaced, 2).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('night.|  |She| went.')
+    expect(applySentenceSpacing([{ s: 'night.' }, { s: '   ' }, { s: 'She' }], 1).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('night.| |She')
     const d = buildPdfData(ir(), applyPreset(settings(), 'classic'), META)
     const p = d.blocks.find((b) => b.t === 'p' && texts(b.runs).startsWith('It was night'))!
     expect(texts((p as { runs: PdfRun[] }).runs)).toBe('It was night.[1]  The rain fell hard and cold.')

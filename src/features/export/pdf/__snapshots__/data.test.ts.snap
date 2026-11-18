@@ -73,7 +73,9 @@ exports[`the bundled template (src-tauri/templates/manuscript.typ) > shows manus
   for r in rs {
     if "br" in r { linebreak() } else if "fn" in r {
       let n = r.n
-      footnote(numbering: (..) => n, plain-runs(r.fn))
+      // The entry reads "1 Note text": a no-break space between the raised number and the text
+      // (the DOCX generator should match it). The reference in the running text is the number alone.
+      footnote(numbering: (..) => n, [#text("\\u{a0}")#plain-runs(r.fn)])
     } else { styled(r) }
   }
 }

@@ -41,7 +41,7 @@ describe('createPdfRenderer (ManuscriptRenderer contract)', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({ template: PDF_TEMPLATE_ID, font: 'serif', preferInstalledFont: true })
     expect(calls[0].data).toEqual(buildPdfData(FIXTURE_MANUSCRIPT_IR, settings, META))
-    expect(onReport).toHaveBeenCalledWith({ font, warnings: [], bytes: 4 })
+    expect(onReport).toHaveBeenCalledWith({ font: { ...font, substituted: false }, warnings: [], bytes: 4 })
     expect(renderer.lastReport?.font.source).toBe('bundled')
     expect(progress[0].fraction).toBe(0)
     expect(progress.at(-1)!.fraction).toBe(1)
@@ -55,6 +55,19 @@ describe('createPdfRenderer (ManuscriptRenderer contract)', () => {
     await createPdfRenderer({ meta, render: run, preferInstalledFont: false }).render(ir(), { ...applyPreset(settings, 'classic'), fontFamily: '  Courier New ' })
     expect(calls[0]).toMatchObject({ font: 'mono', preferInstalledFont: false })
     expect(meta).toHaveBeenCalledOnce()
+  })
+
+  it('a family the engine does not set (Garamond) is reported as substituted, with the trimmed name requested', async () => {
+    const { run, calls } = fakeRender(0, { font: { requested: 'Times New Roman', family: 'Times New Roman', source: 'system', embedded: ['TimesNewRomanPSMT'] } })
+    const renderer = createPdfRenderer({ meta: META, render: run })
+    await renderer.render(ir(), { ...settings, fontFamily: '  Garamond ' })
+    expect(calls[0].font).toBe('serif')
+    expect(renderer.lastReport!.font).toEqual({ requested: 'Garamond', family: 'Times New Roman', source: 'system', embedded: ['TimesNewRomanPSMT'], substituted: true })
+    // The known names (any case, untrimmed) are not substitutions.
+    for (const f of ['Times New Roman', ' tinos ', 'Liberation Serif', 'Courier New', 'Cousine', 'liberation mono']) {
+      await renderer.render(ir(), { ...settings, fontFamily: f })
+      expect(renderer.lastReport!.font).toMatchObject({ requested: f.trim(), substituted: false })
+    }
   })
 
   it('progress creeps up while Typst runs, never past 0.95 before the PDF is back', async () => {

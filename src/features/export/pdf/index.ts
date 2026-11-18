@@ -7,9 +7,9 @@
 // - manuscriptWordCount(ir): the title page's word count (equals countManuscript's body words).
 // - lineMetrics() / fontRoleOf(): the double-spacing pitch both generators share.
 export { createPdfRenderer } from './renderer'
-export type { PdfRenderer, PdfRendererOptions, PdfRenderReport } from './renderer'
+export type { PdfFontReport, PdfRenderer, PdfRendererOptions, PdfRenderReport } from './renderer'
 export { buildPdfData, PDF_DATA_VERSION, PDF_TEMPLATE_ID } from './data'
 export type { ManuscriptMeta, PdfData, PdfBlock, PdfRun, PdfTitlePage } from './data'
 export { manuscriptWordCount } from './word-count'
-export { FONT_METRICS, fontRoleOf, lineMetrics } from './metrics'
+export { FONT_METRICS, fontRoleOf, isKnownFamily, KNOWN_FAMILIES, lineMetrics } from './metrics'
 export type { FontMetrics, LineMetrics } from './metrics'

@@ -139,7 +139,7 @@ importers:
         specifier: ^30.1.3
         version: 30.1.3
       pdfjs-dist:
-        specifier: '5'
+        specifier: ^5.7.284
         version: 5.7.284
       tailwindcss:
         specifier: ^4.3.4

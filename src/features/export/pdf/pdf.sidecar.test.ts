@@ -12,11 +12,12 @@ import { buildManuscript, FEATURE_FIXTURE_DOC, FEATURE_FIXTURE_FOOTNOTES, FEATUR
 import type { ManuscriptIR } from '../ir'
 import { applyPreset, defaultManuscriptSettings, formatWordCount, type ManuscriptSettings } from '../settings'
 import { buildPdfData, type ManuscriptMeta } from './data'
-import { FONT_METRICS } from './metrics'
+import { FONT_METRICS, lineMetrics } from './metrics'
 import { readPdf, renderWithSidecar, REQUIRE_TYPST, ROOT, SIDECAR, type PdfPage, type ReadPdf } from './test-harness'
 import { manuscriptWordCount } from './word-count'
 
 const enabled = SIDECAR !== null || REQUIRE_TYPST
+const PITCH = lineMetrics('serif', 12, 2).pitch
 
 const META: ManuscriptMeta = {
   title: 'The Long Night',
@@ -130,9 +131,11 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
       for (const page of body) {
         const lines = bodyLines(page).filter((l) => fromTop(page, l.y) < 792 - 72 - 80) // above the footnote area
         for (let i = 1; i < lines.length; i++) {
-          const gap = lines[i - 1].y - lines[i].y
-          const steps = Math.round(gap / 27.6)
-          expect(Math.abs(gap - steps * 27.6), `page ${page.number}: ${lines[i].text}`).toBeLessThan(0.1 * steps + 0.01)
+          // Every line on the grid of the page's first text line, within a fixed 0.1 pt (the exact pitch,
+          // 2 x 1.1499 em x 12 pt = 27.598 pt, so the tolerance does not have to grow with the distance).
+          const gap = lines[0].y - lines[i].y
+          const steps = Math.round(gap / PITCH)
+          expect(Math.abs(gap - steps * PITCH), `page ${page.number}: ${lines[i].text}`).toBeLessThan(0.1)
         }
       }
     })
@@ -150,10 +153,13 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
       expect(ir.footnotes.length).toBeGreaterThan(0)
       for (const note of ir.footnotes) {
         const text = note.runs.map((r) => (r.kind === 'text' ? r.text : ' ')).join('')
-        const pages = body.filter((p) => p.lines.some((l) => l.text === text))
+        const pages = body.filter((p) => p.lines.some((l) => l.text.trim() === text))
         expect(pages, text).toHaveLength(1)
         const page = pages[0]
-        const line = page.lines.find((l) => l.text === text)!
+        const line = page.lines.find((l) => l.text.trim() === text)!
+        // A space (a no-break space, about 3 pt at 12 pt) between the entry's number and its text.
+        const entryNumber = page.items.find((i) => i.str === String(note.number) && i.size < 12 && i.y > line.y && i.y - line.y < 8)!
+        expect(line.x - (entryNumber.x + entryNumber.width)).toBeGreaterThan(2.5)
         // At the foot: the last line of the page, its descender on the bottom margin.
         expect(page.lines[page.lines.length - 1]).toBe(line)
         expect(fromTop(page, line.y) + 12 * FONT_METRICS.serif.descender).toBeCloseTo(792 - 72, 0)

@@ -44,6 +44,8 @@ export function renderWithSidecar(data: unknown, font: 'serif' | 'mono' = 'serif
   const env: NodeJS.ProcessEnv = { ...process.env }
   for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) env[k] = 'http://127.0.0.1:9'
   for (const k of ['NO_PROXY', 'no_proxy', 'TYPST_ROOT', 'TYPST_FONT_PATHS', 'TYPST_PACKAGE_PATH', 'TYPST_PACKAGE_CACHE_PATH', 'SOURCE_DATE_EPOCH']) delete env[k]
+  // DUPLICATES the Typst command line Rust builds (src-tauri/src/export/render.rs, `command()` and
+  // `offline_env()`, with the inputs of mod.rs `run_job`). Keep the two in step when either changes.
   const args = [
     'compile',
     '--root', dir,

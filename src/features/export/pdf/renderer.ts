@@ -2,12 +2,22 @@ import { abortError, throwIfAborted, type ManuscriptIR, type ManuscriptRenderer,
 import { ExportPlatformError, renderPdf, type ExportFontReport, type RenderPdfOptions, type RenderPdfResult, type TypstDiagnostic } from '../platform'
 import type { ManuscriptSettings } from '../settings'
 import { buildPdfData, PDF_TEMPLATE_ID, type ManuscriptMeta, type PdfData } from './data'
-import { fontRoleOf } from './metrics'
+import { fontRoleOf, isKnownFamily } from './metrics'
+
+/**
+ * The font of a PDF render. `requested` is the family the settings name (trimmed), not the engine's
+ * role font; `substituted` is true when that family is not one the engine sets as such (Times New
+ * Roman, Tinos, Liberation Serif, Courier New, Cousine, Liberation Mono), so the PDF uses `family`
+ * instead. `source: 'bundled'` when the role font is not installed and the bundled fallback is used.
+ */
+export interface PdfFontReport extends ExportFontReport {
+  substituted: boolean
+}
 
 /** What a PDF render produced besides the bytes: for the wizard to name the font actually used. */
 export interface PdfRenderReport {
-  /** The family the PDF is set in; `source: 'bundled'` when the chosen font is not installed. */
-  font: ExportFontReport
+  /** The family the PDF is set in, and whether it differs from the settings' family. */
+  font: PdfFontReport
   /** Typst warnings (the PDF was still made). */
   warnings: TypstDiagnostic[]
   /** Size of the PDF, bytes. */
@@ -86,7 +96,9 @@ export function createPdfRenderer(options: PdfRendererOptions): PdfRenderer {
     }
     throwIfAborted(signal)
     if (!result.pdf) throw new ExportPlatformError('io', 'The PDF engine returned no file.')
-    lastReport = { font: result.font, warnings: result.warnings, bytes: result.bytes }
+    const requested = settings.fontFamily.trim() || result.font.requested
+    const substituted = !isKnownFamily(requested)
+    lastReport = { font: { ...result.font, requested, substituted }, warnings: result.warnings, bytes: result.bytes }
     options.onReport?.(lastReport)
     progress({ fraction: 1, stage: 'typst' })
     return result.pdf
