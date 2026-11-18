@@ -388,6 +388,9 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
     await page.keyboard.press('ControlOrMeta+Shift+X')
   }
   await expect(wizard(page)).toBeVisible()
+  // The wizard takes the focus as it opens (after the menu hands it back): wait for that before the
+  // first Tab (seen once on macOS CI chromium: a Tab pressed in the same frame left from the menu bar).
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-testid="export-wizard"]'))).toBe(true)
   // Every step: Tab reaches every control (with a focus ring) and stays in the wizard; Alt+N moves on.
   for (const [i, step] of STEPS.entries()) {
     await expect(ctl(wizard(page), `export.step.${step}`)).toHaveAttribute('aria-current', 'step')
