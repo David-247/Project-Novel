@@ -149,6 +149,15 @@ export function toMarkdown(results, dir = 'perf-results') {
     const row = (measure, n, limit) => n !== undefined && n !== null && exportRows.push(`| ${r.scenario} | ${measure} | ${pair(r)} | ${cell(r, n, limit)} | ${limit} |`)
     if (r.irBuild) row('manuscript IR build (median)', r.irBuild.medianMs, 500)
     if (r.irBuildTracked) row('manuscript IR build, 2,000 pending changes (median)', r.irBuildTracked.medianMs, 500)
+    // The PDF render (src/features/export/pdf/pdf.sidecar.test.ts, the Typst sidecar, no browser):
+    // blocking on Windows, recorded on macOS (decisions 1cedc290, f040009b).
+    if (r.pdfRender) {
+      const { ms, pages } = r.pdfRender
+      const miss = ms >= 15000 ? ` (${r.platform === 'win32' ? 'MISS' : 'miss, warning'})` : ''
+      exportRows.push(`| ${r.scenario} | PDF render, Typst sidecar (${v(pages)} pages) | typst / ${r.platform}${r.platform === 'win32' ? ' (blocking)' : ''} | ${miss ? `**${ms}**${miss}` : v(ms)} | 15000 |`)
+    }
+    if (r.docxExport) row('DOCX export, 100k words: IR + render in the worker (median)', r.docxExport.medianMs, 5000)
+    if (r.docxExportClassic) row('DOCX export, 100k words, Classic preset (median)', r.docxExportClassic.medianMs, 5000)
   }
   if (exportRows.length) {
     md.push('#### Export', '')

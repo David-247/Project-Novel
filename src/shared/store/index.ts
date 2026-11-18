@@ -50,6 +50,10 @@ export {
   PROFILE_MAX,
   PROFILE_KEYS,
   MAX_EXPORT_FOLDERS,
+  NAV_PANE_MIN_WIDTH,
+  NAV_PANE_MAX_WIDTH,
+  NAV_PANE_DEFAULT_WIDTH,
+  clampNavPaneWidth,
   PAPER_SURFACES,
 } from './preferences-file'
 export type { ParsedPreferences } from './preferences-file'

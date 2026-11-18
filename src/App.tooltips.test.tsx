@@ -108,7 +108,10 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'view.fitSpread',
           'view.fitWidth',
           'view.actualSize',
+          'view.navigationPane',
           'view.fullScreen',
+          'export.manuscript',
+          'export.again',
         ].map((id) => `ribbon.cmd.${id}`),
         // Review > Changes: the dropdown halves of the Accept / Reject split buttons.
         'review.accept.options',

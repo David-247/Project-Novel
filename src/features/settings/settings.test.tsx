@@ -198,6 +198,8 @@ describe('writing preferences.json', () => {
         'defaultPaper',
         'defaultTrimSize',
         'exportFolders',
+        'navigationPane',
+        'navigationPaneWidth',
         'pageNavigation',
         'profileAddress',
         'profileAgent',

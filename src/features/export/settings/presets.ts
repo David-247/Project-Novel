@@ -103,5 +103,6 @@ export function defaultManuscriptSettings(locale: string | null | undefined = sy
     titlePage: { include: true, showContact: true, showAgent: false, showWordCount: true, bylineStyle: 'a-novel-by' },
     wordCountRounding: 'auto',
     outputs: { docx: true, pdf: true },
+    checks: { genre: '', debut: false, normalizeSpaces: false, blankLineSceneBreaks: 'auto' },
   }
 }

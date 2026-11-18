@@ -15,6 +15,8 @@ import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTR
 import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import { COMMENT_CONTROLS } from '@/features/comments'
 import { REWRITE_CONTROLS } from '@/features/rewrite'
+import { OUTLINE_CONTROLS } from '@/features/outline'
+import { EXPORT_WIZARD_CONTROLS } from '@/features/export'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
@@ -301,6 +303,11 @@ const COMMENT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   ]),
 )
 
+/** The navigation pane: close, the heading rows (their own copy names the heading), the resize handle (outline slice). */
+const OUTLINE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(OUTLINE_CONTROLS).map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined }]),
+)
+
 /** Review: Track Changes and the markup view picker with its choices (track-changes slice). */
 const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
   ...Object.fromEntries(
@@ -315,6 +322,14 @@ const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
 /** Re-write: the comparison view, the manuscript's notice and the Re-writes list (rewrite slice). */
 const REWRITE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   Object.values(REWRITE_CONTROLS).map((c): [string, TooltipCopy] => [
+    c.id,
+    { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+  ]),
+)
+
+/** File > Export > Manuscript…: the export wizard and the status bar's Export Again notice (export slice). */
+const EXPORT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(EXPORT_WIZARD_CONTROLS).map((c): [string, TooltipCopy] => [
     c.id,
     { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
   ]),
@@ -337,7 +352,7 @@ const PAGINATION_DESCRIPTIONS: Record<keyof typeof PAGINATION_CONTROLS, string> 
 
 /** In-app menu bar titles and the menu slice's dialogs. (Menu items: see getTooltipCopy.) */
 const MENU_TOOLTIPS: Record<string, TooltipCopy> = {
-  'menu.file': { title: 'File', description: 'Projects: new, open, save, a copy, book details and page setup.' },
+  'menu.file': { title: 'File', description: 'Projects: new, open, save, a copy, book details, page setup and export.' },
   'menu.edit': { title: 'Edit', description: 'Undo, the clipboard, find and replace, and going to a page.' },
   'menu.view': { title: 'View', description: 'How the pages look on screen: spread, zoom, paper and full screen.' },
   'menu.insert': { title: 'Insert', description: 'Add chapter, page and scene breaks, and footnotes.' },
@@ -389,6 +404,8 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...RECOVERY_TOOLTIPS,
   ...COMMENT_TOOLTIPS,
   ...REWRITE_TOOLTIPS,
+  ...OUTLINE_TOOLTIPS,
+  ...EXPORT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,
 })

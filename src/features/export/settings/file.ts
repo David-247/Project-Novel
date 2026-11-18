@@ -40,7 +40,7 @@ const range = (v: unknown, min: number, max: number): number | undefined => (isN
 const SETTINGS_KEYS = [
   'preset', 'paper', 'fontFamily', 'fontSizePt', 'lineSpacing', 'margins', 'firstLineIndentIn', 'indentFirstParagraph',
   'italics', 'sentenceSpacing', 'header', 'sceneBreak', 'chapterDropFraction', 'endMarker', 'titlePage',
-  'wordCountRounding', 'outputs',
+  'wordCountRounding', 'outputs', 'checks',
 ] as const
 
 /** Keys an older file may carry that are dropped on read (and so on the next write), not kept as unknown. */
@@ -53,6 +53,8 @@ export function readSettings(raw: Obj, locale: string | null | undefined): { set
   const h = isObj(raw.header) ? raw.header : {}
   const t = isObj(raw.titlePage) ? raw.titlePage : {}
   const o = isObj(raw.outputs) ? raw.outputs : {}
+  const c = isObj(raw.checks) ? raw.checks : {}
+  const genre = text(c.genre, 40)
   const margin = (v: unknown, fallback: number) => range(v, 0, 4) ?? fallback
   // Not trimmed: a field being typed into must keep the space just typed. Blank falls back to the default.
   const fam = text(raw.fontFamily, 80)
@@ -86,6 +88,13 @@ export function readSettings(raw: Obj, locale: string | null | undefined): { set
     },
     wordCountRounding: oneOf(raw.wordCountRounding, ['auto', 'nearest-100', 'nearest-500', 'nearest-1000', 'exact'] as const) ?? d.wordCountRounding,
     outputs: { docx: bool(o.docx) ?? d.outputs.docx, pdf: bool(o.pdf) ?? d.outputs.pdf },
+    checks: {
+      // An id this Novel does not list is kept (a newer genre table); the check then has no range.
+      genre: genre !== undefined && /^[a-z0-9-]*$/.test(genre) ? genre : d.checks.genre,
+      debut: bool(c.debut) ?? d.checks.debut,
+      normalizeSpaces: bool(c.normalizeSpaces) ?? d.checks.normalizeSpaces,
+      blankLineSceneBreaks: oneOf(c.blankLineSceneBreaks, ['auto', 'off'] as const) ?? d.checks.blankLineSceneBreaks,
+    },
   }
   const known = new Set<string>(SETTINGS_KEYS)
   const extra: Obj = {}

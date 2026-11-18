@@ -26,6 +26,11 @@ describe('cross-slice import rule', { timeout: 30_000 }, () => {
     expect(await messages('tests/fixtures/features/export/good-index-import.ts')).toHaveLength(0)
     expect(await messages('tests/fixtures/features/export/bad-relative-import.ts')).toHaveLength(1)
   })
+  it('the outline slice is covered both ways: it reaches others by their index, others reach it by its index', async () => {
+    expect(await messages('tests/fixtures/features/outline/bad-deep-import.ts')).toHaveLength(1)
+    expect(await messages('tests/fixtures/features/outline/good-index-import.ts')).toHaveLength(0)
+    expect(await messages('tests/fixtures/features/editor/bad-outline-deep-import.ts')).toHaveLength(1)
+  })
   it("a slice's own sub-folder named like another slice (export/settings) is not a cross-slice import", async () => {
     expect(await messages('tests/fixtures/features/export/good-own-subfolder.ts')).toHaveLength(0)
   })

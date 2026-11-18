@@ -57,7 +57,8 @@ import {
   TrackChangesNotice,
 } from '@/features/track-changes'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
-import { registerExportSideFile } from '@/features/export'
+import { createManuscriptExportRenderers, ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile, setExportRenderers } from '@/features/export'
+import { NavigationPane, registerOutlineCommands } from '@/features/outline'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -122,6 +123,8 @@ export function App() {
       registerCommentsCommands(),
       registerTrackChangesCommands(),
       registerRewriteCommands(),
+      registerOutlineCommands(),
+      registerExportCommands(),
       // The toolbar's tabs and groups (Word-style ribbon; commands join groups by their `ribbon` field).
       registerAppRibbon(),
     ]
@@ -134,6 +137,8 @@ export function App() {
   useEffect(() => registerRewritesSideFile(), [])
   // export.json (manuscript export settings) likewise; a project without it opens with the defaults.
   useEffect(() => registerExportSideFile(), [])
+  // The export wizard's DOCX and PDF generators (File > Export > Manuscript…).
+  useEffect(() => setExportRenderers(createManuscriptExportRenderers()), [])
   // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.
   useEffect(() => {
     setRewriteConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
@@ -180,6 +185,7 @@ export function App() {
       <AppShell
         menuBar={<AppMenuBar />}
         toolbar={<Ribbon quickAccess={<RibbonQuickAccess />} />}
+        navigation={<NavigationPane />}
         editor={
           <>
             {/* Zero-height sticky anchor: the find panel floats at the top of the scrolling editor
@@ -205,6 +211,7 @@ export function App() {
             <RecoveryStatus />
             <TrackChangesNotice />
             <ChangesIndicator />
+            <ExportStatus />
             <span className="flex-1" />
             <NoProjectActions />
             <WordCountIndicator />
@@ -225,6 +232,8 @@ export function App() {
       <WordCountDialog />
       {/* Tracked change details with Accept / Reject (portal). */}
       <ChangePopover />
+      {/* File > Export > Manuscript… (portal); its DOCX / PDF generators are registered above. */}
+      <ExportWizard />
     </TooltipProvider>
   )
 }

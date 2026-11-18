@@ -34,8 +34,10 @@ export interface HeaderSettings {
   format: HeaderFormat
   titleCase: HeaderTitleCase
   /**
-   * Physical page the header starts on, counting the title page as page 1. 2 = every page but the
-   * title page (Shunn). The number printed on the first text page is 1.
+   * Physical page the header starts on, counting the title page as page 1.
+   * - 2 (default, Shunn): every page but the title page; the first text page is numbered 1.
+   * - 1: the title page carries the header too and is numbered 1; the text continues from 2.
+   * Without a title page the header runs from the first page, numbered 1. (DOCX and PDF alike.)
    */
   startPage: 1 | 2
   /** The keyword(s) from the title; '' = derive from the manuscript title. */
@@ -57,6 +59,24 @@ export interface TitlePageSettings {
 export interface OutputSettings {
   docx: boolean
   pdf: boolean
+}
+
+/**
+ * The export wizard's check choices (docs/manuscript-format.md, "Word counts by genre"). Export only:
+ * none of them ever changes the manuscript.
+ */
+export interface CheckSettings {
+  /** A `GENRE_WORD_COUNTS` id for the length check; '' = no genre chosen (no length check). */
+  genre: string
+  /** Compare with the genre's debut range where the sources give one. */
+  debut: boolean
+  /** Export two or more spaces after a full stop (., !, ?) as one. The manuscript keeps its spaces. */
+  normalizeSpaces: boolean
+  /**
+   * Empty paragraphs between prose paragraphs: `'auto'` reads them as scene breaks (unless they space every
+   * paragraph), `'off'` leaves them out (`BuildManuscriptOptions.blankLineSceneBreaks`).
+   */
+  blankLineSceneBreaks: 'auto' | 'off'
 }
 
 export interface ManuscriptSettings {
@@ -83,6 +103,7 @@ export interface ManuscriptSettings {
   titlePage: TitlePageSettings
   wordCountRounding: WordCountRounding
   outputs: OutputSettings
+  checks: CheckSettings
   // The folder of the last export is NOT a project setting (an absolute path, often with the OS user
   // name, must not enter a shareable folder): see getLastOutputFolder() / setLastOutputFolder(), kept in
   // the app's preferences.json by project id.

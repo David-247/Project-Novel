@@ -46,6 +46,10 @@ export interface PreferenceValues {
    * the project folder). At most MAX_EXPORT_FOLDERS entries; the oldest are dropped.
    */
   exportFolders: Record<string, string>
+  /** View ▸ Navigation Pane (Phase 4, src/features/outline): shown at startup. */
+  navigationPane: boolean
+  /** The docked navigation pane's width in CSS px (NAV_PANE_MIN_WIDTH to NAV_PANE_MAX_WIDTH). */
+  navigationPaneWidth: number
 }
 
 export interface Preferences extends PreferenceValues {
@@ -68,6 +72,16 @@ export const PROFILE_MAX = {
 } as const
 
 export const MAX_EXPORT_FOLDERS = 50
+
+/** Navigation pane width limits and default (CSS px). */
+export const NAV_PANE_MIN_WIDTH = 200
+export const NAV_PANE_MAX_WIDTH = 480
+export const NAV_PANE_DEFAULT_WIDTH = 280
+
+/** A width in range, rounded to whole px. */
+export function clampNavPaneWidth(px: number): number {
+  return Math.round(Math.min(NAV_PANE_MAX_WIDTH, Math.max(NAV_PANE_MIN_WIDTH, px)))
+}
 
 /** The default `exportFolders`: one shared object, so a fresh default is `===` the store's (no phantom change). */
 const NO_EXPORT_FOLDERS: Record<string, string> = Object.freeze({}) as Record<string, string>
@@ -100,6 +114,8 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     profileEmail: '',
     profileAgent: '',
     exportFolders: NO_EXPORT_FOLDERS,
+    navigationPane: false,
+    navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH,
   }
 }
 
@@ -121,6 +137,8 @@ const READERS: { [K in keyof PreferenceValues]: (v: unknown) => PreferenceValues
   profileEmail: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileEmail) : undefined),
   profileAgent: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileAgent) : undefined),
   exportFolders: readExportFolders,
+  navigationPane: (v) => (typeof v === 'boolean' ? v : undefined),
+  navigationPaneWidth: (v) => (typeof v === 'number' && Number.isFinite(v) ? clampNavPaneWidth(v) : undefined),
 }
 
 const KNOWN_KEYS = new Set<string>(Object.keys(READERS))
@@ -189,6 +207,8 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     profileEmail: p.profileEmail.trim(),
     profileAgent: p.profileAgent.trim(),
     exportFolders: readExportFolders(p.exportFolders) ?? {},
+    navigationPane: p.navigationPane,
+    navigationPaneWidth: clampNavPaneWidth(p.navigationPaneWidth),
   }
   return JSON.stringify(out, null, 2) + '\n'
 }

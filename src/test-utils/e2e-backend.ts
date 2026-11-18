@@ -18,7 +18,19 @@ import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { getDocJSON, getEditor, getFootnotes, getResolvedStyles, setDocJSON } from '@/features/editor'
-import { buildManuscript } from '@/features/export'
+import {
+  applyPreset,
+  buildManuscript,
+  createDocxRenderer,
+  defaultManuscriptSettings,
+  getWizardState,
+  isAbortError,
+  manuscriptWordCount,
+  WIZARD_FIXTURE_COMMENTS,
+  WIZARD_FIXTURE_DOC,
+  WIZARD_FIXTURE_REWRITES,
+  WIZARD_FIXTURE_STYLES,
+} from '@/features/export'
 import { acceptAll, countChanges, rejectAll, setMarkupView, setTracking } from '@/features/track-changes'
 import { isBlockHidden, isInlineHidden, type MarkupView } from '@/shared/track-changes'
 import { getPaginationDebug, invalidatePagination, registerBottomReservation, relayoutPagination, revealPosition, turnSpread, goToEdgeSpread, showPage } from '@/features/pagination'
@@ -26,6 +38,7 @@ import { ensureAuthorName } from '@/features/settings'
 import { autosaveNow } from '@/features/storage'
 import { commentsDebug } from '@/features/comments'
 import { rewriteDebug } from '@/features/rewrite'
+import { outlineDebug } from '@/features/outline'
 import { footnoteAreaHeights, footnotePlacement } from '@/features/footnotes'
 import { useStore } from '@/shared/store'
 import { getCommands, runCommand } from '@/shared/commands'
@@ -137,6 +150,18 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
      * `cancels`, `reveals`.
      */
     exports: core.exports,
+    /** The export wizard's fixture: manuscript.json, comments.json, rewrites.json and the book's styles. */
+    exportWizardFixture: () => ({ doc: WIZARD_FIXTURE_DOC, comments: WIZARD_FIXTURE_COMMENTS, rewrites: WIZARD_FIXTURE_REWRITES, styles: WIZARD_FIXTURE_STYLES }),
+    /** The export wizard's state (open, step, the run's phase). */
+    exportWizardState: () => {
+      const w = getWizardState()
+      return { open: w.open, step: w.step, phase: w.run.phase, problem: w.run.error?.problem ?? null }
+    },
+    /** The bytes of a file the export wrote (the real DOCX; the PDF is the fake core's stub), or null. */
+    exportedBytes: (path: string) => {
+      const bytes = core.exports.written.get(path)
+      return bytes ? Array.from(bytes) : null
+    },
     /** Fire a Tauri event, e.g. a native File menu item ('menu://new-project'). */
     emit(event: string, payload?: unknown) {
       return window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event, payload })
@@ -187,6 +212,8 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     countControls: () => document.body.querySelectorAll(CONTROL_SELECTOR).length,
     /** Take a crash-recovery snapshot now, as the 30 s autosave timer would (perf: autosave mid-typing). */
     autosaveNow: () => autosaveNow(),
+    /** Navigation pane: how long its last tree rebuild took (ms; perf report). */
+    outlineBuildMs: () => +outlineDebug.lastBuildMs.toFixed(2),
     // ---- Pagination (Phase 2) ----
     /** The engine has laid out the current document and no reflow is pending. */
     paginationSettled: () => getPaginationDebug().settled,
@@ -367,6 +394,61 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       const blocks = ir.frontMatter.length + ir.chapters.reduce((n, c) => n + c.blocks.length, 0)
       return { ms, fromJsonMs, chapters: ir.chapters.length, blocks, footnotes: ir.footnotes.length, trackedChanges: ir.report.trackedChanges.total }
     },
+    /**
+     * Export the open document as DOCX with the real renderer (in its Web Worker) `runs` times after
+     * one warm-up: the IR build plus the render, as the wizard runs them. Times in ms; the progress
+     * fractions of the last run; whether the page kept painting frames during it. `preset` 'classic'
+     * adds the two-spaces-after-a-sentence pass and underline for italics.
+     */
+    renderDocxTimes: async (runs = 3, preset: 'standard' | 'classic' = 'standard') => {
+      const ed = getEditor()
+      if (!ed) return null
+      const styles = getResolvedStyles()
+      const footnotes = useStore.getState().book.footnotes
+      const renderer = createDocxRenderer()
+      const settings = { ...applyPreset(defaultManuscriptSettings('en-US'), preset), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' }, wordCount: 0 } }
+      const once = async (onProgress?: (p: { fraction: number }) => void) => {
+        const t0 = performance.now()
+        const ir = buildManuscript(ed.state.doc, styles, { footnotes })
+        // The wizard counts once, then renders (the count is part of the export time).
+        const bytes = await renderer.render(ir, { ...settings, info: { ...settings.info, wordCount: manuscriptWordCount(ir).total } }, { onProgress })
+        return { ms: +(performance.now() - t0).toFixed(1), bytes: bytes.length }
+      }
+      await once()
+      const ms: number[] = []
+      let bytes = 0
+      const fractions: number[] = []
+      let frames = 0
+      let counting = true
+      const tick = () => {
+        frames++
+        if (counting) requestAnimationFrame(tick)
+      }
+      for (let i = 0; i < runs; i++) {
+        if (i === runs - 1) requestAnimationFrame(tick)
+        const r = await once(i === runs - 1 ? (p) => fractions.push(p.fraction) : undefined)
+        ms.push(r.ms)
+        bytes = r.bytes
+      }
+      counting = false
+      return { ms, bytes, fractions, frames }
+    },
+    /** Start a DOCX export of the open document, cancel it after `afterMs`; what the render settled with. */
+    cancelDocxRender: async (afterMs = 20) => {
+      const ed = getEditor()
+      if (!ed) return null
+      const ir = buildManuscript(ed.state.doc, getResolvedStyles(), { footnotes: useStore.getState().book.footnotes })
+      const settings = { ...defaultManuscriptSettings('en-US'), info: { title: 'Perf', contact: { legalName: 'A Writer', penName: '', address: '', phone: '', email: '', agent: '' }, wordCount: 0 } }
+      const ac = new AbortController()
+      let progressAfterCancel = 0
+      setTimeout(() => ac.abort(), afterMs)
+      const t0 = performance.now()
+      const outcome = await createDocxRenderer()
+        .render(ir, settings, { signal: ac.signal, onProgress: () => ac.signal.aborted && progressAfterCancel++ })
+        .then((b) => ({ resolved: true, bytes: b.length, error: null as string | null }))
+        .catch((e: unknown) => ({ resolved: false, bytes: 0, error: isAbortError(e) ? 'AbortError' : String(e) }))
+      return { ...outcome, settledMs: +(performance.now() - t0).toFixed(1), progressAfterCancel }
+    },
     // ---- Comments (Phase 3) ----
     /** Start recording when each layoutVersion is published (performance.now()); returns the record. */
     watchLayoutPublishes: () => {
@@ -487,6 +569,10 @@ export async function installE2EBackend(): Promise<void> {
     },
     { shouldMockEvents: true },
   )
+  // mockIPC drops invoke options; the export write names its target in headers (as Rust reads them).
+  const internals = window.__TAURI_INTERNALS__ as unknown as { invoke: (cmd: string, args?: unknown, options?: { headers?: unknown }) => Promise<unknown> }
+  const mockedInvoke = internals.invoke
+  internals.invoke = (cmd, args, options) => (cmd === 'export_write_file' ? core.handle(cmd, args as Record<string, unknown>, options) : mockedInvoke(cmd, args, options))
   ;(globalThis as unknown as { isTauri: boolean }).isTauri = true
   window.__nvE2E = controlFor(core)
 }

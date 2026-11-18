@@ -467,7 +467,8 @@ file is created only when the user changes a setting.
     "endMarker": "none",
     "titlePage": { "include": true, "showContact": true, "showAgent": false, "showWordCount": true, "bylineStyle": "a-novel-by" },
     "wordCountRounding": "auto",
-    "outputs": { "docx": true, "pdf": true }
+    "outputs": { "docx": true, "pdf": true },
+    "checks": { "genre": "", "debut": false, "normalizeSpaces": false, "blankLineSceneBreaks": "auto" }
   },
   "contact": { "email": "book@example.com" }
 }
@@ -491,6 +492,7 @@ file is created only when the user changes a setting.
 | `settings.titlePage` | `include`, `showContact`, `showAgent`, `showWordCount`: boolean; `bylineStyle`: `a-novel-by`, `by`, `name-only` | Title page content. |
 | `settings.wordCountRounding` | `auto`, `nearest-100`, `nearest-500`, `nearest-1000`, `exact` | Rounding rule of the title-page word count. |
 | `settings.outputs` | `docx`, `pdf`: boolean | Formats the wizard exports. |
+| `settings.checks` | `genre`: a genre id (`literary`, `fantasy` ...) or `""`; `debut`, `normalizeSpaces`: boolean; `blankLineSceneBreaks`: `auto`, `off` | The export wizard's choices: the genre (and debut range) of the length check; export two or more spaces after a full stop as one; whether blank lines between paragraphs are scene breaks. Export only: the manuscript is never changed. |
 | `contact` | object with any of `legalName`, `penName`, `address`, `phone`, `email`, `agent` (text) | **Per-project override of the author profile.** Only the fields the user set for this project; absent when nothing is overridden. |
 
 Rules:
@@ -501,6 +503,9 @@ Rules:
 - **Personal contact details are not stored in the project by default.** The contact block of the title page comes from
   the author profile in app Settings (`preferences.json`, below). `contact` is written only when the user overrides a
   field for this project, and holds only the overridden fields; clearing an override removes it.
+- **An override cannot blank a field.** An empty override field means "not overridden", so the author profile's value
+  applies again: a project cannot leave out, say, the address the profile has. To omit a detail for one project, turn
+  the contact block off for it (`titlePage.showContact`) or clear the field in the profile.
 - **Reading never fails.** A wrongly typed or out-of-range value falls back to its default, key by key. Unknown keys
   (top level and inside `settings`) are kept and written back unchanged. A `version` above 1 is used as far as
   understood, the status bar says so, and the file is copied aside (`export.newer-<timestamp>.json`) before the first
@@ -509,6 +514,20 @@ Rules:
 - **Saved with the manuscript.** Changing a setting is an unsaved change of the project (prompts, autosave); the file is
   written in the save batch, snapshotted by autosave and restored by crash recovery (`sideFiles` in the snapshot), and
   carried by Save a Copy.
+
+## export-folders.json (app data, Rust only)
+
+Where the export Save dialog opens. Rust keeps it in the app data directory and writes it after every successful
+export write: the folder of the file written, keyed by the open project's root folder (`""` with none open), at most
+32 projects, oldest dropped. The webview never reads, writes or names it. The Save dialog opens in the folder of the
+last file granted in this session (of the same type, else any), else in this record's folder for the project, if it
+still exists, else in the OS default.
+
+```json
+{ "folders": [{ "project": "C:\\Books\\Night", "folder": "C:\\Exports" }] }
+```
+
+A missing or damaged file is read as empty. It holds folders only (no file names, no content).
 
 ## index.sqlite
 
@@ -742,8 +761,10 @@ Windows and Cmd+, on macOS).
 | `authorPrompted` | `true`/`false` | The one-time "who is writing?" question has been asked (answered or dismissed); it is never asked again. |
 | `profileLegalName`, `profilePenName` | text, at most 120 characters each | **Author profile** (Phase 4): the legal name and the by-line (pen) name for the title page of an exported manuscript. `""`: not set (an empty pen name means the legal name). |
 | `profileAddress`, `profileAgent` | text, at most 400 and 300 characters; line breaks kept | Postal address and agent / agency for the title-page contact block. |
-| `exportFolders` | object: project id (the `id` of its project.json) to a folder path; at most 50 entries, oldest dropped | The folder of the last manuscript export of each project on this computer. Machine-local, so it lives here and never in a project. Reset to defaults keeps it. |
+| `exportFolders` | object: project id (the `id` of its project.json) to a folder path; at most 50 entries, oldest dropped | The folder of the last manuscript export of each project on this computer, shown by the export wizard and enabling Export Manuscript Again. Machine-local, so it lives here and never in a project. Reset to defaults keeps it. It does not decide where the Save dialog opens (see `export-folders.json`). |
 | `profilePhone`, `profileEmail` | text, at most 60 and 200 characters | Phone and email for the contact block. |
+| `navigationPane` | `true`/`false` | View ▸ Navigation Pane is shown (Phase 4). Default `false`. Window layout, not a Settings value: Reset to defaults keeps it. |
+| `navigationPaneWidth` | number, 200 to 480 (CSS px; out-of-range values are clamped) | Width of the docked navigation pane. Default 280. Reset to defaults keeps it. |
 
 Rules:
 

@@ -182,6 +182,23 @@ describe('perf summary', () => {
     expect(section).toMatch(/\| perf-export \| manuscript IR build, 2,000 pending changes \(median\) \| chromium \/ win32 \(shipping\) \| \*\*510\*\* \(MISS\) \| 500 \|/)
   })
 
+  it('export: the PDF render of the 100k fixture against 15 s, blocking on Windows, a warning on macOS', () => {
+    const md = toMarkdown([
+      { scenario: 'pdf-export', browser: 'typst', platform: 'win32', pdfRender: { ms: 2300, pages: 363 } },
+      { scenario: 'pdf-export', browser: 'typst', platform: 'darwin', pdfRender: { ms: 15200, pages: 363 } },
+    ])
+    const section = md.slice(md.indexOf('#### Export'))
+    expect(section).toContain('| pdf-export | PDF render, Typst sidecar (363 pages) | typst / win32 (blocking) | 2300 | 15000 |')
+    expect(section).toContain('| pdf-export | PDF render, Typst sidecar (363 pages) | typst / darwin | **15200** (miss, warning) | 15000 |')
+  })
+
+  it('export: the DOCX export row against 5,000 ms', () => {
+    const md = toMarkdown([{ scenario: 'perf-export-docx', browser: 'perf-chromium', platform: 'win32', docxExport: { medianMs: 812.3 }, docxExportClassic: { medianMs: 901 } }])
+    const section = md.slice(md.indexOf('#### Export'))
+    expect(section).toMatch(/\| perf-export-docx \| DOCX export, 100k words: IR \+ render in the worker \(median\) \| chromium \/ win32 \(shipping\) \| 812\.3 \| 5000 \|/)
+    expect(section).toMatch(/\| perf-export-docx \| DOCX export, 100k words, Classic preset \(median\) \| chromium \/ win32 \(shipping\) \| 901 \| 5000 \|/)
+  })
+
   it('live word counts: typing blocks on Windows Chromium like plain typing; the count update is reported (Phase 4)', () => {
     const md = toMarkdown([
       {

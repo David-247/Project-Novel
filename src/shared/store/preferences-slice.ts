@@ -44,6 +44,9 @@ export const createPreferencesSlice: SliceCreator<PreferencesSlice> = (set) => (
           profileEmail: s.preferences.profileEmail,
           profileAgent: s.preferences.profileAgent,
           exportFolders: s.preferences.exportFolders,
+          // Window layout (the navigation pane), not a setting of the Settings dialog.
+          navigationPane: s.preferences.navigationPane,
+          navigationPaneWidth: s.preferences.navigationPaneWidth,
           extra: s.preferences.extra,
           loaded: s.preferences.loaded,
         },

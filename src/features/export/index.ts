@@ -33,3 +33,32 @@ export * from './ir'
 // ExportPlatformError, EXPORT_COMMANDS / EXPORT_HEADERS and their types.
 export * from './platform'
 // --- end of the export platform block ------------------------------------------------------------
+
+// --- PDF generator (src/features/export/pdf/*) ---------------------------------------------------
+// createPdfRenderer({ meta }) (ManuscriptRenderer for PDF via the bundled Typst template), buildPdfData(),
+// lineMetrics() / fontRoleOf(); ManuscriptMeta, PdfRenderReport.
+export * from './pdf'
+// --- end of the PDF generator block --------------------------------------------------------------
+// --- DOCX generator (src/features/export/docx/*) -------------------------------------------------
+// createDocxRenderer() -> ManuscriptRenderer<DocxRenderSettings> (built in a Web Worker),
+// DocxRenderSettings / ManuscriptExportInfo, DOCX_MIME_TYPE. docs/docx-export.md.
+export * from './docx'
+// --- end of the DOCX generator block -------------------------------------------------------------
+// --- Export wizard (src/features/export/wizard/*) ------------------------------------------------
+// File > Export > Manuscript… (the wizard: title page, formatting, checks, export) and Export Manuscript
+// Again (the last export, same files, progress in the status bar):
+// - <ExportWizard /> (render once; portal) and <ExportStatus /> (the status bar's Export Again notice)
+// - registerExportCommands(): both commands (File > Export submenu, ribbon Layout > Export)
+// - setExportRenderers({ docx, pdf }): the composition root injects the DOCX / PDF generators, wrapped
+//   by fromManuscriptRenderer(format, renderer, toSettings?); createMockExportRenderers() for tests / e2e
+// - EXPORT_WIZARD_CONTROLS: control ids, names and descriptions (the tooltips registry reads them)
+// - the pure parts: runChecks(), chapterIssues(), normalizeSentenceSpaces(),
+//   titlePageData(), manuscriptFileName(), runExport()
+export * from './wizard'
+// --- end of the export wizard block --------------------------------------------------------------
+
+// --- Wiring (src/features/export/generators.ts) ----------------------------------------------------
+// createManuscriptExportRenderers(): the DOCX and PDF generators adapted to the wizard's jobs, for
+// setExportRenderers at the composition root; docxSettingsOf(job) / pdfMetaOf(job).
+export * from './generators'
+// --- end of the wiring block -----------------------------------------------------------------------

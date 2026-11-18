@@ -183,7 +183,7 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     failSqlLoad: false,
   }
 
-  const exportFake = createFakeExport(() => state.fonts)
+  const exportFake = createFakeExport(() => state.fonts, () => state.active)
 
   function reset(): void {
     exportFake.reset()
@@ -519,6 +519,8 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     state,
     /** Export platform fake (Save dialog answers, written files, renders, cancels, reveals). */
     exports: exportFake.state,
+    /** A relaunch for the export platform (Rust forgets its Save-dialog grants). */
+    restartExportSession: exportFake.restartSession,
     handle,
     reset,
     hydrate,

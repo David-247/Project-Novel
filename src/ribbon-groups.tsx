@@ -100,6 +100,11 @@ const icons = {
       <path d="M10 5.5C8.5 4 6 3.5 3 3.5v12c3 0 5.5.5 7 2 1.5-1.5 4-2 7-2v-12c-3 0-5.5.5-7 2zM10 5.5v12" />
     </Icon>
   ),
+  export: () => (
+    <Icon>
+      <path d="M11 3H5.5A1.5 1.5 0 004 4.5v11A1.5 1.5 0 005.5 17h9a1.5 1.5 0 001.5-1.5V8zM11 3v5h5M10 10.5v4.5M7.8 12.8L10 15l2.2-2.2" />
+    </Icon>
+  ),
   proofing: () => (
     <Icon>
       <path d="M3 4.5h9M3 8.5h6M3 12.5h4M11.5 16.5l2-6 2 6M12.2 14.5h2.6M17.5 9.5v7" />
@@ -290,6 +295,8 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     menu: [sub('view', 'Paper')],
   },
   { id: 'layout.book', tab: 'layout', label: 'Book', order: 40, priority: 60, icon: icons.book },
+  // Word keeps Export in its File view; Novel has no File tab, so the manuscript export sits after Book.
+  { id: 'layout.export', tab: 'layout', label: 'Export', order: 50, priority: 50, icon: icons.export },
   // ---- Review ----
   // Proofing (Word's first Review group): Word Count, placed by its command.
   { id: 'review.proofing', tab: 'review', label: 'Proofing', order: 5, priority: 60, icon: icons.proofing },
@@ -378,7 +385,8 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
   // Page-turn / continuous scroll (T5) place their commands here.
   { id: 'view.views', tab: 'view', label: 'Views', order: 10, priority: 90, icon: icons.views },
   { id: 'view.zoom', tab: 'view', label: 'Zoom', order: 20, priority: 80, icon: icons.zoom },
-  { id: 'view.show', tab: 'view', label: 'Show', order: 30, priority: 70, icon: icons.show, Content: () => item(<CommentsPanelButton />), menu: [cmd('comment.panel')] },
+  // Navigation Pane (outline slice, a registry command) first, as in Word's Show group, then Comments.
+  { id: 'view.show', tab: 'view', label: 'Show', order: 30, priority: 70, icon: icons.show, buttons: 'before', Content: () => item(<CommentsPanelButton />), menu: [cmd('view.navigationPane'), cmd('comment.panel')] },
   { id: 'view.window', tab: 'view', label: 'Window', order: 40, priority: 60, icon: icons.window },
 ]
 

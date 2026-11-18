@@ -96,15 +96,18 @@ The Classic preset changes only the type: Courier New 12 pt, underline for itali
     rest of the pitch:
     ```typst
     #set page(paper: "us-letter", margin: 1in)            // "a4" on A4
-    #set text(size: 12pt, top-edge: "ascender", bottom-edge: "descender", hyphenate: false)
+    #set text(size: 12pt, top-edge: 0.8911em, bottom-edge: -0.2163em, hyphenate: false)  // Courier: 0.8325em, -0.3003em
     #set par(leading: 14.31pt, spacing: 14.31pt, justify: false,   // Times: 27.60 - 13.29
              first-line-indent: (amount: 0.5in, all: true))        // Courier: leading and spacing 13.60pt
     ```
     `spacing` is set equal to `leading` so the pitch is the same between paragraphs as inside them (no extra gap). For
     1.5 and single, `leading = lineSpacing x single height - 13.29 pt` (Times) or `- 13.59 pt` (Courier).
-    The metrics above are the published font values; the Typst ticket must assert, with a rendered page, that the
-    baseline-to-baseline pitch equals the table value within 0.1 pt, and correct `leading` if Typst measures the line
-    box differently.
+    **Measured (PDF generator, `src/features/export/pdf`).** Typst's `"ascender"` / `"descender"` edges read the OS/2
+    *typo* metrics (Liberation Serif: 0.909 em, a 10.91 pt box), so with them `leading: 14.31pt` gave a 25.22 pt
+    pitch, not 27.60. The template therefore sets the edges to the hhea values above as lengths, which makes the box
+    13.29 pt (Times) / 13.59 pt (Courier) and keeps `leading` at the documented gap. `pdf.sidecar.test.ts` renders a
+    page with the bundled fonts and asserts the baseline pitch: 27.60 pt (Times) and 27.19 pt (Courier) within 0.1 pt,
+    i.e. a gap of 14.31 pt / 13.60 pt.
 - **Options.** 1.5 (for UK agencies that ask), single.
 
 ### Paragraphs and alignment
@@ -158,7 +161,8 @@ A novel has a separate title page. [S-shunn-novel]
   nearest hundred" (e.g. 1,507 words becomes 1,500); "if you're edging into novella territory, round to the nearest 500".
   [S-shunn-story] [S-shunn-checklist]. Use the computer-generated count, not the old rule of thumb. [S-shunn-wordcount]
   Shunn's novel title page reads "about 80,000 words". [S-shunn-novel-pdf]
-- **Rounding rule (exact).** Take the app's word count (the word-count ticket's counter) and round half up to the step:
+- **Rounding rule (exact).** Take the app's word count (the word-count ticket's counter; the export wizard counts once
+  for both formats, footnotes included exactly when Word Count's "Include footnotes" is on) and round half up to the step:
   under 20,000 words the step is 100; from 20,000 words (novella and up, so every novel) it is 500. 79,874 words prints
   "about 80,000 words"; 82,260 prints "about 82,500 words". Format with thousands separators and the words "about" and
   "words"; "1 word" is singular. (`roundWordCount()`, `formatWordCount()`.)
@@ -178,6 +182,12 @@ A novel has a separate title page. [S-shunn-novel]
   double-spaced line, then the by-line centred. Nothing else on the page. Text starts on the next page.
 - **Default.** By-line `A Novel by <name>`, where the name is the pen name if the profile has one, else the legal name.
   **Options.** `bylineStyle`: `a-novel-by`, `by`, `name-only`. The title page has no header and no page number.
+- **The manuscript's own title lines.** With the generated title page on, the front matter's title block does not
+  print again after it (Phase 4 Wave 2 ruling; `withoutTitleBlock` in the export wizard). The block is recognised
+  only at the very start of the front matter: a paragraph that is the manuscript title (letters and digits,
+  case-insensitive), then at most one subtitle ("A novel", "A thriller novel", "A Novel by <name>") and one
+  by-line ("by <name>" or the name; with no name on file, a short "by ..." line), and the page breaks after them.
+  Anything else stays. Without the generated title page nothing is left out.
 
 ## Running header and page numbers
 
