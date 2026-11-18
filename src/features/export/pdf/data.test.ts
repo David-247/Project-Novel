@@ -112,10 +112,29 @@ describe('buildPdfData', () => {
     expect(texts((first as { runs: PdfRun[] }).runs)).toBe('It was night.[1] The rain fell hard and cold.')
     const note = (first as { runs: PdfRun[] }).runs.find((r) => 'fn' in r)
     expect(note).toEqual({ n: '1', fn: [{ s: 'First told in ' }, { s: '1902', i: true }, { s: '.' }] })
-    expect(d.blocks.find((b) => b.t === 'li')).toMatchObject({ marker: '•', pad: 36, hang: 18 })
+    expect(d.blocks.find((b) => b.t === 'li')).toMatchObject({ marker: '•', pad: 18, hang: 18 })
     expect(d.blocks.find((b) => b.t === 'p' && texts(b.runs) === 'Dear Ann, come home.')).toMatchObject({ indent: false, pad: [36, 36] })
     expect(d.blocks.find((b) => b.t === 'p' && texts(b.runs) === '— end of part one —')).toMatchObject({ align: 'right', indent: false })
     expect(d.blocks.filter((b) => b.t === 'page').length).toBeGreaterThan(0)
+  })
+
+  it('block quotes and lists are inset by the first-line indent, with the DOCX geometry (clamped to 0-2 in alike)', () => {
+    const insets = (firstLineIndentIn: number) => {
+      const d = buildPdfData(ir(), { ...settings(), firstLineIndentIn }, META)
+      const quote = d.blocks.find((b) => b.t === 'p' && texts(b.runs) === 'Dear Ann, come home.')
+      const li = d.blocks.find((b) => b.t === 'li')
+      return { quote: quote && 'pad' in quote ? quote.pad : null, li: li && li.t === 'li' ? [li.pad, li.hang] : null, indent: d.type.indent }
+    }
+    // DOCX: quote left/right = indent; list text at (depth + 1) indents, the marker hanging half an indent.
+    expect(insets(1)).toEqual({ quote: [72, 72], li: [36, 36], indent: 72 })
+    expect(insets(0.3)).toEqual({ quote: [21.6, 21.6], li: [10.8, 10.8], indent: 21.6 })
+    expect(insets(5)).toEqual({ quote: [144, 144], li: [72, 72], indent: 144 })
+    const nested = buildPdfData(
+      { ...ir(), frontMatter: [{ kind: 'paragraph', role: 'listItem', list: { marker: '◦', depth: 2, ordered: false }, runs: [{ kind: 'text', text: 'deep' }] }] },
+      settings(),
+      META,
+    ).blocks[0]
+    expect(nested).toMatchObject({ t: 'li', pad: 36 * 3 - 18, hang: 18 })
   })
 
   it('first paragraphs follow indentFirstParagraph', () => {
@@ -138,12 +157,15 @@ describe('buildPdfData', () => {
 
   it('sentence spacing: two spaces after a sentence in Classic, across runs; one in Standard', () => {
     const runs: PdfRun[] = [{ s: 'It was ' }, { s: 'night', b: true }, { s: '.' }, { s: ' She  left. "Go!"   he said. Mr. X' }]
-    expect(applySentenceSpacing(runs, 2).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('It was |night|.|  She  left.  "Go!"  he said.  Mr.  X')
-    expect(applySentenceSpacing(runs, 1).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('It was |night|.| She  left. "Go!" he said. Mr. X')
-    // A run of only spaces after the sentence's end is the gap itself.
+    // Classic: the DOCX's rule (no gap after "Mr.", none before lower case; typed doubles kept).
+    expect(applySentenceSpacing(runs, 2).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('It was |night|.|  She  left.  "Go!"   he said.  Mr. X')
+    // Standard leaves typed spacing alone (only the wizard's normalizeSpaces option changes it).
+    expect(applySentenceSpacing(runs, 1)).toBe(runs)
+    // A run of only spaces after the sentence's end is the gap itself, when a sentence follows.
     const spaced: PdfRun[] = [{ s: 'night.' }, { s: ' ' }, { s: 'She', i: true }, { s: ' went.' }]
     expect(applySentenceSpacing(spaced, 2).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('night.|  |She| went.')
-    expect(applySentenceSpacing([{ s: 'night.' }, { s: '   ' }, { s: 'She' }], 1).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('night.| |She')
+    expect(applySentenceSpacing([{ s: 'night.' }, { s: ' ' }, { s: 'she' }], 2).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('night.| |she')
+    expect(applySentenceSpacing([{ s: 'night.' }, { s: '   ' }, { s: 'She' }], 1).map((r) => ('s' in r ? r.s : '')).join('|')).toBe('night.|   |She')
     const d = buildPdfData(ir(), applyPreset(settings(), 'classic'), META)
     const p = d.blocks.find((b) => b.t === 'p' && texts(b.runs).startsWith('It was night'))!
     expect(texts((p as { runs: PdfRun[] }).runs)).toBe('It was night.[1]  The rain fell hard and cold.')

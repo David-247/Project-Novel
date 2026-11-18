@@ -90,7 +90,14 @@ exports[`the bundled template (src-tauri/templates/manuscript.typ) > shows manus
     let p = if b.align == "center" { align(center, p) } else if b.align == "right" { align(right, p) } else { p }
     if b.pad.at(0) > 0 or b.pad.at(1) > 0 { pad(left: pt(b.pad.at(0)), right: pt(b.pad.at(1)), p) } else { p }
   } else if b.t == "li" {
-    pad(left: pt(b.pad), par(hanging-indent: pt(b.hang))[#box(width: pt(b.hang), text(b.marker))#runs(b.runs)])
+    // The marker's box ends at the text's indent (\`hang\`). A wider marker ("100.") ends at the next
+    // default tab stop after it (every 0.5 in from the margin), as the tab after Word's marker does.
+    let marker = context {
+      let w = measure(text(b.marker)).width
+      let width = if w < pt(b.hang) { pt(b.hang) } else { (calc.floor((pt(b.pad) + w) / 36pt) + 1) * 36pt - pt(b.pad) }
+      box(width: width, text(b.marker))
+    }
+    pad(left: pt(b.pad), par(hanging-indent: pt(b.hang))[#marker#runs(b.runs)])
   } else if b.t == "opening" {
     pagebreak(weak: true)
     v(pt(data.chapterDrop))

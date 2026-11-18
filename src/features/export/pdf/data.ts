@@ -3,7 +3,9 @@ import type { InlineRun, ManuscriptBlock, ManuscriptIR, NoteRun, ParagraphBlock 
 import { assertManuscriptVersion } from '../ir'
 import {
   bylineName,
+  contactBlockLines,
   formatWordCount,
+  manuscriptTitle,
   headerShortTitle,
   sceneBreakText,
   surnameOf,
@@ -11,6 +13,7 @@ import {
   type HeaderSettings,
   type ManuscriptSettings,
 } from '../settings'
+import { classicSentenceSpacing } from '../settings/sentence-spacing'
 import { fontRoleOf, lineMetrics } from './metrics'
 
 /**
@@ -52,7 +55,7 @@ export type PdfAlign = 'left' | 'center' | 'right'
 export type PdfBlock =
   /** A paragraph. `indent`: first-line indent on; `pad`: left / right inset (block quotes, lists), pt. */
   | { t: 'p'; align: PdfAlign; indent: boolean; pad: [number, number]; runs: PdfRun[] }
-  /** A list item paragraph: `marker` hangs in a box of `hang` pt at `pad` pt from the left margin. */
+  /** A list item paragraph: `marker` at `pad` pt from the left margin, the text `hang` pt after it; a wider marker pushes the first line's text to the next default tab stop (every 0.5 in from the margin), as Word's tab after the marker does. */
   | { t: 'li'; marker: string; pad: number; hang: number; runs: PdfRun[] }
   /** A heading set on a new page, dropped (chapter opening, part title): centred lines, then a blank line. */
   | { t: 'opening'; lines: PdfRun[][] }
@@ -134,11 +137,18 @@ const PAPER_HEIGHT_PT = { letter: 792, a4: 841.89 } as const
 const HEADER_DISTANCE_PT = 36
 /** The title on the title page starts a third of the text-area height down (docs/manuscript-format.md). */
 const TITLE_DROP_FRACTION = 1 / 3
-/** Block quotes are inset this much on both sides; list levels step by it. */
-const QUOTE_INSET_PT = 0.5 * PT_PER_IN
-const LIST_HANG_PT = 0.25 * PT_PER_IN
-
 const r2 = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * The first-line indent in pt, clamped to 0 to 2 in as the DOCX's layout clamps it. Block quotes and
+ * lists are inset by it, with the DOCX's geometry (docx/styles.ts, docx/build.ts): a block quote by
+ * one indent on both sides; a list item of depth d has its text at (d + 1) indents and its marker
+ * hanging half an indent before that.
+ */
+export function insetUnitPt(settings: Pick<ManuscriptSettings, 'firstLineIndentIn'>): number {
+  const inches = Number.isFinite(settings.firstLineIndentIn) ? Math.min(2, Math.max(0, settings.firstLineIndentIn)) : 0
+  return r2(inches * PT_PER_IN)
+}
 
 /** The header text before the page number (the page number is always last: settings `runningHeader`). */
 export function headerPrefix(h: Pick<HeaderSettings, 'format' | 'titleCase'>, surname: string, shortTitle: string): string {
@@ -163,52 +173,24 @@ const BYLINE: Record<ManuscriptSettings['titlePage']['bylineStyle'], (name: stri
   'name-only': (n) => n,
 }
 
-/** Lines of a multi-line contact field, each trimmed, empty ones left out. */
-const splitLines = (s: string) =>
-  s
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-
-function contactLines(c: ContactDetails, showAgent: boolean): string[] {
-  return [
-    ...splitLines(c.legalName),
-    ...splitLines(c.address),
-    ...splitLines(c.phone),
-    ...splitLines(c.email),
-    ...(showAgent ? splitLines(c.agent) : []),
-  ]
-}
-
-const SENTENCE_END = /[.!?]["'’”)\]]*$/
-const SENTENCE_GAP = /([.!?]["'’”)\]]*) +(?=\S)/g
-
 /**
- * Sentence spacing (docs/manuscript-format.md): the spaces after a sentence's end become `n` spaces.
- * Works across runs ("night" + "." in one run, " It" in the next) within one paragraph.
+ * Sentence spacing (docs/manuscript-format.md), by the rule the DOCX uses (../settings/sentence-spacing):
+ * Standard (1) leaves the text as typed; Classic (2) adds a second space after each sentence, across
+ * the runs of one paragraph. A footnote reference keeps the sentence before it ended; a line break
+ * ends the context.
  */
 export function applySentenceSpacing(runs: PdfRun[], n: 1 | 2): PdfRun[] {
-  const gap = ' '.repeat(n)
-  let endsSentence = false
-  return runs.map((r) => {
-    if (!('s' in r)) {
-      // A footnote reference after a full stop leaves the sentence ended; a line break does not.
-      if ('br' in r) endsSentence = false
-      return r
-    }
-    let s = r.s.replace(SENTENCE_GAP, `$1${gap}`)
-    if (endsSentence && /^ +\S/.test(s)) s = s.replace(/^ +/, gap)
-    // A run of nothing but spaces right after a sentence's end (" " between "night." and "She") is that gap.
-    else if (endsSentence && /^ +$/.test(s)) s = gap
-    if (/\S/.test(s)) endsSentence = SENTENCE_END.test(s)
-    return s === r.s ? r : { ...r, s }
-  })
+  if (n !== 2) return runs
+  const spaced = classicSentenceSpacing(runs.map((r) => ('s' in r ? r.s : 'br' in r ? null : '')))
+  return runs.map((r, i) => ('s' in r && spaced[i] !== r.s ? { ...r, s: spaced[i] as string } : r))
 }
 
 interface RunContext {
   ir: ManuscriptIR
   underlineItalics: boolean
   sentenceSpacing: 1 | 2
+  /** `insetUnitPt(settings)`: block quote and list insets. */
+  inset: number
 }
 
 function textRun(r: { text: string } & Partial<Record<'bold' | 'italic' | 'underline' | 'smallCaps' | 'superscript' | 'subscript', true>>, ctx: RunContext): PdfTextRun {
@@ -248,7 +230,7 @@ function paragraph(b: ParagraphBlock, settings: ManuscriptSettings, ctx: RunCont
     case 'first':
       return { t: 'p', align: 'left', indent: settings.indentFirstParagraph, pad: [0, 0], runs }
     case 'blockQuote':
-      return { t: 'p', align: b.align ?? 'left', indent: false, pad: [QUOTE_INSET_PT, QUOTE_INSET_PT], runs }
+      return { t: 'p', align: b.align ?? 'left', indent: false, pad: [ctx.inset, ctx.inset], runs }
     case 'aligned':
       return { t: 'p', align: b.align ?? 'center', indent: false, pad: [0, 0], runs }
     case 'subheading':
@@ -257,7 +239,8 @@ function paragraph(b: ParagraphBlock, settings: ManuscriptSettings, ctx: RunCont
       return { t: 'opening', lines: [runs] }
     case 'listItem': {
       const depth = b.list?.depth ?? 0
-      return { t: 'li', marker: b.list?.marker ?? '', pad: r2(QUOTE_INSET_PT + depth * LIST_HANG_PT), hang: LIST_HANG_PT, runs }
+      const hang = r2(ctx.inset / 2)
+      return { t: 'li', marker: b.list?.marker ?? '', pad: r2(ctx.inset * (depth + 1) - hang), hang, runs }
     }
   }
 }
@@ -294,15 +277,15 @@ export function buildPdfData(ir: ManuscriptIR, settings: ManuscriptSettings, met
     left: r2(settings.margins.left * PT_PER_IN),
   }
   const textHeight = PAPER_HEIGHT_PT[settings.paper] - margin.top - margin.bottom
-  const title = meta.title.trim()
+  const title = manuscriptTitle(meta.title)
   const author = bylineName(meta.contact)
-  const ctx: RunContext = { ir, underlineItalics: settings.italics === 'underline', sentenceSpacing: settings.sentenceSpacing }
+  const ctx: RunContext = { ir, underlineItalics: settings.italics === 'underline', sentenceSpacing: settings.sentenceSpacing, inset: insetUnitPt(settings) }
   const scene = sceneBreakText(settings)
 
   const tp = settings.titlePage
   const titlePage: PdfTitlePage | null = tp.include
     ? {
-        contact: tp.showContact ? contactLines(meta.contact, tp.showAgent) : [],
+        contact: contactBlockLines(meta.contact, tp),
         wordCount: tp.showWordCount ? formatWordCount(meta.wordCount, settings.wordCountRounding) : '',
         title,
         byline: author ? BYLINE[tp.bylineStyle](author) : '',
@@ -340,7 +323,7 @@ export function buildPdfData(ir: ManuscriptIR, settings: ManuscriptSettings, met
       pitch: m.pitch,
       leading: m.leading,
       singleLeading: m.singleLeading,
-      indent: r2(settings.firstLineIndentIn * PT_PER_IN),
+      indent: insetUnitPt(settings),
     },
     header,
     titlePage,

@@ -41,7 +41,8 @@ export function createFakeExport(installedFonts: () => readonly string[], active
   const state = {
     /** Save dialog answer: undefined = `/exports/<default name>`, null = cancelled, else that path. */
     savePath: undefined as string | null | undefined,
-    picks: [] as { token: string; path: string; kind: Kind }[],
+    /** Save-dialog grants, each with the project open when it was picked ('' = none). */
+    picks: [] as { token: string; path: string; kind: Kind; project: string }[],
     nextToken: 0,
     /** Files written by export_write_file or a render with an output token, by path. */
     written: new Map<string, Uint8Array>(),
@@ -73,11 +74,15 @@ export function createFakeExport(installedFonts: () => readonly string[], active
     state.picks = []
   }
 
-  /** Where Rust opens the Save dialog: the most recent grant's folder (any kind), else the remembered one. */
+  /**
+   * Where Rust opens the Save dialog (files::dialog_start): the folder of the open project's most recent
+   * grant this session (any kind; another project's grants never count), else its remembered folder.
+   */
   function dialogStart(): string | null {
-    const last = state.picks[state.picks.length - 1]
+    const project = activeRoot() ?? ''
+    const last = [...state.picks].reverse().find((p) => p.project === project)
     if (last) return folderOf(last.path)
-    return state.remembered.get(activeRoot() ?? '') ?? null
+    return state.remembered.get(project) ?? null
   }
 
   function reset() {
@@ -132,7 +137,7 @@ export function createFakeExport(installedFonts: () => readonly string[], active
         if (path === null) return null
         state.nextToken += 1
         const token = `export-${state.nextToken}`
-        state.picks.push({ token, path, kind })
+        state.picks.push({ token, path, kind, project: activeRoot() ?? '' })
         return { token, path }
       }
       case 'export_write_file': {

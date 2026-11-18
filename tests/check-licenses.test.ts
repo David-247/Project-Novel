@@ -36,6 +36,8 @@ describe('license gate (bundled sidecar and fonts)', () => {
   it('passes for the files the app bundles', () => {
     expect(checkBundled(ROOT)).toEqual([])
     expect(BUNDLED[0].license).toBe('Apache-2.0 AND LPPL-1.3c')
+    // Each licence of the expression ships its full text (LPPL-1.3c: a standalone copy, T3).
+    expect(BUNDLED[0].texts).toContain('lppl-1.3c.txt')
   })
 
   it('allows LPPL-1.3c only for bundled files, never for packages', () => {

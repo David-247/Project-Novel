@@ -15,11 +15,11 @@ import {
 // load the editor or the app store.
 import { assertManuscriptVersion, throwIfAborted, type RenderOptions } from '../ir/renderer'
 import type { InlineRun, ManuscriptBlock, ManuscriptIR, NoteRun, ParagraphBlock, TextRun as IRTextRun } from '../ir/types'
-import { bylineName, formatWordCount, headerShortTitle, runningHeader, sceneBreakText, surnameOf } from '../settings/text'
-import type { ContactDetails } from '../settings/types'
+import { bylineName, contactBlockLines, formatWordCount, headerShortTitle, manuscriptTitle, runningHeader, sceneBreakText, surnameOf } from '../settings/text'
+import { classicSentenceSpacing } from '../settings/sentence-spacing'
 import { docxLayout, HEADER_DISTANCE_TWIPS, type DocxLayout } from './layout'
 import { manuscriptStyles, STYLE } from './styles'
-import { doubleSentenceSpaces, sentenceContext, xmlSafe } from './text'
+import { xmlSafe } from './text'
 import type { DocxRenderSettings } from './types'
 
 /**
@@ -79,21 +79,18 @@ type RunChild = TextRun | FootnoteReferenceRun
 
 function inlineRuns(runs: readonly (InlineRun | NoteRun)[], ctx: Ctx): RunChild[] {
   const out: RunChild[] = []
-  const classic = ctx.settings.sentenceSpacing === 2
-  let previous = ''
-  for (const r of runs) {
+  // Classic spacing over the paragraph's runs as one text, by the rule the PDF uses too.
+  const spaced = ctx.settings.sentenceSpacing === 2 ? classicSentenceSpacing(runs.map((r) => (r.kind === 'text' ? r.text : r.kind === 'lineBreak' ? null : ''))) : null
+  runs.forEach((r, i) => {
     if (r.kind === 'text') {
-      const text = classic ? doubleSentenceSpaces(r.text, previous) : r.text
-      if (classic) previous = sentenceContext(previous + r.text)
-      out.push(...textRuns(text, emphasis(r, ctx)))
+      out.push(...textRuns(spaced?.[i] ?? r.text, emphasis(r, ctx)))
     } else if (r.kind === 'lineBreak') {
       out.push(new TextRun({ break: 1 }))
-      previous = ''
     } else {
       // Word numbers its footnotes itself (1, 2, 3 ... through the document).
       out.push(new FootnoteReferenceRun(r.footnote + 1))
     }
-  }
+  })
   return out
 }
 
@@ -188,20 +185,9 @@ function chapterHeading(c: ManuscriptIR['chapters'][number], ctx: Ctx): Paragrap
 
 // ---- title page and header ----------------------------------------------------------------------
 
-function contactLines(contact: ContactDetails, settings: DocxRenderSettings): string[] {
-  if (!settings.titlePage.showContact) return []
-  const lines = (s: string) => s.split(/\r\n|\n|\r/).map((l) => l.trim())
-  const out = [contact.legalName.trim(), ...lines(contact.address), contact.phone.trim(), contact.email.trim()]
-  if (settings.titlePage.showAgent) out.push(...lines(contact.agent))
-  return out.filter((l) => l !== '').map(xmlSafe)
-}
-
-/** The manuscript title as printed and in the properties: trimmed, "Untitled" when empty. */
-const manuscriptTitle = (settings: DocxRenderSettings) => settings.info.title.trim() || 'Untitled'
-
 function titlePage(settings: DocxRenderSettings): { paragraphs: Paragraph[]; linesAboveTitle: number } {
   const { info, titlePage: tp } = settings
-  const lines = contactLines(info.contact, settings)
+  const lines = contactBlockLines(info.contact, tp).map(xmlSafe)
   const wordCount = tp.showWordCount ? formatWordCount(info.wordCount, settings.wordCountRounding) : ''
   const paragraphs: Paragraph[] = []
   if (lines.length || wordCount) {
@@ -212,7 +198,7 @@ function titlePage(settings: DocxRenderSettings): { paragraphs: Paragraph[]; lin
     )
   }
   const linesAboveTitle = paragraphs.length
-  paragraphs.push(new Paragraph({ style: STYLE.titleTitle, children: textRuns(manuscriptTitle(settings), {}) }))
+  paragraphs.push(new Paragraph({ style: STYLE.titleTitle, children: textRuns(manuscriptTitle(settings.info.title), {}) }))
   const name = bylineName(info.contact)
   if (name) paragraphs.push(new Paragraph({ style: STYLE.titleByline, children: textRuns(BYLINE[tp.bylineStyle] + name, {}) }))
   return { paragraphs, linesAboveTitle }
@@ -224,7 +210,7 @@ const PAGE_SLOT = '\u0000PAGE\u0000'
 function header(settings: DocxRenderSettings): Header | null {
   if (settings.header.format === 'none') return null
   const surname = surnameOf(xmlSafe(bylineName(settings.info.contact)))
-  const shortTitle = headerShortTitle(settings.header, settings.info.title)
+  const shortTitle = headerShortTitle(settings.header, manuscriptTitle(settings.info.title))
   const text = runningHeader(settings.header, { surname, shortTitle: xmlSafe(shortTitle), page: PAGE_SLOT })
   const [before, after = ''] = text.split(PAGE_SLOT)
   return new Header({
@@ -343,7 +329,7 @@ export async function renderDocx(ir: ManuscriptIR, settings: DocxRenderSettings,
   })
 
   const author = bylineName(settings.info.contact)
-  const title = manuscriptTitle(settings)
+  const title = manuscriptTitle(settings.info.title)
   const doc = new Document({
     title,
     creator: author,

@@ -181,34 +181,12 @@ fn export_folders_file<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join(files::EXPORT_FOLDERS_FILE))
 }
 
-/// Where the Save dialog opens: the folder of this session's most recent grant (any kind),
-/// else the folder of this project's last export in an earlier session (Rust's own record), if it
-/// still exists. The webview names no folder.
-fn dialog_start<R: Runtime>(app: &AppHandle<R>, state: &ExportState) -> Option<PathBuf> {
-    let session = state.targets.lock().ok().and_then(|t| t.last_folder());
-    let remembered = || {
-        let file = export_folders_file(app)?;
-        let text = std::fs::read_to_string(file).ok();
-        files::RememberedFolders::parse(text.as_deref()).folder_for(&project_key(app))
-    };
-    session.or_else(remembered).and_then(|d| files::start_directory(&d))
-}
-
-/// After a successful export write: remember its folder for this project (best effort; a failure only
-/// means the next session's first dialog opens in the OS default).
-fn remember_export_folder<R: Runtime>(app: &AppHandle<R>, written: &Path) {
-    let (Some(file), Some(folder)) = (export_folders_file(app), written.parent()) else { return };
-    let mut folders = files::RememberedFolders::parse(std::fs::read_to_string(&file).ok().as_deref());
-    folders.remember(&project_key(app), folder);
-    let result = serde_json::to_vec_pretty(&folders)
-        .map_err(ExportError::internal)
-        .and_then(|bytes| {
-            if let Some(dir) = file.parent() {
-                std::fs::create_dir_all(dir).map_err(|e| ExportError::io(dir, e))?;
-            }
-            files::write_export(&file, &bytes)
-        });
-    if let Err(e) = result {
+/// After a successful export write: remember its folder for `project` (best effort; a failure only
+/// means the next session's first dialog opens in the OS default). Blocking file I/O: called from
+/// the export's background (spawn_blocking) work, never on the async command thread.
+fn remember_export_folder(folders_file: Option<&Path>, project: &str, written: &Path) {
+    let Some(file) = folders_file else { return };
+    if let Err(e) = files::remember_export_folder(file, project, written) {
         eprintln!("export: could not remember the export folder: {}", e.message);
     }
 }
@@ -227,8 +205,14 @@ pub async fn export_pick_save_path<R: Runtime>(
     use tauri_plugin_dialog::DialogExt;
     let dialog_app = app.clone();
     let name = files::safe_file_name(&default_name, kind);
-    let start = dialog_start(&app, state.inner());
+    // The grant and the start folder belong to the project open now.
+    let project = project_key(&app);
+    let session = state.targets.lock().ok().and_then(|t| t.last_folder(&project));
+    let folders_file = export_folders_file(&app);
+    let dialog_project = project.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
+        // Off the async command thread: reading export-folders.json and checking the folder exist.
+        let start = files::dialog_start(session, folders_file.as_deref(), &dialog_project);
         let mut builder = dialog_app
             .dialog()
             .file()
@@ -249,7 +233,7 @@ pub async fn export_pick_save_path<R: Runtime>(
     .map_err(ExportError::internal)?;
     let Some(picked) = picked else { return Ok(None) };
     let path = files::with_extension(picked.into_path().map_err(ExportError::internal)?, kind);
-    let token = state.targets.lock().map_err(ExportError::internal)?.grant(path.clone(), kind);
+    let token = state.targets.lock().map_err(ExportError::internal)?.grant(path.clone(), kind, &project);
     Ok(Some(PickedPath { token, path: path.to_string_lossy().into_owned() }))
 }
 
@@ -286,11 +270,16 @@ pub async fn export_write_file<R: Runtime>(
     };
     let target = state.targets.lock().map_err(ExportError::internal)?.target(&token, kind)?;
     let (bytes, written, len) = (bytes.clone(), target.clone(), bytes.len());
-    tauri::async_runtime::spawn_blocking(move || files::write_export(&written, &bytes))
-        .await
-        .map_err(ExportError::internal)??;
+    let (folders_file, project) = (export_folders_file(&app), project_key(&app));
+    tauri::async_runtime::spawn_blocking(move || {
+        files::write_export(&written, &bytes)?;
+        // In the same background work: the folder record is file I/O too.
+        remember_export_folder(folders_file.as_deref(), &project, &written);
+        Ok::<_, ExportError>(())
+    })
+    .await
+    .map_err(ExportError::internal)??;
     state.targets.lock().map_err(ExportError::internal)?.mark_exported(&target);
-    remember_export_folder(&app, &target);
     Ok(WrittenFile { path: target.to_string_lossy().into_owned(), bytes: len })
 }
 
@@ -510,8 +499,10 @@ pub async fn export_render_pdf<R: Runtime>(
         },
     )
     .await?;
-    if let Some(path) = &result.path {
-        remember_export_folder(&app, Path::new(path));
+    if let Some(path) = result.path.clone() {
+        // Off the async command thread, like the PDF's own write.
+        let (folders_file, project) = (export_folders_file(&app), project_key(&app));
+        let _ = tauri::async_runtime::spawn_blocking(move || remember_export_folder(folders_file.as_deref(), &project, Path::new(&path))).await;
     }
     Ok(result)
 }

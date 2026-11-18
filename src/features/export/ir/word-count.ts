@@ -18,7 +18,8 @@ export interface ManuscriptWordCount {
  * are not counted (Word does not count list numbers), which is why this does not count
  * `manuscriptPlainText`.
  *
- * Shared by both generators: the DOCX title page states `total`, the PDF title page states `body`.
+ * Neither generator counts: the wizard counts once (`titlePageWordCount`: `total` when Word Count's
+ * "Include footnotes" is on, else `body`) and both title pages state that one number.
  */
 export function manuscriptWordCount(ir: ManuscriptIR): ManuscriptWordCount {
   let body = 0

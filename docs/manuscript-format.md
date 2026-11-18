@@ -132,6 +132,9 @@ The Classic preset changes only the type: Courier New 12 pt, underline for itali
 - **Default.** One space, italics, em dashes unspaced, curly quotes (as typed in the editor).
 - **Options.** `sentenceSpacing` (1 or 2), `italics` (`italic` or `underline`). Underline: render the italic runs of the
   manuscript as underlined, upright text.
+- **Both formats, one rule** (`settings/sentence-spacing.ts`). 1 leaves the spaces as typed; only the wizard's "Export
+  one space after a full stop" option changes them. 2 adds a second space after each sentence end before a capital,
+  digit or opening quote, but not after an abbreviation (Mr., Dr., etc.) or an initial, and keeps spaces already doubled.
 
 ## Title page
 

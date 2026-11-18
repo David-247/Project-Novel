@@ -46,6 +46,31 @@ export function headerShortTitle(header: Pick<HeaderSettings, 'shortTitle'>, tit
   return header.shortTitle.trim() || title.trim()
 }
 
+/**
+ * The manuscript title as both generators print it (title page, running header, document properties):
+ * trimmed, "Untitled" when empty. The wizard's missing-title check normally blocks an empty one.
+ */
+export function manuscriptTitle(title: string): string {
+  return title.trim() || 'Untitled'
+}
+
+/** A multi-line field's lines: split at CRLF, LF or a lone CR, each trimmed, empty ones left out. */
+const fieldLines = (s: string) =>
+  s
+    .split(/\r\n|\n|\r/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+
+/**
+ * The title page's contact block, in Shunn's order (legal name, address, phone, email, then the
+ * agent when shown); every field may hold several lines. The one rule of both generators and the
+ * wizard's preview.
+ */
+export function contactBlockLines(c: ContactDetails, show: Pick<ManuscriptSettings['titlePage'], 'showContact' | 'showAgent'>): string[] {
+  if (!show.showContact) return []
+  return [c.legalName, c.address, c.phone, c.email, ...(show.showAgent ? [c.agent] : [])].flatMap(fieldLines)
+}
+
 export interface HeaderContext {
   surname: string
   shortTitle: string

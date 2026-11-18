@@ -15,7 +15,9 @@ has an allowed licence, and has its licence text in `src-tauri/resources/license
   License 2.0, full text: [src-tauri/resources/licenses/typst-LICENSE.txt](src-tauri/resources/licenses/typst-LICENSE.txt).
   The binary also contains data under the LaTeX Project Public License 1.3c (OSI-approved): per Typst's NOTICE, the
   translation tables adapted from Babel (LPPL 1.3 or later) and Cleveref (LPPL 1.2 or later). Novel redistributes
-  them unmodified inside the unmodified binary, which the LPPL permits.
+  them unmodified inside the unmodified binary, which the LPPL permits. The LPPL 1.3c full text (verbatim, from
+  `https://www.latex-project.org/lppl/lppl-1-3c.txt`):
+  [src-tauri/resources/licenses/lppl-1.3c.txt](src-tauri/resources/licenses/lppl-1.3c.txt).
 - Notices: Typst's NOTICE file (third-party components inside Typst, under MIT, BSD-3-Clause, Apache-2.0 with LLVM
   exception, and the LPPL) is shipped verbatim:
   [src-tauri/resources/licenses/typst-NOTICE.txt](src-tauri/resources/licenses/typst-NOTICE.txt).
