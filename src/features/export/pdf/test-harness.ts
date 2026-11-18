@@ -17,11 +17,28 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../.
 export const TEMPLATE_PATH = join(ROOT, 'src-tauri', 'templates', 'manuscript.typ')
 export const FONTS_DIR = join(ROOT, 'src-tauri', 'resources', 'fonts')
 
+/**
+ * The sidecar to run among the files of src-tauri/binaries: this host's own build first
+ * (typst-<arch>-<os>), then the universal macOS one. Never another architecture's: after
+ * `fetch-typst --target universal-apple-darwin` the folder holds typst-aarch64-apple-darwin too, which an
+ * Intel Mac cannot execute.
+ */
+export function pickSidecar(files: readonly string[], platform: NodeJS.Platform = process.platform, arch: string = process.arch): string | null {
+  const cpu = arch === 'arm64' ? 'aarch64' : arch === 'x64' ? 'x86_64' : arch
+  const wanted =
+    platform === 'win32'
+      ? [`typst-${cpu}-pc-windows-msvc.exe`]
+      : platform === 'darwin'
+        ? [`typst-${cpu}-apple-darwin`, 'typst-universal-apple-darwin']
+        : [`typst-${cpu}-unknown-linux-gnu`, `typst-${cpu}-unknown-linux-musl`]
+  return wanted.find((w) => files.includes(w)) ?? null
+}
+
 /** The fetched sidecar for this host (src-tauri/binaries/typst-<triple>[.exe]), or null. */
 export function findSidecar(): string | null {
   const dir = join(ROOT, 'src-tauri', 'binaries')
   if (!existsSync(dir) || !existsSync(join(FONTS_DIR, 'LiberationSerif-Regular.ttf'))) return null
-  const exe = readdirSync(dir).find((f) => f.startsWith('typst-') && (process.platform === 'win32' ? f.endsWith('.exe') : !f.includes('.')))
+  const exe = pickSidecar(readdirSync(dir))
   return exe ? join(dir, exe) : null
 }
 
