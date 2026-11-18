@@ -1,7 +1,7 @@
-# Manuscript format (research for export)
+# Manuscript format
 
-What publishers and agents expect from a submitted novel manuscript, written so that a DOCX or Typst generator can
-reproduce the layout exactly. Every rule lists its sources, the **default** Novel uses and the **options** it exposes
+What publishers and agents expect from a submitted novel manuscript, and how Novel's DOCX and PDF export (Phase 4,
+version 0.4.0) reproduces it. Every rule lists its sources, the **default** Novel uses and the **options** it exposes
 (`ManuscriptSettings`, `src/features/export/settings`). Sources were read on **2026-11-18** (see "Sources").
 
 How to read it:
@@ -35,7 +35,7 @@ How to read it:
 | Chapter opening | New page, heading centred one third of the text-area height down | 0 to 0.5 (fraction) | `chapterDropFraction` |
 | Scene break | `#` centred on its own line | `* * *`, any text up to 20 characters | `sceneBreak` |
 | End marker | None | centred END / THE END | `endMarker` |
-| Footnotes | Real footnotes at the foot of the page | endnotes (not yet an option; see "Footnotes") | (W2) |
+| Footnotes | Real footnotes at the foot of the page, numbered through the manuscript | per chapter (the book's setting; PDF only, see "Footnotes"); no endnotes | `book.json` footnotes |
 | Outputs | DOCX and PDF | either | `outputs` |
 
 The Classic preset changes only the type: Courier New 12 pt, underline for italics, two spaces after a sentence.
@@ -235,11 +235,20 @@ A novel has a separate title page. [S-shunn-novel]
 
 ## Footnotes
 
-No source found in this research covers footnotes in a fiction manuscript (none of the guides mention them). Default:
-footnotes stay real footnotes (DOCX footnotes, Typst `footnote`) at the foot of their page, in the body font at 12 pt
-(no size reduction), single-spaced, separated from the text by a short rule. This is an implementer
-default, not a publisher rule; the wizard should say that a market that does not want notes must have them removed.
-Endnotes as an alternative are noted as a W2 option, not a stored setting yet.
+No source found in this research covers footnotes in a fiction manuscript (none of the guides mention them). Novel's
+rule, an implementer default and not a publisher rule:
+
+- Footnotes stay real footnotes at the foot of the page of their reference: Word footnotes in the DOCX, Typst
+  `footnote` in the PDF. The note is in the body font at the body size (no size reduction), single-spaced, separated
+  from the text by a short rule, with a no-break space between its number and its text.
+- Numbering follows the book's footnote setting (`book.json`: through the book, the default, or per chapter). The PDF
+  prints the numbers of the IR, so it follows either. The DOCX uses Word's automatic numbering, which runs through the
+  document: with "per chapter", the two files number differently (a known limitation, see
+  [docx-export.md](docx-export.md)).
+- Endnotes are not offered in Phase 4, and there is no stored setting for them. A market that does not want notes in
+  a novel manuscript needs them removed from the text before export; the export does not remove them.
+- The title-page word count includes the footnotes only when the app's Word Count "Include footnotes" setting is on
+  (see "Word count").
 
 ## Word counts by genre
 

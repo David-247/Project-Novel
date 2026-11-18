@@ -3,14 +3,17 @@
  * does it (src-tauri/src/export/render.rs: private temp dir, empty package folders, a dead proxy,
  * bundled fonts only), and reads the PDF back with pdfjs-dist. The sidecar and fonts come from
  * `pnpm fetch:typst`; without them the tests that use this skip, unless NOVEL_REQUIRE_TYPST=1 (CI's
- * Rust job, which fetches them) makes a missing sidecar a failure.
+ * Rust and e2e jobs, which fetch them) makes a missing sidecar a failure. Also used by the Phase 4
+ * acceptance e2e, which renders the request the app sent to the (fake) Rust command for real.
  */
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-export const ROOT = resolve(__dirname, '../../../..')
+// import.meta.url, not __dirname: Playwright (e2e/phase4-acceptance.spec.ts) loads this file as an ES module.
+export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
 export const TEMPLATE_PATH = join(ROOT, 'src-tauri', 'templates', 'manuscript.typ')
 export const FONTS_DIR = join(ROOT, 'src-tauri', 'resources', 'fonts')
 

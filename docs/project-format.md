@@ -520,8 +520,8 @@ Rules:
 Where the export Save dialog opens. Rust keeps it in the app data directory and writes it after every successful
 export write: the folder of the file written, keyed by the open project's root folder (`""` with none open), at most
 32 projects, oldest dropped. The webview never reads, writes or names it. The Save dialog opens in the folder of the
-last file granted in this session (of the same type, else any), else in this record's folder for the project, if it
-still exists, else in the OS default.
+most recent file granted in this session (of either type, so the PDF's dialog opens where the DOCX was just saved), else
+in this record's folder for the project, if it still exists, else in the OS default.
 
 ```json
 { "folders": [{ "project": "C:\\Books\\Night", "folder": "C:\\Exports" }] }

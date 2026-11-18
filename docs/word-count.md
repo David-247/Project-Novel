@@ -52,14 +52,27 @@ results to the shared store (`wordCount`), where the navigation pane and the exp
 ## Comparison with Word
 
 The ticket asks for counts within 0.5 % of Word on the 100,000-word fixture exported as DOCX, checked
-once by hand. That check needs Word and the export (a parallel ticket) and is left to the Phase 4
-acceptance ticket. Rule by rule against Word's documented and commonly observed behaviour:
+once by hand. The Phase 4 acceptance ticket checked it in Word 365 on Windows (COM automation,
+2026-11-18):
+
+- The 100,000-word fixture exported as DOCX: Word counts **100,017** words on 363 pages. The 17 extra
+  words are the title page (contact block, "about 100,000 words", title and by-line), which is not
+  manuscript text. The difference is 0.017 %.
+- Single lines, Word against Novel: "He paused — then left." 4 / 4. "Salt & pepper, bread & butter."
+  6 / 4. "She said - quietly - no." 6 / 4. "It was a well-known road—long and cold." 8 / 7.
+  "Dr. Smith arrived at 10:30 a.m. with 3 friends." 9 / 9.
+
+So Word counts a lone "&" and a spaced hyphen as words, and splits at an unspaced em dash. A spaced em
+dash is not a word in either. Novel keeps its rules (the ticket's rule, and the convention of
+manuscript word counts, which count words, not symbols). The title page rounds the count to the nearest
+100 or 500 anyway. Rule by rule:
 
 | Case | Word | Novel | Effect on a novel |
 | --- | --- | --- | --- |
-| Words split on spaces; hyphens, unspaced em dashes, slashes keep one word | yes | yes | none |
+| Words split on spaces; hyphens and slashes keep one word | yes | yes | none |
+| Unspaced em dash ("road—long") | two words (measured) | one word | Novel is lower by one per unspaced dash |
 | Numbers | counted | counted | none |
-| Punctuation alone between spaces ("—", "&", "*") | Word counts any run of non-space characters, so a spaced dash or "&" **may count as a word** in Word | not a word (the ticket's rule) | Novel can be lower by the number of spaced dashes and lone symbols: in prose usually well under 0.5 %; a manuscript that spaces every em dash should be checked |
+| Punctuation alone between spaces | "&" and a spaced hyphen "-" are words; a spaced em dash "—" is not (measured) | not a word (the ticket's rule) | Novel is lower by the number of lone "&" and spaced hyphens: on the fixture 0 %, in prose usually far under 0.5 % |
 | Characters (with spaces) | includes spaces and tabs; not paragraph marks | same | none |
 | Manual line breaks | separate words; uncertain whether Word counts the break as a character | separate words; not a character | at most one character per break |
 | Characters beyond the Basic Multilingual Plane (emoji) | may count UTF-16 units (2) | code points (1) | negligible in prose |

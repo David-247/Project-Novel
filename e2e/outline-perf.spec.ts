@@ -99,6 +99,8 @@ test('100k-word manuscript with the navigation pane open: typing stays within bu
   await expect.poll(wordsOf, { timeout: 10_000 }).toBe(before + added)
   const caughtUpMs = Date.now() - t0
   await expect(page.getByTestId('outline-total')).toContainText(`${(words + added).toLocaleString('en-US')} words`)
+  // The status bar's live count (on while typing, as always) followed too.
+  await expect(page.getByTestId('word-count')).toHaveText(`${(words + added).toLocaleString('en-US')} words`)
 
   await report(testInfo, 'perf-navigation-pane', {
     manuscript: { words, blocks: doc.content.length, chapters, subheadings: chapters },
@@ -109,4 +111,73 @@ test('100k-word manuscript with the navigation pane open: typing stays within bu
   })
   expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
   budget(testInfo, 'typing median ms (navigation pane open)', typing.medianMs, 50)
+})
+
+/**
+ * The outline after a trim-size reflow (Phase 4 acceptance): with the pane open on the 100,000-word
+ * manuscript, each trim change reflows the book and the pane then shows the new page ranges: the last
+ * chapter ends on the new last page and the total names the new page count. Measured from the trim
+ * change to that row painted; the outline rebuilds in idle time after the reflow publishes, so its lag
+ * behind the reflow is reported too. Budget: the pane shows the new pages within 1 s of the trim change
+ * (the trim reflow budget: the writer sees the book and its outline change together).
+ */
+const OUTLINE_TRIMS = ['us-5x8', 'uk-a5', 'us-6x9']
+
+test('100k-word manuscript with the navigation pane open: the outline shows the new pages within the reflow budget after a trim change', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const { doc, words } = buildManuscript()
+  await launch(page)
+  await seedProject(page, '/projects/OutlinedTrim', 'OutlinedTrim', doc)
+  await openRecent(page, '/projects/OutlinedTrim')
+  await expect(saveStatus(page)).toHaveText('OutlinedTrim: All changes saved', { timeout: 60_000 })
+  await waitForLayout(page)
+  await page.keyboard.press('ControlOrMeta+Shift+O')
+  const chapters = WORDS / WORDS_PER_PARAGRAPH / CHAPTER_EVERY
+  await expect(page.getByRole('treeitem')).toHaveCount(chapters * 2, { timeout: 30_000 })
+  await expect(page.getByTestId('outline-total')).toContainText('100,000 words')
+
+  const runs: { trim: string; pages: number; reflowMs: number; outlineMs: number; lagMs: number }[] = []
+  for (const trim of OUTLINE_TRIMS) {
+    await waitForLayout(page)
+    const r = await page.evaluate(
+      async ([id, last]) => {
+        const e = window.__nvE2E
+        const v = e.layout().layoutVersion
+        const t0 = performance.now()
+        e.setTrimSize(id)
+        let reflowMs = 0
+        // Reflow complete (as e2e/pagination-perf.spec.ts measures it), then the pane's last chapter row
+        // and its total naming the new last page.
+        await new Promise<void>((resolve) => {
+          const check = () => {
+            const l = e.layout()
+            if (!reflowMs && e.paginationModelSettled() && l.layoutVersion > v) reflowMs = performance.now() - t0
+            const counts = document.querySelector(`[role="treeitem"][data-outline-key="ch:${last}"] [data-outline-counts]`)?.textContent ?? ''
+            const total = document.querySelector('[data-testid="outline-total"]')?.textContent ?? ''
+            if (reflowMs && counts.endsWith(`–${l.pageCount}`) && total.includes(`${l.pageCount.toLocaleString('en-US')} pages`)) resolve()
+            else requestAnimationFrame(check)
+          }
+          requestAnimationFrame(check)
+        })
+        // Painted.
+        await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+        const outlineMs = performance.now() - t0
+        return { reflowMs: +reflowMs.toFixed(1), outlineMs: +outlineMs.toFixed(1), lagMs: +(outlineMs - reflowMs).toFixed(1), pages: e.layout().pageCount }
+      },
+      [trim, chapters - 1] as const,
+    )
+    runs.push({ trim, ...r })
+  }
+  const outlineAfterReflow = {
+    runs,
+    maxOutlineMs: Math.max(...runs.map((r) => r.outlineMs)),
+    maxLagMs: Math.max(...runs.map((r) => r.lagMs)),
+    maxReflowMs: Math.max(...runs.map((r) => r.reflowMs)),
+  }
+  await report(testInfo, 'perf-outline-reflow', {
+    manuscript: { words, blocks: doc.content.length, chapters, subheadings: chapters },
+    outlineAfterReflow,
+    budgets: { outlineAfterReflowMs: 1000 },
+  })
+  for (const r of runs) budget(testInfo, `${r.trim}: navigation pane shows the new pages, ms after the trim change`, r.outlineMs, 1000)
 })

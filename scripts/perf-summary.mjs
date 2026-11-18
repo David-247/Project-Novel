@@ -174,6 +174,23 @@ export function toMarkdown(results, dir = 'perf-results') {
     md.push('')
   }
 
+  // Phase 4: the navigation pane (e2e/outline-perf.spec.ts). Typing with the pane open is in the typing
+  // table; here, the pane catching up after typing (reported) and after a trim reflow (< 1000 ms).
+  const paneRows = []
+  for (const r of results) {
+    if (r.outline && r.outline.caughtUpMs !== undefined)
+      paneRows.push(`| ${r.scenario} | counts caught up after typing (reported) | ${pair(r)} | ${v(r.outline.caughtUpMs)} | – |`)
+    const o = r.outlineAfterReflow
+    if (o && Array.isArray(o.runs)) {
+      for (const x of o.runs)
+        paneRows.push(`| ${r.scenario} | ${x.trim}: new pages shown after the trim change (reflow ${v(x.reflowMs)}, then ${v(x.lagMs)}) | ${pair(r)} | ${cell(r, x.outlineMs, 1000)} | 1000 |`)
+    }
+  }
+  if (paneRows.length) {
+    md.push('#### Navigation pane', '')
+    md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...paneRows, '')
+  }
+
   const broken = results.filter((r) => r.error)
   for (const r of broken) md.push(`- ${r.file}: unreadable (${r.error})`)
   return md.join('\n') + '\n'

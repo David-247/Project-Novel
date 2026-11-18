@@ -214,6 +214,23 @@ describe('perf summary', () => {
     expect(md).toMatch(/\| perf-word-count \| chromium \/ win32 \(shipping\) \| 171\.4 \| 180 \|/)
   })
 
+  it('navigation pane: the counts after typing (reported) and the outline after a trim reflow, against 1,000 ms (Phase 4)', () => {
+    const md = toMarkdown([
+      { scenario: 'perf-navigation-pane', browser: 'perf-chromium', platform: 'win32', typing: { medianMs: 22.5, p95Ms: 30, maxMs: 40 }, outline: { caughtUpMs: 26 } },
+      {
+        scenario: 'perf-outline-reflow',
+        browser: 'perf-webkit',
+        platform: 'darwin',
+        outlineAfterReflow: { runs: [{ trim: 'us-5x8', reflowMs: 700, outlineMs: 1100, lagMs: 400, pages: 600 }, { trim: 'uk-a5', reflowMs: 120, outlineMs: 180, lagMs: 60, pages: 580 }] },
+      },
+    ])
+    const section = md.slice(md.indexOf('#### Navigation pane'))
+    expect(md).toMatch(/\| perf-navigation-pane \| chromium \/ win32 \(shipping\) \| 22\.5 \|/)
+    expect(section).toMatch(/\| perf-navigation-pane \| counts caught up after typing \(reported\) \| chromium \/ win32 \(shipping\) \| 26 \| – \|/)
+    expect(section).toMatch(/\| perf-outline-reflow \| us-5x8: new pages shown after the trim change \(reflow 700, then 400\) \| webkit \/ darwin \(shipping\) \| \*\*1100\*\* \(miss/)
+    expect(section).toMatch(/\| perf-outline-reflow \| uk-a5: new pages shown after the trim change \(reflow 120, then 60\) \| webkit \/ darwin \(shipping\) \| 180 \| 1000 \|/)
+  })
+
   it('says so when there are no results', () => {
     expect(toMarkdown([], 'nowhere')).toMatch(/No perf results found in nowhere/)
   })

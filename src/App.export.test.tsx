@@ -40,7 +40,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
-vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.3.0' }))
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.4.0' }))
 
 // The export wizard in the whole app (T8): every step, every check, the export with the mock renderers.
 
