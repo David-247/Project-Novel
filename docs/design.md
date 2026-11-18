@@ -724,3 +724,38 @@ The signature feature: a passage rewritten beside its original, compared like tw
   Author variants) is off while the view is open: it acts on the hidden manuscript. The re-write's editors are
   `TrackChanges.configure({ detached: true, review: false })` (`detached` implies no review side), so the review
   commands, popover and count always act on the manuscript.
+
+## Navigation pane (Phase 4)
+
+Slice `src/features/outline/` (public interface `index.ts`), modelled on Word's Navigation Pane, Headings tab.
+
+- **Opening it**: View ▸ Navigation Pane (a checkable item before Comments Panel), the ribbon's View ▸ Show
+  toggle, and Ctrl/Cmd+Shift+O (Word has no default key for it; Ctrl/Cmd+F stays Find). Opening it from the
+  command puts the focus on the current heading, as Word's Ctrl+F puts it in its pane; a focus the user moved
+  meanwhile is left alone. While a re-write is open the toggle is gated with the other View panels.
+- **Placement**: docked at the left of the pages (comments use the right margin), with a close button and a
+  resize handle on its inner edge (a 32 px touch strip; drag, or Left / Right with Shift for larger steps, Home /
+  End for the limits). Open state and width (200 to 480 px) persist in preferences.json (`navigationPane`,
+  `navigationPaneWidth`). Below 768 px the pane floats over the pages instead (no resize handle there), and a
+  jump or Escape closes it so the page is visible.
+- **Headings tree**: Front matter (when there is content before the first chapter), then the chapters with their
+  number and title ("Untitled chapter N" without one), and their subheadings (outline level 2 chapter styles)
+  nested and foldable. Chapters follow `getChapters`, so the style sheet and the current markup view decide what
+  opens a chapter. Each row shows its word count (the store's `wordCount`: text with tracked changes accepted,
+  footnotes per Include footnotes) and its page range ("p. 7", "pp. 12–19", from the store's `layout`, numbered
+  like Go to Page). The foot shows the manuscript's words and pages.
+- **Current heading**: highlighted (`aria-selected`, the pressed-toggle colours) as the caret moves; once the view
+  is scrolled or turned away from the caret's page, the heading at the top of the spread in view.
+- **Jump**: click, tap, Enter or Space puts the caret at the start of the heading, flushes a pending progressive
+  draw (decision b4f377639, through `revealPosition`), shows its spread (Book mode) or scrolls it into view (Scroll
+  mode; a chapter that opens its page is shown from the page top), and gives the focus back to the manuscript.
+- **Keyboard**: an ARIA tree (flat, `aria-level` / `aria-posinset` / `aria-setsize`; one row in the tab order):
+  Up / Down, Home / End, Right unfolds or goes to the first subheading, Left folds or goes to the chapter,
+  type-ahead on the titles (and chapter numbers), Escape back to the manuscript. Each row has a tooltip (hover and
+  keyboard focus) naming the heading with its counts.
+- **Live updates, off the typing path**: the tree is rebuilt in an idle callback after each word count publish
+  (itself throttled by the editor slice), a style sheet change and a markup view switch; page ranges follow every
+  published reflow (a trim size change). `buildOutline` caches per document, style sheet and markup view, so
+  getChapters runs once per document version however often the pane asks. Rows are memoized on their own values,
+  so typing in one chapter re-renders its rows only. Perf: e2e/outline-perf.spec.ts (typing on 100k words with
+  the pane open under 50 ms, blocking on Windows Chromium CI). No drag-to-reorder (Phase 4 review default).

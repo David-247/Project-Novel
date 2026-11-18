@@ -11,13 +11,17 @@ const setOpen = (open: boolean) => useStore.getState().preferencesActions.set('n
 
 /** Focus requests from the commands, taken by the mounted pane (it may mount after the request). */
 let focusRequested = false
+/** Where the focus was when it was requested: if the user moved it since, the request lapses. */
+let focusedAtRequest: Element | null = null
 const focusListeners = new Set<() => void>()
 
 /** The pane asks whether it should take the focus now (and clears the request). */
 export function takeFocusRequest(): boolean {
   const r = focusRequested
   focusRequested = false
-  return r
+  const moved = document.activeElement !== focusedAtRequest && document.activeElement !== document.body
+  focusedAtRequest = null
+  return r && !moved
 }
 
 export function onFocusRequest(cb: () => void): () => void {
@@ -27,6 +31,7 @@ export function onFocusRequest(cb: () => void): () => void {
 
 function requestFocus() {
   focusRequested = true
+  focusedAtRequest = document.activeElement
   focusListeners.forEach((l) => l())
 }
 
