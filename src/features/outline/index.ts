@@ -12,7 +12,8 @@
 // - registerOutlineCommands(): View ▸ Navigation Pane (Ctrl/Cmd+Shift+O; ribbon View ▸ Show). Returns unregister.
 // - OUTLINE_CONTROLS: tooltip copy (the tooltips registry reads it).
 // Open state and width: preferences.json (`navigationPane`, `navigationPaneWidth`; shared store).
-export { NavigationPane, OVERLAY_MAX_WIDTH } from './NavigationPane'
+export { NavigationPane } from './NavigationPane'
+export { OVERLAY_MAX_WIDTH } from './presentation'
 export { registerOutlineCommands, outlineCommands, toggleNavigationPane, openNavigationPane, closeNavigationPane } from './commands'
 export { OUTLINE_CONTROLS, NAVIGATION_PANE_SHORTCUT } from './controls'
 export type { OutlineControlMeta, OutlineControlKey } from './controls'

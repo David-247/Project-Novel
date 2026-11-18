@@ -1,35 +1,20 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { useMountedEditor } from '@/features/editor'
 import { clampNavPaneWidth, NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH, useStore } from '@/shared/store'
 import { cn, focusRing, IconButton, Tooltip } from '@/shared/ui'
-import { closeNavigationPane, focusManuscript, onFocusRequest, PANE_ATTR, takeFocusRequest } from './commands'
+import { closeNavigationPane, dismissOverlay, focusManuscript, onFocusRequest, PANE_ATTR, takeFocusRequest } from './commands'
 import { OUTLINE_CONTROLS as C } from './controls'
 import { jumpTo } from './jump'
-import { entryAt, pageRange, pageRangeSpoken, pageRangeText, type OutlineEntry } from './model'
+import { buildOutline, entryAt, pageRange, pageRangeSpoken, pageRangeText, type OutlineEntry } from './model'
+import { usePresentation } from './presentation'
 import { useCurrentPosition, useOutline } from './use-outline'
 
-/** Below this window width the pane overlays the pages instead of docking beside them. */
-export const OVERLAY_MAX_WIDTH = 767
-const OVERLAY_QUERY = `(max-width: ${OVERLAY_MAX_WIDTH}px)`
 /** Arrow-key resize step (px); with Shift, a larger one. */
 const RESIZE_STEP = 16
 const RESIZE_STEP_LARGE = 64
 /** Type-ahead: letters typed within this long form one search. */
 const TYPEAHEAD_MS = 600
-
-function subscribeOverlay(cb: () => void) {
-  if (typeof window.matchMedia !== 'function') return () => {}
-  const mq = window.matchMedia(OVERLAY_QUERY)
-  mq.addEventListener('change', cb)
-  return () => mq.removeEventListener('change', cb)
-}
-const overlaySnapshot = () => typeof window.matchMedia === 'function' && window.matchMedia(OVERLAY_QUERY).matches
-
-/** The narrow-window layout: the pane floats over the pages. */
-function useOverlay(): boolean {
-  return useSyncExternalStore(subscribeOverlay, overlaySnapshot, () => false)
-}
 
 let numberFormat: Intl.NumberFormat | undefined
 /** As the status bar formats counts (the locale's grouping). */
@@ -226,18 +211,25 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
     return onFocusRequest(take)
   }, [hasData])
 
-  const byKey = useMemo(() => new Map(rows.map((r) => [r.entry.key, r])), [rows])
+  // What activate reads, kept current outside render so the callback (a row prop) stays stable and the
+  // memoized rows do not re-render when the tree is rebuilt.
+  const live = useRef({ rewriteOpen, overlay, editor })
+  useLayoutEffect(() => {
+    live.current = { rewriteOpen, overlay, editor }
+  })
 
-  const activate = useCallback(
-    (key: string) => {
-      const row = byKey.get(key)
-      if (!row || rewriteOpen) return
-      setFocusKey(key)
-      jumpTo(row.entry.from, { firstPage: row.pages?.first ?? null })
-      if (overlay) closeNavigationPane()
-    },
-    [byKey, rewriteOpen, overlay],
-  )
+  const activate = useCallback((key: string) => {
+    const { rewriteOpen, overlay, editor } = live.current
+    if (rewriteOpen || !editor || editor.isDestroyed) return
+    // The entry in the document as it is now (the tree shown may be an idle callback behind the last
+    // keystroke): the outline of the current document, cached per document so this is cheap.
+    const s = useStore.getState()
+    const entry = buildOutline(editor.state.doc, undefined, s.trackChanges.markupView).flat.find((e) => e.key === key)
+    if (!entry) return
+    setFocusKey(key)
+    jumpTo(entry.from, { firstPage: pageRange(s.layout.pages, entry.from, entry.to)?.first ?? null })
+    if (overlay) dismissOverlay()
+  }, [])
 
   const toggle = useCallback((key: string) => {
     setCollapsed((s) => {
@@ -286,7 +278,7 @@ function HeadingsTree({ overlay }: { overlay: boolean }) {
         return
       case 'Escape':
         e.preventDefault()
-        if (overlay) closeNavigationPane()
+        if (overlay) dismissOverlay()
         else focusManuscript()
         return
       case ' ':
@@ -426,9 +418,9 @@ export function NavigationPane() {
   const open = useStore((s) => s.preferences.navigationPane)
   const storedWidth = useStore((s) => s.preferences.navigationPaneWidth)
   const setPref = useStore((s) => s.preferencesActions.set)
-  const overlay = useOverlay()
+  const { overlay, dismissed } = usePresentation()
   const [dragWidth, setDragWidth] = useState<number | null>(null)
-  if (!open) return null
+  if (!open || dismissed) return null
   const width = dragWidth ?? storedWidth
   const onWidth = (px: number, commit: boolean) => {
     if (commit) {

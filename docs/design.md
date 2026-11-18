@@ -737,7 +737,9 @@ Slice `src/features/outline/` (public interface `index.ts`), modelled on Word's 
   resize handle on its inner edge (a 32 px touch strip; drag, or Left / Right with Shift for larger steps, Home /
   End for the limits). Open state and width (200 to 480 px) persist in preferences.json (`navigationPane`,
   `navigationPaneWidth`). Below 768 px the pane floats over the pages instead (no resize handle there), and a
-  jump or Escape closes it so the page is visible.
+  jump or Escape dismisses it for now so the page is visible. The dismissal is not saved: the toggle
+  command shows it again, and widening the window docks it again (only the toggle and the close button write
+  `navigationPane`, so the overlay never turns the docked pane off).
 - **Headings tree**: Front matter (when there is content before the first chapter), then the chapters with their
   number and title ("Untitled chapter N" without one), and their subheadings (outline level 2 chapter styles)
   nested and foldable. Chapters follow `getChapters`, so the style sheet and the current markup view decide what
@@ -756,6 +758,6 @@ Slice `src/features/outline/` (public interface `index.ts`), modelled on Word's 
 - **Live updates, off the typing path**: the tree is rebuilt in an idle callback after each word count publish
   (itself throttled by the editor slice), a style sheet change and a markup view switch; page ranges follow every
   published reflow (a trim size change). `buildOutline` caches per document, style sheet and markup view, so
-  getChapters runs once per document version however often the pane asks. Rows are memoized on their own values,
+  getChapters runs once per document version however often the pane asks. Rows are memoized on their own values (their callbacks are stable),
   so typing in one chapter re-renders its rows only. Perf: e2e/outline-perf.spec.ts (typing on 100k words with
   the pane open under 50 ms, blocking on Windows Chromium CI). No drag-to-reorder (Phase 4 review default).

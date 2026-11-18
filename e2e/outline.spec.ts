@@ -90,6 +90,29 @@ test('opens from the ribbon and the shortcut; a click and Enter jump to the chap
   await expect(editor(page)).toBeFocused()
   await expect.poll(async () => (await pageInView(page, storm + 1)).inView).toBe(true)
   await expect(row(page, 'ch:3')).toHaveAttribute('aria-selected', 'true')
+  // Turning or scrolling the view without moving the caret: the highlight follows the spread in view
+  // (the heading at its top), as Word's does when you scroll.
+  const homeFrom = await blockPos(page, titleBlock(5))
+  const homePage = await page.evaluate((at) => window.__nvE2E.layout().pages.findIndex((pg) => !pg.isBlank && pg.from <= at && at < pg.to), homeFrom + 1)
+  await page.evaluate((i) => window.__nvE2E.showPage(i), homePage)
+  await turnSettled(page)
+  const caretAfterTurn = await caret(page)
+  expect(caretAfterTurn).toBe(storm + 1)
+  const topKey = await page.evaluate(
+    ([landfall, home]) => {
+      const l = window.__nvE2E.layout()
+      const top = l.pages.slice(l.visibleSpread.first, l.visibleSpread.last + 1).find((pg) => !pg.isBlank)!.from
+      return top >= home ? 'ch:5' : top >= landfall ? 'ch:4' : 'ch:3'
+    },
+    [await blockPos(page, titleBlock(4)), homeFrom] as const,
+  )
+  expect(topKey).not.toBe('ch:3')
+  await expect(row(page, topKey)).toHaveAttribute('aria-selected', 'true')
+  await expect(row(page, 'ch:3')).toHaveAttribute('aria-selected', 'false')
+  // Back to the caret's page: the caret's heading again.
+  await page.evaluate((i) => window.__nvE2E.showPage(i), (await pageInView(page, storm + 1)).index)
+  await turnSettled(page)
+  await expect(row(page, 'ch:3')).toHaveAttribute('aria-selected', 'true')
   if (projectNavigation(testInfo) === 'scroll') {
     // Scroll mode: a chapter opening its page shows that page from its top (Word scrolls the heading up).
     const { index } = await pageInView(page, storm + 1)
@@ -212,7 +235,7 @@ test('tooltips on hover; the tooltip audit passes with the pane open; the close 
   await expect(pane(page)).toBeHidden()
 })
 
-test('a narrow window: the pane floats over the pages, and a jump closes it', async ({ page }) => {
+test('a narrow window: the pane floats over the pages; a jump dismisses it for now, not the docked pane', async ({ page }) => {
   await open(page, '/projects/Narrow')
   await page.setViewportSize({ width: 700, height: 800 })
   await page.keyboard.press(SHORTCUT)
@@ -225,9 +248,28 @@ test('a narrow window: the pane floats over the pages, and a jump closes it', as
   expect(pb.height).toBeGreaterThan(300)
   // Touch-tolerant: every heading row is at least 32 px tall.
   for (const box of await page.getByRole('treeitem').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(32)
-  await row(page, 'ch:2').tap().catch(() => row(page, 'ch:2').click())
+  await row(page, 'ch:2').click()
   await expect(pane(page)).toBeHidden()
   await expect(editor(page)).toBeFocused()
+  // Dismissed, not closed: the saved open state is unchanged and the toggle reads "not shown".
+  // (preferences.json is written about 300 ms after a change.)
+  await expect.poll(async () => JSON.parse((await page.evaluate(() => window.__nvE2E.preferencesFile())) ?? '{}').navigationPane).toBe(true)
+  await page.waitForTimeout(500)
+  expect(JSON.parse((await page.evaluate(() => window.__nvE2E.preferencesFile())) ?? '{}').navigationPane).toBe(true)
+  expect(await page.evaluate(() => window.__nvE2E.preferences().navigationPane)).toBe(true)
+  // The toggle shows the overlay again; Escape dismisses it again.
+  await page.keyboard.press(SHORTCUT)
+  await expect(pane(page)).toBeVisible()
+  await expect(page.locator('[role="treeitem"][tabindex="0"]')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(pane(page)).toBeHidden()
+  await expect(editor(page)).toBeFocused()
+  // Widening the window docks the pane again, and it is still open after a restart.
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await expect(pane(page)).toBeVisible()
+  await expect(pane(page)).not.toHaveAttribute('data-overlay', 'true')
+  await launch(page)
+  await expect(pane(page)).toBeVisible()
 })
 
 test('the open state and the width are kept across a restart (preferences.json)', async ({ page }) => {

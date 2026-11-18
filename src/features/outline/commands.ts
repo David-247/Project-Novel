@@ -2,6 +2,7 @@ import { getEditor } from '@/features/editor'
 import { notifyCommandStateChanged, registerCommands, type Command } from '@/shared/commands'
 import { useStore } from '@/shared/store'
 import { OUTLINE_CONTROLS as C } from './controls'
+import { isOverlayDismissed, isOverlayLayout, setOverlayDismissed, subscribePresentation } from './presentation'
 
 /** The pane's root element carries this attribute (focus checks, tests). */
 export const PANE_ATTR = 'data-navigation-pane'
@@ -43,22 +44,37 @@ export function focusManuscript(): void {
   if (ed && !ed.isDestroyed) ed.view.focus()
 }
 
+/** The pane is on screen: open, and not dismissed in the narrow-window overlay. */
+export const isNavigationPaneShown = () => prefs().navigationPane && !(isOverlayLayout() && isOverlayDismissed())
+
 /** Show the pane and move the focus to its current heading (Word's Ctrl+F puts the focus in its pane). */
 export function openNavigationPane(): void {
+  setOverlayDismissed(false)
   if (!prefs().navigationPane) setOpen(true)
   requestFocus()
 }
 
-/** Hide the pane; the focus returns to the manuscript when it was in the pane. */
+/** Hide the pane (the close button, the toggle): persisted. The focus returns to the manuscript when it was in the pane. */
 export function closeNavigationPane(): void {
   const inside = focusInPane()
+  setOverlayDismissed(false)
   if (prefs().navigationPane) setOpen(false)
   if (inside) focusManuscript()
 }
 
-/** View ▸ Navigation Pane. */
+/**
+ * Hide the narrow-window overlay for now (a jump, Escape) so the page shows, without changing the
+ * persisted open state: the docked pane is back when the window widens, and after a restart.
+ */
+export function dismissOverlay(): void {
+  const inside = focusInPane()
+  setOverlayDismissed(true)
+  if (inside) focusManuscript()
+}
+
+/** View ▸ Navigation Pane: shows a dismissed overlay again, else toggles the persisted open state. */
 export function toggleNavigationPane(): void {
-  if (prefs().navigationPane) closeNavigationPane()
+  if (isNavigationPaneShown()) closeNavigationPane()
   else openNavigationPane()
 }
 
@@ -74,7 +90,7 @@ export function outlineCommands(): Command[] {
       menu: { id: 'view', group: 'panels', order: 30 },
       ribbon: { group: 'view.show', order: 10 },
       guard: 'modal',
-      isChecked: () => prefs().navigationPane,
+      isChecked: isNavigationPaneShown,
       run: toggleNavigationPane,
     },
   ]
@@ -86,7 +102,9 @@ export function registerOutlineCommands(): () => void {
   const offStore = useStore.subscribe((s, p) => {
     if (s.preferences.navigationPane !== p.preferences.navigationPane) notifyCommandStateChanged()
   })
+  const offPresentation = subscribePresentation(notifyCommandStateChanged)
   return () => {
+    offPresentation()
     offStore()
     off()
   }

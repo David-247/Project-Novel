@@ -163,7 +163,10 @@ describe('navigation pane (View ▸ Navigation Pane)', () => {
     act(() => {
       ed.view.dispatch(ed.state.tr.insertText(' eight nine', end - 1))
     })
-    // Nothing is rebuilt in the transaction itself.
+    // Nothing is rebuilt on the keystroke: not in the transaction, nor in the idle time after it (jsdom's
+    // idle fallback is a 0 ms task), only after the word count publish (throttled at 150 ms).
+    expect(outlineDebug.builds).toBe(builds)
+    await act(() => new Promise((r) => setTimeout(r, 60)))
     expect(outlineDebug.builds).toBe(builds)
     act(() => flushWordCount())
     await waitFor(() => expect(rows()[3].getAttribute('aria-label')).toBe('Chapter 2: Untitled chapter 2, 4 words'))
