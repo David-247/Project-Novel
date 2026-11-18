@@ -40,7 +40,7 @@ fn enumerate_system_families() -> Vec<String> {
 static FONT_CACHE: OnceLock<Vec<String>> = OnceLock::new();
 
 /// Cached for the app's lifetime: the scan runs once, on first call.
-fn cached_system_families() -> Vec<String> {
+pub(crate) fn cached_system_families() -> Vec<String> {
     FONT_CACHE.get_or_init(enumerate_system_families).clone()
 }
 

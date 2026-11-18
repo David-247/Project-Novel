@@ -1,3 +1,4 @@
+mod export;
 mod fonts;
 mod preferences;
 mod menu;
@@ -11,6 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .manage(storage::ProjectRoot::default())
+        .manage(export::ExportState::default())
         .manage(menu::MenuState::<tauri::Wry>::default());
     // macOS: the native menu bar, replaced by the command registry's snapshot (menu_set) once the
     // frontend is up. Windows has no native menu: the frontend draws its own menu bar.
@@ -20,6 +22,11 @@ pub fn run() {
         .on_menu_event(|app, event| menu::handle_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
             fonts::list_system_fonts,
+            export::export_pick_save_path,
+            export::export_write_file,
+            export::export_render_pdf,
+            export::export_cancel_render,
+            export::export_reveal_in_folder,
             menu::menu_set,
             storage::storage_pick_project_folder,
             storage::storage_open_recent_root,
