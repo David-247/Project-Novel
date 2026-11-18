@@ -74,6 +74,7 @@ Requirements: Node 22, pnpm 9, Rust (stable), and the Tauri 2 platform prerequis
 
 ```sh
 pnpm install
+pnpm fetch:typst   # PDF export engine + bundled fonts (needed before any cargo/tauri build)
 pnpm tauri dev     # launch the desktop shell
 pnpm dev           # web build only (Vite on :1420)
 pnpm lint          # ESLint, incl. cross-slice import rule
@@ -83,6 +84,13 @@ pnpm test:e2e      # Playwright e2e + perf, chromium and webkit (see below)
                    # (first run: pnpm exec playwright install chromium webkit)
 pnpm tauri build   # production build
 ```
+
+**PDF export engine.** PDF export runs the [Typst](https://typst.app) CLI as a Tauri sidecar (`bundle.externalBin`),
+fully offline. `pnpm fetch:typst` (`scripts/fetch-typst.mjs`) downloads the pinned version (0.15.1) and the bundled
+Liberation fonts, verifies their SHA-256 checksums, and puts them in `src-tauri/binaries/` and
+`src-tauri/resources/fonts/` (both git-ignored; archives cached in `.cache/sidecar/`). tauri-build copies them at
+compile time, so `cargo build`, `cargo test` and `pnpm tauri build` fail until it has run. For a universal macOS
+build: `node scripts/fetch-typst.mjs --target universal-apple-darwin` (needs `lipo`).
 
 ### End-to-end tests
 
@@ -221,6 +229,10 @@ Every dependency must be MIT-compatible (no GPL/AGPL/proprietary). CI enforces t
   CC-BY-4.0 for data-only packages such as caniuse-lite, Unlicense, BlueOak-1.0.0).
 - Rust: `cargo deny check licenses` in `src-tauri/` with the allowlist in `src-tauri/deny.toml` (adds Zlib,
   Unicode-3.0, BSL-1.0 and `Apache-2.0 WITH LLVM-exception`).
+- Bundled files that are not packages (the Typst CLI sidecar, `Apache-2.0 AND LPPL-1.3c`; the Liberation fonts, OFL-1.1): the same
+  script checks each is listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) with its licence text in
+  `src-tauri/resources/licenses/` (installed with the app), and that nothing in `bundle.externalBin` or
+  `bundle.resources` is unlisted.
 
 **MPL-2.0 (file-level copyleft).** These dependencies are used unmodified, so Novel's own code stays MIT; any change
 to their files would have to be published under MPL-2.0:

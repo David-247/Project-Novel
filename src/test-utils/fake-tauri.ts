@@ -44,7 +44,8 @@ export const backend: Backend = Object.assign(core.state, dialog, {
   },
 })
 
-export const invokeMock = (cmd: string, args: Record<string, unknown> = {}) => core.handle(cmd, args)
+export const invokeMock = (cmd: string, args: Record<string, unknown> = {}, options?: { headers?: unknown }) =>
+  core.handle(cmd, args, options)
 
 export const coreModule = { isTauri: () => true, invoke: invokeMock }
 
