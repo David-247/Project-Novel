@@ -343,6 +343,76 @@ describe('File > Export > Manuscript…', () => {
   })
 })
 
+describe('final-review minors (B-M1, B-M2, B-M3)', () => {
+  it('B-M1: closing the wizard while it saves finishes in the status bar, which says the files were written', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    const handle = core.handle
+    let closed = false
+    const spy = vi.spyOn(core, 'handle').mockImplementation(async (cmd, args, options) => {
+      if (cmd === 'export_write_file' && !closed) {
+        closed = true
+        expect(getWizardState().run.phase).toBe('saving')
+        act(() => closeWizard())
+      }
+      return handle(cmd, args, options)
+    })
+    try {
+      alt('KeyE')
+      await waitFor(() => expect(getWizardState().run.phase).toBe('done'))
+    } finally {
+      spy.mockRestore()
+    }
+    expect(closed).toBe(true)
+    expect(dialog()).toBeNull()
+    expect([...ex.written.keys()]).toEqual([DOCX, PDF])
+    await waitFor(() => expect(document.querySelector('[data-testid="export-status"]')!.textContent).toMatch(/Exported Waight_THE_LONG_NIGHT_manuscript\.docx and/))
+  })
+
+  it('B-M2: a cleared title stays cleared (no snap back to a deleted letter) and shows Required', async () => {
+    await renderApp('')
+    openWizard()
+    const field = ctl(C.title.id) as HTMLInputElement
+    act(() => {
+      field.focus()
+      fireEvent.change(field, { target: { value: 'A' } })
+    })
+    act(() => fireEvent.change(field, { target: { value: '' } }))
+    expect(dialog()!.textContent).toContain('Required: the title page and the header need it.')
+    act(() => fireEvent.blur(field))
+    expect(field.value).toBe('')
+    expect(getWizardState().titleDraft).toBe('')
+  })
+
+  it('B-M3: after a project opens and closes, the new untitled manuscript has neither the old title nor its last export', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(getWizardState().run.phase).toBe('done'))
+    closeWizard()
+    const again = getCommand(EXPORT_COMMAND_IDS.again)!
+    expect(isCommandEnabled(again)).toBe(true)
+    act(() => {
+      useStore.getState().projectActions.projectOpened({ path: '/projects/Other', title: 'Other' })
+      useStore.getState().projectActions.projectClosed()
+    })
+    expect(isCommandEnabled(again)).toBe(false)
+    ex.written.clear()
+    await act(async () => again.run())
+    await flush()
+    // No "Replace Waight_THE_LONG_NIGHT_manuscript.docx…?" and nothing overwritten.
+    expect(backend.messages.map((m) => m.text).filter((t) => t.startsWith('Replace'))).toEqual([])
+    expect(ex.written.size).toBe(0)
+    // The untitled manuscript has no title: Export Again opens the wizard at Checks (Must fix: the title).
+    expect(getWizardState().step).toBe('checks')
+    expect(checkEl('title')).toHaveAttribute('data-severity', 'blocking')
+    alt('Digit1')
+    expect((ctl(C.title.id) as HTMLInputElement).value).toBe('')
+  })
+})
+
 describe('the front matter title block (Wave 2 ruling)', () => {
   const docxText = () => new TextDecoder().decode(ex.written.get('/exports/Waight_THE_LONG_NIGHT_manuscript.docx'))
 

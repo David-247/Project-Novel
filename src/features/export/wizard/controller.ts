@@ -184,14 +184,18 @@ export function openWizard(options: { step?: WizardStep } = {}): void {
 }
 
 /**
- * Close the wizard. A running export is cancelled (it writes nothing). `restoreFocus`: give the focus
- * back to where it was (false when a Show me action moves it into the manuscript).
+ * Close the wizard. A running export is cancelled (it writes nothing); one already saving (its files
+ * being written: too late to cancel) finishes in the status bar, as Export Again does. `restoreFocus`:
+ * give the focus back to where it was (false when a Show me action moves it into the manuscript).
  */
 export function closeWizard({ restoreFocus = true }: { restoreFocus?: boolean } = {}): void {
   if (!state.open) return
   if (state.run.phase === 'rendering' || state.run.phase === 'choosing') controller?.abort()
   void commitTitle()
-  update({ open: false, focus: null })
+  const handOff = state.run.phase === 'saving'
+  // Its Retry (a later write failing) runs in the status bar too.
+  if (handOff && lastAttempt) lastAttempt = { ...lastAttempt, origin: 'again' }
+  update({ open: false, focus: null, ...(handOff ? { run: { ...state.run, origin: 'again' as const } } : {}) })
   const target = returnFocusTo
   returnFocusTo = null
   if (!restoreFocus) return
@@ -501,6 +505,17 @@ async function exportAgainUnguarded(): Promise<boolean> {
   // The grants were forgotten (Rust keeps the last 16): ask where, then try once more.
   if (!ok && state.run.error?.problem === 'not-granted') return chooseOtherLocation()
   return ok
+}
+
+/**
+ * The open document became another one (a project opened or closed: closing leaves a new, empty
+ * untitled manuscript). The title typed without a project and an untitled document's last export
+ * belonged to the document that is gone: Export Again must not replace that export with this text.
+ */
+export function documentChanged(): void {
+  unsavedTitle = ''
+  if (lastExport?.projectPath === null) lastExport = null
+  if (state.titleDraft !== null && !state.open) update({ titleDraft: null })
 }
 
 /** Test-only. */

@@ -329,7 +329,7 @@ function TitleStep({ settings, contact, data, title, overrideContact }: TitleSte
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
       <div className="flex min-w-0 flex-col gap-4">
         <div data-field="title">
-          <DraftField meta={C.title} value={title} invalid={!title.trim()} maxLength={200} onCommit={setTitleDraft} hint={!title.trim() ? 'Required: the title page and the header need it.' : undefined} />
+          <DraftField meta={C.title} value={title} allowBlank invalid={!title.trim()} maxLength={200} onCommit={setTitleDraft} hint={!title.trim() ? 'Required: the title page and the header need it.' : undefined} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {contactField('legalName', { autoComplete: 'name' })}
