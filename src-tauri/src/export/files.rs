@@ -69,12 +69,11 @@ impl Targets {
             })
     }
 
-    /// The folder of the most recent grant of `kind` (else of any kind): where the next Save dialog
-    /// starts. Rust's own record; the webview names no folder.
-    pub fn last_folder(&self, kind: FileKind) -> Option<PathBuf> {
-        let of_kind = self.picked.iter().rev().find(|(_, _, k)| *k == kind);
-        let any = self.picked.last();
-        of_kind.or(any).and_then(|(_, p, _)| p.parent().map(Path::to_path_buf))
+    /// The folder of the most recent grant, of any kind: where the next Save dialog starts, so the
+    /// PDF dialog of a DOCX + PDF export opens where the DOCX was just saved. Rust's own record; the
+    /// webview names no folder.
+    pub fn last_folder(&self) -> Option<PathBuf> {
+        self.picked.last().and_then(|(_, p, _)| p.parent().map(Path::to_path_buf))
     }
 
     pub fn mark_exported(&mut self, path: &Path) {
@@ -371,15 +370,17 @@ mod tests {
     }
 
     #[test]
-    fn the_next_dialog_starts_in_the_folder_of_the_last_grant_of_its_kind() {
+    fn the_next_dialog_starts_in_the_folder_of_the_most_recent_grant_of_any_kind() {
         let mut t = Targets::default();
-        assert_eq!(t.last_folder(FileKind::Pdf), None);
+        assert_eq!(t.last_folder(), None);
+        // A DOCX + PDF export: the PDF dialog opens where the DOCX was just saved.
         t.grant(PathBuf::from("/a/book.docx"), FileKind::Docx);
-        assert_eq!(t.last_folder(FileKind::Pdf), Some(PathBuf::from("/a")));
+        assert_eq!(t.last_folder(), Some(PathBuf::from("/a")));
         t.grant(PathBuf::from("/b/book.pdf"), FileKind::Pdf);
+        // The next export: its DOCX dialog opens where the last file (the PDF) went, not the last DOCX.
+        assert_eq!(t.last_folder(), Some(PathBuf::from("/b")));
         t.grant(PathBuf::from("/c/other.docx"), FileKind::Docx);
-        assert_eq!(t.last_folder(FileKind::Pdf), Some(PathBuf::from("/b")));
-        assert_eq!(t.last_folder(FileKind::Docx), Some(PathBuf::from("/c")));
+        assert_eq!(t.last_folder(), Some(PathBuf::from("/c")));
     }
 
     #[test]

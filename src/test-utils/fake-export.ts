@@ -73,10 +73,10 @@ export function createFakeExport(installedFonts: () => readonly string[], active
     state.picks = []
   }
 
-  /** Where Rust opens the Save dialog: the last grant's folder (this kind, else any), else the remembered one. */
-  function dialogStart(kind: Kind): string | null {
-    const ofKind = [...state.picks].reverse().find((p) => p.kind === kind) ?? state.picks[state.picks.length - 1]
-    if (ofKind) return folderOf(ofKind.path)
+  /** Where Rust opens the Save dialog: the most recent grant's folder (any kind), else the remembered one. */
+  function dialogStart(): string | null {
+    const last = state.picks[state.picks.length - 1]
+    if (last) return folderOf(last.path)
     return state.remembered.get(activeRoot() ?? '') ?? null
   }
 
@@ -126,7 +126,7 @@ export function createFakeExport(installedFonts: () => readonly string[], active
         const kind = a.kind === 'docx' ? 'docx' : 'pdf'
         if ('directory' in a) throw fail('invalid_request', 'The webview names no folder for the Save dialog.')
         if (state.failPick) throw state.failPick
-        state.dialogs.push({ kind, defaultName: String(a.defaultName ?? ''), directory: dialogStart(kind) })
+        state.dialogs.push({ kind, defaultName: String(a.defaultName ?? ''), directory: dialogStart() })
         const path =
           state.savePath === undefined ? `/exports/${safeName(String(a.defaultName ?? ''), kind)}` : state.savePath
         if (path === null) return null

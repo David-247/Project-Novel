@@ -181,11 +181,11 @@ fn export_folders_file<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join(files::EXPORT_FOLDERS_FILE))
 }
 
-/// Where the Save dialog opens: the folder of this session's last grant (of this kind, else any),
+/// Where the Save dialog opens: the folder of this session's most recent grant (any kind),
 /// else the folder of this project's last export in an earlier session (Rust's own record), if it
 /// still exists. The webview names no folder.
-fn dialog_start<R: Runtime>(app: &AppHandle<R>, state: &ExportState, kind: FileKind) -> Option<PathBuf> {
-    let session = state.targets.lock().ok().and_then(|t| t.last_folder(kind));
+fn dialog_start<R: Runtime>(app: &AppHandle<R>, state: &ExportState) -> Option<PathBuf> {
+    let session = state.targets.lock().ok().and_then(|t| t.last_folder());
     let remembered = || {
         let file = export_folders_file(app)?;
         let text = std::fs::read_to_string(file).ok();
@@ -227,7 +227,7 @@ pub async fn export_pick_save_path<R: Runtime>(
     use tauri_plugin_dialog::DialogExt;
     let dialog_app = app.clone();
     let name = files::safe_file_name(&default_name, kind);
-    let start = dialog_start(&app, state.inner(), kind);
+    let start = dialog_start(&app, state.inner());
     let picked = tauri::async_runtime::spawn_blocking(move || {
         let mut builder = dialog_app
             .dialog()
