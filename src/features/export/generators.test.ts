@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { parseXml, pText, unzipDocx, wAll } from './docx/test-helpers'
 import { createManuscriptExportRenderers } from './generators'
-import { buildManuscript, FEATURE_FIXTURE_DOC, FEATURE_FIXTURE_FOOTNOTES, FEATURE_FIXTURE_STYLES, manuscriptWordCount } from './ir'
+import { buildManuscript, FEATURE_FIXTURE_DOC, FEATURE_FIXTURE_FOOTNOTES, FEATURE_FIXTURE_STYLES, manuscriptWordCount, type InlineRun, type ManuscriptIR } from './ir'
 import type { RenderPdfOptions, RenderPdfResult } from './platform'
-import type { PdfData } from './pdf'
+import type { PdfData, PdfRun } from './pdf'
 import { defaultManuscriptSettings, formatWordCount, type ContactDetails, type WordCountRounding } from './settings'
 import { titlePageData, titlePageWordCount, type ExportJob } from './wizard'
 
@@ -55,6 +55,47 @@ describe('the title-page word count is the same in the DOCX and the PDF', () => 
       const n = includeFootnotes ? wc.total : wc.body
       expect(exact.docx).toBe(formatWordCount(n, 'exact'))
       expect(exact.pdf).toBe(exact.docx)
+    })
+  }
+})
+
+describe('the DOCX and the PDF space sentences the same (one shared rule)', () => {
+  // Abbreviations, initials, typed double spaces, a gap across runs (and across a run of only spaces),
+  // a footnote reference after a full stop, and a line break.
+  const runs: InlineRun[] = [
+    { kind: 'text', text: 'Mr. Smith met J. R. R. Tolkien. He left, e.g. at noon.  Two spaces stay. It was ' },
+    { kind: 'text', text: 'night', bold: true },
+    { kind: 'text', text: '.' },
+    { kind: 'text', text: ' ' },
+    { kind: 'text', text: 'She', italic: true },
+    { kind: 'text', text: ' went. "Why?" she asked.' },
+    { kind: 'footnoteRef', footnote: 0 },
+    { kind: 'text', text: ' Then home.' },
+    { kind: 'lineBreak' },
+    { kind: 'text', text: ' After the break. Done.' },
+  ]
+  const spacingIr: ManuscriptIR = structuredClone(ir)
+  spacingIr.chapters[0].blocks.unshift({ kind: 'paragraph', role: 'body', runs })
+  const job = (sentenceSpacing: 1 | 2): ExportJob => {
+    const settings = { ...defaultManuscriptSettings('en-US'), sentenceSpacing }
+    return { ir: spacingIr, settings, titlePage: titlePageData(settings, contact, 'The Long Night', 100) }
+  }
+  // A paragraph's text in the PDF data (the footnote reference left out, a line break as "\n", as pText).
+  const pdfText = (r: PdfRun[]) => r.map((x) => ('s' in x ? x.s : 'br' in x ? '\n' : '')).join('')
+  const typed = 'Mr. Smith met J. R. R. Tolkien. He left, e.g. at noon.  Two spaces stay. It was night. She went. "Why?" she asked. Then home.\n After the break. Done.'
+  const classic = 'Mr. Smith met J. R. R. Tolkien.  He left, e.g. at noon.  Two spaces stay.  It was night.  She went.  "Why?" she asked.  Then home.\n After the break.  Done.'
+
+  for (const sentenceSpacing of [1, 2] as const) {
+    it(`${sentenceSpacing === 2 ? 'Classic' : 'Standard'}: the same text in both files`, async () => {
+      const { renderers, pdfData } = setup()
+      const docx = unzipDocx(await renderers.docx.render(job(sentenceSpacing)))
+      await renderers.pdf.render(job(sentenceSpacing))
+      const docxText = wAll(parseXml(docx['word/document.xml']), 'p')
+        .map(pText)
+        .find((t) => t.startsWith('Mr. Smith'))
+      const pdfBlock = pdfData[0].blocks.find((b) => 'runs' in b && pdfText(b.runs).startsWith('Mr. Smith'))
+      expect(pdfBlock && 'runs' in pdfBlock ? pdfText(pdfBlock.runs) : undefined).toBe(docxText)
+      expect(docxText).toBe(sentenceSpacing === 2 ? classic : typed)
     })
   }
 })

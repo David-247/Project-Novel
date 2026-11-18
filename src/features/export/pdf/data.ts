@@ -11,6 +11,7 @@ import {
   type HeaderSettings,
   type ManuscriptSettings,
 } from '../settings'
+import { classicSentenceSpacing } from '../settings/sentence-spacing'
 import { fontRoleOf, lineMetrics } from './metrics'
 
 /**
@@ -180,29 +181,16 @@ function contactLines(c: ContactDetails, showAgent: boolean): string[] {
   ]
 }
 
-const SENTENCE_END = /[.!?]["'’”)\]]*$/
-const SENTENCE_GAP = /([.!?]["'’”)\]]*) +(?=\S)/g
-
 /**
- * Sentence spacing (docs/manuscript-format.md): the spaces after a sentence's end become `n` spaces.
- * Works across runs ("night" + "." in one run, " It" in the next) within one paragraph.
+ * Sentence spacing (docs/manuscript-format.md), by the rule the DOCX uses (../settings/sentence-spacing):
+ * Standard (1) leaves the text as typed; Classic (2) adds a second space after each sentence, across
+ * the runs of one paragraph. A footnote reference keeps the sentence before it ended; a line break
+ * ends the context.
  */
 export function applySentenceSpacing(runs: PdfRun[], n: 1 | 2): PdfRun[] {
-  const gap = ' '.repeat(n)
-  let endsSentence = false
-  return runs.map((r) => {
-    if (!('s' in r)) {
-      // A footnote reference after a full stop leaves the sentence ended; a line break does not.
-      if ('br' in r) endsSentence = false
-      return r
-    }
-    let s = r.s.replace(SENTENCE_GAP, `$1${gap}`)
-    if (endsSentence && /^ +\S/.test(s)) s = s.replace(/^ +/, gap)
-    // A run of nothing but spaces right after a sentence's end (" " between "night." and "She") is that gap.
-    else if (endsSentence && /^ +$/.test(s)) s = gap
-    if (/\S/.test(s)) endsSentence = SENTENCE_END.test(s)
-    return s === r.s ? r : { ...r, s }
-  })
+  if (n !== 2) return runs
+  const spaced = classicSentenceSpacing(runs.map((r) => ('s' in r ? r.s : 'br' in r ? null : '')))
+  return runs.map((r, i) => ('s' in r && spaced[i] !== r.s ? { ...r, s: spaced[i] as string } : r))
 }
 
 interface RunContext {

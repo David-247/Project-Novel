@@ -16,10 +16,11 @@ import {
 import { assertManuscriptVersion, throwIfAborted, type RenderOptions } from '../ir/renderer'
 import type { InlineRun, ManuscriptBlock, ManuscriptIR, NoteRun, ParagraphBlock, TextRun as IRTextRun } from '../ir/types'
 import { bylineName, formatWordCount, headerShortTitle, runningHeader, sceneBreakText, surnameOf } from '../settings/text'
+import { classicSentenceSpacing } from '../settings/sentence-spacing'
 import type { ContactDetails } from '../settings/types'
 import { docxLayout, HEADER_DISTANCE_TWIPS, type DocxLayout } from './layout'
 import { manuscriptStyles, STYLE } from './styles'
-import { doubleSentenceSpaces, sentenceContext, xmlSafe } from './text'
+import { xmlSafe } from './text'
 import type { DocxRenderSettings } from './types'
 
 /**
@@ -79,21 +80,18 @@ type RunChild = TextRun | FootnoteReferenceRun
 
 function inlineRuns(runs: readonly (InlineRun | NoteRun)[], ctx: Ctx): RunChild[] {
   const out: RunChild[] = []
-  const classic = ctx.settings.sentenceSpacing === 2
-  let previous = ''
-  for (const r of runs) {
+  // Classic spacing over the paragraph's runs as one text, by the rule the PDF uses too.
+  const spaced = ctx.settings.sentenceSpacing === 2 ? classicSentenceSpacing(runs.map((r) => (r.kind === 'text' ? r.text : r.kind === 'lineBreak' ? null : ''))) : null
+  runs.forEach((r, i) => {
     if (r.kind === 'text') {
-      const text = classic ? doubleSentenceSpaces(r.text, previous) : r.text
-      if (classic) previous = sentenceContext(previous + r.text)
-      out.push(...textRuns(text, emphasis(r, ctx)))
+      out.push(...textRuns(spaced?.[i] ?? r.text, emphasis(r, ctx)))
     } else if (r.kind === 'lineBreak') {
       out.push(new TextRun({ break: 1 }))
-      previous = ''
     } else {
       // Word numbers its footnotes itself (1, 2, 3 ... through the document).
       out.push(new FootnoteReferenceRun(r.footnote + 1))
     }
-  }
+  })
   return out
 }
 
