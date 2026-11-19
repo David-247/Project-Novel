@@ -39,7 +39,7 @@ describe('fake export platform', () => {
     await expect(openExportedFile('/exports/Book.docx')).rejects.toMatchObject({ kind: 'not_exported' })
   })
 
-  it('B-M5/A-M3: the Save dialog path always ends in the kind's extension, like Rust with_extension', async () => {
+  it("B-M5/A-M3: the Save dialog path always ends in the kind's extension, like Rust with_extension", async () => {
     core.exports.savePath = '/exports/notes.txt'
     const txt = (await pickSavePath('docx', 'x'))!
     expect(txt.path).toBe('/exports/notes.txt.docx')
