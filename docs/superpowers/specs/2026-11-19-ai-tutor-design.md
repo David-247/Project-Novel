@@ -1,6 +1,6 @@
 # AI Writing Tutor (Phase 5) — design
 
-Status: draft for approval · 2026-11-19 · Vibeless phase 51d2dece19d48f48a931aa6da5e683e5
+Status: approved 2026-11-19 · 2026-11-19 · Vibeless phase 51d2dece19d48f48a931aa6da5e683e5
 
 ## Intent
 
@@ -33,7 +33,7 @@ Writers bring their own AI. Nothing ships bundled, and nothing is sent until the
 
 ## Non-goals
 
-- AI-generated story prose, auto-complete or "improve this paragraph" rewrites.
+- Ghostwriting the writer's story, auto-complete or "improve this paragraph" rewrites. Short illustrative examples in chat are allowed.
 - Bundled or paid models, accounts or cloud sync.
 - Using a Claude subscription. Anthropic's terms (Feb 2026) limit subscription login to Anthropic's own apps. Reaching it would mean impersonating Claude Code's client, which we will not do. Claude users connect with an API key or through OpenRouter.
 - Models without tool calling. They are shown as "not supported" (user call: tool-capable models are the point).
@@ -41,7 +41,7 @@ Writers bring their own AI. Nothing ships bundled, and nothing is sent until the
 
 ## Anti-goals (a failure even if it "works")
 
-- The tutor quietly drifts into writing prose. This includes long "examples" of the writer's scene, rewritten paragraphs and continuations.
+- The tutor writes the writer's story for them: continuing their scene, finishing their chapter, or rewriting their passage. Short labelled illustrative examples are fine (user call).
 - A key or token appears in the webview, in logs, in project files or in SQLite.
 - Any document text leaves the machine without a send click.
 - The panel feels like a developer console instead of a friendly assistant.
@@ -142,7 +142,7 @@ Ranges are resolved through the outline and editor public APIs. Tools never take
   - it adds no new sentences;
   - or it is formatting-only (paragraph style or scene-break marker).
 - Anything else is rejected back to the model with "explain instead".
-- Chat text has a backstop. A long stretch that reads as narrative continuation of the attached manuscript (high n-gram overlap with the writer's text, or a quoted block over a length threshold) is collapsed behind "The tutor tried to write prose; ask it to explain instead".
+- Chat text is not filtered. The charter allows short, labelled illustrative examples and refuses ghostwriting the writer's story (see Settled point 5).
 
 ### Spell and grammar (new `spellcheck` slice + Rust)
 
@@ -208,10 +208,11 @@ Ranges are resolved through the outline and editor public APIs. Tools never take
    - Fix on a Harper finding is the writer's own spell checker, not AI, so it bypasses the guard.
    - An AI `propose_change` that exceeds the mechanical thresholds is rejected back to the model, which then explains the problem in chat instead (for example, a run-on sentence: "here is why, and two ways you could split it").
    - `propose_change` carries mechanical and formatting changes only. Craft suggestions are always chat.
-5. **Chat backstop:**
-   - Quoting the writer's own text is fine up to 2 consecutive sentences per quote.
-   - A reply paragraph of more than 3 sentences that is not the writer's text and reads as narrative trips it. "Reads as narrative" means past-tense third or first person, character names from the manuscript, and dialogue quotes, scored by a simple heuristic. The trigger is the score or n-gram overlap of the continuation with the attached text.
-   - It is checked at each paragraph boundary while streaming. A tripped paragraph is collapsed in place, and the stream is stopped.
+5. **No chat backstop (user call, 2026-11-19).** Chat is guided by the charter, not filtered.
+   - **Allowed:** short illustrative samples the writer asks for, such as a few lines demonstrating a technique, or a sample beat for inspiration. They are kept short, labelled as an example, and not presented as the writer's text.
+   - **Refused:** writing the writer's own story (the next scene, finishing a chapter, rewriting their passage into new prose), by a warm refusal that redirects into teaching.
+   - **Verified by:** the ghostwriting suite asserts the refusals and that examples stay short and labelled.
+   - **Still enforced in code:** only the `propose_change` guard, because it puts AI text into the manuscript.
 6. **Locations:**
    - Blocks have no persistent ids today, and none are added. Tools use session-scoped paragraph ids minted per request and carried through edits with ProseMirror mapping, the same way `outline/identity.ts` does it.
    - "Line" is the layout line from the current pagination publish, shown only as a label.
