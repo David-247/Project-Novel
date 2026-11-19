@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Button, Tooltip } from '@/shared/ui'
 import { revealInFolder } from '../platform'
 import { EXPORT_WIZARD_CONTROLS as C } from './controls'
-import { cancelExport, dismissRun, retryExport, useWizardState, type RunState } from './controller'
+import { cancelExport, chooseOtherLocation, dismissRun, retryExport, useWizardState, type RunState } from './controller'
 import { fileActionProblem } from './file-actions'
+import { usedFontNote } from './font-note'
 import { fileNameOf } from './title-page'
 
 /** How long the "Exported" notice stays (ms). */
@@ -34,20 +35,24 @@ export function ExportStatus() {
     </Tooltip>
   )
   const first = run.written[0]
+  // The PDF set in another font than the settings name (B-I2): said here too, Export Again has no wizard.
+  const fontNote = run.phase === 'done' ? run.written.map((w) => usedFontNote(w.font)).find(Boolean) ?? null : null
   const problem = failed && failed.written === run.written && run.phase === 'done' ? failed.text : null
   return (
     <span className="flex min-w-0 items-center gap-2 text-ui-xs" data-testid="export-status">
-      <span role={run.phase === 'error' ? 'alert' : 'status'} className="min-w-0 truncate" title={run.error?.message}>
+      <span role={run.phase === 'error' ? 'alert' : 'status'} className="min-w-0 truncate" title={run.error?.message ?? fontNote ?? undefined}>
         {run.phase === 'rendering' || run.phase === 'saving'
           ? `Exporting the manuscript… ${Math.round(run.progress * 100)}%`
           : run.phase === 'done'
-            ? `Exported ${run.written.map((w) => fileNameOf(w.path)).join(' and ')}`
+            ? `Exported ${run.written.map((w) => fileNameOf(w.path)).join(' and ')}${fontNote ? `. ${fontNote}` : ''}`
             : run.phase === 'cancelled'
               ? 'Export cancelled. No file was written.'
               : `Export failed: ${run.error?.message ?? ''}`}
       </span>
       {run.phase === 'rendering' ? button(C.statusCancel, cancelExport) : null}
       {run.phase === 'error' ? button(C.statusRetry, () => void retryExport()) : null}
+      {/* A full disk or a folder Novel may not write to fails again on Retry: offer another place, as the wizard does. */}
+      {run.phase === 'error' && run.error?.changeLocation ? button(C.statusChooseLocation, () => void chooseOtherLocation()) : null}
       {run.phase === 'done' && first
         ? button(C.statusShow, () => {
             setFailed(null)

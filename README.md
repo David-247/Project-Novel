@@ -216,7 +216,7 @@ the project. Crash recovery restores the ones that were not saved yet, together 
 - A pending paragraph join or split, while it is still tracked, shows as two paragraphs in No Markup and Original
   until the change is accepted or rejected (decision 5a4f5103; see [docs/track-changes.md](docs/track-changes.md)).
 - There are no context menus (right-click). Every action is in the menu bar, the ribbon or a shortcut.
-- Revision marks are not exported, and there are no AI suggestions or collaboration. These are later phases.
+- Exports (Phase 4) contain no revision marks or comments: pending changes are exported as accepted (decision 1cedc290). There are no AI suggestions or collaboration yet; those are later phases.
 
 ### Manuscript export (Phase 4)
 

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { settled, type Probe } from './contrast'
-import { editor, launch, nativeDialog, openRecent, pressTab, reveal, ribbonTab, saveStatus, seedPreferences, waitForLayout, writeFile } from './helpers'
+import { editor, launch, nativeDialog, openRecent, pressAccessKey, pressTab, reveal, ribbonTab, saveStatus, seedPreferences, waitForLayout, writeFile } from './helpers'
 
 /**
  * Phase 4 acceptance, audits, on the export wizard's fixture (chapters, subheadings, footnotes,
@@ -27,6 +27,11 @@ const pane = (page: Page) => page.getByRole('complementary', { name: 'Navigation
 const wordCount = (page: Page) => page.getByRole('dialog', { name: 'Word Count' })
 const tip = (page: Page) => page.locator('[data-tooltip-body]')
 const menubar = (page: Page) => page.getByRole('menubar', { name: 'Menu bar' })
+/**
+ * The in-app menu bar is rendered on every platform in the e2e build (menuBarKind: only the desktop app
+ * on macOS shows the native one), so it missing is a failure, never a reason to skip the menu checks.
+ */
+const requireMenubar = (page: Page) => expect(menubar(page), 'the in-app menu bar is expected in the e2e build').toBeVisible()
 const focusedId = (page: Page) => page.evaluate(() => document.activeElement?.closest('[data-control-id]')?.getAttribute('data-control-id') ?? null)
 const STEPS = ['title', 'format', 'checks', 'export'] as const
 
@@ -143,16 +148,15 @@ test('tooltips: every Phase 4 control, with the pane, Word Count, each wizard st
   await ctl(wizard(page), 'export.finish').click()
   await expect(wizard(page)).toHaveCount(0)
 
-  // File > Export (the in-app menu bar; macOS uses the native one).
-  if (await menubar(page).isVisible()) {
-    await menubar(page).locator('[data-control-id="menu.file"]').click()
-    await page.locator('[role="menu"] [data-control-id="menu.file.export"]').click()
-    await expect(page.getByRole('menu')).toHaveCount(2)
-    await audit(page, 'File > Export', ['export.manuscript', 'export.again'])
-    await page.keyboard.press('Escape')
-    await page.keyboard.press('Escape')
-    await expect(page.getByRole('menu')).toHaveCount(0)
-  }
+  // File > Export (the in-app menu bar).
+  await requireMenubar(page)
+  await menubar(page).locator('[data-control-id="menu.file"]').click()
+  await page.locator('[role="menu"] [data-control-id="menu.file.export"]').click()
+  await expect(page.getByRole('menu')).toHaveCount(2)
+  await audit(page, 'File > Export', ['export.manuscript', 'export.again'])
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
 
   // The ribbon: Layout > Export (Manuscript…, Export Manuscript Again), hover and keyboard focus.
   await ribbonTab(page, 'layout')
@@ -413,21 +417,18 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
   await expect(wordCount(page)).toBeHidden()
   await expect(editor(page)).toBeFocused()
 
-  // The wizard from the menu bar (F10, File, Export, Manuscript…), or its shortcut where the menu bar is native.
-  if (await menubar(page).isVisible()) {
-    await page.keyboard.press('F10')
-    await expect.poll(() => focusedId(page)).toMatch(/^menu\./)
-    await keyTo(page, 'ArrowLeft', 'menu.file', 8)
-    await page.keyboard.press('ArrowDown')
-    await expect(page.getByRole('menu').first()).toBeVisible()
-    await keyTo(page, 'ArrowDown', 'menu.file.export')
-    await page.keyboard.press('ArrowRight')
-    await expect(page.getByRole('menu')).toHaveCount(2)
-    await keyTo(page, 'ArrowDown', 'export.manuscript')
-    await page.keyboard.press('Enter')
-  } else {
-    await page.keyboard.press('ControlOrMeta+Shift+X')
-  }
+  // The wizard from the menu bar (F10, File, Export, Manuscript…).
+  await requireMenubar(page)
+  await page.keyboard.press('F10')
+  await expect.poll(() => focusedId(page)).toMatch(/^menu\./)
+  await keyTo(page, 'ArrowLeft', 'menu.file', 8)
+  await page.keyboard.press('ArrowDown')
+  await expect(page.getByRole('menu').first()).toBeVisible()
+  await keyTo(page, 'ArrowDown', 'menu.file.export')
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('menu')).toHaveCount(2)
+  await keyTo(page, 'ArrowDown', 'export.manuscript')
+  await page.keyboard.press('Enter')
   await expect(wizard(page)).toBeVisible()
   // The wizard takes the focus as it opens (after the menu hands it back): wait for that before the
   // first Tab (seen once on macOS CI chromium: a Tab pressed in the same frame left from the menu bar).
@@ -436,21 +437,21 @@ test('keyboard only: the pane, Word Count, the wizard (menu bar, every step, exp
   for (const [i, step] of STEPS.entries()) {
     await expect(ctl(wizard(page), `export.step.${step}`)).toHaveAttribute('aria-current', 'step')
     await tabThrough(page, step)
-    if (i < STEPS.length - 1) await page.keyboard.press('Alt+KeyN')
+    if (i < STEPS.length - 1) await pressAccessKey(page, 'KeyN')
   }
   // A field changed from the keyboard (Alt+1 back to the Title page, Tab to the genre, type-ahead
   // "Fan" picks Fantasy: on a closed select it works on every platform, where an arrow key opens the
   // popup on macOS).
-  await page.keyboard.press('Alt+Digit1')
+  await pressAccessKey(page, 'Digit1')
   await expect(ctl(wizard(page), 'export.step.title')).toHaveAttribute('aria-current', 'step')
   await tabTo(page, 'export.genre')
   await expect(ctl(wizard(page), 'export.genre')).not.toHaveValue('fantasy')
   await page.keyboard.type('Fan')
   await expect(ctl(wizard(page), 'export.genre')).toHaveValue('fantasy')
-  await page.keyboard.press('Alt+Digit4')
+  await pressAccessKey(page, 'Digit4')
   await expect(ctl(wizard(page), 'export.step.export')).toHaveAttribute('aria-current', 'step')
   // Export (Alt+E); then Tab to Close and Enter: back in the manuscript.
-  await page.keyboard.press('Alt+KeyE')
+  await pressAccessKey(page, 'KeyE')
   await expect(wizard(page).getByTestId('export-done')).toBeVisible()
   await expect.poll(() => page.evaluate(() => [...window.__nvE2E.exports.written.keys()].length)).toBe(2)
   await tabTo(page, 'export.finish')

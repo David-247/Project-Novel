@@ -429,10 +429,6 @@ export function paragraphSpacingCommands(): Command[] {
 }
 
 /**
- * Register the editor's commands (Edit, Insert and Format menus). Enabled/checked state follows the
- * selection and the undo history; the style list follows book.styles. Returns unregister.
- */
-/**
  * Review ▸ Word Count… (Word's place: first on the Review tab, in Proofing; Ctrl/Cmd+Shift+G). Opens
  * from anywhere but behind another dialog.
  */
@@ -449,6 +445,10 @@ export function wordCountCommand(): Command {
   }
 }
 
+/**
+ * Register the editor's commands (Edit, Insert and Format menus). Enabled/checked state follows the
+ * selection and the undo history; the style list follows book.styles. Returns unregister.
+ */
 export function registerEditorCommands(): () => void {
   const offFixed = registerCommands([...editorCommands(), ...fontSizeCommands(), ...paragraphSpacingCommands(), wordCountCommand()])
   let offStyles = registerCommands(styleCommands())

@@ -5,6 +5,7 @@ import {
   __resetExportRenderersForTests,
   __resetExportSettingsForTests,
   __resetWizardForTests,
+  createManuscriptExportRenderers,
   createMockExportRenderers,
   EXPORT_COMMAND_IDS,
   EXPORT_WIZARD_CONTROLS as C,
@@ -170,6 +171,53 @@ describe('File > Export > Manuscript…', () => {
     expect(ctl(C.stepChecks.id)).toHaveAttribute('aria-current', 'step')
   })
 
+  it('on macOS, Option+letter in a text field types its character: no access key runs (B-I1)', async () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
+    try {
+      await renderApp()
+      openWizard()
+      const legal = ctl(C.legalName.id) as HTMLInputElement
+      act(() => legal.focus())
+      // "Søren": Option+O types "ø"; it must not toggle "Use other details for this project".
+      let typed = true
+      act(() => {
+        typed = fireEvent.keyDown(legal, { key: 'ø', code: 'KeyO', altKey: true })
+      })
+      expect(typed).toBe(true)
+      expect(getWizardState().overrideContact).toBe(false)
+      expect(document.activeElement).toBe(legal)
+      // "Peña": Option+N (the dead key) does not jump to Formatting; nor Option+2 (™) to step 2.
+      act(() => void fireEvent.keyDown(legal, { key: 'Dead', code: 'KeyN', altKey: true }))
+      act(() => void fireEvent.keyDown(legal, { key: '™', code: 'Digit2', altKey: true }))
+      expect(getWizardState().step).toBe('title')
+      // The address (a textarea) is a text field too.
+      const address = ctl(C.address.id) as HTMLTextAreaElement
+      act(() => address.focus())
+      act(() => void fireEvent.keyDown(address, { key: 'ß', code: 'KeyS', altKey: true }))
+      expect(getManuscriptSettings().titlePage.showAgent).toBe(false)
+      // Off a text field (the genre list) the access keys still work.
+      act(() => ctl(C.genre.id)!.focus())
+      alt('KeyN')
+      expect(getWizardState().step).toBe('format')
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
+  it('on Windows, Alt+letter in a text field is the access key (Word)', async () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
+    try {
+      await renderApp()
+      openWizard()
+      const legal = ctl(C.legalName.id) as HTMLInputElement
+      act(() => legal.focus())
+      alt('KeyN')
+      expect(getWizardState().step).toBe('format')
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
   it('the title page preview, the word count with its rounding and the header preview follow the fields', async () => {
     await renderApp()
     openWizard()
@@ -295,6 +343,133 @@ describe('File > Export > Manuscript…', () => {
   })
 })
 
+describe('final-review minors (B-M1, B-M2, B-M3)', () => {
+  it('B-M1: closing the wizard while it saves finishes in the status bar, which says the files were written', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    const handle = core.handle
+    let closed = false
+    const spy = vi.spyOn(core, 'handle').mockImplementation(async (cmd, args, options) => {
+      if (cmd === 'export_write_file' && !closed) {
+        closed = true
+        expect(getWizardState().run.phase).toBe('saving')
+        act(() => closeWizard())
+      }
+      return handle(cmd, args, options)
+    })
+    try {
+      alt('KeyE')
+      await waitFor(() => expect(getWizardState().run.phase).toBe('done'))
+    } finally {
+      spy.mockRestore()
+    }
+    expect(closed).toBe(true)
+    expect(dialog()).toBeNull()
+    expect([...ex.written.keys()]).toEqual([DOCX, PDF])
+    await waitFor(() => expect(document.querySelector('[data-testid="export-status"]')!.textContent).toMatch(/Exported Waight_THE_LONG_NIGHT_manuscript\.docx and/))
+  })
+
+  it('B-M4: while it exports, the other steps stay focusable (aria-disabled, their tooltips reachable) but do not move', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    ex.renderDelayMs = 0
+    const handle = core.handle
+    let checked = false
+    const spy = vi.spyOn(core, 'handle').mockImplementation(async (cmd, args, options) => {
+      if (cmd === 'export_write_file' && !checked) {
+        checked = true
+        const step = ctl(C.stepTitle.id)!
+        expect(step).not.toBeDisabled()
+        expect(step).toHaveAttribute('aria-disabled', 'true')
+        act(() => step.focus())
+        expect(document.activeElement).toBe(step)
+        act(() => fireEvent.click(step))
+        expect(getWizardState().step).toBe('export')
+        expect(ctl(C.formatDocx.id)).toHaveAttribute('aria-disabled', 'true')
+      }
+      return handle(cmd, args, options)
+    })
+    try {
+      alt('KeyE')
+      await waitFor(() => expect(getWizardState().run.phase).toBe('done'))
+    } finally {
+      spy.mockRestore()
+    }
+    expect(checked).toBe(true)
+    expect(ctl(C.stepTitle.id)).not.toHaveAttribute('aria-disabled')
+  })
+
+  it('B-M6: with two files, Alt+O and Alt+F move between the rows\' buttons (Word: a shared key cycles, pressing none)', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
+    const open = dialog()!.querySelectorAll<HTMLElement>(`[data-control-id="${C.openFile.id}"]`)
+    const show = dialog()!.querySelectorAll<HTMLElement>(`[data-control-id="${C.showInFolder.id}"]`)
+    alt('KeyO')
+    expect(document.activeElement).toBe(open[0])
+    alt('KeyO')
+    expect(document.activeElement).toBe(open[1])
+    alt('KeyO')
+    expect(document.activeElement).toBe(open[0])
+    alt('KeyF')
+    expect(document.activeElement).toBe(show[0])
+    alt('KeyF')
+    expect(document.activeElement).toBe(show[1])
+    await flush()
+    expect(ex.opens).toEqual([])
+    expect(ex.reveals).toEqual([])
+    // A key no other control shares still runs its control (Alt+N... is Back/Next; here Alt+B: Back).
+    alt('KeyB')
+    expect(getWizardState().step).toBe('checks')
+  })
+
+  it('B-M2: a cleared title stays cleared (no snap back to a deleted letter) and shows Required', async () => {
+    await renderApp('')
+    openWizard()
+    const field = ctl(C.title.id) as HTMLInputElement
+    act(() => {
+      field.focus()
+      fireEvent.change(field, { target: { value: 'A' } })
+    })
+    act(() => fireEvent.change(field, { target: { value: '' } }))
+    expect(dialog()!.textContent).toContain('Required: the title page and the header need it.')
+    act(() => fireEvent.blur(field))
+    expect(field.value).toBe('')
+    expect(getWizardState().titleDraft).toBe('')
+  })
+
+  it('B-M3: after a project opens and closes, the new untitled manuscript has neither the old title nor its last export', async () => {
+    await renderApp()
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(getWizardState().run.phase).toBe('done'))
+    closeWizard()
+    const again = getCommand(EXPORT_COMMAND_IDS.again)!
+    expect(isCommandEnabled(again)).toBe(true)
+    act(() => {
+      useStore.getState().projectActions.projectOpened({ path: '/projects/Other', title: 'Other' })
+      useStore.getState().projectActions.projectClosed()
+    })
+    expect(isCommandEnabled(again)).toBe(false)
+    ex.written.clear()
+    await act(async () => again.run())
+    await flush()
+    // No "Replace Waight_THE_LONG_NIGHT_manuscript.docx…?" and nothing overwritten.
+    expect(backend.messages.map((m) => m.text).filter((t) => t.startsWith('Replace'))).toEqual([])
+    expect(ex.written.size).toBe(0)
+    // The untitled manuscript has no title: Export Again opens the wizard at Checks (Must fix: the title).
+    expect(getWizardState().step).toBe('checks')
+    expect(checkEl('title')).toHaveAttribute('data-severity', 'blocking')
+    alt('Digit1')
+    expect((ctl(C.title.id) as HTMLInputElement).value).toBe('')
+  })
+})
+
 describe('the front matter title block (Wave 2 ruling)', () => {
   const docxText = () => new TextDecoder().decode(ex.written.get('/exports/Waight_THE_LONG_NIGHT_manuscript.docx'))
 
@@ -335,6 +510,43 @@ describe('exporting', () => {
     expect(ex.reveals).toEqual(['/exports/Waight_THE_LONG_NIGHT_manuscript.pdf'])
   })
 
+  it('the font the PDF is really set in: "Garamond" is set in Times New Roman, and the wizard says so (B-I2)', async () => {
+    backend.fonts = ['Garamond', 'Times New Roman']
+    await renderApp()
+    // The real PDF generator (its Typst render is the fake core's), PDF only.
+    offRenderers()
+    __resetExportRenderersForTests()
+    const reports: string[] = []
+    offRenderers = setExportRenderers({ pdf: createManuscriptExportRenderers({ pdf: { onReport: (r) => reports.push(r.font.family) } }).pdf })
+    act(() => updateManuscriptSettings({ fontFamily: 'Garamond' }))
+    openWizard()
+    alt('Digit2')
+    const note = dialog()!.querySelector('[data-testid="font-note"]')!.textContent!
+    expect(note).not.toMatch(/names and the PDF is set in/)
+    expect(note).toMatch(/^The PDF is set in (Times New Roman|Liberation Serif)/)
+    expect(note).toMatch(/Garamond applies to the Word file only/)
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
+    expect(reports).toEqual(['Times New Roman'])
+    expect(dialog()!.querySelector('[data-testid="export-font-note"]')!.textContent).toBe(
+      'The PDF is set in Times New Roman, not Garamond: the PDF can use only Times New Roman or Courier New. The Word file names Garamond.',
+    )
+  })
+
+  it('the PDF set in the bundled Liberation Serif (no Times New Roman installed) is named on the success screen', async () => {
+    backend.fonts = ['Arial']
+    await renderApp()
+    offRenderers()
+    __resetExportRenderersForTests()
+    offRenderers = setExportRenderers({ pdf: createManuscriptExportRenderers().pdf })
+    openWizard()
+    alt('Digit4')
+    alt('KeyE')
+    await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
+    expect(dialog()!.querySelector('[data-testid="export-font-note"]')!.textContent).toMatch(/^The PDF is set in Liberation Serif, a free font bundled with Novel/)
+  })
+
   it('only the formats chosen; a format with no renderer cannot be chosen', async () => {
     await renderApp()
     offRenderers()
@@ -343,7 +555,14 @@ describe('exporting', () => {
     offRenderers = setExportRenderers({ docx: createMockExportRenderers().docx })
     openWizard()
     alt('Digit4')
-    expect(ctl(C.formatPdf.id)).toBeDisabled()
+    // Unavailable but focusable (B-M4): aria-disabled, its tooltip reachable; a click changes nothing.
+    const pdf = ctl(C.formatPdf.id) as HTMLInputElement
+    expect(pdf).not.toBeDisabled()
+    expect(pdf).toHaveAttribute('aria-disabled', 'true')
+    act(() => pdf.focus())
+    expect(document.activeElement).toBe(pdf)
+    act(() => fireEvent.click(pdf))
+    expect(pdf.checked).toBe(false)
     alt('KeyE')
     await waitFor(() => expect(dialog()!.querySelector('[data-testid="export-done"]')).not.toBeNull())
     expect([...ex.written.keys()]).toEqual(['/exports/Waight_THE_LONG_NIGHT_manuscript.docx'])
@@ -619,6 +838,38 @@ describe('Export Manuscript Again: error states (fix round 1)', () => {
     act(() => fireEvent.click(status()!.querySelector(`[data-control-id="${C.statusRetry.id}"]`)!))
     await waitFor(() => expect(status()!.textContent).toMatch(/Exported Waight_THE_LONG_NIGHT_manuscript\.docx/))
     expect(ex.written.size).toBe(2)
+  })
+
+  it('B-M7: a full disk in the status bar also offers Choose another location, which exports there', async () => {
+    await renderApp()
+    await exportOnce()
+    ex.written.clear()
+    ex.failWrite = { kind: 'disk_full', message: 'full', diagnostics: [] }
+    ex.failWriteMatch = '/exports/'
+    backend.answer = 'Replace'
+    await act(async () => getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(status()?.querySelector('[role="alert"]')?.textContent).toMatch(/The disk is full/))
+    const choose = status()!.querySelector<HTMLElement>(`[data-control-id="${C.statusChooseLocation.id}"]`)
+    expect(choose).not.toBeNull()
+    expect(auditTooltipCoverage(status()!)).toEqual([])
+    ex.savePath = '/other/Night.docx'
+    act(() => fireEvent.click(choose!))
+    await waitFor(() => expect(ex.written.has('/other/Night.docx')).toBe(true))
+    expect(dialog()).toBeNull()
+  })
+
+  it('B-M7: a Typst error offers Retry only (another place would not help)', async () => {
+    await renderApp()
+    await exportOnce()
+    ex.failRender = { kind: 'compile', message: 'bad', diagnostics: [] }
+    backend.answer = 'Replace'
+    offRenderers()
+    __resetExportRenderersForTests()
+    offRenderers = setExportRenderers({ pdf: createManuscriptExportRenderers().pdf })
+    await act(async () => getCommand(EXPORT_COMMAND_IDS.again)!.run())
+    await waitFor(() => expect(status()?.querySelector('[role="alert"]')).not.toBeNull())
+    expect(status()!.querySelector(`[data-control-id="${C.statusRetry.id}"]`)).not.toBeNull()
+    expect(status()!.querySelector(`[data-control-id="${C.statusChooseLocation.id}"]`)).toBeNull()
   })
 
   it('Cancel in the status bar stops the export, writing nothing', async () => {

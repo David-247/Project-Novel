@@ -271,6 +271,23 @@ export async function pressTab(page: Page, opts: { shift?: boolean } = {}): Prom
   await page.keyboard.press([...mods, 'Tab'].join('+'))
 }
 
+/**
+ * A dialog access key (the export wizard's Alt+<letter>), `code` a physical key ("KeyN", "Digit2").
+ * On macOS, Option+<letter> in a text field types a character and runs no access key (B-I1), so a
+ * keyboard user Tabs off the field first: so does this.
+ */
+export async function pressAccessKey(page: Page, code: string): Promise<void> {
+  const inTextField = () =>
+    page.evaluate(() => {
+      const a = document.activeElement as HTMLElement | null
+      if (!a) return false
+      if (a.tagName === 'TEXTAREA' || a.isContentEditable) return true
+      return a.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image', 'hidden'].includes((a as HTMLInputElement).type)
+    })
+  if (IS_MAC) for (let i = 0; i < 8 && (await inTextField()); i++) await pressTab(page)
+  await page.keyboard.press(`Alt+${code}`)
+}
+
 /** Caret to start / end of line: Home/End elsewhere; on macOS those scroll, so Cmd+Left/Right. */
 export const lineStart = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowLeft' : 'Home')
 export const lineEnd = (page: Page) => page.keyboard.press(IS_MAC ? 'Meta+ArrowRight' : 'End')

@@ -66,6 +66,31 @@ test.beforeEach(async ({ page }, testInfo) => {
   await seedProjectNavigation(page, testInfo)
 })
 
+test('a tap on a heading (touch) jumps to it, as a click does', async ({ browser }, testInfo) => {
+  // A touch context: a tap is a touch event the browser turns into a click (the README says "click, tap").
+  const context = await browser.newContext({ hasTouch: true, viewport: { width: 1400, height: 900 } })
+  const page = await context.newPage()
+  await seedProjectNavigation(page, testInfo)
+  await open(page, '/projects/OutlineTouch')
+  await editor(page).focus()
+  await page.keyboard.press(SHORTCUT)
+  await expect(pane(page)).toBeVisible()
+  await expect(page.getByRole('treeitem')).toHaveCount(1 + 6 + 2)
+  await row(page, 'ch:3').tap()
+  await turnSettled(page)
+  const storm = await blockPos(page, titleBlock(3))
+  await expect.poll(() => caret(page)).toBe(storm + 1)
+  await expect(editor(page)).toBeFocused()
+  await expect.poll(async () => (await pageInView(page, storm + 1)).inView).toBe(true)
+  await expect(row(page, 'ch:3')).toHaveAttribute('aria-selected', 'true')
+  // The fold arrow takes a tap too: it folds the chapter and does not jump.
+  const before = await caret(page)
+  await row(page, 'ch:2').locator('[data-outline-toggle]').tap()
+  await expect(row(page, 'ch:2')).toHaveAttribute('aria-expanded', 'false')
+  expect(await caret(page)).toBe(before)
+  await context.close()
+})
+
 test('opens from the ribbon and the shortcut; a click and Enter jump to the chapter, its page in view, focus back in the manuscript', async ({ page }, testInfo) => {
   await open(page, '/projects/Outline')
   // Ribbon View ▸ Show ▸ Navigation Pane (a pressed toggle).

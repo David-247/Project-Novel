@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref } from 'react'
-import { Checkbox, cn, fieldBase, Select, TextInput, Tooltip } from '@/shared/ui'
+import { Checkbox, cn, detectPlatform, fieldBase, Select, TextInput, Tooltip } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
 import type { ExportControlMeta } from './controls'
 
@@ -32,64 +32,41 @@ function accessKey(e: KeyboardEvent | ReactKeyboardEvent): string | null {
   return null
 }
 
-const TAB_STOPS = 'a[href], button, input, select, textarea, [tabindex]'
+const NOT_TEXT = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image', 'hidden'])
 
-/** The Tab stops of `root` in DOM order (no positive tabindex is used): enabled, visible, not tabindex -1, one per radio group. */
-function tabStops(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(TAB_STOPS)).filter((el) => {
-    if ((el as HTMLButtonElement).disabled || el.tabIndex < 0) return false
-    if (typeof el.checkVisibility === 'function' ? !el.checkVisibility() : el.closest('[hidden]')) return false
-    const input = el as HTMLInputElement
-    return !(el.tagName === 'INPUT' && input.type === 'radio' && !input.checked && input.name !== '')
-  })
+/** A control where a key types text (Option+letter types a character there on macOS). */
+function isTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.tagName === 'TEXTAREA' || target.isContentEditable) return true
+  return target.tagName === 'INPUT' && !NOT_TEXT.has((target as HTMLInputElement).type)
 }
 
 /**
- * Option+Tab (Alt+Tab), Safari's and WKWebView's "every control" Tab when "Keyboard navigation" is
- * off: the dialog's focus trap (Radix FocusScope) only loops a plain Tab, so at the last control
- * Option+Tab would stop. Loop it the same way: past the last stop to the first, Shift before the
- * first to the last. Returns true when it moved the focus.
+ * Alt+<key> inside `root`: the visible, enabled element marked `data-mnemonic="<key>"` is focused; a
+ * button, checkbox or radio is also pressed (Word: an access key on a button runs it). When several
+ * share the key (Open file on each exported file), Word's rule: each press moves the focus to the next
+ * of them, pressing none, and Enter or Space then runs the focused one. Returns true when it handled the key.
  *
- * Forward, the dialog itself (tabindex -1, before its first stop) takes the focus and the browser's
- * own Option+Tab then moves it on to the first stop, so the move is a keyboard one and shows the focus
- * ring (in macOS WebKit a focus moved by script after a modified key is not :focus-visible); where the
- * browser does not move it on (Chromium), the target is focused right after. Backward, or with a root
- * that cannot take the focus, the target is focused asking for the ring.
- */
-export function loopOptionTab(e: KeyboardEvent | ReactKeyboardEvent, root: HTMLElement | null): boolean {
-  if (e.key !== 'Tab' || !e.altKey || e.ctrlKey || e.metaKey || !root) return false
-  const stops = tabStops(root)
-  if (!stops.length) return false
-  const at = stops.indexOf(document.activeElement as HTMLElement)
-  const target = e.shiftKey ? (at <= 0 ? stops[stops.length - 1] : null) : at === stops.length - 1 || at < 0 ? stops[0] : null
-  if (!target) return false
-  if (!e.shiftKey && root.hasAttribute('tabindex') && root.tabIndex < 0) {
-    root.focus({ preventScroll: true })
-    // A browser whose Option+Tab does not move the focus (Chromium) leaves it on the dialog: finish the move.
-    setTimeout(() => {
-      if (document.activeElement === root) target.focus({ focusVisible: true } as FocusOptions)
-    }, 0)
-    return true
-  }
-  e.preventDefault()
-  target.focus({ focusVisible: true } as FocusOptions)
-  return true
-}
-
-/**
- * Alt+<key> inside `root`: the first visible, enabled element marked `data-mnemonic="<key>"` is
- * focused; a button, checkbox or radio is also pressed (Word: an access key on a button runs it).
- * Returns true when it handled the key.
+ * On macOS, Option+<key> in a text field types a character (ø, ß, the ñ dead key), so it is left to
+ * the field there: Word for Mac has no access keys, and a press meant as a letter must never run a
+ * control. From any other control (a list, a checkbox, a button) the access keys work on macOS too.
  */
 export function handleAccessKey(e: ReactKeyboardEvent, root: HTMLElement | null): boolean {
   const key = accessKey(e)
   if (!key || !root) return false
+  if (detectPlatform() === 'mac' && isTextEntry(e.target)) return false
   const candidates = Array.from(root.querySelectorAll<HTMLElement>(`[data-mnemonic="${key}"]`))
   const visible = (c: HTMLElement) => (typeof c.checkVisibility === 'function' ? c.checkVisibility() : !c.closest('[hidden]'))
-  const el = candidates.find((c) => !(c as HTMLButtonElement).disabled && c.getAttribute('aria-disabled') !== 'true' && visible(c))
-  if (!el) return false
+  const matches = candidates.filter((c) => !(c as HTMLButtonElement).disabled && c.getAttribute('aria-disabled') !== 'true' && visible(c))
+  if (!matches.length) return false
   e.preventDefault()
   e.stopPropagation()
+  if (matches.length > 1) {
+    const at = matches.indexOf(document.activeElement as HTMLElement)
+    matches[(at + 1) % matches.length].focus()
+    return true
+  }
+  const el = matches[0]
   el.focus()
   const type = (el as HTMLInputElement).type
   if (el.tagName === 'BUTTON' || (el.tagName === 'INPUT' && (type === 'checkbox' || type === 'radio'))) el.click()
@@ -250,6 +227,10 @@ export interface CheckFieldProps {
   className?: string
 }
 
+/**
+ * A labelled checkbox with its tooltip and access key. Disabled is `aria-disabled` (still focusable, so
+ * a keyboard user reaches its tooltip and learns why), and a click or Space then changes nothing.
+ */
 export function CheckField({ meta, checked, onChange, disabled, label, className }: CheckFieldProps) {
   return (
     <Tooltip wrap>
@@ -259,9 +240,11 @@ export function CheckField({ meta, checked, onChange, disabled, label, className
         data-control-id={meta.id}
         data-mnemonic={meta.mnemonic}
         checked={checked}
-        disabled={disabled}
-        onCheckedChange={onChange}
-        className={className}
+        aria-disabled={disabled || undefined}
+        onCheckedChange={(on) => {
+          if (!disabled) onChange(on)
+        }}
+        className={cn(disabled && 'cursor-not-allowed opacity-50', className)}
       />
     </Tooltip>
   )

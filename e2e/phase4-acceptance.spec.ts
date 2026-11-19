@@ -11,6 +11,7 @@ import {
   lineEnd,
   nativeDialog,
   openRecent,
+  pressAccessKey,
   projectNavigation,
   readFile,
   reopenProject,
@@ -299,12 +300,12 @@ test('the feature fixture: the wizard (a blocking check fixed), DOCX and PDF che
   await ctl(page, 'export.email').fill('')
   await ctl(page, 'export.address').fill('')
   // 2. Formatting (Alt+N, from inside the wizard): Standard on Letter.
-  await page.keyboard.press('Alt+KeyN')
+  await pressAccessKey(page, 'KeyN')
   await expect(ctl(page, 'export.step.format')).toHaveAttribute('aria-current', 'step')
   await expect(ctl(page, 'export.preset.standard')).toBeChecked()
   await expect(ctl(page, 'export.paper')).toHaveValue('letter')
   // 3. Checks: name and contact block the export.
-  await page.keyboard.press('Alt+KeyN')
+  await pressAccessKey(page, 'KeyN')
   await expect(check(page, 'name')).toHaveAttribute('data-severity', 'blocking')
   await expect(check(page, 'contact')).toHaveAttribute('data-severity', 'blocking')
   await goTo(page, 'export')
@@ -321,9 +322,9 @@ test('the feature fixture: the wizard (a blocking check fixed), DOCX and PDF che
   await expect(check(page, 'contact')).toHaveAttribute('data-severity', 'pass')
   await expect(check(page, 'word-count')).toHaveAttribute('data-severity', 'warning')
   // 4. Export (Alt+E): DOCX and PDF.
-  await page.keyboard.press('Alt+KeyN')
+  await pressAccessKey(page, 'KeyN')
   await expect(ctl(page, 'export.start')).not.toHaveAttribute('aria-disabled', 'true')
-  await page.keyboard.press('Alt+KeyE')
+  await pressAccessKey(page, 'KeyE')
   await expect(wizard(page).getByTestId('export-done')).toBeVisible()
   expect(await written(page)).toEqual([DOCX, PDF])
 
@@ -492,6 +493,7 @@ test('offline: with the network disabled, DOCX and PDF export, and nothing is re
   // as the installed app's do (Tauri's asset protocol): every request is answered from dist-e2e/ by
   // this handler, or refused and recorded when it is not for the app itself.
   const outbound: string[] = []
+  const served: string[] = []
   const appFiles = join(ROOT, 'dist-e2e')
   await context.setOffline(true)
   await context.route('**/*', async (route) => {
@@ -502,6 +504,7 @@ test('offline: with the network disabled, DOCX and PDF export, and nothing is re
     }
     const file = join(appFiles, decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname))
     if (!file.startsWith(appFiles) || !existsSync(file)) return route.fulfill({ status: 404, body: '' })
+    served.push(url.pathname)
     return route.fulfill({ status: 200, body: readFileSync(file), contentType: MIME[extname(file)] ?? 'application/octet-stream' })
   })
   context.on('request', (r) => {
@@ -516,6 +519,11 @@ test('offline: with the network disabled, DOCX and PDF export, and nothing is re
   await expect(wizard(page).getByTestId('export-done')).toBeVisible({ timeout: 60_000 })
   expect(await written(page)).toEqual([DOCX, PDF])
   expect(readDocx(await exported(page, DOCX)).paragraphs.some((p) => p.text === 'The Storm')).toBe(true)
+  // The DOCX was built in its Web Worker, offline: the worker's script was served, and the page never
+  // fell back to loading the builder itself (the renderer retries in the page when the worker fails to
+  // start, which would also pass the checks above).
+  expect(served.filter((p) => /\/worker-[\w-]+\.js$/.test(p)), 'the DOCX worker script was loaded').not.toHaveLength(0)
+  expect(served.filter((p) => /\/build-[\w-]+\.js$/.test(p)), 'the page did not build the DOCX itself').toEqual([])
   // The PDF: the sidecar run as Rust runs it (empty package folders, a dead proxy, bundled fonts only;
   // src-tauri/src/export/tests.rs also proves it with the network blocked).
   const pdf = await realPdf(page, testInfo, 'offline')

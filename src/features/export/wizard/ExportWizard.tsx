@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { listSystemFonts } from '@/features/editor'
 import { PROFILE_MAX, useStore } from '@/shared/store'
 import type { PreferenceValues } from '@/shared/store'
-import { Button, cn, focusRing, IconButton, Tooltip } from '@/shared/ui'
+import { Button, cn, focusRing, IconButton, loopOptionTab, Tooltip } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
 import {
   CONTACT_FIELDS,
@@ -41,10 +41,11 @@ import {
   type RunState,
   type WizardStep,
 } from './controller'
-import { CheckField, DraftField, handleAccessKey, loopOptionTab, Mn, SelectField } from './fields'
+import { CheckField, DraftField, handleAccessKey, Mn, SelectField } from './fields'
 import { ChapterPagePreview, HeaderPreview, TitlePagePreview } from './previews'
 import { useExportRenderers, WIZARD_FORMATS, type WizardFormat } from './renderers'
 import { fileActionProblem } from './file-actions'
+import { formatFontNote, usedFontNote } from './font-note'
 import { fileNameOf, manuscriptFileName, titlePageData, type TitlePageData } from './title-page'
 
 /**
@@ -245,11 +246,14 @@ function StepList({ step, checks, disabled }: { step: WizardStep; checks: CheckR
                   data-mnemonic={meta.mnemonic}
                   aria-current={current ? 'step' : undefined}
                   aria-label={`Step ${i + 1}: ${meta.label}${badge ? `, ${badge}` : ''}`}
-                  disabled={disabled && !current}
-                  onClick={() => setStep(s)}
+                  // aria-disabled, not disabled: still focusable, so its tooltip can be read (as FooterButton).
+                  aria-disabled={(disabled && !current) || undefined}
+                  onClick={() => {
+                    if (!(disabled && !current)) setStep(s)
+                  }}
                   className={cn(
                     'flex min-h-control w-full min-w-control items-center gap-2 rounded-control px-2 text-left text-ui-sm',
-                    'disabled:cursor-not-allowed disabled:opacity-50',
+                    disabled && !current && 'cursor-not-allowed opacity-50',
                     current ? 'bg-accent-soft font-semibold text-accent' : 'text-text hover:bg-surface-hover',
                     focusRing,
                   )}
@@ -328,7 +332,7 @@ function TitleStep({ settings, contact, data, title, overrideContact }: TitleSte
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
       <div className="flex min-w-0 flex-col gap-4">
         <div data-field="title">
-          <DraftField meta={C.title} value={title} invalid={!title.trim()} maxLength={200} onCommit={setTitleDraft} hint={!title.trim() ? 'Required: the title page and the header need it.' : undefined} />
+          <DraftField meta={C.title} value={title} allowBlank invalid={!title.trim()} maxLength={200} onCommit={setTitleDraft} hint={!title.trim() ? 'Required: the title page and the header need it.' : undefined} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {contactField('legalName', { autoComplete: 'name' })}
@@ -406,12 +410,8 @@ function useInstalledFonts(): string[] | null {
 
 function FormatStep({ settings, data, prepared }: { settings: ManuscriptSettings; data: TitlePageData; prepared: PreparedManuscript | null }) {
   const fonts = useInstalledFonts()
-  const family = settings.fontFamily.trim()
-  const mono = /courier|mono/i.test(family)
-  const installed = fonts === null || fonts.length === 0 || fonts.some((f) => f.toLowerCase() === family.toLowerCase())
-  const fontHint = installed
-    ? 'The font the Word file names and the PDF is set in.'
-    : `${family} is not installed on this computer. The PDF uses ${mono ? 'Liberation Mono' : 'Liberation Serif'}, a free font with the same letter widths, so the pages break the same; the Word file still names ${family}.`
+  // What the PDF is really set in (it knows Times New Roman and Courier New only), not just whether the family is installed.
+  const fontHint = formatFontNote(settings.fontFamily, fonts)
   const radioName = useId()
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
@@ -631,7 +631,7 @@ function ExportStep({ settings, data, run, blocked }: { settings: ManuscriptSett
   const chosen = WIZARD_FORMATS.filter((f) => settings.outputs[f])
   return (
     <div className="flex flex-col gap-4">
-      <fieldset className="flex flex-col gap-1" disabled={running}>
+      <fieldset className="flex flex-col gap-1">
         <legend className="mb-1 text-ui-sm font-medium">Formats</legend>
         {WIZARD_FORMATS.map((f) => (
           <div key={f} className="flex flex-col">
@@ -756,6 +756,13 @@ function RunPanel({ run }: { run: RunState }) {
             <FileRow key={f.path} path={f.path} />
           ))}
         </ul>
+        {run.written.map((f) =>
+          usedFontNote(f.font) ? (
+            <p key={f.path} className="m-0 text-ui-xs text-text-muted" data-testid="export-font-note">
+              {usedFontNote(f.font)}
+            </p>
+          ) : null,
+        )}
       </div>
     )
   }

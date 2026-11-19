@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { ManuscriptSettings } from '../settings'
 import { createMockRenderer, type ManuscriptIR, type ManuscriptRenderer, type MockRendererOptions, type RenderOptions } from '../ir'
+import type { ExportFontNote } from './font-note'
 import type { TitlePageData } from './title-page'
 
 /**
@@ -19,9 +20,14 @@ export interface ExportJob {
   titlePage: TitlePageData
 }
 
+export interface ExportRenderOptions extends RenderOptions {
+  /** The font the file was set in, when the renderer reports it (the PDF): for the success screen. */
+  onFont?: (font: ExportFontNote) => void
+}
+
 export interface ExportRenderer {
   readonly format: WizardFormat
-  render(job: ExportJob, options?: RenderOptions): Promise<Uint8Array>
+  render(job: ExportJob, options?: ExportRenderOptions): Promise<Uint8Array>
 }
 
 /**

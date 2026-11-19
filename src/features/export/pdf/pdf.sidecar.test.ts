@@ -203,6 +203,47 @@ describe.skipIf(!enabled)('PDF manuscript (real Typst sidecar + pdfjs)', () => {
     }
   })
 
+  it('lists and block quotes sit where the DOCX puts them; a wide marker ("1000.") never runs into its text', async () => {
+    const base = featureIR()
+    const item = (marker: string, depth: number, text: string) => ({ kind: 'paragraph' as const, role: 'listItem' as const, list: { marker, depth, ordered: true }, runs: [{ kind: 'text' as const, text }] })
+    const ir: ManuscriptIR = {
+      ...base,
+      frontMatter: [],
+      chapters: [
+        {
+          ...base.chapters[0],
+          blocks: [
+            item('9.', 0, 'Nine'),
+            item('1000.', 0, 'Thousand'),
+            item('a.', 1, 'Nested'),
+            { kind: 'paragraph', role: 'blockQuote', runs: [{ kind: 'text', text: 'Quoted' }] },
+          ] as ManuscriptIR['chapters'][number]['blocks'],
+        },
+      ],
+    }
+    // A 0.6 in (43.2 pt) indent, as the DOCX: text at one indent per level (43.2, 86.4 pt), the marker
+    // half an indent before it; a block quote inset by one indent.
+    const settings = { ...letter(), firstLineIndentIn: 0.6, titlePage: { ...letter().titlePage, include: false } }
+    const doc = await readPdf((await renderWithSidecar(buildPdfData(ir, settings, { ...META, wordCount: 1 }))).pdf)
+    const items = doc.pages[0].items
+    const at = (s: string) => {
+      const found = items.find((i) => i.str.trim() === s)
+      expect(found, `"${s}" in ${JSON.stringify(items.map((i) => i.str))}`).toBeDefined()
+      return found!
+    }
+    const left = 72
+    expect(at('9.').x).toBeCloseTo(left + 21.6, 0)
+    expect(at('Nine').x).toBeCloseTo(left + 43.2, 0)
+    // "1000." (27 pt) is wider than the 21.6 pt hang: its text goes to the next 0.5 in tab stop
+    // (72 pt from the margin), as Word's tab does, instead of overprinting the marker.
+    expect(at('1000.').x).toBeCloseTo(left + 21.6, 0)
+    expect(at('Thousand').x).toBeGreaterThan(at('1000.').x + at('1000.').width)
+    expect(at('Thousand').x).toBeCloseTo(left + 72, 0)
+    expect(at('a.').x).toBeCloseTo(left + 64.8, 0)
+    expect(at('Nested').x).toBeCloseTo(left + 86.4, 0)
+    expect(at('Quoted').x).toBeCloseTo(left + 43.2, 0)
+  })
+
   it('manuscript text with Typst syntax prints literally (no injection)', async () => {
     const nasty = '#set page(fill: red) $x^2$ [link] *bold* _it_ @ref <label> \\ `raw` // not a comment /* nor */ = heading #import "@preview/x:1.0.0" #eval("1")'
     const ir: ManuscriptIR = {

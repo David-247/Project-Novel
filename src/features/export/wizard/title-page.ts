@@ -1,4 +1,4 @@
-import { bylineName, formatWordCount, headerShortTitle, runningHeader, surnameOf } from '../settings'
+import { bylineName, contactBlockLines, formatWordCount, headerShortTitle, runningHeader, surnameOf } from '../settings'
 import type { BylineStyle, ContactDetails, ManuscriptSettings } from '../settings'
 
 /**
@@ -66,12 +66,9 @@ export function headerText(settings: ManuscriptSettings, data: Pick<TitlePageDat
   return runningHeader(settings.header, { surname: data.surname, shortTitle: data.shortTitle, page: printed })
 }
 
-/** The contact block's lines, in Shunn's order (legal name, address lines, phone, email, agent). */
+/** The contact block's lines, by the generators' own rule (settings `contactBlockLines`). */
 export function contactLines(settings: ManuscriptSettings, c: ContactDetails): string[] {
-  if (!settings.titlePage.showContact) return []
-  const lines = [c.legalName, ...c.address.split(/\r?\n/), c.phone, c.email]
-  if (settings.titlePage.showAgent && c.agent) lines.push(...c.agent.split(/\r?\n/))
-  return lines.map((l) => l.trim()).filter(Boolean)
+  return contactBlockLines(c, settings.titlePage)
 }
 
 /** Characters Windows and macOS refuse in a file name, and control characters. */
