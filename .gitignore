@@ -16,7 +16,13 @@ src-tauri/target/
 src-tauri/gen/
 playwright-report/
 test-results/
+e2e-exports/
 coverage/
 *.log
 .DS_Store
 .claude/worktrees/
+
+# Typst sidecar + bundled fonts (scripts/fetch-typst.mjs)
+.cache/
+src-tauri/binaries/
+src-tauri/resources/fonts/

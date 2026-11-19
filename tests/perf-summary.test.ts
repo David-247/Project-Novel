@@ -173,6 +173,78 @@ describe('perf summary', () => {
     expect(md).toMatch(/\| rewrite-chapter: Enter \/ Backspace \| chromium \/ win32 \(shipping\) \| 20 \|/)
   })
 
+  it('export: the manuscript IR build rows, clean and with pending changes, against 500 ms', () => {
+    const md = toMarkdown([
+      { scenario: 'perf-export', browser: 'perf-chromium', platform: 'win32', irBuild: { medianMs: 120.5 }, irBuildTracked: { medianMs: 510 } },
+    ])
+    const section = md.slice(md.indexOf('#### Export'))
+    expect(section).toMatch(/\| perf-export \| manuscript IR build \(median\) \| chromium \/ win32 \(shipping\) \| 120\.5 \| 500 \|/)
+    expect(section).toMatch(/\| perf-export \| manuscript IR build, 2,000 pending changes \(median\) \| chromium \/ win32 \(shipping\) \| \*\*510\*\* \(MISS\) \| 500 \|/)
+  })
+
+  it('every number the export and outline specs write is tabulated, the reported-only ones with no budget', () => {
+    const md = toMarkdown([
+      { scenario: 'perf-export', browser: 'perf-chromium', platform: 'win32', irBuild: { medianMs: 120, maxMs: 150, fromJsonMedianMs: 33 } },
+      { scenario: 'perf-export-docx', browser: 'perf-chromium', platform: 'win32', docxExport: { medianMs: 800, maxMs: 900, framesDuringLastRun: 41 }, docxExportClassic: { medianMs: 700, maxMs: 760 } },
+      { scenario: 'perf-navigation-pane', browser: 'perf-chromium', platform: 'win32', outline: { caughtUpMs: 26, lastBuildMs: 4.321 } },
+    ])
+    expect(md).toContain('| perf-export | manuscript IR build (slowest run; reported) | chromium / win32 (shipping) | 150 | – |')
+    expect(md).toContain('| perf-export | manuscript IR from the stored JSON, no editor (median; reported) | chromium / win32 (shipping) | 33 | – |')
+    expect(md).toContain('| perf-export-docx | DOCX export (slowest run; reported) | chromium / win32 (shipping) | 900 | – |')
+    expect(md).toContain('| perf-export-docx | DOCX export: animation frames painted during the last run (reported) | chromium / win32 (shipping) | 41 | – |')
+    expect(md).toContain('| perf-export-docx | DOCX export, Classic preset (slowest run; reported) | chromium / win32 (shipping) | 760 | – |')
+    expect(md).toContain('| perf-navigation-pane | last outline build (reported) | chromium / win32 (shipping) | 4.3 | – |')
+  })
+
+  it('export: the PDF render of the 100k fixture against 15 s, blocking on Windows, a warning on macOS', () => {
+    const md = toMarkdown([
+      { scenario: 'pdf-export', browser: 'typst', platform: 'win32', pdfRender: { ms: 2300, pages: 363 } },
+      { scenario: 'pdf-export', browser: 'typst', platform: 'darwin', pdfRender: { ms: 15200, pages: 363 } },
+    ])
+    const section = md.slice(md.indexOf('#### Export'))
+    expect(section).toContain('| pdf-export | PDF render, Typst sidecar (363 pages) | typst / win32 (blocking) | 2300 | 15000 |')
+    expect(section).toContain('| pdf-export | PDF render, Typst sidecar (363 pages) | typst / darwin | **15200** (miss, warning) | 15000 |')
+  })
+
+  it('export: the DOCX export row against 5,000 ms', () => {
+    const md = toMarkdown([{ scenario: 'perf-export-docx', browser: 'perf-chromium', platform: 'win32', docxExport: { medianMs: 812.3 }, docxExportClassic: { medianMs: 901 } }])
+    const section = md.slice(md.indexOf('#### Export'))
+    expect(section).toMatch(/\| perf-export-docx \| DOCX export, 100k words: IR \+ render in the worker \(median\) \| chromium \/ win32 \(shipping\) \| 812\.3 \| 5000 \|/)
+    expect(section).toMatch(/\| perf-export-docx \| DOCX export, 100k words, Classic preset \(median\) \| chromium \/ win32 \(shipping\) \| 901 \| 5000 \|/)
+  })
+
+  it('live word counts: typing blocks on Windows Chromium like plain typing; the count update is reported (Phase 4)', () => {
+    const md = toMarkdown([
+      {
+        scenario: 'perf-word-count',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        typing: { medianMs: 52, p95Ms: 60, maxMs: 70 },
+        wordCount: { caughtUpMs: 180, updateMs: 171.4 },
+      },
+    ])
+    expect(md).toMatch(/\| perf-word-count \| chromium \/ win32 \(shipping\) \| \*\*52\*\* \(MISS\) \|/)
+    expect(md).toMatch(/#### Live word count/)
+    expect(md).toMatch(/\| perf-word-count \| chromium \/ win32 \(shipping\) \| 171\.4 \| 180 \|/)
+  })
+
+  it('navigation pane: the counts after typing (reported) and the outline after a trim reflow, against 1,000 ms (Phase 4)', () => {
+    const md = toMarkdown([
+      { scenario: 'perf-navigation-pane', browser: 'perf-chromium', platform: 'win32', typing: { medianMs: 22.5, p95Ms: 30, maxMs: 40 }, outline: { caughtUpMs: 26 } },
+      {
+        scenario: 'perf-outline-reflow',
+        browser: 'perf-webkit',
+        platform: 'darwin',
+        outlineAfterReflow: { runs: [{ trim: 'us-5x8', reflowMs: 700, outlineMs: 1100, lagMs: 400, pages: 600 }, { trim: 'uk-a5', reflowMs: 120, outlineMs: 180, lagMs: 60, pages: 580 }] },
+      },
+    ])
+    const section = md.slice(md.indexOf('#### Navigation pane'))
+    expect(md).toMatch(/\| perf-navigation-pane \| chromium \/ win32 \(shipping\) \| 22\.5 \|/)
+    expect(section).toMatch(/\| perf-navigation-pane \| counts caught up after typing \(reported\) \| chromium \/ win32 \(shipping\) \| 26 \| – \|/)
+    expect(section).toMatch(/\| perf-outline-reflow \| us-5x8: new pages shown after the trim change \(reflow 700, then 400\) \| webkit \/ darwin \(shipping\) \| \*\*1100\*\* \(miss/)
+    expect(section).toMatch(/\| perf-outline-reflow \| uk-a5: new pages shown after the trim change \(reflow 120, then 60\) \| webkit \/ darwin \(shipping\) \| 180 \| 1000 \|/)
+  })
+
   it('says so when there are no results', () => {
     expect(toMarkdown([], 'nowhere')).toMatch(/No perf results found in nowhere/)
   })

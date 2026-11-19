@@ -1,5 +1,7 @@
-// Markdown tables of the perf numbers in perf-results/*.json (written by e2e/perf.spec.ts and
-// e2e/pagination-perf.spec.ts). Appends to $GITHUB_STEP_SUMMARY in CI, otherwise prints to stdout.
+// Markdown tables of the perf numbers in perf-results/*.json (written by e2e/perf.spec.ts,
+// e2e/pagination-perf.spec.ts, e2e/perf-export.spec.ts, e2e/outline-perf.spec.ts and, for the PDF
+// render, src/features/export/pdf/pdf.sidecar.test.ts). Budgeted measures and reported-only ones
+// (budget column "–") both go in. Appends to $GITHUB_STEP_SUMMARY in CI, otherwise prints to stdout.
 // Never fails the job: the budgets are asserted by the tests. In CI only Windows Chromium blocks; every
 // other pair, macOS WebKit included (free shared runner), reports a miss as a warning (decisions
 // afbe3475, f040009b).
@@ -141,6 +143,67 @@ export function toMarkdown(results, dir = 'perf-results') {
   if (rows.length) {
     md.push('#### Revision tools (track changes, comments, re-write)', '')
     md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...rows, '')
+  }
+
+  // Phase 4 (export): the manuscript IR build (e2e/perf-export.spec.ts).
+  const exportRows = []
+  for (const r of results) {
+    const row = (measure, n, limit) => n !== undefined && n !== null && exportRows.push(`| ${r.scenario} | ${measure} | ${pair(r)} | ${cell(r, n, limit)} | ${limit ?? '–'} |`)
+    if (r.irBuild) {
+      row('manuscript IR build (median)', r.irBuild.medianMs, 500)
+      row('manuscript IR build (slowest run; reported)', r.irBuild.maxMs)
+      row('manuscript IR from the stored JSON, no editor (median; reported)', r.irBuild.fromJsonMedianMs)
+    }
+    if (r.irBuildTracked) row('manuscript IR build, 2,000 pending changes (median)', r.irBuildTracked.medianMs, 500)
+    // The PDF render (src/features/export/pdf/pdf.sidecar.test.ts, the Typst sidecar, no browser):
+    // blocking on Windows, recorded on macOS (decisions 1cedc290, f040009b).
+    if (r.pdfRender) {
+      const { ms, pages } = r.pdfRender
+      const miss = ms >= 15000 ? ` (${r.platform === 'win32' ? 'MISS' : 'miss, warning'})` : ''
+      exportRows.push(`| ${r.scenario} | PDF render, Typst sidecar (${v(pages)} pages) | typst / ${r.platform}${r.platform === 'win32' ? ' (blocking)' : ''} | ${miss ? `**${ms}**${miss}` : v(ms)} | 15000 |`)
+    }
+    if (r.docxExport) {
+      row('DOCX export, 100k words: IR + render in the worker (median)', r.docxExport.medianMs, 5000)
+      row('DOCX export (slowest run; reported)', r.docxExport.maxMs)
+      row('DOCX export: animation frames painted during the last run (reported)', r.docxExport.framesDuringLastRun)
+    }
+    if (r.docxExportClassic) {
+      row('DOCX export, 100k words, Classic preset (median)', r.docxExportClassic.medianMs, 5000)
+      row('DOCX export, Classic preset (slowest run; reported)', r.docxExportClassic.maxMs)
+    }
+  }
+  if (exportRows.length) {
+    md.push('#### Export', '')
+    md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...exportRows, '')
+  }
+
+  // Phase 4: live word counts (e2e/perf.spec.ts). Typing with the counts on is in the typing table
+  // (blocking on Windows Chromium like plain typing); the count's catch-up is reported, not a budget.
+  const counts = results.filter((r) => r.wordCount && typeof r.wordCount === 'object')
+  if (counts.length) {
+    md.push('#### Live word count (status bar update after typing; reported, no budget)', '')
+    md.push('| scenario | engine / OS | one keystroke to count shown ms | after typing, caught up ms |', '| --- | --- | --- | --- |')
+    for (const r of counts) md.push(`| ${r.scenario} | ${pair(r)} | ${v(r.wordCount.updateMs)} | ${v(r.wordCount.caughtUpMs)} |`)
+    md.push('')
+  }
+
+  // Phase 4: the navigation pane (e2e/outline-perf.spec.ts). Typing with the pane open is in the typing
+  // table; here, the pane catching up after typing (reported) and after a trim reflow (< 1000 ms).
+  const paneRows = []
+  for (const r of results) {
+    if (r.outline && r.outline.caughtUpMs !== undefined)
+      paneRows.push(`| ${r.scenario} | counts caught up after typing (reported) | ${pair(r)} | ${v(r.outline.caughtUpMs)} | – |`)
+    if (r.outline && r.outline.lastBuildMs !== undefined)
+      paneRows.push(`| ${r.scenario} | last outline build (reported) | ${pair(r)} | ${v(+Number(r.outline.lastBuildMs).toFixed(1))} | – |`)
+    const o = r.outlineAfterReflow
+    if (o && Array.isArray(o.runs)) {
+      for (const x of o.runs)
+        paneRows.push(`| ${r.scenario} | ${x.trim}: new pages shown after the trim change (reflow ${v(x.reflowMs)}, then ${v(x.lagMs)}) | ${pair(r)} | ${cell(r, x.outlineMs, 1000)} | 1000 |`)
+    }
+  }
+  if (paneRows.length) {
+    md.push('#### Navigation pane', '')
+    md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...paneRows, '')
   }
 
   const broken = results.filter((r) => r.error)

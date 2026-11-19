@@ -75,10 +75,45 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
+      # The Typst PDF sidecar and bundled fonts (pinned, SHA-256 verified): tauri-build copies them at
+      # compile time, so every cargo build needs them. The downloaded archives are cached.
+      - name: Cache Typst sidecar and fonts
+        uses: actions/cache@v4
+        with:
+          path: .cache/sidecar
+          key: sidecar-${{ runner.os }}-${{ hashFiles('scripts/fetch-typst.mjs') }}
+      - name: Fetch Typst sidecar and fonts
+        run: node scripts/fetch-typst.mjs
       # tauri::generate_context! embeds ../dist at compile time.
       - run: pnpm build
-      - run: cargo test --locked
+      # Hello-world PDF with the bundled fallback font, the offline guarantees (package import refused,
+      # no fetch with the network blocked), timeout, cancel and temp cleanup: src-tauri/src/export/tests.rs.
+      - name: Typst sidecar smoke (export tests)
+        run: cargo test --locked "export::"
         working-directory: src-tauri
+      # Everything else (the export tests already ran above).
+      - name: cargo test (other modules)
+        run: cargo test --locked -- --skip "export::"
+        working-directory: src-tauri
+      # The PDF manuscript (src/features/export/pdf/pdf.sidecar.test.ts): the bundled template rendered
+      # by this sidecar and read back with pdfjs-dist (title page, headers, chapter pages, footnotes,
+      # line pitch, injection), and the 100k-word fixture against its 15 s budget (blocking on Windows,
+      # recorded on macOS: decisions 1cedc290, f040009b). NOVEL_REQUIRE_TYPST makes a missing sidecar fail.
+      - name: PDF manuscript (Typst sidecar + pdfjs)
+        run: pnpm exec vitest run src/features/export/pdf
+        env:
+          NOVEL_REQUIRE_TYPST: '1'
+      - name: PDF perf numbers to the job summary
+        if: ${{ !cancelled() }}
+        run: node scripts/perf-summary.mjs
+      - name: Upload PDF perf results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results-pdf-${{ matrix.os }}
+          path: perf-results/pdf-export-*.json
+          if-no-files-found: warn
+          retention-days: 90
 
   e2e:
     name: Playwright e2e (${{ matrix.os }})
@@ -96,11 +131,51 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium webkit
+      # The Typst sidecar and bundled fonts: e2e/phase4-acceptance.spec.ts renders the app's PDF
+      # request with them (as Rust would) and reads the PDF back with pdfjs.
+      - name: Cache Typst sidecar and fonts
+        uses: actions/cache@v4
+        with:
+          path: .cache/sidecar
+          key: sidecar-${{ runner.os }}-${{ hashFiles('scripts/fetch-typst.mjs') }}
+      - name: Fetch Typst sidecar and fonts
+        run: node scripts/fetch-typst.mjs
       # Functional projects: chromium (stands in for WebView2) and webkit (for WKWebView). Perf runs
       # in its own job, so its numbers are published even when a functional test fails.
       # Includes e2e/pagination-fixture.spec.ts, which writes the cross-engine page-break JSONs
       # (perf-results/pagination-fixture-<browser>-<platform>.json) compared by the job below.
+      # NOVEL_REQUIRE_TYPST: a missing sidecar fails the Phase 4 acceptance instead of skipping its PDF checks.
       - run: pnpm exec playwright test --project=chromium --project=webkit --project=chromium-scroll --project=webkit-scroll
+        env:
+          NOVEL_REQUIRE_TYPST: '1'
+      # Phase 4 manual check, macOS half: the exported manuscripts as macOS draws them. Quick Look
+      # (qlmanage) thumbnails the first page of the PDF and the DOCX; PDFKit (Preview's engine) renders
+      # the PDF's first pages, so the title page, the running headers and the page numbers can be
+      # looked at in the artifact. Opening them in Preview and Word on a real Mac stays a manual step.
+      - name: Render the exported manuscripts with Quick Look and PDFKit (macOS)
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p e2e-exports/macos-render
+          ls -la e2e-exports
+          for f in e2e-exports/feature-webkit-darwin.pdf e2e-exports/feature-webkit-darwin.docx e2e-exports/hundred-webkit-darwin.pdf; do
+            qlmanage -t -s 1600 -o e2e-exports/macos-render "$f"
+          done
+          swift scripts/render-pdf-pages.swift e2e-exports/feature-webkit-darwin.pdf e2e-exports/macos-render 6
+          swift scripts/render-pdf-pages.swift e2e-exports/hundred-webkit-darwin.pdf e2e-exports/macos-render 3
+          ls -la e2e-exports/macos-render
+      - name: Upload exported manuscripts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: exported-manuscripts-${{ matrix.os }}
+          path: |
+            e2e-exports/
+            !e2e-exports/*.mjs
+            !e2e-exports/*.txt
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -203,6 +278,13 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
+      - name: Cache Typst sidecar and fonts
+        uses: actions/cache@v4
+        with:
+          path: .cache/sidecar
+          key: sidecar-${{ runner.os }}-${{ hashFiles('scripts/fetch-typst.mjs') }}
+      - name: Fetch Typst sidecar and fonts
+        run: node scripts/fetch-typst.mjs
       # No bundle signing: build the app binary only.
       - run: pnpm tauri build --no-bundle
       # The web bundle tauri build embedded (beforeBuildCommand `pnpm build` -> dist/) must not

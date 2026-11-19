@@ -1,0 +1,2 @@
+# Golden files compared byte for byte by Vitest file snapshots: keep LF on every checkout.
+src/features/export/docx/__golden__/** text eol=lf

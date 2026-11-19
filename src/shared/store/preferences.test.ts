@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { newProjectBookSettings } from '@/shared/book'
-import { defaultPreferenceValues, parsePreferences, PREFERENCES_VERSION, serializePreferences } from './preferences-file'
+import { defaultPreferenceValues, NAV_PANE_DEFAULT_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH, parsePreferences, PREFERENCES_VERSION, serializePreferences } from './preferences-file'
 import { setSystemAuthorName } from './preferences-slice'
 import { useStore } from './index'
 
@@ -54,9 +54,27 @@ describe('preferences.json', () => {
       defaultTrimSize: 'us-6x9',
       reduceMotion: 'on' as const,
       authorPrompted: true,
+      profileLegalName: 'Augusta Ada King',
+      profilePenName: 'Ada Lovelace',
+      profileAddress: '1 Analytical Way\nLondon',
+      profilePhone: '+44 20 7946 0000',
+      profileEmail: 'ada@example.com',
+      profileAgent: 'Babbage & Co.',
+      exportFolders: { 'project-id': '/exports' },
+      navigationPane: true,
+      navigationPaneWidth: 320,
     }
     const parsed = parsePreferences(serializePreferences({ ...values, extra: {} }))
     expect(parsed).toMatchObject({ values, extra: {}, authorNameMissing: false, fallback: null })
+  })
+
+  it('the navigation pane: open state and width, the width kept in range, wrong types fall back', () => {
+    expect(defaultPreferenceValues()).toMatchObject({ navigationPane: false, navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH })
+    const read = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values
+    expect(read({ navigationPane: true, navigationPaneWidth: 333.4 })).toMatchObject({ navigationPane: true, navigationPaneWidth: 333 })
+    expect(read({ navigationPaneWidth: 10 }).navigationPaneWidth).toBe(NAV_PANE_MIN_WIDTH)
+    expect(read({ navigationPaneWidth: 5000 }).navigationPaneWidth).toBe(NAV_PANE_MAX_WIDTH)
+    expect(read({ navigationPane: 'yes', navigationPaneWidth: 'wide' })).toMatchObject({ navigationPane: false, navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH })
   })
 
   it('writes the version first-class and trims the name', () => {
@@ -123,6 +141,32 @@ describe('preferences.json', () => {
 
   it('caps the author name length', () => {
     expect(parsePreferences(JSON.stringify({ authorName: 'x'.repeat(500) })).values.authorName).toHaveLength(120)
+  })
+
+  it('author profile: empty by default, trimmed on write, wrongly typed values default, long ones are capped', () => {
+    expect(defaultPreferenceValues()).toMatchObject({ profileLegalName: '', profilePenName: '', profileAddress: '', profilePhone: '', profileEmail: '', profileAgent: '' })
+    const json = JSON.parse(serializePreferences({ ...defaultPreferenceValues(), profileEmail: '  a@b.c ', extra: {} }))
+    expect(json.profileEmail).toBe('a@b.c')
+    const parsed = parsePreferences(JSON.stringify({ version: 1, profilePhone: 5, profileAddress: 'x'.repeat(900) }))
+    expect(parsed.values.profilePhone).toBe('')
+    expect(parsed.values.profileAddress).toHaveLength(400)
+  })
+
+  it('exportFolders: per-project folders, read defensively, capped, and the default is a stable shared object', () => {
+    expect(defaultPreferenceValues().exportFolders).toBe(defaultPreferenceValues().exportFolders)
+    const parsed = parsePreferences(JSON.stringify({ version: 1, exportFolders: { p1: '/out', p2: 5, p3: '', p4: ['x'] } }))
+    expect(parsed.values.exportFolders).toEqual({ p1: '/out' })
+    expect(parsePreferences(JSON.stringify({ exportFolders: [1] })).values.exportFolders).toEqual({})
+    const many = Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`p${i}`, `/o${i}`]))
+    expect(Object.keys(parsePreferences(JSON.stringify({ exportFolders: many })).values.exportFolders)).toHaveLength(50)
+    expect(JSON.parse(serializePreferences({ ...defaultPreferenceValues(), exportFolders: { a: '/x' }, extra: {} })).exportFolders).toEqual({ a: '/x' })
+  })
+
+  it('Reset to defaults keeps the author profile (it is typed data, not a preference)', () => {
+    a().set('profileLegalName', 'Ada King')
+    a().set('pageNavigation', 'scroll')
+    a().reset()
+    expect(prefs()).toMatchObject({ profileLegalName: 'Ada King', pageNavigation: 'book' })
   })
 })
 

@@ -7,6 +7,7 @@ export type { TextInputProps, SelectProps, SelectOption, CheckboxProps } from '.
 export { Panel, StatusText } from './Panel'
 export type { PanelProps, StatusTextProps, StatusTone } from './Panel'
 export { Dialog, DialogClose } from './Dialog'
+export { loopOptionTab } from './option-tab'
 export type { DialogProps } from './Dialog'
 export { cn, focusRing, controlBase, fieldBase } from './styles'
 export { Tooltip, TooltipProvider, describeTooltip } from './Tooltip'

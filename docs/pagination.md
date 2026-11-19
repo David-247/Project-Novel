@@ -352,6 +352,14 @@ zero-height line. A view switch re-measures the blocks holding changes (`invalid
 rules, and the e2e check that a view's breaks equal the manuscript with its changes applied or rejected,
 are in [docs/track-changes.md](track-changes.md#pagination).
 
+### Line count (Phase 4)
+
+`countLines()` gives the laid-out body lines of the manuscript, `countLines({ from, to })` the lines a
+range touches (Word Count's "Lines", docs/word-count.md); null before the first layout. It reads the
+last pass's line boxes; for a partly selected textblock it finds the line holding each end through the
+cached line starts (the same lookup the page model uses). Footnote areas and running heads are not in
+the stream, so they are not counted.
+
 ### Invalidation
 
 - `relayoutPagination()`: re-break the pages on the next frame from the measured lines (reservation

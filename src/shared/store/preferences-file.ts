@@ -29,6 +29,27 @@ export interface PreferenceValues {
   reduceMotion: ReduceMotion
   /** The one-time author-name question has been asked (answered or dismissed). */
   authorPrompted: boolean
+  /**
+   * Author profile (Phase 4): the contact block of an exported manuscript's title page. App-level, like
+   * Word's user information, so personal details stay out of project folders unless a project
+   * overrides them. '' = not set. Line breaks are kept in `profileAddress` and `profileAgent`.
+   */
+  profileLegalName: string
+  /** The name on the by-line (a pen name); '' = the legal name. */
+  profilePenName: string
+  profileAddress: string
+  profilePhone: string
+  profileEmail: string
+  profileAgent: string
+  /**
+   * Folder of the last manuscript export, by project id (a machine-local path, so it lives here and not in
+   * the project folder). At most MAX_EXPORT_FOLDERS entries; the oldest are dropped.
+   */
+  exportFolders: Record<string, string>
+  /** View ▸ Navigation Pane (Phase 4, src/features/outline): shown at startup. */
+  navigationPane: boolean
+  /** The docked navigation pane's width in CSS px (NAV_PANE_MIN_WIDTH to NAV_PANE_MAX_WIDTH). */
+  navigationPaneWidth: number
 }
 
 export interface Preferences extends PreferenceValues {
@@ -40,6 +61,43 @@ export interface Preferences extends PreferenceValues {
 
 export const MAX_AUTHOR_NAME = 120
 
+/** Longest value of each author-profile field (a project's contact override has the same limits). */
+export const PROFILE_MAX = {
+  profileLegalName: 120,
+  profilePenName: 120,
+  profileAddress: 400,
+  profilePhone: 60,
+  profileEmail: 200,
+  profileAgent: 300,
+} as const
+
+export const MAX_EXPORT_FOLDERS = 50
+
+/** Navigation pane width limits and default (CSS px). */
+export const NAV_PANE_MIN_WIDTH = 200
+export const NAV_PANE_MAX_WIDTH = 480
+export const NAV_PANE_DEFAULT_WIDTH = 280
+
+/** A width in range, rounded to whole px. */
+export function clampNavPaneWidth(px: number): number {
+  return Math.round(Math.min(NAV_PANE_MAX_WIDTH, Math.max(NAV_PANE_MIN_WIDTH, px)))
+}
+
+/** The default `exportFolders`: one shared object, so a fresh default is `===` the store's (no phantom change). */
+const NO_EXPORT_FOLDERS: Record<string, string> = Object.freeze({}) as Record<string, string>
+
+function readExportFolders(v: unknown): Record<string, string> | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
+  const out: Record<string, string> = {}
+  for (const [k, p] of Object.entries(v)) {
+    if (typeof p === 'string' && p !== '' && k.length <= 64 && p.length <= 1024) out[k] = p
+  }
+  return Object.fromEntries(Object.entries(out).slice(-MAX_EXPORT_FOLDERS))
+}
+
+/** The author-profile keys, in the order of the title-page contact block. */
+export const PROFILE_KEYS = ['profileLegalName', 'profilePenName', 'profileAddress', 'profilePhone', 'profileEmail', 'profileAgent'] as const
+
 export function defaultPreferenceValues(authorName = ''): PreferenceValues {
   return {
     authorName,
@@ -49,6 +107,15 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     defaultTrimSize: DEFAULT_TRIM_SIZE,
     reduceMotion: 'system',
     authorPrompted: false,
+    profileLegalName: '',
+    profilePenName: '',
+    profileAddress: '',
+    profilePhone: '',
+    profileEmail: '',
+    profileAgent: '',
+    exportFolders: NO_EXPORT_FOLDERS,
+    navigationPane: false,
+    navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH,
   }
 }
 
@@ -63,6 +130,15 @@ const READERS: { [K in keyof PreferenceValues]: (v: unknown) => PreferenceValues
   defaultTrimSize: (v) => (isTrimSizeId(v) ? v : undefined),
   reduceMotion: (v) => (v === 'system' || v === 'on' || v === 'off' ? v : undefined),
   authorPrompted: (v) => (typeof v === 'boolean' ? v : undefined),
+  profileLegalName: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileLegalName) : undefined),
+  profilePenName: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profilePenName) : undefined),
+  profileAddress: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileAddress) : undefined),
+  profilePhone: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profilePhone) : undefined),
+  profileEmail: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileEmail) : undefined),
+  profileAgent: (v) => (typeof v === 'string' ? v.slice(0, PROFILE_MAX.profileAgent) : undefined),
+  exportFolders: readExportFolders,
+  navigationPane: (v) => (typeof v === 'boolean' ? v : undefined),
+  navigationPaneWidth: (v) => (typeof v === 'number' && Number.isFinite(v) ? clampNavPaneWidth(v) : undefined),
 }
 
 const KNOWN_KEYS = new Set<string>(Object.keys(READERS))
@@ -124,6 +200,15 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     defaultTrimSize: p.defaultTrimSize,
     reduceMotion: p.reduceMotion,
     authorPrompted: p.authorPrompted,
+    profileLegalName: p.profileLegalName.trim(),
+    profilePenName: p.profilePenName.trim(),
+    profileAddress: p.profileAddress.trim(),
+    profilePhone: p.profilePhone.trim(),
+    profileEmail: p.profileEmail.trim(),
+    profileAgent: p.profileAgent.trim(),
+    exportFolders: readExportFolders(p.exportFolders) ?? {},
+    navigationPane: p.navigationPane,
+    navigationPaneWidth: clampNavPaneWidth(p.navigationPaneWidth),
   }
   return JSON.stringify(out, null, 2) + '\n'
 }

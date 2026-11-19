@@ -3,7 +3,7 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import tseslint from 'typescript-eslint'
 
-export const SLICES = ['editor', 'storage', 'tooltips', 'app-shell', 'book-settings', 'pagination', 'header-footer', 'footnotes', 'menu', 'track-changes', 'settings', 'comments', 'rewrite']
+export const SLICES = ['editor', 'storage', 'tooltips', 'app-shell', 'book-settings', 'pagination', 'header-footer', 'footnotes', 'menu', 'track-changes', 'settings', 'comments', 'rewrite', 'export', 'outline', 'ribbon']
 
 /**
  * A file in slice A may import slice B only via its index (`@/features/B`),
@@ -11,20 +11,30 @@ export const SLICES = ['editor', 'storage', 'tooltips', 'app-shell', 'book-setti
  * Within-slice relative imports are fine, so each slice gets its own override
  * forbidding deep paths into every OTHER slice.
  */
-const crossSliceRules = SLICES.map((slice) => ({
-  files: [`src/features/${slice}/**/*.{ts,tsx}`, `tests/fixtures/features/${slice}/**/*.{ts,tsx}`],
-  rules: {
-    'no-restricted-imports': [
-      'error',
-      {
-        patterns: SLICES.filter((o) => o !== slice).map((other) => ({
-          group: [`@/features/${other}/**`, `**/features/${other}/**`, `**/${other}/**`],
-          message: `Import from "@/features/${other}" (its index.ts), not its internals.`,
-        })),
-      },
+// A relative import reaches another slice only by climbing out of the slice folder, so the pattern depends
+// on how deep the file is: `src/features/A/x.ts` reaches slice B as `../B/...`, `src/features/A/sub/x.ts`
+// as `../../B/...`. Matching `**/B/**` instead would also hit A's own sub-folder that happens to be named
+// like a slice (`export/settings/`).
+const MAX_DEPTH = 5
+const crossSliceRules = SLICES.flatMap((slice) =>
+  Array.from({ length: MAX_DEPTH + 1 }, (_, depth) => ({
+    files: [
+      `src/features/${slice}/${'*/'.repeat(depth)}*.{ts,tsx}`,
+      ...(depth === 0 ? [`tests/fixtures/features/${slice}/**/*.{ts,tsx}`] : []),
     ],
-  },
-}))
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: SLICES.filter((o) => o !== slice).map((other) => ({
+            group: [`@/features/${other}/**`, `**/features/${other}/**`, `${'../'.repeat(depth + 1)}${other}/**`],
+            message: `Import from "@/features/${other}" (its index.ts), not its internals.`,
+          })),
+        },
+      ],
+    },
+  })),
+)
 
 export default tseslint.config(
   {

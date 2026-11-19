@@ -13,6 +13,9 @@ import {
   onDocChange,
   registerEditorCommands,
   setDocJSON,
+  setWordCountLineSource,
+  WordCountDialog,
+  WordCountIndicator,
 } from '@/features/editor'
 import { registerBookSettingsCommands } from '@/features/book-settings'
 import { HeaderFooter, registerHeaderFooterCommands } from '@/features/header-footer'
@@ -25,7 +28,7 @@ import {
   SaveStatusIndicator,
   useStorageIntegration,
 } from '@/features/storage'
-import { invalidatePaginationAt, PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
+import { countLines, invalidatePaginationAt, PageIndicator, PaginatedView, registerPaginationCommands, ZoomControls } from '@/features/pagination'
 import { registerFootnoteCommands, useFootnotePagination } from '@/features/footnotes'
 import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
 import {
@@ -54,6 +57,8 @@ import {
   TrackChangesNotice,
 } from '@/features/track-changes'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
+import { createManuscriptExportRenderers, ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile, setExportRenderers } from '@/features/export'
+import { NavigationPane, registerOutlineCommands } from '@/features/outline'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -118,6 +123,8 @@ export function App() {
       registerCommentsCommands(),
       registerTrackChangesCommands(),
       registerRewriteCommands(),
+      registerOutlineCommands(),
+      registerExportCommands(),
       // The toolbar's tabs and groups (Word-style ribbon; commands join groups by their `ribbon` field).
       registerAppRibbon(),
     ]
@@ -128,6 +135,10 @@ export function App() {
   useEffect(() => registerCommentsSideFile(), [])
   // rewrites.json likewise (re-write versions are saved, autosaved and recovered with the manuscript).
   useEffect(() => registerRewritesSideFile(), [])
+  // export.json (manuscript export settings) likewise; a project without it opens with the defaults.
+  useEffect(() => registerExportSideFile(), [])
+  // The export wizard's DOCX and PDF generators (File > Export > Manuscript…).
+  useEffect(() => setExportRenderers(createManuscriptExportRenderers()), [])
   // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.
   useEffect(() => {
     setRewriteConfirm(({ title, message, confirmLabel }) => askConfirm(title, message, confirmLabel))
@@ -154,6 +165,8 @@ export function App() {
       setOnTrackingSwitchedOn(null)
     }
   }, [])
+  // Word Count's "Lines" are the pages' lines (pagination slice).
+  useEffect(() => setWordCountLineSource(countLines), [])
   // Track changes: a markup view switch re-measures the blocks holding changes (hidden text).
   useEffect(() => setMarkupViewRepaginate(invalidatePaginationAt), [])
   // Accept / Reject All above 50 changes asks with the app's native message dialog.
@@ -172,6 +185,7 @@ export function App() {
       <AppShell
         menuBar={<AppMenuBar />}
         toolbar={<Ribbon quickAccess={<RibbonQuickAccess />} />}
+        navigation={<NavigationPane />}
         editor={
           <>
             {/* Zero-height sticky anchor: the find panel floats at the top of the scrolling editor
@@ -197,8 +211,10 @@ export function App() {
             <RecoveryStatus />
             <TrackChangesNotice />
             <ChangesIndicator />
+            <ExportStatus />
             <span className="flex-1" />
             <NoProjectActions />
+            <WordCountIndicator />
             <PageIndicator />
             <ZoomControls />
           </>
@@ -212,8 +228,12 @@ export function App() {
       <RecoveryDialog />
       {/* Help and Go to Page dialogs (portal). */}
       <MenuDialogs />
+      {/* Review > Word Count (portal). */}
+      <WordCountDialog />
       {/* Tracked change details with Accept / Reject (portal). */}
       <ChangePopover />
+      {/* File > Export > Manuscript… (portal); its DOCX / PDF generators are registered above. */}
+      <ExportWizard />
     </TooltipProvider>
   )
 }

@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { COMMANDS } from '@/features/storage/ipc'
+import { EXPORT_COMMANDS } from '@/features/export'
 import { createFakeTauriCore, HANDLED_COMMANDS, memoryPersistence } from './fake-tauri-core'
 
 /** Plugin commands the app sends, with the plugin file that defines each name. */
@@ -49,6 +50,15 @@ async function handles(cmd: string): Promise<boolean> {
 describe('fake Tauri command core', () => {
   it('handles every storage command the frontend invokes (COMMANDS in storage/ipc.ts)', async () => {
     for (const cmd of Object.values(COMMANDS)) {
+      expect(HANDLED_COMMANDS, cmd).toContain(cmd)
+      expect(await handles(cmd), cmd).toBe(true)
+    }
+  })
+
+  it('handles every export platform command (EXPORT_COMMANDS in export/platform/ipc.ts)', async () => {
+    const names = Object.values(EXPORT_COMMANDS)
+    expect(names).toHaveLength(6)
+    for (const cmd of names) {
       expect(HANDLED_COMMANDS, cmd).toContain(cmd)
       expect(await handles(cmd), cmd).toBe(true)
     }

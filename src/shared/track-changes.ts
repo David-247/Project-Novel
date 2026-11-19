@@ -74,3 +74,39 @@ export function isBlockHidden(node: PMNode, view: MarkupView): boolean {
   })
   return all
 }
+
+// ---- Accepted text: the text with every pending change accepted (what export produces) ----------
+
+/** Removed when every pending change is accepted: an inline node (text, break, footnote) marked deleted. */
+export const isDeletedOnAccept = (node: PMNode): boolean => node.marks.length > 0 && hasMark(node, DELETION_MARK)
+
+/**
+ * The boundary before this block is deleted (`trackedDelete`): accepting joins the block to the
+ * previous textblock, or removes it when it is a break or holds no text once accepted.
+ */
+export const joinsPreviousOnAccept = (node: PMNode): boolean => !!node.attrs?.[TRACKED_DELETE_ATTR]
+
+export interface AcceptedTextOptions {
+  /** Leave out these inline nodes and their content (e.g. footnotes, read separately). */
+  skip?: (node: PMNode) => boolean
+  /** Text of an inline leaf (a hard break: '\n'); undefined falls back to its schema `leafText`, else ''. */
+  leafText?: (node: PMNode) => string | undefined
+}
+
+/**
+ * Plain text of a textblock's inline content (or of an inline node holding text) with every pending
+ * change accepted: inserted text kept, deleted text and deleted inline nodes left out. Block
+ * boundaries are the caller's (`joinsPreviousOnAccept`).
+ */
+export function acceptedText(node: PMNode, options: AcceptedTextOptions = {}): string {
+  if (node.isText) return isDeletedOnAccept(node) ? '' : (node.text ?? '')
+  const { skip, leafText } = options
+  let out = ''
+  node.forEach((child) => {
+    if (isDeletedOnAccept(child) || skip?.(child)) return
+    if (child.isText) out += child.text ?? ''
+    else if (child.isLeaf) out += leafText?.(child) ?? child.type.spec.leafText?.(child) ?? ''
+    else out += acceptedText(child, options)
+  })
+  return out
+}

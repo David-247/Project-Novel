@@ -64,10 +64,12 @@ export interface CommandButtonProps {
   icon?: ComponentType
   /** Shorter visible label than the command's (Word's "Accept"); the tooltip keeps the command's label. */
   label?: string
+  /** Icon only (a one-button group in compact size): no visible label; the accessible name and the tooltip stay. */
+  iconOnly?: boolean
   className?: string
 }
 
-export function CommandButton({ command, icon: Icon, label, className }: CommandButtonProps) {
+export function CommandButton({ command, icon: Icon, label, iconOnly, className }: CommandButtonProps) {
   useCommandStateVersion()
   const [, clicked] = useReducer((n: number) => n + 1, 0)
   const enabled = isCommandEnabled(command)
@@ -84,6 +86,7 @@ export function CommandButton({ command, icon: Icon, label, className }: Command
           type="button"
           data-control-id={ribbonCommandControlId(command.id)}
           aria-pressed={command.isChecked ? !!checked : undefined}
+          aria-label={iconOnly && Icon ? command.label.replace(/…$/, '') : undefined}
           disabled={!enabled}
           // Keep the manuscript's focus and selection on a pointer press (the command acts there).
           onMouseDown={(e) => {
@@ -95,7 +98,8 @@ export function CommandButton({ command, icon: Icon, label, className }: Command
           }}
           className={cn(
             controlBase,
-            'whitespace-nowrap px-2 font-normal',
+            'whitespace-nowrap font-normal',
+            iconOnly && Icon ? 'px-0' : 'px-2',
             Icon && 'gap-1.5',
             checked ? 'bg-accent-soft text-accent' : 'text-text hover:bg-surface-hover',
             className,
@@ -106,7 +110,7 @@ export function CommandButton({ command, icon: Icon, label, className }: Command
               <Icon />
             </span>
           ) : null}
-          {label ?? command.label.replace(/…$/, '')}
+          {iconOnly && Icon ? null : (label ?? command.label.replace(/…$/, ''))}
         </button>
       </Tooltip>
     </RToolbar.Button>
@@ -148,13 +152,19 @@ export function SplitCommandButton({ commandId, label, icon, menuControlId, menu
   )
 }
 
+/** A group of one command button and nothing else: it goes icon only, then into More (layout.ts). */
+const isOneButton = (g: RibbonGroupSpec, placed: Placed) => !g.Content && !g.hasCompact && g.collapsible !== false && buttons(g, placed).length === 1
+
 function GroupView({ group, state, placed }: { group: RibbonGroupSpec; state: GroupState; placed: Placed }) {
   const shown = state === 'full' || state === 'compact'
   const Content = group.Content
   const Icon = group.icon
+  const iconOnly = state === 'compact' && isOneButton(group, placed)
   // In compact size a group may leave its command buttons out (its own control then offers them).
   const ownButtons =
-    state === 'compact' && group.compactButtons === false ? [] : buttons(group, placed).map((c) => <CommandButton key={c.id} command={c} />)
+    state === 'compact' && group.compactButtons === false
+      ? []
+      : buttons(group, placed).map((c) => (iconOnly ? <CommandButton key={c.id} command={c} icon={Icon} iconOnly /> : <CommandButton key={c.id} command={c} />))
   return (
     <div
       role="group"
@@ -228,9 +238,10 @@ function TabPanel({ tab, active, groups, placed }: { tab: RibbonTabId; active: b
           priority: g.priority,
           hasCompact: g.hasCompact,
           collapsible: g.collapsible !== false && !(fullWidths[g.id] !== undefined && fullWidths[g.id] <= collapsedWidthEstimate(g.label)),
+          oneButton: isOneButton(g, placed),
         })),
       ),
-    [groups, fullWidths],
+    [groups, fullWidths, placed],
   )
   const [step, setStep] = useState(0)
   const widths = useRef<(number | undefined)[]>([])

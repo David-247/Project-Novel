@@ -36,6 +36,17 @@ export const createPreferencesSlice: SliceCreator<PreferencesSlice> = (set) => (
           ...defaultPreferenceValues(systemAuthorName),
           // The author question was already asked; resetting does not ask it again.
           authorPrompted: s.preferences.authorPrompted,
+          // The author profile is data the user typed for their manuscripts, not a preference to reset.
+          profileLegalName: s.preferences.profileLegalName,
+          profilePenName: s.preferences.profilePenName,
+          profileAddress: s.preferences.profileAddress,
+          profilePhone: s.preferences.profilePhone,
+          profileEmail: s.preferences.profileEmail,
+          profileAgent: s.preferences.profileAgent,
+          exportFolders: s.preferences.exportFolders,
+          // Window layout (the navigation pane), not a setting of the Settings dialog.
+          navigationPane: s.preferences.navigationPane,
+          navigationPaneWidth: s.preferences.navigationPaneWidth,
           extra: s.preferences.extra,
           loaded: s.preferences.loaded,
         },

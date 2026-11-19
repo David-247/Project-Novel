@@ -1,3 +1,4 @@
+mod export;
 mod fonts;
 mod preferences;
 mod menu;
@@ -11,6 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .manage(storage::ProjectRoot::default())
+        .manage(export::ExportState::default())
         .manage(menu::MenuState::<tauri::Wry>::default());
     // macOS: the native menu bar, replaced by the command registry's snapshot (menu_set) once the
     // frontend is up. Windows has no native menu: the frontend draws its own menu bar.
@@ -20,6 +22,12 @@ pub fn run() {
         .on_menu_event(|app, event| menu::handle_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
             fonts::list_system_fonts,
+            export::export_pick_save_path,
+            export::export_write_file,
+            export::export_render_pdf,
+            export::export_cancel_render,
+            export::export_reveal_in_folder,
+            export::export_open_file,
             menu::menu_set,
             storage::storage_pick_project_folder,
             storage::storage_open_recent_root,
@@ -49,6 +57,11 @@ pub fn run() {
             // NOT covered: macOS Dock > Quit, logging off, and Windows shutdown end
             // the process without reaching the quit flow; there crash recovery
             // limits the loss to the last <= 30 s (docs/project-format.md).
+            // Quitting mid-export: kill any running Typst process (bounded wait) so none outlives the app.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<export::ExportState>().shutdown(std::time::Duration::from_secs(2));
+                return;
+            }
             if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
                 if !storage::allow_exit(code, app.webview_windows().len()) {
                     api.prevent_exit();

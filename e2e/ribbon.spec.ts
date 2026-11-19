@@ -112,8 +112,10 @@ const REACH: Record<RibbonTab, Record<string, [string, string][]>> = {
     'layout.headers': [['book.headerFooter', 'book.headerFooter']],
     'layout.paper': [['book.surface.dark', 'menu.view.paper']],
     'layout.book': [['ribbon.cmd.book.details', 'book.details']],
+    'layout.export': [['ribbon.cmd.export.manuscript', 'export.manuscript'], ['ribbon.cmd.export.again', 'export.again']],
   },
   review: {
+    'review.proofing': [['ribbon.cmd.review.wordCount', 'review.wordCount']],
     'review.tracking': [['review.track', 'review.track'], ['review.markup', 'menu.view.markup']],
     'review.changes': [
       ['ribbon.cmd.review.change.prev', 'review.change.prev'],

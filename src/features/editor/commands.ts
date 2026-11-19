@@ -16,6 +16,8 @@ import { TOOLBAR_CONTROLS, type ToolbarControlKey, type ToolbarControlMeta } fro
 import { markChain } from './toolbar/mark-chain'
 import { FIRST_LINE_INDENTS, FONT_SIZES, LINE_SPACINGS, PARAGRAPH_SPACINGS, type Preset } from './toolbar/presets'
 import { readToolbarState } from './toolbar/toolbar-state'
+import { WORD_COUNT_CONTROLS } from './word-count/controls'
+import { openWordCount } from './word-count/WordCount'
 
 /**
  * The editor's commands for the Edit, Insert and Format menus (and their shortcuts). Ids reuse the
@@ -427,11 +429,28 @@ export function paragraphSpacingCommands(): Command[] {
 }
 
 /**
+ * Review ▸ Word Count… (Word's place: first on the Review tab, in Proofing; Ctrl/Cmd+Shift+G). Opens
+ * from anywhere but behind another dialog.
+ */
+export function wordCountCommand(): Command {
+  return {
+    id: WORD_COUNT_CONTROLS.open.id,
+    label: 'Word Count…',
+    description: WORD_COUNT_CONTROLS.open.description,
+    shortcut: WORD_COUNT_CONTROLS.open.shortcut,
+    menu: { id: 'review', group: 'proofing', order: 0.5 },
+    ribbon: { group: 'review.proofing', order: 10 },
+    guard: 'modal',
+    run: openWordCount,
+  }
+}
+
+/**
  * Register the editor's commands (Edit, Insert and Format menus). Enabled/checked state follows the
  * selection and the undo history; the style list follows book.styles. Returns unregister.
  */
 export function registerEditorCommands(): () => void {
-  const offFixed = registerCommands([...editorCommands(), ...fontSizeCommands(), ...paragraphSpacingCommands()])
+  const offFixed = registerCommands([...editorCommands(), ...fontSizeCommands(), ...paragraphSpacingCommands(), wordCountCommand()])
   let offStyles = registerCommands(styleCommands())
   // Font families: System Default now, the installed families once the OS list arrived.
   let disposed = false

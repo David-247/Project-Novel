@@ -11,10 +11,12 @@
  * Shortcut specs use Tiptap notation ("Mod" = Cmd on macOS, Ctrl elsewhere) and are rendered per
  * platform by the shared Tooltip.
  */
-import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS } from '@/features/editor'
+import { FIND_CONTROLS, FOOTNOTE_EDITOR_CONTROLS, HISTORY_CONTROLS, INSERT_CONTROLS, STYLE_DIALOG_CONTROLS, TOOLBAR_CONTROLS, WORD_COUNT_CONTROLS } from '@/features/editor'
 import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import { COMMENT_CONTROLS } from '@/features/comments'
 import { REWRITE_CONTROLS } from '@/features/rewrite'
+import { OUTLINE_CONTROLS } from '@/features/outline'
+import { EXPORT_WIZARD_CONTROLS } from '@/features/export'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
 import { PAGINATION_CONTROLS } from '@/features/pagination'
@@ -261,6 +263,16 @@ const FOOTNOTE_TOOLTIPS: Record<string, TooltipCopy> = {
   ...fromMeta(FOOTNOTE_EDITOR_CONTROLS, { done: 'Finish the footnote and put the cursor back after its number in the text.' }),
 }
 
+/**
+ * Word count: the status bar count and the Word Count dialog (editor slice). The command itself
+ * (`review.wordCount`: menu item, ribbon button) reads its copy from the registry command.
+ */
+const WORD_COUNT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(WORD_COUNT_CONTROLS)
+    .filter((c) => c.id !== WORD_COUNT_CONTROLS.open.id)
+    .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined }]),
+)
+
 /** Settings dialog and the one-time author question (settings slice). */
 const SETTINGS_DESCRIPTIONS: Record<keyof typeof SETTINGS_CONTROLS, string> = {
   open: 'Your name, how pages turn, and what new projects start with. Applies to every project.',
@@ -271,6 +283,12 @@ const SETTINGS_DESCRIPTIONS: Record<keyof typeof SETTINGS_CONTROLS, string> = {
   reduceMotion: 'Follow your computer, or always reduce or allow animation such as page turns.',
   defaultPaper: 'The paper a new project starts with. Projects you already have keep theirs.',
   defaultTrimSize: 'The page size a new project starts with. Projects you already have keep theirs.',
+  profileLegalName: 'Your legal name, for the contact block on the title page of an exported manuscript.',
+  profilePenName: 'The name under the title, if it is not your legal name. Empty uses your legal name.',
+  profileAddress: 'Your postal address, for the title page contact block. Kept on this computer.',
+  profilePhone: 'Your phone number, for the contact block on the title page.',
+  profileEmail: 'Your email address, for the contact block on the title page.',
+  profileAgent: 'Your agent or agency. It is printed on the title page only if you choose.',
   reset: 'Put every setting back the way it came, including your name from your computer account.',
   done: 'Close Settings. Changes are already applied.',
   promptName: 'The name that goes on your tracked changes and comments. You can change it later in Settings.',
@@ -283,6 +301,17 @@ const COMMENT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
     c.id,
     { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
   ]),
+)
+
+/**
+ * The navigation pane: close, the heading rows (their own copy names the heading), the fold arrow, the
+ * resize handle (outline slice). The toggle (`view.navigationPane`: menu item, ribbon button) reads its
+ * copy from the registry command.
+ */
+const OUTLINE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(OUTLINE_CONTROLS)
+    .filter((c) => c.id !== OUTLINE_CONTROLS.toggle.id)
+    .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: 'shortcut' in c ? (c.shortcut as string) : undefined }]),
 )
 
 /** Review: Track Changes and the markup view picker with its choices (track-changes slice). */
@@ -299,6 +328,14 @@ const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
 /** Re-write: the comparison view, the manuscript's notice and the Re-writes list (rewrite slice). */
 const REWRITE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   Object.values(REWRITE_CONTROLS).map((c): [string, TooltipCopy] => [
+    c.id,
+    { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
+  ]),
+)
+
+/** File > Export > Manuscript…: the export wizard and the status bar's Export Again notice (export slice). */
+const EXPORT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(EXPORT_WIZARD_CONTROLS).map((c): [string, TooltipCopy] => [
     c.id,
     { title: c.label, description: c.description, shortcut: 'shortcut' in c ? c.shortcut : undefined },
   ]),
@@ -321,7 +358,7 @@ const PAGINATION_DESCRIPTIONS: Record<keyof typeof PAGINATION_CONTROLS, string> 
 
 /** In-app menu bar titles and the menu slice's dialogs. (Menu items: see getTooltipCopy.) */
 const MENU_TOOLTIPS: Record<string, TooltipCopy> = {
-  'menu.file': { title: 'File', description: 'Projects: new, open, save, a copy, book details and page setup.' },
+  'menu.file': { title: 'File', description: 'Projects: new, open, save, a copy, book details, page setup and export.' },
   'menu.edit': { title: 'Edit', description: 'Undo, the clipboard, find and replace, and going to a page.' },
   'menu.view': { title: 'View', description: 'How the pages look on screen: spread, zoom, paper and full screen.' },
   'menu.insert': { title: 'Insert', description: 'Add chapter, page and scene breaks, and footnotes.' },
@@ -368,10 +405,13 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...BOOK_TOOLTIPS,
   ...INSERT_TOOLTIPS,
   ...FOOTNOTE_TOOLTIPS,
+  ...WORD_COUNT_TOOLTIPS,
   ...REVIEW_TOOLTIPS,
   ...RECOVERY_TOOLTIPS,
   ...COMMENT_TOOLTIPS,
   ...REWRITE_TOOLTIPS,
+  ...OUTLINE_TOOLTIPS,
+  ...EXPORT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,
 })

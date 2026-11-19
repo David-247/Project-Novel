@@ -1,0 +1,536 @@
+{
+  "version": 1,
+  "document": {
+    "title": "The Long Night",
+    "author": "Perry Slaughter",
+    "lang": "en"
+  },
+  "page": {
+    "paper": "us-letter",
+    "margin": {
+      "top": 72,
+      "right": 72,
+      "bottom": 72,
+      "left": 72
+    }
+  },
+  "type": {
+    "size": 12,
+    "topEdge": 0.8911,
+    "bottomEdge": -0.2163,
+    "pitch": 27.598,
+    "leading": 14.309,
+    "singleLeading": 0.51,
+    "indent": 36
+  },
+  "header": {
+    "show": true,
+    "prefix": "Slaughter / The Long Night / ",
+    "from": 2,
+    "offset": 1,
+    "ascent": 22.71
+  },
+  "titlePage": {
+    "contact": [
+      "Perry Slaughter",
+      "123 Main Street",
+      "Springfield, IL 62701",
+      "(555) 555-0100",
+      "perry@example.com"
+    ],
+    "wordCount": "about 100 words",
+    "title": "The Long Night",
+    "byline": "A Novel by Perry Slaughter",
+    "drop": 216
+  },
+  "chapterDrop": 216,
+  "blocks": [
+    {
+      "t": "p",
+      "align": "center",
+      "indent": false,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "THE LONG NIGHT"
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "center",
+      "indent": false,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "A "
+        },
+        {
+          "s": "novel",
+          "i": true
+        }
+      ]
+    },
+    {
+      "t": "page"
+    },
+    {
+      "t": "p",
+      "align": "center",
+      "indent": false,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "For M."
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": false,
+      "pad": [
+        36,
+        36
+      ],
+      "runs": [
+        {
+          "s": "Not all who wander are lost.",
+          "i": true
+        }
+      ]
+    },
+    {
+      "t": "opening",
+      "lines": [
+        [
+          {
+            "s": "Chapter One"
+          }
+        ],
+        [
+          {
+            "s": "The "
+          },
+          {
+            "s": "Arrival",
+            "i": true
+          }
+        ]
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "It was "
+        },
+        {
+          "s": "night",
+          "b": true
+        },
+        {
+          "s": "."
+        },
+        {
+          "fn": [
+            {
+              "s": "First told in "
+            },
+            {
+              "s": "1902",
+              "i": true
+            },
+            {
+              "s": "."
+            }
+          ],
+          "n": "1"
+        },
+        {
+          "s": " The rain fell "
+        },
+        {
+          "s": "hard",
+          "u": true
+        },
+        {
+          "s": " and "
+        },
+        {
+          "s": "cold",
+          "i": true
+        },
+        {
+          "s": "."
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "She waited."
+        },
+        {
+          "br": true
+        },
+        {
+          "s": "Nobody came."
+        }
+      ]
+    },
+    {
+      "t": "scene",
+      "text": "#"
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "Morning came."
+        }
+      ]
+    },
+    {
+      "t": "scene",
+      "text": "#"
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "Later, a letter."
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": false,
+      "pad": [
+        36,
+        36
+      ],
+      "runs": [
+        {
+          "s": "Dear Ann, come home."
+        }
+      ]
+    },
+    {
+      "t": "li",
+      "marker": "•",
+      "pad": 18,
+      "hang": 18,
+      "runs": [
+        {
+          "s": "Bread"
+        }
+      ]
+    },
+    {
+      "t": "li",
+      "marker": "•",
+      "pad": 18,
+      "hang": 18,
+      "runs": [
+        {
+          "s": "Salt"
+        }
+      ]
+    },
+    {
+      "t": "li",
+      "marker": "3.",
+      "pad": 54,
+      "hang": 18,
+      "runs": [
+        {
+          "s": "Pinch"
+        }
+      ]
+    },
+    {
+      "t": "li",
+      "marker": "4.",
+      "pad": 54,
+      "hang": 18,
+      "runs": [
+        {
+          "s": "Dash"
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "She folded the list."
+        }
+      ]
+    },
+    {
+      "t": "opening",
+      "lines": [
+        [
+          {
+            "s": "The Storm"
+          }
+        ]
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "Thunder."
+        }
+      ]
+    },
+    {
+      "t": "sub",
+      "runs": [
+        {
+          "s": "At the Harbour"
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "Boats rocked."
+        }
+      ]
+    },
+    {
+      "t": "scene",
+      "text": "#"
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "The wind dropped."
+        }
+      ]
+    },
+    {
+      "t": "scene",
+      "text": "#"
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "A gull cried over the water."
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "Then silence."
+        }
+      ]
+    },
+    {
+      "t": "page"
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "The tide turned."
+        },
+        {
+          "fn": [
+            {
+              "s": "Second note."
+            }
+          ],
+          "n": "2"
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "They went home."
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "right",
+      "indent": false,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "— end of part one —"
+        }
+      ]
+    },
+    {
+      "t": "page"
+    },
+    {
+      "t": "opening",
+      "lines": [
+        [
+          {
+            "s": "Part Two"
+          }
+        ]
+      ]
+    },
+    {
+      "t": "opening",
+      "lines": []
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "Nothing has a name here."
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "Added later."
+        }
+      ]
+    },
+    {
+      "t": "p",
+      "align": "left",
+      "indent": true,
+      "pad": [
+        0,
+        0
+      ],
+      "runs": [
+        {
+          "s": "Bold now",
+          "b": true
+        },
+        {
+          "s": "."
+        }
+      ]
+    },
+    {
+      "t": "opening",
+      "lines": [
+        [
+          {
+            "s": "Epilogue"
+          }
+        ]
+      ]
+    }
+  ],
+  "endMarker": ""
+}
