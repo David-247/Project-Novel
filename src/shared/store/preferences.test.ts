@@ -63,6 +63,7 @@ describe('preferences.json', () => {
       exportFolders: { 'project-id': '/exports' },
       navigationPane: true,
       navigationPaneWidth: 320,
+      tutorActiveConnection: 'conn-1',
     }
     const parsed = parsePreferences(serializePreferences({ ...values, extra: {} }))
     expect(parsed).toMatchObject({ values, extra: {}, authorNameMissing: false, fallback: null })
@@ -75,6 +76,15 @@ describe('preferences.json', () => {
     expect(read({ navigationPaneWidth: 10 }).navigationPaneWidth).toBe(NAV_PANE_MIN_WIDTH)
     expect(read({ navigationPaneWidth: 5000 }).navigationPaneWidth).toBe(NAV_PANE_MAX_WIDTH)
     expect(read({ navigationPane: 'yes', navigationPaneWidth: 'wide' })).toMatchObject({ navigationPane: false, navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH })
+  })
+
+  it('the tutor active connection: null or a short id, anything else falls back to none', () => {
+    const read = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values.tutorActiveConnection
+    expect(defaultPreferenceValues().tutorActiveConnection).toBeNull()
+    expect(read({ tutorActiveConnection: 'c1' })).toBe('c1')
+    expect(read({ tutorActiveConnection: '' })).toBeNull()
+    expect(read({ tutorActiveConnection: 7 })).toBeNull()
+    expect(read({ tutorActiveConnection: 'x'.repeat(129) })).toBeNull()
   })
 
   it('writes the version first-class and trims the name', () => {

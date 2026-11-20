@@ -13,7 +13,8 @@
  * The keychain is `state.secrets` (connection id to secret; no command reads it back) and
  * ai-connections.json is `state.connections`. Saving validates like Rust (unknown provider, duplicate
  * id, a bad `baseUrl` for ollama, lmstudio and custom; a hosted provider's `baseUrl` is dropped) and
- * deletes the secrets of removed connections. `failSecrets` makes the keychain commands fail.
+ * deletes the secret of a removed connection or one whose provider, auth or base URL origin changed
+ * (a secret can only be set for a saved connection, as in Rust). `failSecrets` makes the keychain commands fail.
  */
 
 export const AI_COMMAND_NAMES = [
@@ -164,6 +165,17 @@ export function createFakeAi() {
     return id
   }
 
+  const originOf = (u: unknown) => {
+    try {
+      return new URL(String(u)).origin
+    } catch {
+      return ''
+    }
+  }
+  /** What a secret is tied to (Rust's `binding`): provider, auth and the request origin. */
+  const binding = (c: Record<string, unknown>) =>
+    `${c.provider}|${c.auth}|${USER_HOSTED.includes(c.provider as string) && c.baseUrl !== undefined ? originOf(c.baseUrl) : ''}`
+
   function saveConnections(list: Record<string, unknown>[]) {
     const ids = new Set<string>()
     const saved = list.map((c) => {
@@ -186,7 +198,10 @@ export function createFakeAi() {
       }
       return copy
     })
-    for (const old of state.connections) if (!ids.has(old.id as string)) state.secrets.delete(old.id as string)
+    for (const old of state.connections) {
+      const now = saved.find((c) => c.id === old.id)
+      if (!now || binding(now) !== binding(old)) state.secrets.delete(old.id as string)
+    }
     state.connections = saved
   }
 
@@ -210,6 +225,7 @@ export function createFakeAi() {
       case 'ai_secret_set': {
         const id = checkSecretArgs(args)
         if (typeof args.secret !== 'string' || !args.secret) throw fail('bad_request', 'The credential is empty or too long.')
+        if (!state.connections.some((c) => c.id === id)) throw fail('not_connected', 'This AI connection is not set up. Connect a provider in Settings.')
         state.secrets.set(id, args.secret)
         return null
       }

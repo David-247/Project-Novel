@@ -47,6 +47,8 @@ export const createPreferencesSlice: SliceCreator<PreferencesSlice> = (set) => (
           // Window layout (the navigation pane), not a setting of the Settings dialog.
           navigationPane: s.preferences.navigationPane,
           navigationPaneWidth: s.preferences.navigationPaneWidth,
+          // The tutor's connection is chosen in the tutor, not in Settings.
+          tutorActiveConnection: s.preferences.tutorActiveConnection,
           extra: s.preferences.extra,
           loaded: s.preferences.loaded,
         },

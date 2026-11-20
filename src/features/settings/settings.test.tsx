@@ -208,6 +208,7 @@ describe('writing preferences.json', () => {
         'profilePenName',
         'profilePhone',
         'reduceMotion',
+        'tutorActiveConnection',
         'version',
       ],
     )

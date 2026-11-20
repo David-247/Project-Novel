@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::keychain::{SecretStore, MAX_ID_BYTES};
-use super::{providers, AiError, ConnectionResolver, ResolvedConnection};
+use super::{providers, AiError, ConnectionResolver, ResolvedConnection, Secret};
 
 /// File name inside the app data dir.
 pub const CONNECTIONS_FILE: &str = "ai-connections.json";
@@ -101,11 +101,62 @@ pub fn save_connections(path: &Path, secrets: &dyn SecretStore, connections: Vec
     crate::storage::write_atomic(path, text.as_bytes())
         .map_err(|_| AiError::bad_request("The AI connections could not be saved."))?;
     if let Some(old) = existing {
-        for gone in old.connections.iter().filter(|c| !file.connections.iter().any(|n| n.id == c.id)) {
-            let _ = secrets.delete(&gone.id);
+        for before in &old.connections {
+            // Removed, or re-pointed (provider, auth or origin): the stored key must not follow it.
+            let kept = file.connections.iter().find(|n| n.id == before.id).is_some_and(|n| binding(n) == binding(before));
+            if !kept {
+                let _ = secrets.delete(&before.id);
+            }
         }
     }
     Ok(())
+}
+
+/// What a stored secret is tied to: the provider, the auth kind and the origin (scheme, host, port) its
+/// requests go to. A saved connection whose binding differs from the secret's gets no secret.
+fn binding(c: &Connection) -> String {
+    let origin_of = |u: &str| Url::parse(u).map(|u| u.origin().ascii_serialization()).unwrap_or_default();
+    let origin = match providers::descriptor(&c.provider) {
+        Some(d) => match d.base_url {
+            Some(fixed) => origin_of(fixed),
+            None => c.base_url.as_deref().map(origin_of).unwrap_or_default(),
+        },
+        None => String::new(),
+    };
+    let auth = match c.auth {
+        ConnectionAuth::ApiKey => "api_key",
+        ConnectionAuth::Oauth => "oauth",
+        ConnectionAuth::None => "none",
+    };
+    format!("{}|{auth}|{origin}", c.provider)
+}
+
+/// The keychain value: the secret with its binding, as JSON. Only Rust reads it.
+fn wrap(c: &Connection, secret: &str) -> String {
+    serde_json::json!({ "v": 1, "b": binding(c), "s": secret }).to_string()
+}
+
+/// The secret inside a keychain value, if the value is bound to exactly this connection's binding.
+fn unwrap_for(c: &Connection, stored: &str) -> Option<Secret> {
+    let v: Value = serde_json::from_str(stored).ok()?;
+    (v["v"] == 1 && v["b"] == binding(c).as_str()).then(|| v["s"].as_str().map(Secret::new))?
+}
+
+fn find(path: &Path, connection_id: &str) -> Result<Connection, AiError> {
+    load_connections(path)?.into_iter().find(|c| c.id == connection_id).ok_or_else(AiError::not_connected)
+}
+
+/// Store the secret of a saved connection, bound to its provider, auth and origin. The connection
+/// must be saved first.
+pub fn set_connection_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &str, secret: &str) -> Result<(), AiError> {
+    let c = find(path, connection_id)?;
+    super::keychain::set_secret(secrets, connection_id, &wrap(&c, secret))
+}
+
+/// True if the connection is saved and the keychain holds a secret bound to it as it is now.
+pub fn has_connection_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &str) -> Result<bool, AiError> {
+    let Ok(c) = find(path, connection_id) else { return Ok(false) };
+    Ok(secrets.get(connection_id)?.is_some_and(|s| unwrap_for(&c, s.expose()).is_some()))
 }
 
 fn text_ok(s: &str, max: usize) -> bool {
@@ -201,7 +252,8 @@ impl ConnectionResolver for FileResolver {
         let secret = match connection.auth {
             ConnectionAuth::None => None,
             ConnectionAuth::ApiKey | ConnectionAuth::Oauth => {
-                let stored = self.secrets.get(connection_id)?;
+                // A secret bound to another provider, auth or origin is not released.
+                let stored = self.secrets.get(connection_id)?.and_then(|s| unwrap_for(&connection, s.expose()));
                 // A hosted provider cannot work without its credential; a custom endpoint's key is optional.
                 if stored.is_none() && provider.base_url.is_some() {
                     return Err(AiError::not_connected());
@@ -217,8 +269,7 @@ impl ConnectionResolver for FileResolver {
 mod tests {
     use super::super::fetch;
     use super::super::keychain::testing::MemoryStore;
-    use super::super::keychain::set_secret;
-    use super::*;
+        use super::*;
 
     fn conn(id: &str, provider: &str, base_url: Option<&str>) -> Connection {
         Connection {
@@ -249,6 +300,12 @@ mod tests {
         fn save(&self, list: Vec<Connection>) -> Result<(), AiError> {
             save_connections(&self.path(), self.secrets.as_ref(), list)
         }
+        fn set_secret(&self, id: &str, secret: &str) -> Result<(), AiError> {
+            set_connection_secret(&self.path(), self.secrets.as_ref(), id, secret)
+        }
+        fn has_secret(&self, id: &str) -> bool {
+            has_connection_secret(&self.path(), self.secrets.as_ref(), id).unwrap()
+        }
         fn resolver(&self) -> FileResolver {
             FileResolver::new(self.path(), self.secrets.clone())
         }
@@ -263,7 +320,7 @@ mod tests {
         let f = Fixture::new();
         f.save(vec![conn("c1", "anthropic", None), conn("c2", "custom", Some("https://llm.example.com/v1"))]).unwrap();
         let secret = "sk-ant-TOP-SECRET-123";
-        set_secret(f.secrets.as_ref(), "c1", secret).unwrap();
+        f.set_secret("c1", secret).unwrap();
         // Saving again after the secret exists must not pick it up either.
         f.save(load_connections(&f.path()).unwrap()).unwrap();
         let bytes = fs::read(f.path()).unwrap();
@@ -312,6 +369,15 @@ mod tests {
     }
 
     #[test]
+    fn only_localhost_and_loopback_literals_are_loopback() {
+        let f = Fixture::new();
+        for url in ["http://foo.localhost:11434", "http://localhost.example.com", "http://127.0.0.1.nip.io", "http://[::ffff:192.168.1.5]"] {
+            f.save(vec![conn("l", "custom", Some(url))]).unwrap();
+            assert_eq!(target(&f.resolver().resolve("l").unwrap()).unwrap_err().kind, "blocked_host", "{url}");
+        }
+    }
+
+    #[test]
     fn hosted_provider_ignores_base_url() {
         let f = Fixture::new();
         // Saving drops the base URL of a hosted provider (and any acceptance flag) ...
@@ -324,7 +390,7 @@ mod tests {
         // ... and a hand-edited file naming one is ignored when resolving.
         let text = r#"{"version":1,"connections":[{"id":"c1","provider":"openai","label":"x","auth":"api_key","baseUrl":"http://evil.example/v1","insecureHttpAccepted":true}]}"#;
         fs::write(f.path(), text).unwrap();
-        set_secret(f.secrets.as_ref(), "c1", "sk-1").unwrap();
+        f.set_secret("c1", "sk-1").unwrap();
         let resolved = f.resolver().resolve("c1").unwrap();
         assert_eq!(resolved.base_url, None);
         assert_eq!(target(&resolved).unwrap().as_str(), "https://api.openai.com/v1/models");
@@ -388,8 +454,8 @@ mod tests {
     fn removing_a_connection_deletes_its_secret() {
         let f = Fixture::new();
         f.save(vec![conn("c1", "openai", None), conn("c2", "xai", None)]).unwrap();
-        set_secret(f.secrets.as_ref(), "c1", "k1").unwrap();
-        set_secret(f.secrets.as_ref(), "c2", "k2").unwrap();
+        f.set_secret("c1", "k1").unwrap();
+        f.set_secret("c2", "k2").unwrap();
         f.save(vec![conn("c2", "xai", None)]).unwrap();
         assert!(f.secrets.get("c1").unwrap().is_none());
         assert!(f.secrets.get("c2").unwrap().is_some());
@@ -403,8 +469,86 @@ mod tests {
         assert_eq!(f.resolver().resolve("c1").unwrap_err().kind, "not_connected", "no key stored yet");
         // A custom endpoint's key is optional.
         assert!(f.resolver().resolve("custom").unwrap().secret.is_none());
-        set_secret(f.secrets.as_ref(), "c1", "k").unwrap();
+        f.set_secret("c1", "k").unwrap();
         let r = f.resolver().resolve("c1").unwrap();
         assert_eq!(r.provider.id, "openai");
+    }
+
+    fn assert_secret_dropped_on_change(change: impl FnOnce(&mut Connection), what: &str) {
+        let f = Fixture::new();
+        f.save(vec![conn("c1", "custom", Some("https://llm.example.com/v1"))]).unwrap();
+        f.set_secret("c1", "sk-live").unwrap();
+        assert!(f.has_secret("c1"));
+        let mut changed = conn("c1", "custom", Some("https://llm.example.com/v1"));
+        change(&mut changed);
+        f.save(vec![changed]).unwrap();
+        assert!(f.secrets.get("c1").unwrap().is_none(), "{what}: the secret survived");
+        assert!(!f.has_secret("c1"), "{what}");
+    }
+
+    #[test]
+    fn changing_provider_auth_or_origin_deletes_the_secret() {
+        assert_secret_dropped_on_change(|c| c.provider = "ollama".into(), "provider");
+        assert_secret_dropped_on_change(|c| c.auth = ConnectionAuth::Oauth, "auth");
+        assert_secret_dropped_on_change(|c| c.base_url = Some("https://attacker.example/v1".into()), "host");
+        assert_secret_dropped_on_change(|c| c.base_url = Some("http://llm.example.com/v1".into()), "scheme");
+        assert_secret_dropped_on_change(|c| c.base_url = Some("https://llm.example.com:8443/v1".into()), "port");
+        assert_secret_dropped_on_change(|c| c.base_url = None, "base url removed");
+    }
+
+    #[test]
+    fn hosted_connection_re_pointed_at_a_custom_host_loses_its_key() {
+        let f = Fixture::new();
+        f.save(vec![conn("c1", "anthropic", None)]).unwrap();
+        f.set_secret("c1", "sk-ant-live").unwrap();
+        f.save(vec![conn("c1", "custom", Some("https://attacker.example"))]).unwrap();
+        assert!(f.secrets.get("c1").unwrap().is_none());
+        assert!(f.resolver().resolve("c1").unwrap().secret.is_none(), "custom has an optional key: none is sent");
+    }
+
+    #[test]
+    fn path_only_change_keeps_the_secret() {
+        let f = Fixture::new();
+        f.save(vec![conn("c1", "custom", Some("https://llm.example.com/v1"))]).unwrap();
+        f.set_secret("c1", "sk-live").unwrap();
+        let mut c = conn("c1", "custom", Some("https://LLM.example.com:443/other/path/"));
+        c.label = "renamed".into();
+        c.default_model = Some("m".into());
+        f.save(vec![c]).unwrap();
+        assert_eq!(f.resolver().resolve("c1").unwrap().secret.unwrap().expose(), "sk-live");
+        assert!(f.has_secret("c1"));
+    }
+
+    #[test]
+    fn resolver_refuses_a_secret_bound_to_another_origin_or_provider() {
+        let f = Fixture::new();
+        f.save(vec![conn("c1", "custom", Some("https://llm.example.com/v1"))]).unwrap();
+        f.set_secret("c1", "sk-live").unwrap();
+        // The file is edited behind save's back (a compromised webview cannot do this, but a hand edit can).
+        for edited in [
+            r#"{"id":"c1","provider":"custom","label":"x","auth":"api_key","baseUrl":"https://attacker.example/v1"}"#,
+            r#"{"id":"c1","provider":"openai","label":"x","auth":"api_key"}"#,
+            r#"{"id":"c1","provider":"custom","label":"x","auth":"oauth","baseUrl":"https://llm.example.com/v1"}"#,
+        ] {
+            fs::write(f.path(), format!(r#"{{"version":1,"connections":[{edited}]}}"#)).unwrap();
+            // Custom: key optional, so it resolves without one; hosted: not connected.
+            let r = f.resolver().resolve("c1");
+            match r {
+                Ok(c) => assert!(c.secret.is_none(), "{edited}"),
+                Err(e) => assert_eq!(e.kind, "not_connected", "{edited}"),
+            }
+            assert!(!f.has_secret("c1"), "{edited}");
+        }
+        // A raw (unbound) keychain value is never released either.
+        f.save(vec![conn("c1", "openai", None)]).unwrap();
+        f.secrets.set("c1", "sk-raw").unwrap();
+        assert_eq!(f.resolver().resolve("c1").unwrap_err().kind, "not_connected");
+    }
+
+    #[test]
+    fn setting_a_secret_needs_a_saved_connection() {
+        let f = Fixture::new();
+        assert_eq!(f.set_secret("nope", "k").unwrap_err().kind, "not_connected");
+        assert!(f.secrets.get("nope").unwrap().is_none());
     }
 }

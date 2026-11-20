@@ -10,7 +10,7 @@ import { createCommentsSlice } from './comments-slice'
 import { createTrackChangesSlice } from './track-changes-slice'
 import { createRewriteSlice } from './rewrite-slice'
 import { createWordCountSlice } from './word-count-slice'
-import { createTutorConnectionsSlice } from '@/features/ai-tutor'
+import { createTutorConnectionsSlice } from './tutor-connections-slice'
 import type { RootState } from './types'
 
 /**
@@ -64,5 +64,5 @@ export type { CommentsSlice, CommentThread, CommentMessage } from './comments-sl
 export type { TrackChangesSlice } from './track-changes-slice'
 export type { RewriteSlice, RewriteRecord, RewriteVersion, RewriteStatus, RewriteNotice, RewriteLocation } from './rewrite-slice'
 export type { WordCountSlice, CountsWithNotes, ChapterWordCounts, WordCountPublish } from './word-count-slice'
-export type { TutorConnectionsSlice } from '@/features/ai-tutor'
+export type { TutorConnectionsSlice, TutorConnection } from './tutor-connections-slice'
 export type { RootState, SliceCreator } from './types'

@@ -50,6 +50,8 @@ export interface PreferenceValues {
   navigationPane: boolean
   /** The docked navigation pane's width in CSS px (NAV_PANE_MIN_WIDTH to NAV_PANE_MAX_WIDTH). */
   navigationPaneWidth: number
+  /** The AI tutor's active connection id (Phase 5); null = none chosen. */
+  tutorActiveConnection: string | null
 }
 
 export interface Preferences extends PreferenceValues {
@@ -116,6 +118,7 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     exportFolders: NO_EXPORT_FOLDERS,
     navigationPane: false,
     navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH,
+    tutorActiveConnection: null,
   }
 }
 
@@ -139,6 +142,7 @@ const READERS: { [K in keyof PreferenceValues]: (v: unknown) => PreferenceValues
   exportFolders: readExportFolders,
   navigationPane: (v) => (typeof v === 'boolean' ? v : undefined),
   navigationPaneWidth: (v) => (typeof v === 'number' && Number.isFinite(v) ? clampNavPaneWidth(v) : undefined),
+  tutorActiveConnection: (v) => (v === null ? null : typeof v === 'string' && v !== '' && v.length <= 128 ? v : undefined),
 }
 
 const KNOWN_KEYS = new Set<string>(Object.keys(READERS))
@@ -209,6 +213,7 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     exportFolders: readExportFolders(p.exportFolders) ?? {},
     navigationPane: p.navigationPane,
     navigationPaneWidth: clampNavPaneWidth(p.navigationPaneWidth),
+    tutorActiveConnection: p.tutorActiveConnection,
   }
   return JSON.stringify(out, null, 2) + '\n'
 }

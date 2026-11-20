@@ -367,10 +367,12 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, AiError> + Se
         .map_err(|_| AiError::new("not_connected", "The AI connection could not be read."))?
 }
 
-/// Store a connection's credential in the OS keychain. There is no command that reads it back.
+/// Store a saved connection's credential in the OS keychain, bound to its provider, auth and origin
+/// (save the connection first). There is no command that reads it back.
 #[tauri::command]
-pub async fn ai_secret_set(connection_id: String, secret: String) -> Result<(), AiError> {
-    blocking(move || keychain::set_secret(&keychain::KeyringStore, &connection_id, &secret)).await
+pub async fn ai_secret_set<R: Runtime>(app: AppHandle<R>, connection_id: String, secret: String) -> Result<(), AiError> {
+    let path = connections_file(&app)?;
+    blocking(move || connections::set_connection_secret(&path, &keychain::KeyringStore, &connection_id, &secret)).await
 }
 
 #[tauri::command]
@@ -380,8 +382,9 @@ pub async fn ai_secret_delete(connection_id: String) -> Result<(), AiError> {
 
 /// True if the keychain holds a credential for the connection.
 #[tauri::command]
-pub async fn ai_secret_has(connection_id: String) -> Result<bool, AiError> {
-    blocking(move || keychain::has_secret(&keychain::KeyringStore, &connection_id)).await
+pub async fn ai_secret_has<R: Runtime>(app: AppHandle<R>, connection_id: String) -> Result<bool, AiError> {
+    let path = connections_file(&app)?;
+    blocking(move || connections::has_connection_secret(&path, &keychain::KeyringStore, &connection_id)).await
 }
 
 #[tauri::command]

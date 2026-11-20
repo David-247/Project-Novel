@@ -166,13 +166,14 @@ pub(super) fn target_url(conn: &ResolvedConnection, path: &str) -> Result<Url, A
     Ok(url)
 }
 
-/// True for `localhost` and loopback addresses (127.0.0.0/8, ::1).
+/// True for the host `localhost` and loopback IP literals (127.0.0.0/8, ::1). Other names, `*.localhost`
+/// included, are not trusted to resolve to this machine.
 pub(super) fn is_loopback(url: &Url) -> bool {
     let Some(host) = url.host_str() else { return false };
     let host = host.trim_start_matches('[').trim_end_matches(']').trim_end_matches('.').to_ascii_lowercase();
     match host.parse::<std::net::IpAddr>() {
         Ok(ip) => ip.is_loopback(),
-        Err(_) => host == "localhost" || host.ends_with(".localhost"),
+        Err(_) => host == "localhost",
     }
 }
 
