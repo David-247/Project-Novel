@@ -17,7 +17,7 @@ import {
 import { FootnoteOptionsButton } from '@/features/footnotes'
 import { HeaderFooterButton } from '@/features/header-footer'
 import { CommandButton, SplitCommandButton } from '@/features/ribbon'
-import { SparkleIcon, TUTOR_CONTROLS } from '@/features/ai-tutor'
+import { TUTOR_CONTROLS } from '@/features/ai-tutor'
 import { REWRITE_CONTROLS as RW } from '@/features/rewrite'
 import { BY_AUTHOR_SUBMENU, MarkupViewMenu, TRACK_CHANGES_CONTROLS as TC, TrackChangesButton } from '@/features/track-changes'
 import { getCommand, isCommandEnabled, useCommandStateVersion, useCommands } from '@/shared/commands'
@@ -152,7 +152,6 @@ const icons = {
       <path d="M2.5 4h15v12h-15zM12.5 4v12M14.5 7.5h1M14.5 10h1" />
     </Icon>
   ),
-  tutor: () => <SparkleIcon />,
   window: () => (
     <Icon>
       <path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" />
@@ -180,7 +179,7 @@ const gated = (commandId: string, node: ReactElement) => <GatedItem commandId={c
  */
 function RibbonCommand({ commandId, icon, label }: { commandId: string; icon?: () => ReactElement; label?: string }) {
   const command = useCommands().find((c) => c.id === commandId)
-  return command ? <CommandButton command={command} icon={icon} label={label} /> : null
+  return command ? <CommandButton command={command} icon={icon ?? command.ribbon?.icon} label={label} /> : null
 }
 
 /** Keep Original / Keep This Version: contextual, only while a re-write is open (the group keeps its width otherwise). */
@@ -383,23 +382,28 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
       </>
     ),
   },
-  // The AI tutor (Copilot in Word sits at the end of Home; Novel's own tab for writing help is Review).
-  {
-    id: 'review.tutor',
-    tab: 'review',
-    label: 'Tutor',
-    order: 50,
-    priority: 65,
-    icon: icons.tutor,
-    Content: () => <RibbonCommand commandId={TUTOR_CONTROLS.toggle.id} icon={icons.tutor} label="Tutor" />,
-    menu: [cmd(TUTOR_CONTROLS.toggle.id)],
-  },
   // ---- View ----
   // Page-turn / continuous scroll (T5) place their commands here.
   { id: 'view.views', tab: 'view', label: 'Views', order: 10, priority: 90, icon: icons.views },
   { id: 'view.zoom', tab: 'view', label: 'Zoom', order: 20, priority: 80, icon: icons.zoom },
-  // Navigation Pane (outline slice, a registry command) first, as in Word's Show group, then Comments.
-  { id: 'view.show', tab: 'view', label: 'Show', order: 30, priority: 70, icon: icons.show, buttons: 'before', Content: () => item(<CommentsPanelButton />), menu: [cmd('view.navigationPane'), cmd('comment.panel'), cmd(TUTOR_CONTROLS.toggle.id)] },
+  // Navigation Pane (outline slice, a registry command) first, as in Word's Show group, then Comments, then
+  // the AI tutor (its command is placed in Review ▸ Proofing; here it is the group's own button).
+  {
+    id: 'view.show',
+    tab: 'view',
+    label: 'Show',
+    order: 30,
+    priority: 70,
+    icon: icons.show,
+    buttons: 'before',
+    Content: () => (
+      <>
+        {item(<CommentsPanelButton />)}
+        <RibbonCommand commandId={TUTOR_CONTROLS.toggle.id} />
+      </>
+    ),
+    menu: [cmd('view.navigationPane'), cmd('comment.panel'), cmd(TUTOR_CONTROLS.toggle.id)],
+  },
   { id: 'view.window', tab: 'view', label: 'Window', order: 40, priority: 60, icon: icons.window },
 ]
 

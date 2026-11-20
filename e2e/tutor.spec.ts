@@ -252,6 +252,8 @@ test('WCAG AA contrast of the panel in OS light and dark (greeting, a reply with
     if (scheme === 'light') {
       await take(scheme, 'greeting', '[data-testid="tutor-panel"]', 8)
       await askAboutTypo(page)
+      // A question typed: ➤ enabled (its icon on the accent fill is measured too).
+      await composer(page).fill('And the next paragraph?')
     }
     await page.mouse.move(0, 0)
     await take(scheme, 'reply with corrections', '[data-testid="tutor-panel"]', 14)

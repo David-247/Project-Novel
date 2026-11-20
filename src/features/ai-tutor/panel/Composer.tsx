@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react'
-import { cn, IconButton, Tooltip } from '@/shared/ui'
+import { cn, controlBase, IconButton, Tooltip } from '@/shared/ui'
 import { removeChip, send, setDraft, stop, useTutorChat, type Chip } from './chat'
 import { TUTOR_CONTROLS as C } from './controls'
 import { ContextMenuPlus } from './ContextMenuPlus'
@@ -8,6 +8,8 @@ import { ModelPicker } from './ModelPicker'
 
 const formatCount = (n: number) => new Intl.NumberFormat().format(n)
 const MAX_ROWS_PX = 160
+/** ➤ and Stop: round, filled with the accent (their own colours: IconButton's muted text would compete). */
+const roundAction = cn(controlBase, 'rounded-full px-1.5')
 
 function ChipIcon({ chip }: { chip: Chip }) {
   switch (chip.attachment.kind) {
@@ -128,24 +130,22 @@ export function Composer() {
           <span className="flex-1" />
           {busy ? (
             <Tooltip controlId={C.stop.id} side="top">
-              <IconButton label={C.stop.label} data-control-id={C.stop.id} onClick={() => void stop()} className="rounded-full bg-accent text-accent-contrast hover:bg-accent-hover hover:text-accent-contrast">
+              <button type="button" aria-label={C.stop.label} data-control-id={C.stop.id} onClick={() => void stop()} className={cn(roundAction, 'bg-accent text-accent-contrast hover:bg-accent-hover')}>
                 <StopIcon />
-              </IconButton>
+              </button>
             </Tooltip>
           ) : (
             <Tooltip controlId={C.send.id} side="top">
-              <IconButton
-                label={C.send.label}
+              <button
+                type="button"
+                aria-label={C.send.label}
                 data-control-id={C.send.id}
                 aria-disabled={canSend ? undefined : true}
                 onClick={() => canSend && void send()}
-                className={cn(
-                  'rounded-full',
-                  canSend ? 'bg-accent text-accent-contrast hover:bg-accent-hover hover:text-accent-contrast' : 'cursor-not-allowed bg-surface-hover text-text-muted hover:bg-surface-hover',
-                )}
+                className={cn(roundAction, canSend ? 'bg-accent text-accent-contrast hover:bg-accent-hover' : 'cursor-not-allowed bg-surface-hover text-text-muted')}
               >
                 <SendIcon />
-              </IconButton>
+              </button>
             </Tooltip>
           )}
         </div>

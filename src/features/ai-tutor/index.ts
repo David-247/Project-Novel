@@ -48,14 +48,13 @@ export type { Chat, ChatSummary, StoredMessage, StoredAttachment } from './histo
 
 // The tutor panel (Task 9; design "Chat panel"). Wiring (composition root):
 // - <TutorPanel /> as AppShell's `sidePanel`: docked at the right of the pages, floating over them below 768 px.
-// - registerTutorCommands(): View ▸ Tutor (Ctrl/Cmd+Shift+Y; ribbon View ▸ Show, and Review ▸ Tutor by its
-//   ribbon group), "Ask the Tutor About This" in the manuscript's context menu, the chat history flush on
-//   quit, and a stop on every project change. Returns unregister.
-// - useTutorIntegration(): reads the saved connections once preferences are loaded.
+// - registerTutorCommands(): View ▸ Tutor (Ctrl/Cmd+Shift+Y; ribbon Review ▸ Proofing, and View ▸ Show by
+//   its ribbon group's content), "Ask the Tutor About This" in the manuscript's context menu, the chat history flush on
+//   quit, the saved connections once preferences are loaded, and a stop on every project change. Returns unregister.
 // - setTutorConnectAction(fn): what "Connect a Provider…" opens (Settings).
 // - TUTOR_CONTROLS: tooltip copy (the tooltips registry reads it). SparkleIcon: the ribbon's Tutor icon.
 export { TutorPanel } from './panel/TutorPanel'
-export { registerTutorCommands, useTutorIntegration, openTutor, closeTutor, toggleTutor, isTutorOpen, tutorCommands } from './commands'
+export { registerTutorCommands, openTutor, closeTutor, toggleTutor, isTutorOpen, tutorCommands } from './commands'
 export { setTutorConnectAction } from './panel/connect'
 export { TUTOR_CONTROLS, TUTOR_SHORTCUT, CONFIRM_WORDS, NO_TOOLS_REASON } from './panel/controls'
 export type { TutorControlMeta, TutorControlKey } from './panel/controls'

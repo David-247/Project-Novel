@@ -155,7 +155,7 @@ afterEach(async () => {
 })
 
 describe('the tutor in the app', () => {
-  it('View ▸ Tutor (Ctrl/Cmd+Shift+Y), Review ▸ Tutor and View ▸ Show ▸ Tutor open and close the docked panel', async () => {
+  it('View ▸ Tutor (Ctrl/Cmd+Shift+Y), Review ▸ Proofing ▸ Tutor and View ▸ Show ▸ Tutor open and close the docked panel', async () => {
     await renderApp()
     const cmd = getCommand(C.toggle.id)!
     expect(cmd.shortcut).toBe('Mod-Shift-y')
@@ -163,10 +163,12 @@ describe('the tutor in the app', () => {
     const view = buildMenuModel(getCommands(), 'in-app').find((m) => m.id === 'view')!
     const labels = (nodes: MenuNode[]): string[] => nodes.flatMap((n) => (n.kind === 'item' ? [n.command.label] : n.kind === 'submenu' ? labels(n.children) : []))
     expect(labels(view.children)).toContain('Tutor')
-    // The ribbon: Review ▸ Tutor (its own group, with the sparkle) and View ▸ Show.
+    // The ribbon: Review ▸ Proofing (with the sparkle) and View ▸ Show.
     const buttons = document.querySelectorAll<HTMLElement>(`[data-control-id="ribbon.cmd.${C.toggle.id}"]`)
     expect(buttons).toHaveLength(2)
     expect(buttons[0].closest('[data-ribbon-panel]')?.getAttribute('data-ribbon-panel')).toBe('review')
+    expect(buttons[0].closest('[data-ribbon-group]')?.getAttribute('data-ribbon-group')).toBe('review.proofing')
+    expect(buttons[0].querySelector('svg')).not.toBeNull()
     expect(buttons[1].closest('[data-ribbon-panel]')?.getAttribute('data-ribbon-panel')).toBe('view')
     fireEvent.click(buttons[0])
     expect(panel()).toBeInTheDocument()

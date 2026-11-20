@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useSyncExternalStore } from 'react'
 import { getEditor, registerContextMenuItems, type ContextMenuContext, type MenuItem } from '@/features/editor'
 import { onProjectOpened, registerExitTask } from '@/features/storage'
 import { notifyCommandStateChanged, registerCommands, type Command } from '@/shared/commands'
@@ -7,6 +7,7 @@ import { loadTutorConnections } from './connections/store'
 import { useTutorHistory } from './history/store'
 import { attach, connectionChanged, projectChanged, requestComposerFocus, shutdown } from './panel/chat'
 import { TUTOR_CONTROLS as C } from './panel/controls'
+import { SparkleIcon } from './panel/icons'
 
 /**
  * The tutor panel's open state, its command (View ▸ Tutor, Review ▸ Tutor, View ▸ Show ▸ Tutor,
@@ -108,8 +109,9 @@ export function tutorCommands(): Command[] {
       shortcut: C.toggle.shortcut,
       // After Comments Panel (40) and Spelling & Grammar (50): the panels over the pages.
       menu: { id: 'view', group: 'panels', order: 60 },
-      // View ▸ Show, after Navigation Pane (10) and Comments; Review ▸ Tutor shows it too (ribbon-groups).
-      ribbon: { group: 'view.show', order: 30 },
+      // Review ▸ Proofing, after Spelling & Grammar (5) and Word Count (10), with the AI sparkle (Word keeps
+      // its Editor in Proofing). View ▸ Show lists it too (ribbon-groups).
+      ribbon: { group: 'review.proofing', order: 20, icon: SparkleIcon },
       guard: 'modal',
       isChecked: isTutorOpen,
       run: toggleTutor,
@@ -119,8 +121,8 @@ export function tutorCommands(): Command[] {
 
 /**
  * The tutor's wiring (composition root, once): its command, its context menu item, the history flush on
- * quit (must-do 4), the saved connections once preferences are read (the active one is a preference),
- * and a stop on every project change (Review Focus 5: project close emits no event, so the open
+ * quit (must-do 4), the saved connections once preferences are read (the active one is a preference;
+ * a store subscription, so the app does not render again for it), and a stop on every project change (Review Focus 5: project close emits no event, so the open
  * project's path is watched too). Returns unregister.
  */
 export function registerTutorCommands(): () => void {
@@ -132,18 +134,16 @@ export function registerTutorCommands(): () => void {
     useStore.subscribe((s, p) => {
       if (s.project.path !== p.project.path) projectChanged()
       if (s.tutorConnections.activeId !== p.tutorConnections.activeId) connectionChanged()
+      if (s.preferences.loaded && !p.preferences.loaded) loadConnections()
     }),
   ]
+  if (useStore.getState().preferences.loaded) loadConnections()
   return () => offs.forEach((off) => off())
 }
 
-/** Read the saved connections once preferences are loaded (they name the active one). */
-export function useTutorIntegration(): void {
-  const loaded = useStore((s) => s.preferences.loaded)
-  useEffect(() => {
-    if (!loaded) return
-    loadTutorConnections().catch((e: unknown) => console.error('[tutor] the connections could not be read', e))
-  }, [loaded])
+/** Read the saved connections (once preferences are loaded: they name the active one). */
+function loadConnections(): void {
+  loadTutorConnections().catch((e: unknown) => console.error('[tutor] the connections could not be read', e))
 }
 
 /** Test-only. */
