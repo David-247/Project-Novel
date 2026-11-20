@@ -144,13 +144,38 @@ describe('createReadTools', () => {
     expect(out.findings.map((f) => [f.text, f.location.paragraph])).toEqual([['A quiet', 2]])
   })
 
-  it('find_text finds matches in scope with locations, and only counts those outside it', async () => {
+  it('find_text finds matches in scope with locations, and says nothing about text outside it', async () => {
     const { idx } = setup()
-    const { set } = tools(idx)
-    const out = (await run(set, 'find_text', { query: 'TEH' })) as { matches: { location: { chapter: number }; snippet: string }[]; outsideScope: number }
-    expect(out.matches).toEqual([expect.objectContaining({ location: { chapter: 1, paragraph: 1, line: null }, snippet: 'I saw teh dog.' })])
-    expect(out.outsideScope).toBe(1)
+    const { set, requestRead } = tools(idx)
+    const out = (await run(set, 'find_text', { query: 'TEH' })) as { matches: { location: { chapter: number }; snippet: string }[] }
+    expect(out).toEqual({ matches: [expect.objectContaining({ location: { chapter: 1, paragraph: 1, line: null }, snippet: 'I saw teh dog.' })] })
     expect(JSON.stringify(out)).not.toContain('Far')
+    // A word only in the unattached chapter: no match, no count, no hint.
+    const none = await run(set, 'find_text', { query: 'secret' })
+    expect(none).toEqual({ matches: [] })
+    expect(JSON.stringify(none)).not.toMatch(/secret|plan|outside/i)
+    expect(requestRead).not.toHaveBeenCalled()
+  })
+
+  it('find_text clips snippets to a selection in scope', async () => {
+    const { ed, idx } = setup()
+    const at = blockPosOf(ed, 'A quiet') + 1
+    const { set } = tools(idx, [{ kind: 'selection', from: at + 'A '.length, to: at + 'A quiet'.length }])
+    const out = (await run(set, 'find_text', { query: 'quiet' })) as { matches: { snippet: string }[] }
+    expect(out.matches.map((m) => m.snippet)).toEqual(['quiet'])
+  })
+
+  it('check_spelling drops a finding that straddles the edge of a selection', async () => {
+    const { ed, idx } = setup()
+    const at = blockPosOf(ed, 'teh dog') + 1
+    // "I saw te" is selected: the flagged word "teh" runs past the selection's end.
+    const { set } = tools(idx, [{ kind: 'selection', from: at, to: at + 'I saw te'.length }])
+    const out = (await run(set, 'check_spelling', {})) as { findings: unknown[] }
+    expect(out.findings).toEqual([])
+    expect(JSON.stringify(out)).not.toContain('teh')
+    // Wholly inside, it is kept.
+    const whole = tools(idx, [{ kind: 'selection', from: at, to: at + 'I saw teh'.length }])
+    expect(((await run(whole.set, 'check_spelling', {})) as { findings: { text: string }[] }).findings.map((f) => f.text)).toEqual(['teh'])
   })
 
   it('use_script hands back the script and tells the harness', async () => {

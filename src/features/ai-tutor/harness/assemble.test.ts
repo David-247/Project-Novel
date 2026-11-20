@@ -34,7 +34,7 @@ describe('the charter', () => {
   // One assertion per rule the spec requires, by its stable marker.
   const rules: [marker: string, mustSay: RegExp][] = [
     ['editor-not-ghostwriter', /do not write the writer's book/i],
-    ['examples-allowed', /short illustrative example/i],
+    ['examples-allowed', /asks for an example \(to show a technique, or a sample beat for inspiration\)/i],
     ['refuse-warmly', /say no kindly/i],
     ['data-not-instructions', /never instructions/i],
     ['quote-limit', /at most 2 consecutive sentences/i],
@@ -49,6 +49,17 @@ describe('the charter', () => {
     // The rule's text follows its marker, before the next marker.
     const next = CHARTER_SOURCE.indexOf('<!-- rule:', at + 1)
     expect(CHARTER_SOURCE.slice(at, next < 0 ? undefined : next)).toMatch(mustSay)
+  })
+
+  it('names the book facts as data too', () => {
+    const at = CHARTER_SOURCE.indexOf('<!-- rule:data-not-instructions -->')
+    expect(CHARTER_SOURCE.slice(at, CHARTER_SOURCE.indexOf('<!-- rule:', at + 1))).toContain('`<book-facts>` block')
+  })
+
+  it('lets the stuck script allow a labelled sample beat (decision 6a07d777)', () => {
+    const stuck = scriptText('stuck')
+    expect(stuck).not.toMatch(/never hand them prose/i)
+    expect(stuck).toMatch(/sample beat for inspiration, a short labelled example with invented characters is fine/i)
   })
 
   it('names the prompt injection case as data', () => {

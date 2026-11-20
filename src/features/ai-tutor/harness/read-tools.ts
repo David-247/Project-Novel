@@ -1,7 +1,7 @@
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 import { chapterIndexAt, getChapters } from '@/features/editor'
-import { blockCheckText, checkBlocks, hashText, textRangeToDoc, type Finding } from '@/features/spellcheck'
+import { blockCheckText, checkBlocks, hashText, textRangeToDoc, type Finding, type TextSegment } from '@/features/spellcheck'
 import { useStore } from '@/shared/store'
 import { isScriptName, SCRIPT_NAMES, scriptText, type ScriptName } from './assemble'
 import { attachmentLabel, attachmentRange, formatParagraphs, paragraphsIn, type Attachment, type ParagraphText } from './attachments'
@@ -41,19 +41,35 @@ const targetSchema = {
   number: z.number().int().positive().optional().describe('The page or chapter number as the writer sees it (from 1). Leave out for the current one.'),
 }
 
-/** The merged ranges cover all of `r`. */
-function covered(r: Range, ranges: readonly Range[]): boolean {
+/** The merged range (of `ranges`) that holds all of `r`, or null when none does. */
+function coveringRange(r: Range, ranges: readonly Range[]): Range | null {
   const sorted = [...ranges].sort((a, b) => a.from - b.from)
-  let start = -1
-  let end = -1
+  let cur: Range | null = null
+  const fits = (m: Range | null) => m !== null && r.from >= m.from && r.to <= m.to
   for (const x of sorted) {
-    if (x.from > end) {
-      if (start >= 0 && r.from >= start && r.to <= end) return true
-      start = x.from
-      end = x.to
-    } else end = Math.max(end, x.to)
+    if (cur && x.from <= cur.to) cur = { from: cur.from, to: Math.max(cur.to, x.to) }
+    else {
+      if (fits(cur)) return cur
+      cur = { from: x.from, to: x.to }
+    }
   }
-  return start >= 0 && r.from >= start && r.to <= end
+  return fits(cur) ? cur : null
+}
+
+const covered = (r: Range, ranges: readonly Range[]) => coveringRange(r, ranges) !== null
+
+/** The block-text offsets `[lo, hi)` whose characters lie in the document range `r`. */
+function textSpanIn(segments: readonly TextSegment[], r: Range): { lo: number; hi: number } {
+  let lo = -1
+  let hi = -1
+  for (const s of segments) {
+    const a = Math.max(s.pos, r.from)
+    const b = Math.min(s.pos + s.length, r.to)
+    if (b <= a) continue
+    if (lo < 0) lo = s.offset + (a - s.pos)
+    hi = s.offset + (b - s.pos)
+  }
+  return lo < 0 ? { lo: 0, hi: 0 } : { lo, hi }
 }
 
 /** A snippet for a match: its sentence, cut to about 200 characters around the match. */
@@ -197,7 +213,8 @@ export function createReadTools(ctx: ReadToolsContext): ToolSet {
       for (const f of found.get(hashText(c.text)) ?? []) {
         if (f.kind !== kind) continue
         const at = textRangeToDoc(c.segments, f.start, f.end)
-        if (!at || !got.ranges.some((r) => at.from < r.to && at.to > r.from)) continue
+        // Only findings wholly in the ranges: a word straddling a selection edge would leak its other half.
+        if (!at || !covered(at, got.ranges)) continue
         if (findings.length >= MAX_RESULTS) {
           more++
           continue
@@ -248,14 +265,13 @@ export function createReadTools(ctx: ReadToolsContext): ToolSet {
 
     find_text: tool({
       description:
-        'Find text in the manuscript (case-insensitive). Returns the matches within what you may read, each with its paragraph id, location and sentence; ' +
-        'matches elsewhere are only counted (outsideScope).',
+        'Find text (case-insensitive) in what you may read: what the writer attached, or the current chapter. ' +
+        'Returns each match with its paragraph id, location and sentence. Text elsewhere is not searched; to look there, read it with read_range first (the writer is asked).',
       inputSchema: z.object({ query: z.string().min(1).max(200).describe('The text to find.') }),
       execute: async ({ query }) => {
         const needle = query.toLocaleLowerCase()
         const ranges = scopeRanges()
         const matches: { paragraph: string; location: Location; snippet: string }[] = []
-        let outsideScope = 0
         let more = 0
         doc().descendants((node, pos) => {
           if (!node.isTextblock) return true
@@ -263,21 +279,21 @@ export function createReadTools(ctx: ReadToolsContext): ToolSet {
           const hay = c.text.toLocaleLowerCase()
           for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + needle.length)) {
             const at = textRangeToDoc(c.segments, i, i + needle.length)
-            if (!at) continue
-            if (!covered(at, ranges)) {
-              outsideScope++
-              continue
-            }
+            const within = at && coveringRange(at, ranges)
+            // Outside the scope: not reported at all, not even counted (no yes/no oracle).
+            if (!at || !within) continue
             if (matches.length >= MAX_MATCHES) {
               more++
               continue
             }
             const id = idx.idFor(pos)
-            matches.push({ paragraph: id, location: idx.locationOf(id, at.from), snippet: sentenceAround(c.text, i, i + needle.length) })
+            // The snippet never reaches past the scope (a selection cuts a paragraph).
+            const { lo, hi } = textSpanIn(c.segments, within)
+            matches.push({ paragraph: id, location: idx.locationOf(id, at.from), snippet: sentenceAround(c.text.slice(lo, hi), i - lo, i - lo + needle.length) })
           }
           return false
         })
-        return more ? { matches, outsideScope, truncated: more } : { matches, outsideScope }
+        return more ? { matches, truncated: more } : { matches }
       },
     }),
 
