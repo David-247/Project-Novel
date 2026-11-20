@@ -10,7 +10,7 @@ beforeEach(() => backend.reset())
 describe('connection ipc', () => {
   it('has no way to read a secret back', () => {
     expect(Object.keys(ipc)).not.toContain('getSecret')
-    expect(Object.keys(ipc).sort()).toEqual(['deleteSecret', 'getConnections', 'hasSecret', 'saveConnections', 'setSecret'])
+    expect(Object.keys(ipc).sort()).toEqual(['deleteSecret', 'getConnections', 'hasSecret', 'removeConnection', 'saveConnections', 'setSecret', 'upsertConnection'])
   })
 
   it('stores, reports and deletes a secret in the (fake) keychain', async () => {

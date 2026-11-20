@@ -39,6 +39,8 @@ pub fn run() {
             ai::ai_secret_has,
             ai::ai_connections_get,
             ai::ai_connections_save,
+            ai::ai_connection_upsert,
+            ai::ai_connection_remove,
             ai::tutor_history_list,
             ai::tutor_history_load,
             ai::tutor_history_save,

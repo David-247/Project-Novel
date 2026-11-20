@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { backend } from '@/test-utils/fake-tauri'
 import { useStore } from '@/shared/store'
 import * as ipc from './ipc'
-import { loadTutorConnections, saveTutorConnections, setActiveTutorConnection } from './store'
+import { loadTutorConnections, removeTutorConnection, saveTutorConnections, setActiveTutorConnection, upsertTutorConnection } from './store'
 import type { Connection } from './types'
 
 vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
@@ -76,5 +76,21 @@ describe('tutor connections (store + ipc)', () => {
 
   it('exposes no secret reader', () => {
     expect(Object.keys(ipc)).not.toContain('getSecret')
+  })
+
+  it('upsert and remove change one connection and keep any the store has not seen (T10 I1)', async () => {
+    await saveTutorConnections([claude])
+    // Rust adds a connection behind the store's back (a sign-in).
+    backend.ai.connections = [...backend.ai.connections, { id: 'or', provider: 'openrouter', label: 'OpenRouter', auth: 'oauth' }]
+    backend.ai.secrets.set('or', 'k')
+    await upsertTutorConnection({ ...claude, label: 'Claude work' })
+    expect(backend.ai.connections.map((c) => [c.id, c.label])).toEqual([['c1', 'Claude work'], ['or', 'OpenRouter']])
+    await upsertTutorConnection(local)
+    expect(slice().list.map((c) => c.id)).toEqual(['c1', 'or', 'c2'])
+    await removeTutorConnection('c1')
+    expect(backend.ai.connections.map((c) => c.id)).toEqual(['or', 'c2'])
+    expect(backend.ai.secrets.get('or')).toBe('k')
+    expect(slice().activeId).toBe('or')
+    expect(pref()).toBe('or')
   })
 })

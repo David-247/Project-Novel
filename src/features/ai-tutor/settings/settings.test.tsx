@@ -63,6 +63,13 @@ const jsonResponse = (body: unknown): FakeAiEvent[] => [
   { type: 'end' },
 ]
 
+/** A streamed plain-text reply ("pong"): what a local model that ignores the probe's tool answers. */
+const pongStream = (): FakeAiEvent[] =>
+  sseResponse([
+    `data: ${JSON.stringify({ id: 'x', object: 'chat.completion.chunk', created: 0, model: 'llama3', choices: [{ index: 0, delta: { content: 'pong' }, finish_reason: 'stop' }] })}\n\n`,
+    'data: [DONE]\n\n',
+  ])
+
 const form = () => screen.getByRole('form')
 const audit = (where: string) => {
   const problems = auditTooltipCoverage(document.body)
@@ -236,6 +243,64 @@ describe('Settings ▸ AI Tutor', () => {
     const id = core.completeOAuth('sk-or-v1-x')
     act(() => emit('ai-oauth-result', { ok: true, connectionId: id }))
     await waitFor(() => expect(useStore.getState().tutorConnections.list.map((c) => c.id)).toEqual([id]))
+  })
+
+  it('I1: a sign-in that finishes during a slow Test Connection survives the writes of the test (connection and key)', async () => {
+    backend.ai.connections = [{ id: 'local', provider: 'ollama', label: 'Ollama', auth: 'none', baseUrl: 'http://localhost:11434/v1' }]
+    // The probe (POST /chat/completions) waits on a gate: a slow local model.
+    let release = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    let probing = false
+    const original = core.handle.bind(core)
+    const handle = vi.spyOn(core, 'handle').mockImplementation(async (cmd, args, options) => {
+      if (cmd === 'ai_fetch' && (args as { req: { path: string } }).req.path === '/chat/completions') {
+        probing = true
+        await gate
+      }
+      return original(cmd, args, options)
+    })
+    try {
+      renderPage()
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in with OpenRouter' }))
+      await waitFor(() => expect(backend.ai.oauthStarts).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: 'Edit Ollama' }))
+      backend.ai.queue.push(
+        { events: jsonResponse({ data: [{ id: 'llama3' }] }) },
+        { events: pongStream() },
+      )
+      fireEvent.click(within(form()).getByRole('button', { name: 'Test Connection' }))
+      await waitFor(() => expect(probing).toBe(true))
+      // The browser comes back while the probe runs.
+      const id = core.completeOAuth('sk-or-v1-RACE')
+      act(() => emit('ai-oauth-result', { ok: true, connectionId: id }))
+      await waitFor(() => expect(screen.getByTestId('ai-sign-in-status')).toHaveTextContent('Signed in.'))
+      release()
+      await waitFor(() => expect(within(form()).getByTestId('ai-settings-form-status')).toHaveTextContent('did not call a tool'))
+      expect(backend.ai.connections.map((c) => c.id)).toEqual(['local', id])
+      expect(backend.ai.secrets.get(id)).toBe('sk-or-v1-RACE')
+      expect(backend.ai.connections[0]).toMatchObject({ toolSupport: { llama3: false } })
+      // Then Save (the form opened before the sign-in), and Remove of the other connection: both keep it.
+      fireEvent.click(within(form()).getByRole('button', { name: 'Save Connection' }))
+      await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+      expect(backend.ai.connections.map((c) => c.id)).toEqual(['local', id])
+      expect(backend.ai.secrets.get(id)).toBe('sk-or-v1-RACE')
+      expect(useStore.getState().tutorConnections.list.map((c) => c.id)).toEqual(['local', id])
+    } finally {
+      release()
+      handle.mockRestore()
+    }
+  })
+
+  it('I1: Remove never writes a list captured before a sign-in finished', async () => {
+    backend.ai.connections = [{ id: 'a', provider: 'openai', label: 'A', auth: 'api_key' }]
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove A' }))
+    const ask = await screen.findByRole('dialog', { name: 'Remove “A”?' })
+    // Rust adds a signed-in connection while the question is open; the page has not heard yet.
+    const id = core.completeOAuth('sk-or-v1-LATE')
+    fireEvent.click(within(ask).getByRole('button', { name: 'Remove Connection' }))
+    await waitFor(() => expect(backend.ai.connections.map((c) => c.id)).toEqual([id]))
+    expect(backend.ai.secrets.get(id)).toBe('sk-or-v1-LATE')
   })
 
   it('Get a Key opens the provider page through Rust (by provider, never a URL)', async () => {

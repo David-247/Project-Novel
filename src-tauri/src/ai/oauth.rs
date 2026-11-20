@@ -27,6 +27,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
+use tokio::task::JoinSet;
 
 use super::connections::{self, Connection, ConnectionAuth};
 use super::keychain::{SecretStore, MAX_SECRET_BYTES};
@@ -38,6 +39,10 @@ pub const RESULT_EVENT: &str = "ai-oauth-result";
 pub const CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// How long a connection that opened may take to send its request line and headers.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// Connections whose request head is still being read at once; more are closed unread.
+const MAX_PENDING_CONNECTIONS: usize = 16;
+/// The pause after a failed accept before the next one.
+const ACCEPT_RETRY: Duration = Duration::from_millis(50);
 /// Longest request head read (the callback is one short GET).
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 const MAX_CODE_CHARS: usize = 1024;
@@ -135,6 +140,11 @@ pub fn parse_callback(head: &str, nonce: &str) -> Result<String, AiError> {
             _ => {}
         }
     }
+    // No code at all: the writer denied access (OpenRouter then sends no `state` either, per its OAuth
+    // doc), or the page was opened by hand. Refused either way; the parameters are never echoed (M2).
+    if codes.is_empty() {
+        return Err(refused("OpenRouter did not grant access. Try again if you meant to sign in."));
+    }
     if states.len() != 1 || !same(&states[0], nonce) {
         return Err(refused("The sign-in reply did not belong to this sign-in, so Novel ignored it. Try again."));
     }
@@ -142,7 +152,6 @@ pub fn parse_callback(head: &str, nonce: &str) -> Result<String, AiError> {
         [code] if !code.is_empty() && code.chars().count() <= MAX_CODE_CHARS && !code.chars().any(char::is_control) => {
             Ok(code.clone())
         }
-        [] => Err(refused("OpenRouter did not grant access. Try again if you meant to sign in.")),
         _ => Err(refused("The sign-in reply was not the one Novel expected. Try again.")),
     }
 }
@@ -191,10 +200,12 @@ pub enum Stop {
     Superseded,
 }
 
-/// Wait for the one callback request and return its code. The first connection that sends a request
-/// decides: a valid callback gets the "return to Novel" page, anything else a refusal and an error.
-/// A connection that closes or sends nothing in time is not a request and does not count. The
-/// listener is dropped (closed) when this returns.
+/// Wait for the one callback request and return its code. The first connection whose request head
+/// arrives decides: a valid callback gets the "return to Novel" page, anything else a refusal and an
+/// error. Heads are read concurrently (M4), so a connection that sends nothing (a browser preconnect,
+/// any local process) cannot hold up the real callback; one that closes or stays silent for
+/// `REQUEST_TIMEOUT` simply does not count. The listener, and every connection still being read, is
+/// closed when this returns.
 pub async fn wait_for_callback(
     listener: TcpListener,
     nonce: &str,
@@ -202,23 +213,37 @@ pub async fn wait_for_callback(
     mut stop: watch::Receiver<Stop>,
 ) -> Result<String, AiError> {
     let wait = async {
+        let mut pending: JoinSet<Option<(TcpStream, String)>> = JoinSet::new();
         loop {
-            let Ok((mut stream, peer)) = listener.accept().await else { continue };
-            if !peer.ip().is_loopback() {
-                continue;
+            tokio::select! {
+                accepted = listener.accept() => match accepted {
+                    Ok((stream, peer)) => {
+                        // More silent connections than this are dropped unread.
+                        if peer.ip().is_loopback() && pending.len() < MAX_PENDING_CONNECTIONS {
+                            pending.spawn(async move {
+                                let mut stream = stream;
+                                read_head(&mut stream).await.map(|head| (stream, head))
+                            });
+                        }
+                    }
+                    // A persistent accept error (out of file handles) must not spin a core (M3).
+                    Err(_) => tokio::time::sleep(ACCEPT_RETRY).await,
+                },
+                Some(done) = pending.join_next(), if !pending.is_empty() => {
+                    let Ok(Some((mut stream, head))) = done else { continue };
+                    return match parse_callback(&head, nonce) {
+                        Ok(code) => {
+                            respond(&mut stream, "200 OK", DONE_PAGE).await;
+                            Ok(code)
+                        }
+                        Err(e) => {
+                            let status = if head.starts_with("GET ") { "400 Bad Request" } else { "405 Method Not Allowed" };
+                            respond(&mut stream, status, FAILED_PAGE).await;
+                            Err(e)
+                        }
+                    };
+                }
             }
-            let Some(head) = read_head(&mut stream).await else { continue };
-            return match parse_callback(&head, nonce) {
-                Ok(code) => {
-                    respond(&mut stream, "200 OK", DONE_PAGE).await;
-                    Ok(code)
-                }
-                Err(e) => {
-                    let status = if head.starts_with("GET ") { "400 Bad Request" } else { "405 Method Not Allowed" };
-                    respond(&mut stream, status, FAILED_PAGE).await;
-                    Err(e)
-                }
-            };
         }
     };
     let stopped = async {
@@ -234,10 +259,23 @@ pub async fn wait_for_callback(
     };
     tokio::select! {
         r = tokio::time::timeout(timeout, wait) => r.unwrap_or_else(|_| Err(refused("The sign-in timed out. Try again."))),
-        s = stopped => Err(match s {
-            Stop::Superseded => AiError::new("superseded", "A newer sign-in replaced this one."),
-            _ => AiError::cancelled(),
-        }),
+        s = stopped => Err(stop_error(s)),
+    }
+}
+
+fn stop_error(s: Stop) -> AiError {
+    match s {
+        Stop::Superseded => AiError::new("superseded", "A newer sign-in replaced this one."),
+        _ => AiError::cancelled(),
+    }
+}
+
+/// Ok while the sign-in is still wanted. Checked again after the code exchange, so Cancel Sign-in
+/// pressed while the browser had already come back still adds nothing (M1).
+pub fn still_wanted(stop: &watch::Receiver<Stop>) -> Result<(), AiError> {
+    match *stop.borrow() {
+        Stop::Running => Ok(()),
+        s => Err(stop_error(s)),
     }
 }
 
@@ -287,6 +325,8 @@ fn free_label(list: &[Connection], name: &str) -> String {
 /// Add a connection of `provider` signed in with OAuth and store `key` for it. Returns its id. If the
 /// key cannot be stored, the connection is taken out again.
 pub fn save_signed_in(path: &Path, secrets: &dyn SecretStore, provider: &str, name: &str, key: &Secret) -> Result<String, AiError> {
+    // One load-modify-write with the key stored inside it: no webview save can interleave (I1).
+    let _lock = connections::write_lock();
     let mut list = connections::load_connections(path)?;
     let id = loop {
         let id = format!("{provider}-{}", random_token(9)?.replace(['-', '_'], "x"));
@@ -305,10 +345,10 @@ pub fn save_signed_in(path: &Path, secrets: &dyn SecretStore, provider: &str, na
         insecure_http_accepted: None,
         extra: Default::default(),
     });
-    connections::save_connections(path, secrets, list)?;
+    connections::save_locked(path, secrets, list)?;
     if let Err(e) = connections::set_connection_secret(path, secrets, &id, key.expose()) {
         let rest: Vec<Connection> = connections::load_connections(path)?.into_iter().filter(|c| c.id != id).collect();
-        let _ = connections::save_connections(path, secrets, rest);
+        let _ = connections::save_locked(path, secrets, rest);
         return Err(e);
     }
     Ok(id)
@@ -398,8 +438,11 @@ pub async fn ai_oauth_start<R: Runtime>(
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let outcome = async {
+            let wanted = stop.clone();
             let code = wait_for_callback(listener, &nonce, CALLBACK_TIMEOUT, stop).await?;
             let key = exchange_code(&client, sign_in.keys_url, &code, &pkce.verifier).await?;
+            // Cancelled (or replaced) during the exchange: the key is dropped, nothing is saved (M1).
+            still_wanted(&wanted)?;
             super::blocking(move || save_signed_in(&path, &super::keychain::KeyringStore, &provider, sign_in.name, &key)).await
         }
         .await;
@@ -488,6 +531,59 @@ mod tests {
         ] {
             assert!(parse_callback(head, "n0nce").is_err(), "{why}");
         }
+    }
+
+    #[test]
+    fn a_denial_says_access_was_not_granted() {
+        // OpenRouter sends no `state` when the writer denies access (its OAuth doc).
+        for head in ["GET /callback?error=access_denied HTTP/1.1
+
+
+
+", "GET /callback HTTP/1.1
+
+
+
+", "GET /callback?state=n0nce HTTP/1.1
+
+
+
+"] {
+            let e = parse_callback(head, "n0nce").unwrap_err();
+            assert!(e.message.contains("did not grant access"), "{head}: {}", e.message);
+            assert!(!e.message.contains("access_denied"));
+        }
+        // A code with the wrong state is still the foreign-reply message.
+        assert!(parse_callback("GET /callback?code=c&state=x HTTP/1.1
+
+
+
+", "n0nce").unwrap_err().message.contains("did not belong"));
+    }
+
+    #[test]
+    fn a_cancel_after_the_callback_still_stops_the_save() {
+        let (tx, rx) = running();
+        assert!(still_wanted(&rx).is_ok());
+        tx.send(Stop::Cancelled).unwrap();
+        assert_eq!(still_wanted(&rx).unwrap_err().kind, "cancelled");
+        let (tx, rx) = running();
+        tx.send(Stop::Superseded).unwrap();
+        assert_eq!(still_wanted(&rx).unwrap_err().kind, "superseded");
+    }
+
+    #[tokio::test]
+    async fn an_idle_connection_does_not_hold_up_the_callback() {
+        let (l, port) = listener().await;
+        let (_tx, rx) = running();
+        let wait = tokio::spawn(async move { wait_for_callback(l, "n0nce", Duration::from_secs(30), rx).await });
+        // A preconnect that never sends anything, kept open.
+        let _idle = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
+        let started = std::time::Instant::now();
+        let page = send(port, GOOD).await;
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        assert_eq!(wait.await.unwrap().unwrap(), "the-code");
+        assert!(started.elapsed() < Duration::from_secs(3), "waited {:?}", started.elapsed());
     }
 
     #[test]

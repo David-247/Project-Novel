@@ -38,6 +38,30 @@ export async function saveTutorConnections(list: Connection[]): Promise<void> {
   rememberActive(activeId)
 }
 
+/** Read what Rust stored and keep the active one (else the first). */
+async function reload(): Promise<void> {
+  const saved = await ipc.getConnections()
+  const activeId = pickActive(saved, state().tutorConnections.activeId)
+  state().tutorConnectionsActions.setConnections(saved, activeId)
+  rememberActive(activeId)
+}
+
+/**
+ * Save one connection (add, or replace the one with its id). Only that entry changes: Rust merges it
+ * into the file as it is now, so a connection added meanwhile (a sign-in) is never dropped (T10 I1).
+ * Settings uses this and `removeTutorConnection`, never a whole-list save.
+ */
+export async function upsertTutorConnection(c: Connection): Promise<void> {
+  await ipc.upsertConnection(c)
+  await reload()
+}
+
+/** Remove one connection (Rust deletes its key); the others stay as they are on disk. */
+export async function removeTutorConnection(id: string): Promise<void> {
+  await ipc.removeConnection(id)
+  await reload()
+}
+
 /** Use this connection (ignored, as none, when it is not in the list); null clears. */
 export function setActiveTutorConnection(id: string | null): void {
   const next = id !== null && state().tutorConnections.list.some((c) => c.id === id) ? id : null

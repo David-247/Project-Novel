@@ -11,7 +11,7 @@
  * connection (`not_connected`).
  *
  * The keychain is `state.secrets` (connection id to secret; no command reads it back) and
- * ai-connections.json is `state.connections`. Saving validates like Rust (unknown provider, duplicate
+ * ai-connections.json is `state.connections` (`ai_connection_upsert` / `ai_connection_remove` change one entry of it, as Rust does). Saving validates like Rust (unknown provider, duplicate
  * id, a bad `baseUrl` for ollama, lmstudio and custom; a hosted provider's `baseUrl` is dropped) and
  * deletes the secret of a removed connection or one whose provider, auth or base URL origin changed
  * (a secret can only be set for a saved connection, as in Rust). `failSecrets` makes the keychain commands fail.
@@ -33,6 +33,8 @@ export const AI_COMMAND_NAMES = [
   'ai_secret_has',
   'ai_connections_get',
   'ai_connections_save',
+  'ai_connection_upsert',
+  'ai_connection_remove',
   'tutor_history_list',
   'tutor_history_load',
   'tutor_history_save',
@@ -334,6 +336,16 @@ export function createFakeAi() {
         return structuredClone(state.connections)
       case 'ai_connections_save':
         saveConnections(structuredClone(args.connections as Record<string, unknown>[]))
+        return null
+      case 'ai_connection_upsert': {
+        // As Rust: merged into the stored list, so other connections (and their keys) are kept.
+        const c = structuredClone(args.connection as Record<string, unknown>)
+        const list = state.connections.some((x) => x.id === c.id) ? state.connections.map((x) => (x.id === c.id ? c : x)) : [...state.connections, c]
+        saveConnections(structuredClone(list))
+        return null
+      }
+      case 'ai_connection_remove':
+        saveConnections(structuredClone(state.connections.filter((x) => x.id !== args.connectionId)))
         return null
       case 'tutor_history_list':
       case 'tutor_history_load':

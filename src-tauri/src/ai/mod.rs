@@ -339,6 +339,21 @@ pub async fn ai_connections_save<R: Runtime>(
     blocking(move || connections::save_connections(&path, &keychain::KeyringStore, connections)).await
 }
 
+/// Add a connection, or replace the saved one with its id; the others stay as they are on disk
+/// (Settings edits through this, so it can never drop a connection it has not seen).
+#[tauri::command]
+pub async fn ai_connection_upsert<R: Runtime>(app: AppHandle<R>, connection: connections::Connection) -> Result<(), AiError> {
+    let path = connections_file(&app)?;
+    blocking(move || connections::upsert_connection(&path, &keychain::KeyringStore, connection)).await
+}
+
+/// Remove one connection and its key; the others stay as they are on disk.
+#[tauri::command]
+pub async fn ai_connection_remove<R: Runtime>(app: AppHandle<R>, connection_id: String) -> Result<(), AiError> {
+    let path = connections_file(&app)?;
+    blocking(move || connections::remove_connection(&path, &keychain::KeyringStore, &connection_id)).await
+}
+
 // ---- Chat history (Task 8) -------------------------------------------------------------------------
 
 fn history_root<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, AiError> {

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -87,9 +87,45 @@ pub fn load_connections(path: &Path) -> Result<Vec<Connection>, AiError> {
     Ok(read_file(path)?.map(|f| f.connections).unwrap_or_default())
 }
 
+/// Serialises every load-modify-write of the connections file: the webview's saves, upserts and
+/// removes, and the sign-in's append + key (oauth.rs). Without it a write built from an older read
+/// could drop a connection another writer had just added, and delete its key.
+static WRITES: Mutex<()> = Mutex::new(());
+
+/// Hold this across a whole load-modify-write of the connections file (never across a network call).
+pub fn write_lock() -> MutexGuard<'static, ()> {
+    WRITES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Validate and atomically save `connections`, keeping the file's unknown top-level keys. Secrets
 /// of connections that are no longer listed are deleted (best effort).
 pub fn save_connections(path: &Path, secrets: &dyn SecretStore, connections: Vec<Connection>) -> Result<(), AiError> {
+    let _lock = write_lock();
+    save_locked(path, secrets, connections)
+}
+
+/// Add `connection`, or replace the saved one with its id, leaving every other connection (and its
+/// key) as it is on disk. The webview edits through this, so it can never drop a connection it has
+/// not seen yet (a sign-in that finished meanwhile).
+pub fn upsert_connection(path: &Path, secrets: &dyn SecretStore, connection: Connection) -> Result<(), AiError> {
+    let _lock = write_lock();
+    let mut list = load_connections(path)?;
+    match list.iter_mut().find(|c| c.id == connection.id) {
+        Some(slot) => *slot = connection,
+        None => list.push(connection),
+    }
+    save_locked(path, secrets, list)
+}
+
+/// Remove one connection (and its key); the others stay as they are on disk. A missing id is fine.
+pub fn remove_connection(path: &Path, secrets: &dyn SecretStore, connection_id: &str) -> Result<(), AiError> {
+    let _lock = write_lock();
+    let list: Vec<Connection> = load_connections(path)?.into_iter().filter(|c| c.id != connection_id).collect();
+    save_locked(path, secrets, list)
+}
+
+/// `save_connections` for a caller that already holds [`write_lock`].
+pub fn save_locked(path: &Path, secrets: &dyn SecretStore, connections: Vec<Connection>) -> Result<(), AiError> {
     let connections = validate(connections)?;
     let existing = read_file(path)?;
     let extra = existing.as_ref().map(|f| f.extra.clone()).unwrap_or_default();
@@ -565,6 +601,62 @@ mod tests {
         assert_eq!(f.set_secret("c1", &(at_cap.clone() + "k")).unwrap_err().kind, "bad_request");
         assert_eq!(f.set_secret("c1", &at_cap).unwrap_err().kind, "bad_request", "the wrapped value is over the cap too");
         assert!(f.secrets.get("c1").unwrap().is_none());
+    }
+
+    #[test]
+    fn upsert_keeps_connections_it_never_saw() {
+        let f = Fixture::new();
+        f.save(vec![conn("a", "custom", Some("https://a.example/v1")), conn("b", "openrouter", None)]).unwrap();
+        f.set_secret("a", "ka").unwrap();
+        f.set_secret("b", "kb").unwrap();
+        // The webview edits "a" from a list that never had "b".
+        let mut a = conn("a", "custom", Some("https://a.example/v1"));
+        a.label = "renamed".into();
+        upsert_connection(&f.path(), f.secrets.as_ref(), a).unwrap();
+        let ids: Vec<_> = load_connections(&f.path()).unwrap().into_iter().map(|c| (c.id, c.label)).collect();
+        assert_eq!(ids, [("a".to_owned(), "renamed".to_owned()), ("b".to_owned(), "openrouter connection".to_owned())]);
+        assert!(f.has_secret("a") && f.has_secret("b"));
+        // A new one is appended; re-pointing "a" drops only a's key.
+        upsert_connection(&f.path(), f.secrets.as_ref(), conn("c", "openai", None)).unwrap();
+        upsert_connection(&f.path(), f.secrets.as_ref(), conn("a", "custom", Some("https://elsewhere.example/v1"))).unwrap();
+        assert_eq!(load_connections(&f.path()).unwrap().len(), 3);
+        assert!(!f.has_secret("a") && f.has_secret("b"));
+        // Validation still applies to the merged list.
+        assert!(upsert_connection(&f.path(), f.secrets.as_ref(), conn("d", "nope", None)).is_err());
+    }
+
+    #[test]
+    fn remove_deletes_only_that_connection_and_its_secret() {
+        let f = Fixture::new();
+        f.save(vec![conn("a", "openai", None), conn("b", "xai", None)]).unwrap();
+        f.set_secret("a", "ka").unwrap();
+        f.set_secret("b", "kb").unwrap();
+        remove_connection(&f.path(), f.secrets.as_ref(), "a").unwrap();
+        assert_eq!(load_connections(&f.path()).unwrap().iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["b"]);
+        assert!(f.secrets.get("a").unwrap().is_none());
+        assert!(f.has_secret("b"));
+        remove_connection(&f.path(), f.secrets.as_ref(), "missing").unwrap();
+    }
+
+    #[test]
+    fn concurrent_writers_lose_nothing() {
+        // Each thread adds its own connection through a full load-modify-write; with the shared lock
+        // none overwrites another's.
+        let f = Arc::new(Fixture::new());
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let f = f.clone();
+                std::thread::spawn(move || {
+                    for k in 0..5 {
+                        upsert_connection(&f.path(), f.secrets.as_ref(), conn(&format!("t{i}-{k}"), "openai", None)).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert_eq!(load_connections(&f.path()).unwrap().len(), 40);
     }
 
     #[test]

@@ -4,7 +4,7 @@ import { useStore } from '@/shared/store'
 import { Button, Checkbox, Dialog, Select, TextInput, Tooltip, cn } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
 import { hasSecret, deleteSecret, setSecret } from '../connections/ipc'
-import { loadTutorConnections, saveTutorConnections, setActiveTutorConnection } from '../connections/store'
+import { loadTutorConnections, removeTutorConnection, setActiveTutorConnection, upsertTutorConnection } from '../connections/store'
 import { USER_HOSTED_PROVIDERS, type Connection, type ProviderId } from '../connections/types'
 import { useTutorHistory } from '../history/store'
 import { forgetModels, useTutorChat } from '../panel/chat'
@@ -191,7 +191,8 @@ export function AiTutorSettings() {
       danger: true,
       onYes: async () => {
         try {
-          await saveTutorConnections(connections.filter((x) => x.id !== c.id))
+          // Removes just this one: a connection added since the list was drawn stays (I1).
+          await removeTutorConnection(c.id)
           await deleteSecret(c.id).catch(() => {})
           forgetModels(c.id)
           if (draft?.id === c.id) setDraft(null)
@@ -332,7 +333,9 @@ function ConnectionForm({ initial, connections, hasKey, onKeyChanged, onConfirm,
 
   /** The connection as it would be saved, keeping fields this form does not know. */
   function build(id: string, baseUrl: string | undefined, toolSupport: Record<string, boolean>): Connection {
-    const c: Connection = { ...(existing ?? {}), id, provider: d.provider, label: d.label.trim() || adapter.label, auth }
+    // Unknown fields come from the connection as the store holds it now, not as it was drawn.
+    const current = (useStore.getState().tutorConnections.list as Connection[]).find((x) => x.id === id) ?? existing
+    const c: Connection = { ...(current ?? {}), id, provider: d.provider, label: d.label.trim() || adapter.label, auth }
     delete c.baseUrl
     delete c.insecureHttpAccepted
     delete c.defaultModel
@@ -345,9 +348,10 @@ function ConnectionForm({ initial, connections, hasKey, onKeyChanged, onConfirm,
   }
 
   async function store(c: Connection): Promise<void> {
-    const list = connections.some((x) => x.id === c.id) ? connections.map((x) => (x.id === c.id ? c : x)) : [...connections, c]
-    // The connection is saved first: Rust binds the key to the saved connection (provider, auth, origin).
-    await saveTutorConnections(list)
+    // Only this connection is written (Rust merges it into the file as it is now), never a list from
+    // an earlier render: a sign-in that finished during a slow test must survive (I1). The connection
+    // is saved before its key: Rust binds the key to the saved connection (provider, auth, origin).
+    await upsertTutorConnection(c)
     forgetModels(c.id)
   }
 

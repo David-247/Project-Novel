@@ -25,3 +25,13 @@ export function getConnections(): Promise<Connection[]> {
 export function saveConnections(connections: Connection[]): Promise<void> {
   return invoke<void>('ai_connections_save', { connections })
 }
+
+/** Add a connection, or replace the saved one with its id; Rust leaves every other connection as it is on disk. */
+export function upsertConnection(connection: Connection): Promise<void> {
+  return invoke<void>('ai_connection_upsert', { connection })
+}
+
+/** Remove one connection and its key; the others stay as they are on disk. */
+export function removeConnection(connectionId: string): Promise<void> {
+  return invoke<void>('ai_connection_remove', { connectionId })
+}
