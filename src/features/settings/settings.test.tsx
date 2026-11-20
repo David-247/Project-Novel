@@ -75,6 +75,31 @@ describe('loading preferences.json', () => {
     stop()
   })
 
+  it('a relaunch keeps object-valued preferences from the file (spell check, export folders) and writes nothing', async () => {
+    vi.useFakeTimers()
+    const saved = {
+      version: 1,
+      authorName: 'Pen Name',
+      spellcheck: { enabled: false, words: ['Aelinor', 'Brannoch'] },
+      exportFolders: { docx: 'C:/out' },
+    }
+    backend.preferences = JSON.stringify(saved)
+    const stop = startPreferencesWriter()
+    await loadPreferences()
+    expect(prefs().spellcheck).toEqual({ enabled: false, words: ['Aelinor', 'Brannoch'] })
+    expect(prefs().exportFolders).toEqual({ docx: 'C:/out' })
+    await vi.advanceTimersByTimeAsync(WRITE_DEBOUNCE_MS + 10)
+    expect(JSON.parse(backend.preferences!)).toEqual(saved) // loading never writes
+    stop()
+  })
+
+  it('a change to the spell-check preference made before the file loaded is still kept over it', async () => {
+    backend.preferences = JSON.stringify({ version: 1, authorName: 'Pen Name', spellcheck: { enabled: true, words: ['Aelinor'] } })
+    act(() => actions().set('spellcheck', { enabled: false, words: ['Zed'] }))
+    await loadPreferences()
+    expect(prefs().spellcheck).toEqual({ enabled: false, words: ['Zed'] })
+  })
+
   it('a failing backend leaves the defaults and the app running', async () => {
     const original = backend.preferences
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})

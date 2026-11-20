@@ -101,6 +101,9 @@ const NO_EXPORT_FOLDERS: Record<string, string> = Object.freeze({}) as Record<st
 
 const NO_WORDS: readonly string[] = Object.freeze([])
 
+/** The default `spellcheck`: one shared object for the same reason as NO_EXPORT_FOLDERS. */
+const DEFAULT_SPELLCHECK: PreferenceValues['spellcheck'] = Object.freeze({ enabled: true, words: NO_WORDS as string[] })
+
 /**
  * Dictionary words as stored: trimmed strings without whitespace, in range, no case-insensitive
  * duplicates, at most `limit` (one list: the user's or a project's; a merge of both passes Infinity).
@@ -160,7 +163,7 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH,
     tutorActiveConnection: null,
     tutorPlanWarningSeen: false,
-    spellcheck: { enabled: true, words: NO_WORDS as string[] },
+    spellcheck: DEFAULT_SPELLCHECK,
   }
 }
 

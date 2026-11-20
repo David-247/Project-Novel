@@ -19,6 +19,15 @@ describe('preferences slice', () => {
     expect(prefs().pageNavigation).toBe('book')
   })
 
+  it('object-valued defaults are shared objects, so a fresh default never looks like a change', () => {
+    const one = defaultPreferenceValues()
+    const two = defaultPreferenceValues()
+    for (const k of Object.keys(one) as (keyof typeof one)[]) {
+      if (typeof one[k] === 'object' && one[k] !== null) expect(two[k], k).toBe(one[k])
+    }
+    expect(Object.isFrozen(one.spellcheck)).toBe(true)
+  })
+
   it('set changes one key', () => {
     a().set('pageNavigation', 'scroll')
     a().set('authorName', 'Ada')
