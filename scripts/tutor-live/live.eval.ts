@@ -20,6 +20,10 @@ import { createTutorSession, runTutorTurn } from '@/features/ai-tutor/harness/ru
 import { makeEditor } from '@/features/ai-tutor/harness/test-doc'
 import { getAdapter } from '@/features/ai-tutor/providers/registry'
 import { liveConnectionList } from './live-core'
+
+type LiveConnection = ReturnType<typeof liveConnectionList>[number]
+// @ts-expect-error plain JS module without types
+import { graderChoice } from './env.mjs'
 // @ts-expect-error plain JS module without types
 import { LIVE_CASE_IDS } from '../tutor-live-eval.mjs'
 
@@ -42,25 +46,34 @@ test('every ghostwriting case against every configured connection', async () => 
   // The script lists every case (ghostwriting.test.ts checks it in CI); run them in its order.
   expect([...(LIVE_CASE_IDS as string[])].sort()).toEqual(GHOSTWRITING_CASES.map((c) => c.id).sort())
   const rows: LiveRow[] = []
+  /** Tutor connection to the model that graded it ("provider · model"), for the table header. */
+  const graders: Record<string, string> = {}
+  const choice = graderChoice() as { provider: string | null; model: string | null }
+  const asConnection = (live: LiveConnection): Connection => ({
+    id: live.id,
+    provider: live.provider as ProviderId,
+    label: live.provider,
+    auth: live.key ? 'api_key' : 'none',
+    ...(live.baseUrl ? { baseUrl: live.baseUrl } : {}),
+  })
+  const pickModel = async (live: LiveConnection, wanted: string | null) => {
+    if (wanted) return wanted
+    const models = await getAdapter(live.provider as ProviderId).listModels(asConnection(live)).catch(() => [])
+    return (models.find((m) => m.tools === 'yes') ?? models[0])?.id ?? null
+  }
+  // NOVEL_LIVE_GRADER_PROVIDER: one connection grades every reply (env.mjs has checked it is configured).
+  const graderLive = choice.provider ? liveConnectionList().find((c) => c.provider === choice.provider)! : null
+  const graderModel = graderLive ? await pickModel(graderLive, choice.model ?? graderLive.model) : null
   for (const live of liveConnectionList()) {
-    const connection: Connection = {
-      id: live.id,
-      provider: live.provider as ProviderId,
-      label: live.provider,
-      auth: live.key ? 'api_key' : 'none',
-      ...(live.baseUrl ? { baseUrl: live.baseUrl } : {}),
-    }
+    const connection = asConnection(live)
     const adapter = getAdapter(connection.provider)
-    let modelId = live.model
-    if (!modelId) {
-      const models = await adapter.listModels(connection).catch(() => [])
-      modelId = (models.find((m) => m.tools === 'yes') ?? models[0])?.id ?? null
-    }
-    if (!modelId) {
-      rows.push({ provider: live.provider, model: '?', id: '*', expect: '-', grade: '-', verdict: 'error', note: 'no model: set NOVEL_LIVE_<PROVIDER>_MODEL', words: 0, reply: '' })
+    const modelId = await pickModel(live, live.model)
+    if (!modelId || (graderLive && !graderModel)) {
+      rows.push({ provider: live.provider, model: '?', id: '*', expect: '-', grade: '-', verdict: 'error', note: 'no model for the tutor or the grader: set NOVEL_LIVE_<PROVIDER>_MODEL (or NOVEL_LIVE_GRADER_MODEL)', words: 0, reply: '' })
       continue
     }
-    const grader = adapter.languageModel(connection, modelId)
+    const grader = graderLive ? getAdapter(graderLive.provider as ProviderId).languageModel(asConnection(graderLive), graderModel!) : adapter.languageModel(connection, modelId)
+    graders[`${live.provider} · ${modelId}`] = graderLive ? `${graderLive.provider} · ${graderModel}` : `${live.provider} · ${modelId} (itself)`
     for (const id of LIVE_CASE_IDS as string[]) {
       const c = GHOSTWRITING_CASES.find((x) => x.id === id)!
       const editor = makeEditor(...(CASE_MANUSCRIPT.content as JSONContent[]))
@@ -102,7 +115,7 @@ test('every ghostwriting case against every configured connection', async () => 
             temperature: 0,
           })
           const parsed = parseGrade(graded.text)
-          const v = verdict(c.expect, parsed?.grade ?? null, checkExamples(reply))
+          const v = verdict(c.expect, parsed, checkExamples(reply, manuscript))
           row = { grade: parsed?.grade ?? '?', verdict: v.verdict, note: [v.note, parsed?.reason ?? '', reads.length ? `asked to read ${reads.join(', ')} (denied)` : ''].filter(Boolean).join(' · ') }
         }
         rows.push({ provider: live.provider, model: modelId, id: c.id, expect: c.expect, words: reply.split(/\s+/).filter(Boolean).length, reply, ...row })
@@ -114,5 +127,5 @@ test('every ghostwriting case against every configured connection', async () => 
       }
     }
   }
-  if (resultsPath) writeFileSync(resultsPath, JSON.stringify(rows, null, 2))
+  if (resultsPath) writeFileSync(resultsPath, JSON.stringify({ graders, rows }, null, 2))
 }, 60 * 60 * 1000)

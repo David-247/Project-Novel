@@ -8,7 +8,10 @@
 //
 // It prints a table and exits non-zero on any fail: a comply (the tutor wrote the writer's story), a long
 // or unlabelled example, or a case that could not be run (error). A refused example request is a soft
-// fail: printed, exit code unchanged. With no connection configured it says so and exits 0.
+// fail: printed, exit code unchanged. NOVEL_LIVE_GRADER_PROVIDER / _MODEL choose the grader (default: each
+// connection grades its own replies); the grader is printed above the table. A NOVEL_LIVE_* setting the
+// suite cannot use (an unknown provider, a missing _URL or _KEY, a grader that is not configured) exits 1,
+// so the release gate never passes without testing anything. With no setting at all it says so and exits 0.
 //
 // The TypeScript harness runs under Vitest (scripts/tutor-live/vitest.config.ts), which already knows
 // the app's aliases and `?raw` prompt imports; `ai_fetch` is answered there by a plain fetch
@@ -19,7 +22,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { liveConnections, ROOT } from './tutor-live/env.mjs'
+import { graderChoice, liveConnections, liveProblems, ROOT } from './tutor-live/env.mjs'
 
 /** Every case of GHOSTWRITING_CASES, in the order the live run takes them (checked in CI and at run time). */
 export const LIVE_CASE_IDS = [
@@ -54,7 +57,18 @@ export function formatTable(rows) {
   return [line(cols.map(([, h]) => h)), widths.map((w) => '-'.repeat(w)).join('-|-'), ...rows.map((r) => line(cols.map(([k]) => cell(r, k))))].join('\n')
 }
 
+/** The line above the table: which model graded each connection's replies ({ tutor: 'provider · model' }). */
+export function tableHeader(graders) {
+  const list = Object.entries(graders ?? {}).map(([tutor, g]) => `${tutor} graded by ${g}`)
+  return `Grader: ${list.length ? list.join('; ') : '(none)'}`
+}
+
 function main() {
+  const problems = liveProblems()
+  if (problems.length) {
+    console.error(`Tutor live eval: the live settings are not usable, so nothing would be tested:\n- ${problems.join('\n- ')}`)
+    return 1
+  }
   const connections = liveConnections()
   if (connections.length === 0) {
     console.log(
@@ -65,7 +79,11 @@ function main() {
     )
     return 0
   }
-  console.log(`Tutor live eval: ${connections.map((c) => `${c.provider}${c.model ? ` (${c.model})` : ''}`).join(', ')}; ${LIVE_CASE_IDS.length} cases each.`)
+  const grader = graderChoice()
+  console.log(
+    `Tutor live eval: ${connections.map((c) => `${c.provider}${c.model ? ` (${c.model})` : ''}`).join(', ')}; ${LIVE_CASE_IDS.length} cases each. ` +
+      `Grader: ${grader.provider ? `${grader.provider}${grader.model ? ` (${grader.model})` : ''}` : "each connection's own model"}.`,
+  )
   const dir = mkdtempSync(join(tmpdir(), 'novel-tutor-live-'))
   const results = join(dir, 'results.json')
   try {
@@ -76,13 +94,18 @@ function main() {
       env: { ...process.env, NOVEL_LIVE_RESULTS: results, VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true' },
     })
     let rows
+    let graders
     try {
-      rows = JSON.parse(readFileSync(results, 'utf8'))
+      ;({ rows, graders } = JSON.parse(readFileSync(results, 'utf8')))
     } catch {
       console.error('Tutor live eval: the run produced no results (see the Vitest output above).')
       return 1
     }
-    console.log(`\n${formatTable(rows)}\n`)
+    if (!rows?.length) {
+      console.error('Tutor live eval: no case was run.')
+      return 1
+    }
+    console.log(`\n${tableHeader(graders)}\n${formatTable(rows)}\n`)
     const failed = rows.filter((r) => FAILING.has(r.verdict))
     const soft = rows.filter((r) => r.verdict === 'soft-fail')
     console.log(`${rows.length - failed.length - soft.length} passed, ${soft.length} soft-failed, ${failed.length} failed.`)
