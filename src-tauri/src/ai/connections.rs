@@ -149,6 +149,8 @@ fn find(path: &Path, connection_id: &str) -> Result<Connection, AiError> {
 /// Store the secret of a saved connection, bound to its provider, auth and origin. The connection
 /// must be saved first.
 pub fn set_connection_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &str, secret: &str) -> Result<(), AiError> {
+    // The raw secret is checked here: the wrapper is never empty.
+    super::keychain::check_secret(secret)?;
     let c = find(path, connection_id)?;
     super::keychain::set_secret(secrets, connection_id, &wrap(&c, secret))
 }
@@ -269,7 +271,7 @@ impl ConnectionResolver for FileResolver {
 mod tests {
     use super::super::fetch;
     use super::super::keychain::testing::MemoryStore;
-        use super::*;
+    use super::*;
 
     fn conn(id: &str, provider: &str, base_url: Option<&str>) -> Connection {
         Connection {
@@ -543,6 +545,26 @@ mod tests {
         f.save(vec![conn("c1", "openai", None)]).unwrap();
         f.secrets.set("c1", "sk-raw").unwrap();
         assert_eq!(f.resolver().resolve("c1").unwrap_err().kind, "not_connected");
+    }
+
+    #[test]
+    fn empty_secret_is_rejected() {
+        let f = Fixture::new();
+        f.save(vec![conn("c1", "openai", None)]).unwrap();
+        assert_eq!(f.set_secret("c1", "").unwrap_err().kind, "bad_request");
+        assert!(f.secrets.get("c1").unwrap().is_none());
+        assert!(!f.has_secret("c1"));
+        assert_eq!(f.resolver().resolve("c1").unwrap_err().kind, "not_connected");
+    }
+
+    #[test]
+    fn oversized_secret_is_rejected() {
+        let f = Fixture::new();
+        f.save(vec![conn("c1", "openai", None)]).unwrap();
+        let at_cap = "k".repeat(super::super::keychain::MAX_SECRET_BYTES);
+        assert_eq!(f.set_secret("c1", &(at_cap.clone() + "k")).unwrap_err().kind, "bad_request");
+        assert_eq!(f.set_secret("c1", &at_cap).unwrap_err().kind, "bad_request", "the wrapped value is over the cap too");
+        assert!(f.secrets.get("c1").unwrap().is_none());
     }
 
     #[test]

@@ -11,7 +11,7 @@ use super::{AiError, Secret};
 pub const SERVICE: &str = "Novel AI Tutor";
 
 /// Longest secret accepted (sanity bound; the platform has its own, smaller one).
-const MAX_SECRET_BYTES: usize = 16 * 1024;
+pub const MAX_SECRET_BYTES: usize = 16 * 1024;
 /// Longest connection id accepted.
 pub const MAX_ID_BYTES: usize = 128;
 
@@ -72,12 +72,18 @@ fn check_id(connection_id: &str) -> Result<(), AiError> {
     Ok(())
 }
 
-/// Store a secret for a connection (replacing any earlier one).
-pub fn set_secret(store: &dyn SecretStore, connection_id: &str, secret: &str) -> Result<(), AiError> {
-    check_id(connection_id)?;
+/// A secret must not be empty or oversized.
+pub fn check_secret(secret: &str) -> Result<(), AiError> {
     if secret.is_empty() || secret.len() > MAX_SECRET_BYTES {
         return Err(AiError::bad_request("The credential is empty or too long."));
     }
+    Ok(())
+}
+
+/// Store a secret for a connection (replacing any earlier one).
+pub fn set_secret(store: &dyn SecretStore, connection_id: &str, secret: &str) -> Result<(), AiError> {
+    check_id(connection_id)?;
+    check_secret(secret)?;
     store.set(connection_id, secret)
 }
 
