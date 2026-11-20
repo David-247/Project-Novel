@@ -177,9 +177,9 @@ https://developers.openai.com/siwc/website
    with `prompt=consent` if the plan was declined. A declined scope still adds no connection: the
    tutor cannot use a sign-in without the plan. If two such accounts are known, Novel does not guess
    and registers instead. Settings names the account it will reuse and offers **Use Another Account**.
-   A reuse that fails for any reason other than a cancel or a no is not tried again. A client OpenAI no
+   When OpenAI refuses a reuse for this sign-in, the account is not tried again. A client OpenAI no
    longer knows (`invalid_client`, for example after the writer disconnected Novel in ChatGPT Settings)
-   is forgotten.
+   is forgotten. Timeouts, transport errors and stray local requests change nothing.
 
 ## What Novel built
 

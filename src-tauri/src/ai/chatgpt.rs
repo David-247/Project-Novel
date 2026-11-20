@@ -287,6 +287,9 @@ const NOT_EXPECTED: &str = "The sign-in reply was not the one Novel expected. Tr
 /// no longer knows the client id Novel sent.
 pub const DENIED: &str = "denied";
 pub const INVALID_CLIENT: &str = "invalid_client";
+/// OpenAI answered this sign-in (after the `state` check) with a refusal other than the two above: an
+/// `error` on the callback, another client id, or an OAuth error body from the token endpoint.
+pub const OPENAI_REFUSED: &str = "openai_refused";
 const STALE_CLIENT: &str = "ChatGPT no longer knows the registration Novel saved for this account, so Novel forgot it. Continue with ChatGPT again to sign in.";
 
 /// The code and client id in a callback request head: exactly `GET <callback_path>?...` with this
@@ -324,7 +327,7 @@ pub fn parse_callback(head: &str, plan: &PlanSignIn, state: &str, saved_client: 
         } else if errors.iter().any(|e| e == "invalid_client" || e == "unauthorized_client") {
             AiError::new(INVALID_CLIENT, STALE_CLIENT)
         } else {
-            refused("ChatGPT did not finish the sign-in. Try again.")
+            AiError::new(OPENAI_REFUSED, "ChatGPT did not finish the sign-in. Try again.")
         });
     }
     let code = match codes.as_slice() {
@@ -334,7 +337,7 @@ pub fn parse_callback(head: &str, plan: &PlanSignIn, state: &str, saved_client: 
     let client_id = match (clients.as_slice(), saved_client) {
         ([], Some(saved)) => saved.to_owned(),
         ([c], Some(saved)) if c == saved => c.clone(),
-        ([_], Some(_)) => return Err(refused("ChatGPT answered for another registration, so Novel saved nothing. Try again.")),
+        ([_], Some(_)) => return Err(AiError::new(OPENAI_REFUSED, "ChatGPT answered for another registration, so Novel saved nothing. Try again.")),
         ([c], None) if token_ok(c, MAX_ID_CHARS) && c != plan.register_client => c.clone(),
         _ => return Err(refused("ChatGPT did not finish registering Novel. Try again.")),
     };
@@ -449,9 +452,12 @@ pub async fn exchange_code(client: &reqwest::Client, plan: &PlanSignIn, client_i
     let (status, body) = post_form(client, plan.token_url, &form).await?;
     if !(200..300).contains(&status) {
         return Err(match error_code(&body).as_deref() {
-            Some("invalid_grant") => AiError::new("auth", "The sign-in code expired before Novel could use it. Try again."),
             Some("invalid_client" | "unauthorized_client") => AiError::new(INVALID_CLIENT, STALE_CLIENT),
-            _ => AiError::new("auth", format!("ChatGPT refused the sign-in (HTTP {status}). Try again.")),
+            Some("invalid_grant") => AiError::new(OPENAI_REFUSED, "The sign-in code expired before Novel could use it. Try again."),
+            // An OAuth error body: OpenAI refused this exchange.
+            Some(_) => AiError::new(OPENAI_REFUSED, format!("ChatGPT refused the sign-in (HTTP {status}). Try again.")),
+            // No error body (a proxy, an outage page): not known to be OpenAI's answer.
+            None => AiError::new("auth", format!("ChatGPT refused the sign-in (HTTP {status}). Try again.")),
         });
     }
     let tokens = read_tokens(&body)?;
@@ -964,20 +970,34 @@ fn reauth_for(path: &Path, provider: &str, connection_id: &str) -> Result<Reauth
     })
 }
 
-/// A reuse of a known account's client (`connection_id` None) failed before anything was saved. Kept as
-/// is only when the writer cancelled or said no. A client OpenAI no longer knows is forgotten (the next
-/// sign-in registers anew); any other failure (another client came back, an OpenAI error, a refused
-/// exchange, an ID token that does not check out, a timeout) marks the account to be skipped next time,
-/// so a dead client is never retried forever.
+/// A reuse of a known account's client (`connection_id` None) failed before anything was saved. Saved
+/// state changes only for an answer that clearly came from OpenAI for this sign-in (after the `state`
+/// check): a client OpenAI no longer knows is forgotten (the next sign-in registers anew), and any other
+/// OpenAI refusal marks the account to be skipped next time, so a dead client is never retried forever.
+/// A timeout, a local or transport error, a stray loopback request, a cancel or a no change nothing.
 pub fn after_reuse_failure(host_path: &Path, reuse: &Reauth, e: &AiError) -> Result<(), AiError> {
     if reuse.connection_id.is_some() {
         return Ok(());
     }
     match e.kind {
-        "cancelled" | "superseded" | DENIED => Ok(()),
         INVALID_CLIENT => forget_account(host_path, &reuse.sub),
-        _ => skip_account(host_path, &reuse.sub),
+        OPENAI_REFUSED => skip_account(host_path, &reuse.sub),
+        _ => Ok(()),
     }
+}
+
+/// ChatGPT's callback, screened like OpenRouter's: another method or path, or a missing or foreign
+/// `state`, is ignored (a 4xx, and the wait goes on); a request with this sign-in's `state` ends it.
+pub fn classify_callback(head: &str, plan: &PlanSignIn, state: &str, saved_client: Option<&str>) -> oauth::Reply<Callback> {
+    let url = match oauth::screen(head, plan.callback_path) {
+        Ok(u) => u,
+        Err(status) => return oauth::Reply::Ignore(status),
+    };
+    let states = oauth::params(&url, "state");
+    if states.len() != 1 || !oauth::same(&states[0], state) {
+        return oauth::Reply::Ignore("400 Bad Request");
+    }
+    oauth::Reply::Done(parse_callback(head, plan, state, saved_client))
 }
 
 /// Forget an account entirely (its client id is dead).
@@ -1054,7 +1074,7 @@ pub async fn start<R: Runtime>(
             let wanted = stop.clone();
             let saved_client = reauth.as_ref().map(|r| r.client_id.clone());
             let verified = async {
-                let callback = oauth::wait_for_reply(listener, CALLBACK_TIMEOUT, stop, |head| parse_callback(head, &plan, &state, saved_client.as_deref())).await?;
+                let callback = oauth::wait_for_reply(listener, CALLBACK_TIMEOUT, stop, |head| classify_callback(head, &plan, &state, saved_client.as_deref())).await?;
                 let redirect = redirect_uri(&plan, port);
                 exchange_and_verify(&client, &plan, &callback, &pkce.verifier, &redirect, &nonce, now_secs()).await
             }
@@ -1806,9 +1826,10 @@ mod tests {
             ("superseded", "kept"),
             (DENIED, "kept"),
             (INVALID_CLIENT, "forgotten"),
-            ("auth", "skipped"),     // another client id came back, an OpenAI error, a refused exchange, a bad ID token
-            ("network", "skipped"),  // OpenAI unreachable
-            ("provider", "skipped"), // an unreadable answer
+            (OPENAI_REFUSED, "skipped"), // an OpenAI error on this sign-in's callback, another client id, an OAuth error body
+            ("auth", "kept"),            // a timeout, a stray request, a body that is not OpenAI's
+            ("network", "kept"),         // a transport error
+            ("provider", "kept"),        // an unreadable answer
         ];
         for (kind, want) in kinds {
             let (f, r) = reuse_with_dead_client();
@@ -1850,9 +1871,9 @@ mod tests {
         assert_eq!(kind("GET /auth/callback?error=access_denied&state=S HTTP/1.1\r\n\r\n"), DENIED);
         assert_eq!(kind("GET /auth/callback?error=invalid_client&state=S HTTP/1.1\r\n\r\n"), INVALID_CLIENT);
         assert_eq!(kind("GET /auth/callback?error=unauthorized_client&state=S HTTP/1.1\r\n\r\n"), INVALID_CLIENT);
-        assert_eq!(kind("GET /auth/callback?error=server_error&state=S HTTP/1.1\r\n\r\n"), "auth");
+        assert_eq!(kind("GET /auth/callback?error=server_error&state=S HTTP/1.1\r\n\r\n"), OPENAI_REFUSED);
         let other = parse_callback("GET /auth/callback?code=C&state=S&client_id=oaiapp_2 HTTP/1.1\r\n\r\n", &p, "S", Some("oaiapp_1")).unwrap_err();
-        assert_eq!(other.kind, "auth");
+        assert_eq!(other.kind, OPENAI_REFUSED);
         assert!(!other.message.contains("kept this connection"), "no connection exists in a reuse: {}", other.message);
     }
 
@@ -1882,6 +1903,93 @@ mod tests {
         assert_eq!(subs, ["second-sub", "user-sub"]);
         // The first account is still the one a plain Continue with ChatGPT would reuse.
         assert_eq!(reusable_email(&f.conns(), &f.host()).unwrap().as_deref(), Some("writer@example.com"));
+    }
+
+    #[tokio::test]
+    async fn the_failure_kinds_of_the_exchange() {
+        let client = super::super::fetch::client();
+        for (status, body, want) in [
+            ("400 Bad Request", r#"{"error":"invalid_grant"}"#, OPENAI_REFUSED),
+            ("400 Bad Request", r#"{"error":"server_error"}"#, OPENAI_REFUSED),
+            ("502 Bad Gateway", "<html>proxy</html>", "auth"),
+        ] {
+            let (base, _) = mock(status, body).await;
+            let e = exchange_code(&client, &plan_at(&base), "oaiapp_1", "C", "V", "x").await.unwrap_err();
+            assert_eq!(e.kind, want, "{status} {body}");
+        }
+        // Nobody listening: a transport error.
+        let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let base = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
+        drop(l);
+        assert_eq!(exchange_code(&client, &plan_at(&base), "oaiapp_1", "C", "V", "x").await.unwrap_err().kind, "network");
+    }
+
+    #[test]
+    fn a_timeout_or_a_transport_error_leaves_the_known_account_as_it_was() {
+        let (f, r) = reuse_with_dead_client();
+        let before = f.accounts();
+        for e in [
+            oauth::refused("The sign-in timed out. Try again."),
+            AiError::new("network", "Novel could not reach ChatGPT. Check your connection and try again."),
+            AiError::cancelled(),
+        ] {
+            after_reuse_failure(&f.host(), &r, &e).unwrap();
+            assert_eq!(f.accounts(), before, "{}", e.message);
+        }
+        assert!(reuse(&f).is_some());
+        // invalid_client forgets; another OpenAI error skips.
+        after_reuse_failure(&f.host(), &r, &AiError::new(OPENAI_REFUSED, "x")).unwrap();
+        assert!(f.accounts()[0].skip);
+        let (f, r) = reuse_with_dead_client();
+        after_reuse_failure(&f.host(), &r, &AiError::new(INVALID_CLIENT, "x")).unwrap();
+        assert!(f.accounts().is_empty());
+    }
+
+    async fn send(port: u16, request: &str) -> String {
+        let mut s = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
+        s.write_all(request.as_bytes()).await.unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out).await;
+        out
+    }
+
+    #[tokio::test]
+    async fn stray_loopback_requests_are_ignored_and_the_real_callback_still_succeeds() {
+        let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let (_tx, rx) = tokio::sync::watch::channel(oauth::Stop::Running);
+        let wait = tokio::spawn(async move {
+            let p = plan();
+            oauth::wait_for_reply(l, Duration::from_secs(5), rx, |h| classify_callback(h, &p, "S", Some("oaiapp_1"))).await
+        });
+        for (stray, status) in [
+            ("GET /auth/callback?code=C&state=WRONG HTTP/1.1\r\n\r\n", "400"),
+            ("GET /auth/callback?error=invalid_client HTTP/1.1\r\n\r\n", "400"), // an error without this state
+            ("GET /auth/callback?error=invalid_client&state=WRONG HTTP/1.1\r\n\r\n", "400"),
+            ("POST /auth/callback?code=C&state=S HTTP/1.1\r\nContent-Length: 0\r\n\r\n", "405"),
+            ("GET /callback?code=C&state=S HTTP/1.1\r\n\r\n", "404"),
+        ] {
+            let page = send(port, stray).await;
+            assert!(page.starts_with(&format!("HTTP/1.1 {status}")), "{stray}: {page}");
+            assert!(!wait.is_finished(), "{stray}: still waiting");
+        }
+        let page = send(port, "GET /auth/callback?code=REAL&state=S HTTP/1.1\r\n\r\n").await;
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        let cb = wait.await.unwrap().unwrap();
+        assert_eq!((cb.code.as_str(), cb.client_id.as_str()), ("REAL", "oaiapp_1"));
+    }
+
+    #[tokio::test]
+    async fn an_openai_error_with_this_state_ends_the_wait() {
+        let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let (_tx, rx) = tokio::sync::watch::channel(oauth::Stop::Running);
+        let wait = tokio::spawn(async move {
+            let p = plan();
+            oauth::wait_for_reply(l, Duration::from_secs(5), rx, |h| classify_callback(h, &p, "S", Some("oaiapp_1"))).await
+        });
+        send(port, "GET /auth/callback?error=invalid_client&state=S HTTP/1.1\r\n\r\n").await;
+        assert_eq!(wait.await.unwrap().unwrap_err().kind, INVALID_CLIENT);
     }
 
 }

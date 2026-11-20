@@ -7,8 +7,10 @@
 //! A random one-time `state` nonce goes with it; OpenRouter returns it unchanged on the callback
 //! (ruling R16: a callback without it, or with another, is refused).
 //!
-//! The listener serves exactly one request, then closes (or gives up after five minutes). That request
-//! must be `GET /callback?code=..&state=<nonce>`; anything else ends the sign-in with an error. The
+//! The listener waits for `GET /callback?code=..&state=<nonce>`, then closes (or gives up after five
+//! minutes). A request with another method or path, or a code without this sign-in's `state`, gets a
+//! plain 4xx and is ignored, so a stray local request cannot end the sign-in; OpenRouter's denial (no
+//! code) still ends it. The
 //! code is exchanged here, in Rust (a POST to the descriptor's `sign_in.keys_url` with the verifier),
 //! and the key goes straight to the keychain under a new saved connection. The key never reaches the
 //! webview: the `ai-oauth-result` event carries `{ ok, connectionId?, error? }` only. Neither the code
@@ -54,6 +56,9 @@ const CALLBACK_PATH: &str = "/callback";
 const DONE_PAGE: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Novel</title></head>\
 <body style=\"font-family:system-ui,sans-serif;margin:3rem;line-height:1.5\"><h1>Return to Novel</h1>\
 <p>Novel is finishing the sign-in. You can close this tab and go back to Novel.</p></body></html>";
+const IGNORED_PAGE: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Novel</title></head>\
+<body style=\"font-family:system-ui,sans-serif;margin:3rem;line-height:1.5\"><h1>Not a sign-in reply</h1>\
+<p>This page is not part of a sign-in. Novel is still waiting for your browser.</p></body></html>";
 const FAILED_PAGE: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Novel</title></head>\
 <body style=\"font-family:system-ui,sans-serif;margin:3rem;line-height:1.5\"><h1>The sign-in did not finish</h1>\
 <p>Close this tab, return to Novel and try again.</p></body></html>";
@@ -156,6 +161,54 @@ pub fn parse_callback(head: &str, nonce: &str) -> Result<String, AiError> {
     }
 }
 
+/// What a callback parser makes of one request on the loopback port.
+pub enum Reply<T> {
+    /// This sign-in's answer: the callback (Ok), or the provider's refusal for this sign-in (Err).
+    Done(Result<T, AiError>),
+    /// Not this sign-in's callback (another method or path, a missing or foreign `state`): answered with
+    /// this status and ignored, so a stray local request cannot end the sign-in.
+    Ignore(&'static str),
+}
+
+/// The URL of a request head that is `GET <origin-form target> HTTP/x` on `path`, else the status to
+/// ignore it with (405 for another method, 404 for another path, 400 for anything unreadable).
+pub fn screen(head: &str, path: &str) -> Result<Url, &'static str> {
+    let line = head.lines().next().unwrap_or_default();
+    let mut parts = line.split(' ');
+    let (method, target, version) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default(), parts.next());
+    if !version.is_some_and(|v| v.starts_with("HTTP/")) || parts.next().is_some() || !target.starts_with('/') {
+        return Err("400 Bad Request");
+    }
+    if method != "GET" {
+        return Err("405 Method Not Allowed");
+    }
+    let url = Url::parse(&format!("http://127.0.0.1{target}")).map_err(|_| "400 Bad Request")?;
+    if url.path() != path {
+        return Err("404 Not Found");
+    }
+    Ok(url)
+}
+
+/// The values of one query parameter.
+pub fn params(url: &Url, name: &str) -> Vec<String> {
+    url.query_pairs().filter(|(k, _)| k == name).map(|(_, v)| v.into_owned()).collect()
+}
+
+/// OpenRouter's callback, screened: another method or path, or a code with a missing or foreign `state`,
+/// is ignored. A `GET /callback` without a code is OpenRouter's documented denial (it sends no `state`
+/// then), so it still ends the sign-in; that changes nothing saved.
+pub fn classify_callback(head: &str, nonce: &str) -> Reply<String> {
+    let url = match screen(head, CALLBACK_PATH) {
+        Ok(u) => u,
+        Err(status) => return Reply::Ignore(status),
+    };
+    let states = params(&url, "state");
+    if !params(&url, "code").is_empty() && (states.len() != 1 || !same(&states[0], nonce)) {
+        return Reply::Ignore("400 Bad Request");
+    }
+    Reply::Done(parse_callback(head, nonce))
+}
+
 /// Read one request head (up to the blank line), bounded in size and time.
 async fn read_head(stream: &mut TcpStream) -> Option<String> {
     let mut buf = Vec::with_capacity(1024);
@@ -200,9 +253,9 @@ pub enum Stop {
     Superseded,
 }
 
-/// Wait for the one callback request and return its code. The first connection whose request head
-/// arrives decides: a valid callback gets the "return to Novel" page, anything else a refusal and an
-/// error. Heads are read concurrently (M4), so a connection that sends nothing (a browser preconnect,
+/// Wait for the callback request and return its code. A request that is not this sign-in's callback
+/// (another method or path, a missing or foreign `state`) gets a plain 4xx and is ignored; the wait goes
+/// on until the real callback or the timeout. Heads are read concurrently (M4), so a connection that sends nothing (a browser preconnect,
 /// any local process) cannot hold up the real callback; one that closes or stays silent for
 /// `REQUEST_TIMEOUT` simply does not count. The listener, and every connection still being read, is
 /// closed when this returns.
@@ -212,7 +265,7 @@ pub async fn wait_for_callback(
     timeout: Duration,
     stop: watch::Receiver<Stop>,
 ) -> Result<String, AiError> {
-    wait_for_reply(listener, timeout, stop, |head| parse_callback(head, nonce)).await
+    wait_for_reply(listener, timeout, stop, |head| classify_callback(head, nonce)).await
 }
 
 /// [`wait_for_callback`] with the provider's own callback parser (`chatgpt.rs` reads more than a code).
@@ -220,7 +273,7 @@ pub async fn wait_for_reply<T>(
     listener: TcpListener,
     timeout: Duration,
     mut stop: watch::Receiver<Stop>,
-    parse: impl Fn(&str) -> Result<T, AiError>,
+    parse: impl Fn(&str) -> Reply<T>,
 ) -> Result<T, AiError> {
     let wait = async {
         let mut pending: JoinSet<Option<(TcpStream, String)>> = JoinSet::new();
@@ -242,14 +295,18 @@ pub async fn wait_for_reply<T>(
                 Some(done) = pending.join_next(), if !pending.is_empty() => {
                     let Ok(Some((mut stream, head))) = done else { continue };
                     return match parse(&head) {
-                        Ok(reply) => {
+                        Reply::Done(Ok(reply)) => {
                             respond(&mut stream, "200 OK", DONE_PAGE).await;
                             Ok(reply)
                         }
-                        Err(e) => {
-                            let status = if head.starts_with("GET ") { "400 Bad Request" } else { "405 Method Not Allowed" };
-                            respond(&mut stream, status, FAILED_PAGE).await;
+                        Reply::Done(Err(e)) => {
+                            respond(&mut stream, "400 Bad Request", FAILED_PAGE).await;
                             Err(e)
+                        }
+                        Reply::Ignore(status) => {
+                            // Not this sign-in's callback: answer plainly and keep listening.
+                            respond(&mut stream, status, IGNORED_PAGE).await;
+                            continue;
                         }
                     };
                 }
@@ -675,16 +732,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn callback_rejects_state_mismatch() {
+    async fn a_wrong_state_is_ignored_and_the_real_callback_still_succeeds() {
         let (l, port) = listener().await;
         let (_tx, rx) = running();
-        let wait = tokio::spawn(async move { wait_for_callback(l, "right-nonce", Duration::from_secs(5), rx).await });
-        let page = send(port, "GET /callback?code=c&state=wrong-nonce HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").await;
-        assert!(page.starts_with("HTTP/1.1 400"), "{page}");
-        assert!(!page.contains("<script"));
-        let err = wait.await.unwrap().unwrap_err();
-        assert_eq!(err.kind, "auth");
-        // Served one request, then closed: a second (even a valid one) finds nobody listening.
+        let wait = tokio::spawn(async move { wait_for_callback(l, "n0nce", Duration::from_secs(5), rx).await });
+        for stray in [
+            "GET /callback?code=c&state=wrong-nonce HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            "GET /callback?code=c HTTP/1.1\r\n\r\n",
+        ] {
+            let page = send(port, stray).await;
+            assert!(page.starts_with("HTTP/1.1 400"), "{page}");
+            assert!(!page.contains("<script") && page.contains("Not a sign-in reply"));
+        }
+        assert!(!wait.is_finished(), "still waiting");
+        let page = send(port, GOOD).await;
+        assert!(page.starts_with("HTTP/1.1 200"), "{page}");
+        assert_eq!(wait.await.unwrap().unwrap(), "the-code");
+        // Closed after the callback.
         assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.is_err());
     }
 
@@ -704,15 +768,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn callback_rejects_post_and_other_paths() {
-        for req in ["POST /callback?code=c&state=n0nce HTTP/1.1\r\nContent-Length: 0\r\n\r\n", "GET /other?code=c&state=n0nce HTTP/1.1\r\n\r\n"] {
+    async fn another_method_or_path_is_ignored() {
+        for (req, status) in [
+            ("POST /callback?code=c&state=n0nce HTTP/1.1\r\nContent-Length: 0\r\n\r\n", "405"),
+            ("GET /other?code=c&state=n0nce HTTP/1.1\r\n\r\n", "404"),
+            ("GET /favicon.ico HTTP/1.1\r\n\r\n", "404"),
+            ("garbage\r\n\r\n", "400"),
+        ] {
             let (l, port) = listener().await;
             let (_tx, rx) = running();
             let wait = tokio::spawn(async move { wait_for_callback(l, "n0nce", Duration::from_secs(5), rx).await });
             let page = send(port, req).await;
-            assert!(page.starts_with("HTTP/1.1 4"), "{page}");
-            assert!(wait.await.unwrap().is_err(), "{req}");
+            assert!(page.starts_with(&format!("HTTP/1.1 {status}")), "{req}: {page}");
+            assert!(!wait.is_finished(), "{req}: still waiting");
+            assert!(send(port, GOOD).await.starts_with("HTTP/1.1 200"));
+            assert_eq!(wait.await.unwrap().unwrap(), "the-code", "{req}");
         }
+    }
+
+    #[tokio::test]
+    async fn openrouters_denial_still_ends_the_wait() {
+        let (l, port) = listener().await;
+        let (_tx, rx) = running();
+        let wait = tokio::spawn(async move { wait_for_callback(l, "n0nce", Duration::from_secs(5), rx).await });
+        let page = send(port, "GET /callback?error=access_denied HTTP/1.1\r\n\r\n").await;
+        assert!(page.starts_with("HTTP/1.1 400"), "{page}");
+        assert!(wait.await.unwrap().unwrap_err().message.contains("did not grant access"));
     }
 
     #[tokio::test]
