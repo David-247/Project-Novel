@@ -15,6 +15,6 @@ export const qwen: ProviderAdapter = {
   label: 'Qwen (Alibaba)',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://modelstudio.console.alibabacloud.com/',
-  listModels: (c) => listHostedModels(c, MODELS),
+  listModels: (c, opts) => listHostedModels(c, MODELS, opts),
   languageModel: compatModel,
 }

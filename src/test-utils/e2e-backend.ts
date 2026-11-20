@@ -167,6 +167,14 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       for (const r of replies) core.ai.queue.push({ events: openAiChatStream(r) })
     },
     aiRequests: () => core.ai.requests.length,
+    /** ai-connections.json as stored (no secret may ever appear in it). */
+    tutorConnectionsFile: () => JSON.stringify(core.ai.connections),
+    /** The connection ids the keychain holds a secret for, and whether one holds exactly `value`. */
+    tutorSecretIds: () => [...core.ai.secrets.keys()],
+    tutorSecretIs: (id: string, value: string) => core.ai.secrets.get(id) === value,
+    /** Sign in with OpenRouter: the providers Rust was asked to open, and finishing it as Rust does (returns the id). */
+    oauthStarts: () => [...core.ai.oauthStarts],
+    completeOAuth: (key: string) => core.completeOAuth(key),
     /** The tutor's chat history as stored (project id to chat titles). */
     tutorHistory: () => Object.fromEntries([...core.ai.history].map(([project, chats]) => [project, [...chats.values()].map((c) => c.title)])),
     /** The export wizard's fixture: manuscript.json, comments.json, rewrites.json and the book's styles. */

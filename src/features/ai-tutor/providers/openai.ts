@@ -15,7 +15,7 @@ export const openai: ProviderAdapter = {
   label: 'OpenAI',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://platform.openai.com/api-keys',
-  listModels: (c) => listHostedModels(c, MODELS),
+  listModels: (c, opts) => listHostedModels(c, MODELS, opts),
   // `.chat` is Chat Completions (`/chat/completions`); the default model object would use `/responses`.
   languageModel: (c, modelId) => createOpenAI(sdkOptions(c)).chat(modelId),
 }

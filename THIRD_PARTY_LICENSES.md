@@ -33,3 +33,14 @@ has an allowed licence, and has its licence text in `src-tauri/resources/license
 - Copyright: Digitized data copyright (c) 2010 Google Corporation with Reserved Font Arimo, Tinos and Cousine;
   copyright (c) 2012 Red Hat, Inc. with Reserved Font Name Liberation.
 - The fonts are embedded (subset) in exported PDFs, which the OFL permits.
+
+## Rust crates added for the AI tutor (packages, recorded here as the Phase 5 plan asks)
+
+These are packages, checked by `cargo deny check licenses` like every other crate; they ship compiled into the app
+binary, not as separate files, so the bundled-file gate does not apply to them.
+
+- `open` 5.4.5 (`MIT`, https://github.com/Byron/open-rs), with its `shellexecute-on-windows` feature, which adds
+  `dunce` 1.0.5 (`CC0-1.0 OR MIT-0 OR Apache-2.0`). Opens the system browser from Rust for Sign in with OpenRouter and
+  each provider's "Get a Key" page (`src-tauri/src/ai/oauth.rs`).
+- `ring` 0.17.14 (`Apache-2.0 AND ISC`), already in the app as rustls' crypto provider, now also named directly for
+  the PKCE verifier and its SHA-256 challenge.

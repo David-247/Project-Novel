@@ -153,6 +153,16 @@ export function chooseModel(connectionId: string, modelId: string, setActive: (i
   set({ modelId })
 }
 
+/** A connection was saved or removed in Settings: list its models again next time (or set them, after a test). */
+export function forgetModels(connectionId: string, models?: ModelInfo[]): void {
+  set((s) => {
+    const next = { ...s.models }
+    if (models) next[connectionId] = { status: 'ready', models }
+    else delete next[connectionId]
+    return { models: next }
+  })
+}
+
 /** The active connection changed elsewhere (Settings): forget a model chosen for the old one. */
 export function connectionChanged(): void {
   set({ modelId: null })

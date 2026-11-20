@@ -29,6 +29,7 @@ const hoisted = vi.hoisted(() => ({ model: null as unknown }))
 vi.mock('@/features/ai-tutor/providers/registry', () => ({
   getAdapter: () => ({
     label: 'Test provider',
+    connectKinds: ['api_key'],
     languageModel: () => hoisted.model,
     listModels: async () => [
       { id: 'gpt-test', label: 'GPT Test', tools: 'yes' },
@@ -39,8 +40,8 @@ vi.mock('@/features/ai-tutor/providers/registry', () => ({
   modelSupportsTools: (c: { toolSupport?: Record<string, boolean> }, m: { id: string; tools: string }) => c.toolSupport?.[m.id] ?? m.tools === 'yes',
 }))
 
-import { closeTutor, isTutorOpen, TUTOR_CONTROLS as C, TUTOR_SHORTCUT, useTutorHistory } from '@/features/ai-tutor'
-import { closeSettings } from '@/features/settings'
+import { AI_SETTINGS_PAGE_ID, closeTutor, isTutorOpen, TUTOR_CONTROLS as C, TUTOR_SHORTCUT, useTutorHistory } from '@/features/ai-tutor'
+import { closeSettings, openSettings } from '@/features/settings'
 import { openProject } from '@/features/storage'
 import { App } from './App'
 
@@ -285,7 +286,7 @@ describe('tooltip and keyboard audits of the tutor panel', () => {
     keyboardAudit('history')
   })
 
-  it('not connected: the scripted reply and "Connect a Provider…" (opens Settings)', async () => {
+  it('not connected: the scripted reply and "Connect a Provider…" (opens Settings ▸ AI Tutor)', async () => {
     await renderApp({ connected: false })
     act(() => void runCommand(C.toggle.id))
     await focusComposer()
@@ -294,7 +295,23 @@ describe('tooltip and keyboard audits of the tutor panel', () => {
     const connect = await within(panel()).findByRole('button', { name: 'Connect a Provider…' })
     audit('not connected')
     fireEvent.click(connect)
-    expect(await screen.findByRole('dialog', { name: /Settings/ })).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: /Settings/ })
+    expect(within(dialog).getByRole('tab', { name: 'AI Tutor' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(dialog).getByRole('tabpanel')).toHaveTextContent("Claude subscriptions can't be used by other apps (Anthropic's rule). Use an API key or OpenRouter.")
+    audit('Settings ▸ AI Tutor')
+  })
+
+  it("openSettings('ai-tutor') opens Settings on the AI Tutor page; General is still first", async () => {
+    await renderApp()
+    act(() => openSettings(AI_SETTINGS_PAGE_ID))
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(within(dialog).getAllByRole('tab').map((t) => t.textContent)).toEqual(['General', 'AI Tutor'])
+    expect(within(dialog).getByRole('tab', { name: 'AI Tutor' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(dialog).getByRole('region', { name: 'Connections' })).toHaveTextContent('OpenAI')
+    expect(within(dialog).getByRole('region', { name: 'Chat history' })).toHaveTextContent('Chats are saved on this computer with the text you attached.')
+    act(() => closeSettings())
+    act(() => openSettings())
+    expect((await screen.findByRole('tab', { name: 'General' }))).toHaveAttribute('aria-selected', 'true')
   })
 })
 

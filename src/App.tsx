@@ -35,6 +35,7 @@ import {
   ensureAuthorName,
   getAuthor,
   openSettings,
+  registerSettingsPage,
   registerSettingsCommands,
   SettingsDialog,
   useSettingsIntegration,
@@ -61,7 +62,7 @@ import { createSpellcheckExtension, registerDictionarySideFile, registerSpellche
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
 import { createManuscriptExportRenderers, ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile, setExportRenderers } from '@/features/export'
 import { NavigationPane, registerOutlineCommands } from '@/features/outline'
-import { registerTutorCommands, setTutorConnectAction, TutorPanel } from '@/features/ai-tutor'
+import { AI_SETTINGS_PAGE_ID, AiTutorSettings, registerTutorCommands, setTutorConnectAction, TutorPanel } from '@/features/ai-tutor'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -138,10 +139,20 @@ export function App() {
     return () => offs.forEach((off) => off())
   }, [])
   useAppMenus()
-  // "Connect a Provider…" in the tutor opens Settings (TODO Task 10: on its AI Tutor page).
+  // Settings ▸ AI Tutor (the tutor's connections and chat history), and "Connect a Provider…" in the
+  // tutor opens Settings on it.
   useEffect(() => {
-    setTutorConnectAction(() => openSettings())
-    return () => setTutorConnectAction(null)
+    const offPage = registerSettingsPage({
+      id: AI_SETTINGS_PAGE_ID,
+      label: 'AI Tutor',
+      description: 'Connect the tutor to an AI provider or a model on this computer, and clear its chat history.',
+      component: AiTutorSettings,
+    })
+    setTutorConnectAction(() => openSettings(AI_SETTINGS_PAGE_ID))
+    return () => {
+      setTutorConnectAction(null)
+      offPage()
+    }
   }, [])
   // comments.json is saved, autosaved and recovered with the manuscript (storage side file).
   useEffect(() => registerCommentsSideFile(), [])

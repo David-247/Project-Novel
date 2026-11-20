@@ -15,6 +15,6 @@ export const zhipu: ProviderAdapter = {
   label: 'GLM (Zhipu AI)',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
-  listModels: (c) => listHostedModels(c, MODELS),
+  listModels: (c, opts) => listHostedModels(c, MODELS, opts),
   languageModel: compatModel,
 }

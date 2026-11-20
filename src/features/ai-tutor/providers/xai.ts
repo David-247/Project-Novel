@@ -11,6 +11,6 @@ export const xai: ProviderAdapter = {
   label: 'xAI',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://console.x.ai',
-  listModels: (c) => listHostedModels(c, MODELS),
+  listModels: (c, opts) => listHostedModels(c, MODELS, opts),
   languageModel: (c, modelId) => createXai(sdkOptions(c)).languageModel(modelId),
 }

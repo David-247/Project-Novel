@@ -2,7 +2,7 @@ import { generateText, tool, type LanguageModel } from 'ai'
 import { z } from 'zod'
 import { createTauriFetch } from '../net/tauri-fetch'
 import type { Connection } from '../connections/types'
-import type { ModelInfo } from './types'
+import type { ListModelsOptions, ModelInfo } from './types'
 
 /**
  * The origin every SDK provider is built with. The fetch shim drops it and forwards only the path;
@@ -43,16 +43,23 @@ export async function listOpenAiModels(c: Connection, tools: ModelInfo['tools'] 
     }))
 }
 
-/** One trivial tool-call request: true only when the model answers by calling `ping`. Never throws. */
+/** Output budget of the tool probe: room for a reasoning model to think before it calls the tool. */
+export const PROBE_MAX_TOKENS = 1024
+
+/**
+ * One trivial tool-call request: true when the model answers with any tool call. Never throws. The
+ * tool choice is 'auto' (the tutor's own), not 'required': many local servers reject or ignore
+ * 'required', and a 64-token cap cut reasoning models off before their call (T3 false negatives).
+ */
 export async function probeToolCall(model: LanguageModel): Promise<boolean> {
   try {
     const result = await generateText({
       model,
       prompt: 'Call the ping tool now. Do not answer in text.',
       tools: { ping: tool({ description: 'Reply to a ping.', inputSchema: z.object({}) }) },
-      toolChoice: 'required',
+      toolChoice: 'auto',
       maxRetries: 0,
-      maxOutputTokens: 64,
+      maxOutputTokens: PROBE_MAX_TOKENS,
     })
     return result.toolCalls.length > 0
   } catch {
@@ -63,13 +70,15 @@ export async function probeToolCall(model: LanguageModel): Promise<boolean> {
 /**
  * A hosted provider's models: the curated list (tool-capable, kept first with its flag) merged with the
  * provider's own `/models`, whose extra ids are `unknown` (unsupported until the user overrides it). Any
- * failure of that request falls back to the curated list alone, so a stale curated id never locks a user out.
+ * failure of that request falls back to the curated list alone, so a stale curated id never locks a user out
+ * (`strict`, Settings' Test Connection: the failure is thrown, so a wrong key shows).
  */
-export async function listHostedModels(c: Connection, list: ModelInfo[]): Promise<ModelInfo[]> {
+export async function listHostedModels(c: Connection, list: ModelInfo[], opts?: ListModelsOptions): Promise<ModelInfo[]> {
   let remote: ModelInfo[]
   try {
     remote = await listOpenAiModels(c)
-  } catch {
+  } catch (e) {
+    if (opts?.strict) throw e
     return list
   }
   const known = new Set(list.map((m) => m.id))

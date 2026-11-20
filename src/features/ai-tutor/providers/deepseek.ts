@@ -14,6 +14,6 @@ export const deepseek: ProviderAdapter = {
   label: 'DeepSeek',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://platform.deepseek.com/api_keys',
-  listModels: (c) => listHostedModels(c, MODELS),
+  listModels: (c, opts) => listHostedModels(c, MODELS, opts),
   languageModel: (c, modelId) => createDeepSeek(sdkOptions(c)).chat(modelId),
 }

@@ -28,14 +28,27 @@ pub struct ProviderDescriptor {
     /// The provider's page for creating an API key: the only page "Get a Key" opens (`ai_open_key_page`,
     /// in the system browser, from Rust). `None` when the provider has no key.
     pub key_url: Option<&'static str>,
+    /// OAuth PKCE sign-in with a loopback redirect that ends in an API key (`oauth.rs`), if offered.
+    pub sign_in: Option<SignIn>,
+}
+
+/// A provider's "Sign in with ..." endpoints (PKCE, S256; the code is traded for an API key).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignIn {
+    /// The new connection's name ("OpenRouter", then "OpenRouter 2", ...).
+    pub name: &'static str,
+    /// Where the browser goes, with `callback_url`, `code_challenge`, `code_challenge_method` and `state`.
+    pub auth_url: &'static str,
+    /// Where Rust POSTs `{ code, code_verifier, code_challenge_method }`; answers `{ key }`.
+    pub keys_url: &'static str,
 }
 
 const fn hosted(id: &'static str, base_url: &'static str, key_url: &'static str) -> ProviderDescriptor {
-    ProviderDescriptor { id, base_url: Some(base_url), auth: Auth::Bearer, extra_headers: &[], key_url: Some(key_url) }
+    ProviderDescriptor { id, base_url: Some(base_url), auth: Auth::Bearer, extra_headers: &[], key_url: Some(key_url), sign_in: None }
 }
 
 const fn local(id: &'static str, auth: Auth) -> ProviderDescriptor {
-    ProviderDescriptor { id, base_url: None, auth, extra_headers: &[], key_url: None }
+    ProviderDescriptor { id, base_url: None, auth, extra_headers: &[], key_url: None, sign_in: None }
 }
 
 pub const PROVIDERS: &[ProviderDescriptor] = &[
@@ -45,6 +58,7 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
         auth: Auth::Header("x-api-key"),
         extra_headers: &[("anthropic-version", "2023-06-01")],
         key_url: Some("https://console.anthropic.com/settings/keys"),
+        sign_in: None,
     },
     hosted("openai", "https://api.openai.com/v1", "https://platform.openai.com/api-keys"),
     hosted("xai", "https://api.x.ai/v1", "https://console.x.ai"),
@@ -53,7 +67,18 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
     hosted("zhipu", "https://open.bigmodel.cn/api/paas/v4", "https://open.bigmodel.cn/usercenter/apikeys"),
     // Qwen (Alibaba Model Studio, international endpoint), OpenAI-compatible mode.
     hosted("qwen", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "https://modelstudio.console.alibabacloud.com/"),
-    hosted("openrouter", "https://openrouter.ai/api/v1", "https://openrouter.ai/keys"),
+    // Sign in with OpenRouter: https://openrouter.ai/docs/guides/overview/auth/oauth (read 2026-11-19).
+    ProviderDescriptor {
+        id: "openrouter",
+        base_url: Some("https://openrouter.ai/api/v1"),
+        auth: Auth::Bearer,
+        extra_headers: &[],
+        key_url: Some("https://openrouter.ai/keys"),
+        sign_in: Some(SignIn {
+            name: "OpenRouter",
+            auth_url: "https://openrouter.ai/auth", keys_url: "https://openrouter.ai/api/v1/auth/keys",
+        }),
+    },
     local("ollama", Auth::None),
     local("lmstudio", Auth::None),
     // A user-entered OpenAI-compatible endpoint; the key is optional (sent only when one is stored).
@@ -65,6 +90,7 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
         auth: Auth::Bearer,
         extra_headers: &[],
         key_url: None,
+        sign_in: None,
     },
 ];
 
@@ -105,6 +131,15 @@ mod tests {
                 _ => assert!(p.key_url.unwrap().starts_with("https://"), "{}", p.id),
             }
         }
+    }
+
+    #[test]
+    fn only_openrouter_offers_a_sign_in_and_it_is_https() {
+        for p in PROVIDERS {
+            assert_eq!(p.sign_in.is_some(), p.id == "openrouter", "{}", p.id);
+        }
+        let s = descriptor("openrouter").unwrap().sign_in.unwrap();
+        assert!(s.auth_url.starts_with("https://openrouter.ai/") && s.keys_url.starts_with("https://openrouter.ai/"));
     }
 
     #[test]

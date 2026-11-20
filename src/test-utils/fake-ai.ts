@@ -18,6 +18,11 @@
  *
  * Chat history (`tutor_history_*`) is `state.history` (project id to chat id to chat) with Rust's id check
  * (`^[A-Za-z0-9-]{1,64}$`) and 8 MB size cap; `historySaves` logs every save, `failHistory` makes the commands fail.
+ *
+ * Sign in with OpenRouter: `ai_oauth_start` only records the provider (`oauthStarts`; Rust would open the
+ * browser). A test finishes the sign-in with `completeOAuth(key)` (adds the oauth connection and its secret,
+ * as Rust does) and then emits `ai-oauth-result` itself. `ai_open_key_page` records the provider
+ * (`keyPages`); `oauthCancels` counts `ai_oauth_cancel`.
  */
 
 export const AI_COMMAND_NAMES = [
@@ -33,6 +38,9 @@ export const AI_COMMAND_NAMES = [
   'tutor_history_save',
   'tutor_history_delete',
   'tutor_history_clear_all',
+  'ai_oauth_start',
+  'ai_oauth_cancel',
+  'ai_open_key_page',
 ] as const
 
 /** Mirrors Rust's AiFetchEvent (serde tag "type"). */
@@ -143,6 +151,11 @@ export function createFakeAi() {
     historySaves: [] as { projectId: string; chat: Record<string, unknown> }[],
     /** true: tutor_history_* fail. */
     failHistory: false,
+    /** Every ai_oauth_start provider, in order. */
+    oauthStarts: [] as string[],
+    oauthCancels: 0,
+    /** Every ai_open_key_page provider, in order. */
+    keyPages: [] as string[],
   }
   const running = new Map<number, () => void>()
   const earlyCancels = new Set<number>()
@@ -158,6 +171,9 @@ export function createFakeAi() {
     state.history.clear()
     state.historySaves.length = 0
     state.failHistory = false
+    state.oauthStarts.length = 0
+    state.oauthCancels = 0
+    state.keyPages.length = 0
     running.clear()
     earlyCancels.clear()
   }
@@ -325,10 +341,34 @@ export function createFakeAi() {
       case 'tutor_history_delete':
       case 'tutor_history_clear_all':
         return historyCommand(cmd, args)
+      case 'ai_oauth_start':
+        if (args.provider !== 'openrouter') throw fail('bad_request', 'This provider has no sign-in.')
+        state.oauthStarts.push(args.provider)
+        return null
+      case 'ai_oauth_cancel':
+        state.oauthCancels++
+        return null
+      case 'ai_open_key_page': {
+        const provider = String(args.provider)
+        if (['ollama', 'lmstudio', 'custom', 'chatgpt'].includes(provider) || !PROVIDERS.includes(provider)) throw fail('bad_request', 'This provider has no key page.')
+        state.keyPages.push(provider)
+        return null
+      }
       default:
         throw new Error(`unexpected command ${cmd}`)
     }
   }
 
-  return { state, handle, reset }
+  /** Finish a sign-in as Rust does: a new OpenRouter oauth connection with `key` in the keychain. Returns its id. */
+  function completeOAuth(key: string): string {
+    const taken = new Set(state.connections.map((c) => c.label))
+    let label = 'OpenRouter'
+    for (let n = 2; taken.has(label); n++) label = `OpenRouter ${n}`
+    const id = `openrouter-${state.connections.length + 1}x${Math.random().toString(36).slice(2, 8)}`
+    state.connections = [...state.connections, { id, provider: 'openrouter', label, auth: 'oauth' }]
+    state.secrets.set(id, key)
+    return id
+  }
+
+  return { state, handle, reset, completeOAuth }
 }

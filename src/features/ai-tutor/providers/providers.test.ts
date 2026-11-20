@@ -3,6 +3,7 @@ import { backend } from '@/test-utils/fake-tauri'
 import { sseResponse, toBase64Text, type FakeAiEvent } from '@/test-utils/fake-ai'
 import { PROVIDER_IDS, type Connection, type ProviderId } from '../connections/types'
 import { getAdapter, listAdapters, modelSupportsTools } from './registry'
+import { PROBE_MAX_TOKENS } from './shared'
 
 vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
 
@@ -160,6 +161,14 @@ describe('hosted listModels', () => {
     expect(models.map((m) => m.id)).toEqual(['deepseek-v4-pro', 'deepseek-flash'])
     expect(models.every((m) => m.tools === 'yes')).toBe(true)
   })
+
+  it('strict (Test Connection) reports the failure instead of falling back', async () => {
+    backend.ai.script = { events: [{ type: 'head', status: 401, headers: [] }, { type: 'end' }] }
+    await expect(getAdapter('deepseek').listModels(conn('deepseek'), { strict: true })).rejects.toThrow(/401/)
+    backend.ai.script = { events: jsonResponse({ data: [{ id: 'deepseek-extra' }] }) }
+    const models = await getAdapter('deepseek').listModels(conn('deepseek'), { strict: true })
+    expect(models.map((m) => m.id)).toContain('deepseek-extra')
+  })
 })
 
 describe('modelSupportsTools', () => {
@@ -190,6 +199,9 @@ describe('probeTools', () => {
     expect(await getAdapter('ollama').probeTools!(local, 'llama3')).toBe(true)
     const body = JSON.parse(backend.ai.requests[0].req.body ?? '{}')
     expect(body.tools[0].function.name).toBe('ping')
+    // T3: 'auto' with room to think; 'required' and a 64-token cap gave false negatives.
+    expect(body.tool_choice).toBe('auto')
+    expect(body.max_tokens).toBe(PROBE_MAX_TOKENS)
   })
 
   it('is false for a plain text reply', async () => {

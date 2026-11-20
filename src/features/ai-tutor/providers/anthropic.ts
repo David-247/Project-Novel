@@ -16,7 +16,7 @@ export const anthropic: ProviderAdapter = {
   label: 'Anthropic',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://console.anthropic.com/settings/keys',
-  listModels: (c) => listHostedModels(c, MODELS),
+  listModels: (c, opts) => listHostedModels(c, MODELS, opts),
   // Rust's base URL is https://api.anthropic.com/v1, so the SDK's `/messages` becomes `/v1/messages`.
   languageModel: (c, modelId) => createAnthropic(sdkOptions(c)).languageModel(modelId),
 }

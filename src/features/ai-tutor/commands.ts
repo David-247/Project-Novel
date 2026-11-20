@@ -7,6 +7,7 @@ import { loadTutorConnections } from './connections/store'
 import { useTutorHistory } from './history/store'
 import { attach, beforeDocumentReplace, connectionChanged, projectChanged, requestComposerFocus, shutdown } from './panel/chat'
 import { TUTOR_CONTROLS as C } from './panel/controls'
+import { listenForSignIn } from './settings/sign-in'
 import { SparkleIcon } from './panel/icons'
 
 /**
@@ -121,7 +122,7 @@ export function tutorCommands(): Command[] {
 
 /**
  * The tutor's wiring (composition root, once): its command, its context menu item, the history flush on
- * quit (must-do 4), the saved connections once preferences are read (the active one is a preference;
+ * quit (must-do 4), the Sign in with OpenRouter result, the saved connections once preferences are read (the active one is a preference;
  * a store subscription, so the app does not render again for it), and a stop on every project change (Review Focus 5: project close emits no event, so the open
  * project's path is watched too). Returns unregister.
  */
@@ -133,6 +134,8 @@ export function registerTutorCommands(): () => void {
     // Before another manuscript is loaded (open, new, close, restore): stop, then save to this project (C1, M1).
     registerBeforeDocumentReplace(beforeDocumentReplace),
     onProjectOpened(() => projectChanged()),
+    // Sign in with OpenRouter reports when the browser comes back, even after Settings was closed.
+    listenForSignIn(),
     useStore.subscribe((s, p) => {
       if (s.project.path !== p.project.path) projectChanged()
       if (s.tutorConnections.activeId !== p.tutorConnections.activeId) connectionChanged()

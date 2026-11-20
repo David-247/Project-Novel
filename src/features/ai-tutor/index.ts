@@ -59,3 +59,11 @@ export { setTutorConnectAction } from './panel/connect'
 export { TUTOR_CONTROLS, TUTOR_SHORTCUT, CONFIRM_WORDS, NO_TOOLS_REASON } from './panel/controls'
 export type { TutorControlMeta, TutorControlKey } from './panel/controls'
 export { SparkleIcon } from './panel/icons'
+
+// Settings ▸ AI Tutor (Task 10): the connections (add, edit, remove, set as default; keys go to the keychain
+// only), Sign in with OpenRouter (Rust PKCE flow; registerTutorCommands listens for its result), and the chat
+// history's Clear buttons. The composition root registers the page with the settings slice:
+// registerSettingsPage({ id: AI_SETTINGS_PAGE_ID, label: 'AI Tutor', component: AiTutorSettings }).
+export { AiTutorSettings } from './settings/AiTutorSettings'
+export { AI_SETTINGS_CONTROLS, AI_SETTINGS_PAGE_ID } from './settings/controls'
+export type { AiSettingsControlKey } from './settings/controls'

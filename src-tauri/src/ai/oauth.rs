@@ -1,14 +1,15 @@
 //! Sign in with OpenRouter: OAuth PKCE with a loopback redirect (design "Network and credentials").
 //!
-//! `ai_oauth_start("openrouter")` makes a code verifier and its S256 challenge, binds a one-shot
+//! `ai_oauth_start("openrouter")` (any provider whose descriptor has a `sign_in`) makes a code verifier and its S256 challenge, binds a one-shot
 //! listener on `127.0.0.1` (a random port), and opens the system browser (from Rust; the webview has
-//! no open-URL capability) at OpenRouter's `/auth` page with `callback_url=http://127.0.0.1:<port>/callback`.
+//! no open-URL capability) at the descriptor's `sign_in.auth_url` (`providers.rs`) with
+//! `callback_url=http://127.0.0.1:<port>/callback`.
 //! A random one-time `state` nonce goes with it; OpenRouter returns it unchanged on the callback
 //! (ruling R16: a callback without it, or with another, is refused).
 //!
 //! The listener serves exactly one request, then closes (or gives up after five minutes). That request
 //! must be `GET /callback?code=..&state=<nonce>`; anything else ends the sign-in with an error. The
-//! code is exchanged here, in Rust (`POST https://openrouter.ai/api/v1/auth/keys` with the verifier),
+//! code is exchanged here, in Rust (a POST to the descriptor's `sign_in.keys_url` with the verifier),
 //! and the key goes straight to the keychain under a new saved connection. The key never reaches the
 //! webview: the `ai-oauth-result` event carries `{ ok, connectionId?, error? }` only. Neither the code
 //! nor the key appears in any error message or log line.
@@ -33,8 +34,6 @@ use super::{AiError, AiState, Secret};
 
 /// The event the webview listens to for the sign-in's outcome.
 pub const RESULT_EVENT: &str = "ai-oauth-result";
-pub const OPENROUTER_AUTH_URL: &str = "https://openrouter.ai/auth";
-pub const OPENROUTER_KEYS_URL: &str = "https://openrouter.ai/api/v1/auth/keys";
 /// How long the browser has to come back.
 pub const CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// How long a connection that opened may take to send its request line and headers.
@@ -89,9 +88,9 @@ pub fn new_pkce() -> Result<Pkce, AiError> {
     Ok(Pkce { verifier, challenge })
 }
 
-/// OpenRouter's authorization page for this sign-in.
-pub fn auth_url(port: u16, challenge: &str, state: &str) -> String {
-    let mut url = Url::parse(OPENROUTER_AUTH_URL).expect("static URL");
+/// The provider's authorization page (`sign_in.auth_url`) for this sign-in.
+pub fn auth_url(base: &str, port: u16, challenge: &str, state: &str) -> String {
+    let mut url = Url::parse(base).expect("a static https URL from providers.rs");
     url.query_pairs_mut()
         .append_pair("callback_url", &format!("http://127.0.0.1:{port}{CALLBACK_PATH}"))
         .append_pair("code_challenge", challenge)
@@ -276,29 +275,29 @@ pub async fn exchange_code(client: &reqwest::Client, url: &str, code: &str, veri
 
 // ---- Saving the signed-in connection -------------------------------------------------------------------
 
-/// A label not used yet: "OpenRouter", else "OpenRouter 2", ...
-fn free_label(list: &[Connection]) -> String {
+/// A label not used yet: `name`, else "`name` 2", ...
+fn free_label(list: &[Connection], name: &str) -> String {
     let taken = |l: &str| list.iter().any(|c| c.label == l);
-    if !taken("OpenRouter") {
-        return "OpenRouter".into();
+    if !taken(name) {
+        return name.into();
     }
-    (2..).map(|n| format!("OpenRouter {n}")).find(|l| !taken(l)).expect("unbounded")
+    (2..).map(|n| format!("{name} {n}")).find(|l| !taken(l)).expect("unbounded")
 }
 
-/// Add an OpenRouter connection signed in with OAuth and store `key` for it. Returns its id. If the
+/// Add a connection of `provider` signed in with OAuth and store `key` for it. Returns its id. If the
 /// key cannot be stored, the connection is taken out again.
-pub fn save_signed_in(path: &Path, secrets: &dyn SecretStore, key: &Secret) -> Result<String, AiError> {
+pub fn save_signed_in(path: &Path, secrets: &dyn SecretStore, provider: &str, name: &str, key: &Secret) -> Result<String, AiError> {
     let mut list = connections::load_connections(path)?;
     let id = loop {
-        let id = format!("openrouter-{}", random_token(9)?.replace(['-', '_'], "x"));
+        let id = format!("{provider}-{}", random_token(9)?.replace(['-', '_'], "x"));
         if !list.iter().any(|c| c.id == id) {
             break id;
         }
     };
     list.push(Connection {
         id: id.clone(),
-        provider: "openrouter".into(),
-        label: free_label(&list),
+        provider: provider.into(),
+        label: free_label(&list, name),
         auth: ConnectionAuth::Oauth,
         base_url: None,
         default_model: None,
@@ -380,9 +379,9 @@ pub async fn ai_oauth_start<R: Runtime>(
     oauth: State<'_, OauthState>,
     provider: String,
 ) -> Result<(), AiError> {
-    if provider != "openrouter" {
-        return Err(AiError::bad_request("This provider has no sign-in."));
-    }
+    let sign_in = super::providers::descriptor(&provider)
+        .and_then(|d| d.sign_in)
+        .ok_or_else(|| AiError::bad_request("This provider has no sign-in."))?;
     let path = super::connections_file(&app)?;
     let pkce = new_pkce()?;
     let nonce = random_token(16)?;
@@ -391,7 +390,7 @@ pub async fn ai_oauth_start<R: Runtime>(
         .map_err(|_| AiError::new("network", "The sign-in could not start: no local port is free."))?;
     let port = listener.local_addr().map_err(|_| AiError::new("network", "The sign-in could not start."))?.port();
     let (id, stop) = oauth.begin();
-    if let Err(e) = open_in_browser(&auth_url(port, &pkce.challenge, &nonce)) {
+    if let Err(e) = open_in_browser(&auth_url(sign_in.auth_url, port, &pkce.challenge, &nonce)) {
         oauth.finish(id);
         return Err(e);
     }
@@ -400,8 +399,8 @@ pub async fn ai_oauth_start<R: Runtime>(
     tauri::async_runtime::spawn(async move {
         let outcome = async {
             let code = wait_for_callback(listener, &nonce, CALLBACK_TIMEOUT, stop).await?;
-            let key = exchange_code(&client, OPENROUTER_KEYS_URL, &code, &pkce.verifier).await?;
-            super::blocking(move || save_signed_in(&path, &super::keychain::KeyringStore, &key)).await
+            let key = exchange_code(&client, sign_in.keys_url, &code, &pkce.verifier).await?;
+            super::blocking(move || save_signed_in(&path, &super::keychain::KeyringStore, &provider, sign_in.name, &key)).await
         }
         .await;
         use tauri::Manager as _;
@@ -450,7 +449,8 @@ mod tests {
 
     #[test]
     fn auth_url_names_the_loopback_callback_and_the_challenge() {
-        let url = Url::parse(&auth_url(51423, "CHAL", "NONCE")).unwrap();
+        let base = super::super::providers::descriptor("openrouter").unwrap().sign_in.unwrap().auth_url;
+        let url = Url::parse(&auth_url(base, 51423, "CHAL", "NONCE")).unwrap();
         assert_eq!(url.origin().ascii_serialization(), "https://openrouter.ai");
         assert_eq!(url.path(), "/auth");
         let q: Vec<(String, String)> = url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
@@ -650,8 +650,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(connections::CONNECTIONS_FILE);
         let secrets = MemoryStore::default();
-        let a = save_signed_in(&path, &secrets, &Secret::new("sk-or-TOP-SECRET")).unwrap();
-        let b = save_signed_in(&path, &secrets, &Secret::new("sk-or-OTHER")).unwrap();
+        let a = save_signed_in(&path, &secrets, "openrouter", "OpenRouter", &Secret::new("sk-or-TOP-SECRET")).unwrap();
+        let b = save_signed_in(&path, &secrets, "openrouter", "OpenRouter", &Secret::new("sk-or-OTHER")).unwrap();
         assert_ne!(a, b);
         let list = connections::load_connections(&path).unwrap();
         assert_eq!(list.iter().map(|c| c.label.as_str()).collect::<Vec<_>>(), ["OpenRouter", "OpenRouter 2"]);

@@ -1,7 +1,6 @@
 /**
  * "Connect a Provider…": opens Settings ▸ AI Tutor. The settings slice is wired in by the composition
- * root (setTutorConnectAction), so this slice never imports it (Task 10's AI Tutor page will import
- * this one). TODO(Task 10): open the AI Tutor page itself once openSettings takes a page id.
+ * root (setTutorConnectAction(() => openSettings(AI_SETTINGS_PAGE_ID))), so this slice never imports it.
  */
 let action: (() => void) | null = null
 

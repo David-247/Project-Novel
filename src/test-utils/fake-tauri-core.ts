@@ -533,6 +533,8 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     restartExportSession: exportFake.restartSession,
     /** AI network proxy fake (scripted streams, recorded requests and cancels). */
     ai: aiFake.state,
+    /** Finish a Sign in with OpenRouter as Rust does (the test then emits `ai-oauth-result`). */
+    completeOAuth: aiFake.completeOAuth,
     /** Spell checker fake (recorded calls, scripted misspellings). */
     spell: spellFake.state,
     handle,
