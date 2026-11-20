@@ -240,6 +240,20 @@ mod tests {
     }
 
     #[test]
+    fn curly_quotes_and_curly_possessive_offsets() {
+        // Review Focus 1: the underline sits exactly on "teh" after curly quotes and a curly possessive.
+        let text = "\u{201c}Aelinor\u{2019}s\u{201d} teh";
+        let found = one(text, &["Aelinor"], None);
+        let spelling: Vec<&Finding> = found.iter().filter(|f| f.kind == FindingKind::Spelling).collect();
+        assert_eq!(spelling.len(), 1, "{found:?}");
+        assert_eq!(js_slice(text, spelling[0]), "teh");
+        assert_eq!((spelling[0].start, spelling[0].end), (12, 15));
+        // With the name in the dictionary its curly possessive is not flagged; without, it is.
+        assert!(found.iter().all(|f| !js_slice(text, f).contains("Aelinor")), "{found:?}");
+        assert!(one(text, &[], None).iter().any(|f| js_slice(text, f).starts_with("Aelinor")));
+    }
+
+    #[test]
     fn utf16_map_counts_astral_chars_as_two() {
         let chars: Vec<char> = "a😀b".chars().collect();
         let m = Utf16Map::new(&chars);

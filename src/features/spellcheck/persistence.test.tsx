@@ -24,7 +24,7 @@ const projectWords = () => useStore.getState().spellcheck.projectWords
 beforeEach(() => {
   vi.useFakeTimers()
   backend.reset()
-  useStore.getState().preferencesActions.set('spellcheck', { words: [] })
+  useStore.getState().preferencesActions.set('spellcheck', { enabled: true, words: [] })
   useStore.getState().spellcheckActions.loadProjectWords([])
   __resetDictionaryFileForTests()
   editor = createMemoryDocumentProvider()

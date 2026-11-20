@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { newProjectBookSettings } from '@/shared/book'
-import { defaultPreferenceValues, NAV_PANE_DEFAULT_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH, parsePreferences, PREFERENCES_VERSION, serializePreferences } from './preferences-file'
+import { defaultPreferenceValues, MAX_DICTIONARY_WORDS, readDictionaryWords, NAV_PANE_DEFAULT_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH, parsePreferences, PREFERENCES_VERSION, serializePreferences } from './preferences-file'
 import { setSystemAuthorName } from './preferences-slice'
 import { useStore } from './index'
 
@@ -64,7 +64,7 @@ describe('preferences.json', () => {
       navigationPane: true,
       navigationPaneWidth: 320,
       tutorActiveConnection: 'conn-1',
-      spellcheck: { words: ['Aelinor', 'Zoë'] },
+      spellcheck: { enabled: false, words: ['Aelinor', 'Zoë'] },
     }
     const parsed = parsePreferences(serializePreferences({ ...values, extra: {} }))
     expect(parsed).toMatchObject({ values, extra: {}, authorNameMissing: false, fallback: null })
@@ -195,11 +195,22 @@ describe('newProjectBookSettings', () => {
 describe('the user dictionary preference', () => {
   const read = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values.spellcheck
   it('defaults to no words and keeps clean, distinct, single words only', () => {
-    expect(defaultPreferenceValues().spellcheck).toEqual({ words: [] })
-    expect(read({ spellcheck: { words: ['Aelinor', 'aelinor', ' Brynn ', 'two words', 7, '', 'x'.repeat(65)] } })).toEqual({ words: ['Aelinor', 'Brynn'] })
+    expect(defaultPreferenceValues().spellcheck).toEqual({ enabled: true, words: [] })
+    expect(read({ spellcheck: { words: ['Aelinor', 'aelinor', ' Brynn ', 'two words', 7, '', 'x'.repeat(65)] } })).toEqual({ enabled: true, words: ['Aelinor', 'Brynn'] })
   })
   it('wrong types fall back to the default', () => {
-    expect(read({ spellcheck: 'x' })).toEqual({ words: [] })
-    expect(read({ spellcheck: { words: 'Aelinor' } })).toEqual({ words: [] })
+    expect(read({ spellcheck: 'x' })).toEqual({ enabled: true, words: [] })
+    expect(read({ spellcheck: { words: 'Aelinor', enabled: 'no' } })).toEqual({ enabled: true, words: [] })
+  })
+  it('View > Spelling & Grammar (spellcheck.enabled) is on by default, and an off is kept', () => {
+    expect(read({})).toEqual({ enabled: true, words: [] })
+    expect(read({ spellcheck: { enabled: false, words: ['Aelinor'] } })).toEqual({ enabled: false, words: ['Aelinor'] })
+    const values = { ...defaultPreferenceValues(), spellcheck: { enabled: false, words: ['Zoë'] } }
+    expect(JSON.parse(serializePreferences({ ...values, extra: {} })).spellcheck).toEqual({ enabled: false, words: ['Zoë'] })
+  })
+  it('readDictionaryWords caps a list at MAX_DICTIONARY_WORDS unless told another limit', () => {
+    const many = Array.from({ length: MAX_DICTIONARY_WORDS + 10 }, (_, i) => `w${i}`)
+    expect(readDictionaryWords(many)).toHaveLength(MAX_DICTIONARY_WORDS)
+    expect(readDictionaryWords(many, Infinity)).toHaveLength(MAX_DICTIONARY_WORDS + 10)
   })
 })

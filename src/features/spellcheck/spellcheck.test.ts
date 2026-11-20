@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useStore } from '@/shared/store'
+import { MAX_DICTIONARY_WORDS, useStore } from '@/shared/store'
 import { backend } from '@/test-utils/fake-tauri'
 
 vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
@@ -23,7 +23,7 @@ beforeEach(() => {
   backend.reset()
   __resetSpellcheckCacheForTests()
   __resetIgnoredForTests()
-  useStore.getState().preferencesActions.set('spellcheck', { words: [] })
+  useStore.getState().preferencesActions.set('spellcheck', { enabled: true, words: [] })
   useStore.getState().spellcheckActions.loadProjectWords([])
 })
 
@@ -139,12 +139,28 @@ describe('the dictionary', () => {
     addWord('Aelinor', 'user')
     const v = dictionaryVersion()
     expect(v).not.toBe(empty)
-    useStore.getState().preferencesActions.set('spellcheck', { words: ['aelinor', 'BRYNN'] })
+    useStore.getState().preferencesActions.set('spellcheck', { enabled: true, words: ['aelinor', 'BRYNN'] })
     expect(dictionaryVersion()).toBe(v)
   })
 
   it('the user dictionary is a preference (spellcheck.words), saved with preferences.json', () => {
     addWord('Aelinor', 'user')
-    expect(useStore.getState().preferences.spellcheck).toEqual({ words: ['Aelinor'] })
+    expect(useStore.getState().preferences.spellcheck).toEqual({ enabled: true, words: ['Aelinor'] })
+  })
+
+  it('adding a word keeps the spell check on/off preference', () => {
+    useStore.getState().preferencesActions.set('spellcheck', { enabled: false, words: [] })
+    addWord('Aelinor', 'user')
+    removeWord('Aelinor', 'user')
+    expect(useStore.getState().preferences.spellcheck.enabled).toBe(false)
+  })
+
+  it('a full user dictionary does not push the project words out (each scope is capped on its own)', () => {
+    const full = Array.from({ length: MAX_DICTIONARY_WORDS }, (_, i) => `user${i}`)
+    useStore.getState().preferencesActions.set('spellcheck', { enabled: true, words: full })
+    useStore.getState().spellcheckActions.loadProjectWords(['Aelinor', 'USER3'])
+    const words = dictionaryWords()
+    expect(words).toContain('Aelinor')
+    expect(words).toHaveLength(MAX_DICTIONARY_WORDS + 1) // USER3 is user3 again
   })
 })

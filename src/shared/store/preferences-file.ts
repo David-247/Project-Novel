@@ -52,8 +52,11 @@ export interface PreferenceValues {
   navigationPaneWidth: number
   /** The AI tutor's active connection id (Phase 5); null = none chosen. */
   tutorActiveConnection: string | null
-  /** The user dictionary (Phase 5): words the spell checker accepts in every project. */
-  spellcheck: { words: string[] }
+  /**
+   * Spell check (Phase 5). `enabled`: View ▸ Spelling & Grammar, the editor's underlines (default on).
+   * `words`: the user dictionary, words the spell checker accepts in every project.
+   */
+  spellcheck: { enabled: boolean; words: string[] }
 }
 
 export interface Preferences extends PreferenceValues {
@@ -96,8 +99,11 @@ const NO_EXPORT_FOLDERS: Record<string, string> = Object.freeze({}) as Record<st
 
 const NO_WORDS: readonly string[] = Object.freeze([])
 
-/** Dictionary words as stored: trimmed strings without whitespace, in range, no case-insensitive duplicates. */
-export function readDictionaryWords(v: unknown): string[] {
+/**
+ * Dictionary words as stored: trimmed strings without whitespace, in range, no case-insensitive
+ * duplicates, at most `limit` (one list: the user's or a project's; a merge of both passes Infinity).
+ */
+export function readDictionaryWords(v: unknown, limit = MAX_DICTIONARY_WORDS): string[] {
   if (!Array.isArray(v)) return []
   const seen = new Set<string>()
   const out: string[] = []
@@ -109,14 +115,15 @@ export function readDictionaryWords(v: unknown): string[] {
     if (seen.has(key)) continue
     seen.add(key)
     out.push(word)
-    if (out.length === MAX_DICTIONARY_WORDS) break
+    if (out.length >= limit) break
   }
   return out
 }
 
-function readSpellcheck(v: unknown): { words: string[] } | undefined {
+function readSpellcheck(v: unknown): PreferenceValues['spellcheck'] | undefined {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
-  return { words: readDictionaryWords((v as { words?: unknown }).words) }
+  const { enabled, words } = v as { enabled?: unknown; words?: unknown }
+  return { enabled: typeof enabled === 'boolean' ? enabled : true, words: readDictionaryWords(words) }
 }
 
 function readExportFolders(v: unknown): Record<string, string> | undefined {
@@ -150,7 +157,7 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     navigationPane: false,
     navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH,
     tutorActiveConnection: null,
-    spellcheck: { words: NO_WORDS as string[] },
+    spellcheck: { enabled: true, words: NO_WORDS as string[] },
   }
 }
 
@@ -247,7 +254,7 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     navigationPane: p.navigationPane,
     navigationPaneWidth: clampNavPaneWidth(p.navigationPaneWidth),
     tutorActiveConnection: p.tutorActiveConnection,
-    spellcheck: { words: readDictionaryWords(p.spellcheck.words) },
+    spellcheck: { enabled: p.spellcheck.enabled !== false, words: readDictionaryWords(p.spellcheck.words) },
   }
   return JSON.stringify(out, null, 2) + '\n'
 }

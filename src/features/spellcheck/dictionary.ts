@@ -19,9 +19,13 @@ export function normalizeWord(word: string): string | null {
 const userWords = () => useStore.getState().preferences.spellcheck.words
 const projectWords = () => useStore.getState().spellcheck.projectWords
 
-/** Every word the checker accepts: the user's and the project's, without case-insensitive duplicates. */
+/**
+ * Every word the checker accepts: the user's and the project's, without case-insensitive duplicates.
+ * Each list is capped on its own (MAX_DICTIONARY_WORDS), so the merge is not: a full user dictionary
+ * must not push the project's words out.
+ */
 export function dictionaryWords(): string[] {
-  return readDictionaryWords([...userWords(), ...projectWords()])
+  return readDictionaryWords([...userWords(), ...projectWords()], Infinity)
 }
 
 /**
@@ -47,7 +51,7 @@ export function addWord(word: string, scope: DictionaryScope): boolean {
   const list = scope === 'user' ? userWords() : projectWords()
   if (list.length >= MAX_DICTIONARY_WORDS || list.some((x) => x.toLowerCase() === w.toLowerCase())) return false
   if (scope === 'user') {
-    state.preferencesActions.set('spellcheck', { words: [...list, w] })
+    state.preferencesActions.set('spellcheck', { ...state.preferences.spellcheck, words: [...list, w] })
   } else {
     state.spellcheckActions.setProjectWords([...list, w])
     sideFileChanged()
@@ -63,7 +67,7 @@ export function removeWord(word: string, scope: DictionaryScope): boolean {
   if (next.length === list.length) return false
   const state = useStore.getState()
   if (scope === 'user') {
-    state.preferencesActions.set('spellcheck', { words: next })
+    state.preferencesActions.set('spellcheck', { ...state.preferences.spellcheck, words: next })
   } else {
     state.spellcheckActions.setProjectWords(next)
     sideFileChanged()
