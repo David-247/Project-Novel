@@ -82,7 +82,7 @@ async fn stream(
         let excerpt = tokio::select! {
             biased;
             _ = cancelled(&mut cancel) => return Err(AiError::cancelled()),
-            text = error_excerpt(&mut response) => text,
+            text = error_excerpt(&mut response, conn) => text,
         };
         return Err(status_error(status, &host, &excerpt));
     }
@@ -193,18 +193,127 @@ pub(super) fn request_headers(conn: &ResolvedConnection, caller: &[(String, Stri
     Ok(headers)
 }
 
-/// The start of a provider's error body, for the message (best effort; bounded read).
-async fn error_excerpt(response: &mut reqwest::Response) -> String {
+/// How much of a provider's error body is read (a hard cut).
+const ERROR_BODY_BYTES: usize = 4096;
+/// A secret counts as echoed when this many of its leading characters appear (fewer for a shorter
+/// secret): no prefix of 4 or more characters may reach an error message.
+const SECRET_PROBE_CHARS: usize = 4;
+
+/// The start of a provider's error body, for the message (best effort; bounded read). Empty when
+/// the body read so far echoes any part of the secret's start, checked on the whole read body
+/// (raw and JSON-unescaped) before it is collapsed or cut, so no cut can leave a fragment behind.
+async fn error_excerpt(response: &mut reqwest::Response, conn: &ResolvedConnection) -> String {
     let mut bytes = Vec::new();
-    while bytes.len() < 4096 {
+    while bytes.len() < ERROR_BODY_BYTES {
         match tokio::time::timeout(Duration::from_secs(5), response.chunk()).await {
             Ok(Ok(Some(chunk))) => bytes.extend_from_slice(&chunk),
             _ => break,
         }
     }
+    bytes.truncate(ERROR_BODY_BYTES);
     let text = String::from_utf8_lossy(&bytes);
+    if echoes_secret(&text, conn) {
+        return String::new();
+    }
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    text.chars().take(ERROR_EXCERPT_CHARS).collect()
+    let excerpt: String = text.chars().take(ERROR_EXCERPT_CHARS).collect();
+    if echoes_secret(&excerpt, conn) {
+        return String::new();
+    }
+    excerpt
+}
+
+/// True if `text`, as is or JSON-unescaped (once or twice, for JSON quoted inside JSON), contains
+/// the secret's first `SECRET_PROBE_CHARS` characters (the whole secret if it is shorter). Any
+/// prefix of 4 or more characters, the whole secret and a secret cut by a read cap or the
+/// excerpt cut all contain that probe.
+pub(super) fn echoes_secret(text: &str, conn: &ResolvedConnection) -> bool {
+    let Some(secret) = &conn.secret else { return false };
+    let probe: String = secret.expose().chars().take(SECRET_PROBE_CHARS).collect();
+    if probe.is_empty() {
+        return false;
+    }
+    let once = json_unescape(text);
+    text.contains(&probe) || once.contains(&probe) || json_unescape(&once).contains(&probe)
+}
+
+/// Decode JSON string escapes (`\uXXXX` including surrogate pairs, `\/`, `\\`, `\"`, `\n`, ...)
+/// wherever they appear, for secret detection. An unknown escape `\X` reads as `X`; a malformed
+/// `\u` is kept as written.
+pub(super) fn json_unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let hex4 = |it: &mut std::iter::Peekable<std::str::Chars>| -> Option<u32> {
+        let s: String = it.clone().take(4).collect();
+        if s.len() == 4 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+            for _ in 0..4 {
+                it.next();
+            }
+            u32::from_str_radix(&s, 16).ok()
+        } else {
+            None
+        }
+    };
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek().copied() {
+            Some('u') => {
+                let mut after_u = chars.clone();
+                after_u.next();
+                match hex4(&mut after_u) {
+                    Some(hi) if (0xD800..0xDC00).contains(&hi) => {
+                        let mut low = after_u.clone();
+                        let lo = (low.next() == Some('\\') && low.next() == Some('u')).then(|| hex4(&mut low)).flatten();
+                        match lo.filter(|lo| (0xDC00..0xE000).contains(lo)) {
+                            Some(lo) => {
+                                out.extend(char::from_u32(0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)));
+                                chars = low;
+                            }
+                            None => {
+                                out.push('\u{FFFD}');
+                                chars = after_u;
+                            }
+                        }
+                    }
+                    Some(code) => {
+                        out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
+                        chars = after_u;
+                    }
+                    None => out.push('\\'),
+                }
+            }
+            Some(e @ ('"' | '\\' | '/')) => {
+                out.push(e);
+                chars.next();
+            }
+            Some('n') => {
+                out.push('\n');
+                chars.next();
+            }
+            Some('t') => {
+                out.push('\t');
+                chars.next();
+            }
+            Some('r') => {
+                out.push('\r');
+                chars.next();
+            }
+            Some('b') | Some('f') => {
+                out.push(' ');
+                chars.next();
+            }
+            // Not valid JSON, but a lenient server may write it (`\-`): read it as the character.
+            Some(other) => {
+                out.push(other);
+                chars.next();
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 fn status_error(status: StatusCode, host: &str, excerpt: &str) -> AiError {
@@ -232,14 +341,12 @@ fn network_error(e: &reqwest::Error, host: &str) -> AiError {
     AiError::new("network", message)
 }
 
-/// Remove the connection's secret from an error message (defence in depth: nothing above puts it
-/// there, but a provider's error body can echo it).
+/// Backstop for every error message (`error_excerpt` already drops an echoing excerpt): a message
+/// that echoes any part of the secret's start (see `echoes_secret`) is replaced as a whole, so no
+/// fragment can survive a partial replace.
 fn redact(mut e: AiError, conn: &ResolvedConnection) -> AiError {
-    if let Some(secret) = &conn.secret {
-        let s = secret.expose();
-        if !s.is_empty() && e.message.contains(s) {
-            e.message = e.message.replace(s, "[redacted]");
-        }
+    if echoes_secret(&e.message, conn) {
+        e.message = "The provider returned an error. Its details were withheld because they echoed the credential.".into();
     }
     e
 }
@@ -590,6 +697,73 @@ mod tests {
         }
         assert!(checked >= 21);
         assert!(!format!("{:?}", Secret::new(SECRET)).contains(SECRET));
+    }
+
+    /// True if `s` holds any prefix of the secret of 4+ characters, as is or JSON-unescaped, or the
+    /// secret's unescaped tail.
+    fn leaks_secret(s: &str) -> bool {
+        let unescaped = json_unescape(s);
+        (4..=SECRET.len()).any(|n| s.contains(&SECRET[..n]) || unescaped.contains(&SECRET[..n]))
+            || s.contains("test-SECRET")
+    }
+
+    /// Every error string a `code` response with `body` produces, after asserting it failed.
+    async fn error_strings_for(code: u16, body: &str) -> Vec<String> {
+        let m = mock(vec![status(code, "Error", body)]).await;
+        let (result, events) = fetch(&state(&m.base_url), 13, post("/chat/completions", &[])).await;
+        assert!(result.is_err());
+        let strings = error_strings(&result, &events);
+        assert!(!strings.is_empty());
+        strings
+    }
+
+    #[tokio::test]
+    async fn secret_cut_by_the_300_char_excerpt_never_leaks() {
+        // The secret straddles the excerpt cut: "...xxxx sk-test-SE|CRET".
+        for pad in [286, 289, 290, 292, 295, 296] {
+            let body = format!("{} {SECRET} tail", "x".repeat(pad));
+            for s in error_strings_for(500, &body).await {
+                assert!(!leaks_secret(&s), "pad {pad}: {s}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn secret_cut_by_the_4096_byte_read_cap_never_leaks() {
+        // Whitespace collapses, so the bytes near the read cap land inside the 300-char excerpt.
+        for keep in [4, 5, 8, 12] {
+            let pad = ERROR_BODY_BYTES - keep;
+            let body = format!("{}{SECRET}", " ".repeat(pad));
+            for s in error_strings_for(400, &body).await {
+                assert!(!leaks_secret(&s), "keep {keep}: {s}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn json_escaped_secret_never_leaks() {
+        let escaped_dash = SECRET.replace('-', "\\u002d");
+        let all_escaped: String = SECRET.chars().map(|c| format!("\\u{:04x}", c as u32)).collect();
+        let double = format!(r#""{}""#, SECRET.replace('-', "\\\\u002d"));
+        for echo in [escaped_dash, all_escaped, double, SECRET.replace('-', "\\-")] {
+            let body = format!(r#"{{"error":{{"message":"bad key {echo}"}}}}"#);
+            for s in error_strings_for(400, &body).await {
+                assert!(!leaks_secret(&s), "{echo}: {s}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_error_without_the_secret_keeps_its_detail() {
+        let strings = error_strings_for(400, r#"{"error":{"message":"model not found"}}"#).await;
+        assert!(strings.iter().all(|s| s.contains("model not found")), "{strings:?}");
+    }
+
+    #[test]
+    fn json_unescape_decodes_escapes_and_keeps_malformed_text() {
+        assert_eq!(json_unescape(r#"sk-x \/ \\ \" \n"#), "sk-x / \\ \" \n");
+        assert_eq!(json_unescape(r"😀"), "\u{1F600}");
+        assert_eq!(json_unescape(r"\u00 \q end\"), r"\u00 q end\");
     }
 
     #[tokio::test]
