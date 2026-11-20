@@ -99,7 +99,10 @@ imports, provider hosts, and branching on a provider id outside those two places
     sign-out.
   - **Known accounts.** `chatgpt-host.json` keeps each registered account's issued client id across Remove
     and a declined plan scope, as OpenAI asks. The next Continue with ChatGPT reuses it instead of
-    registering again (with `prompt=consent` after a decline).
+    registering again (with `prompt=consent` after a decline). Settings says which account it will use and offers
+    **Use Another Account**, which registers a new one. If a reuse fails for any reason other than a cancel or a
+    no, the account is skipped next time. A client OpenAI no longer knows (`invalid_client`) is forgotten, so the
+    next sign-in registers anew.
   - **Pinned routes.** The plan token goes only to `/responses` and `/models`.
 - **The account-ban warning.** Signing in with a consumer subscription (Continue with ChatGPT) first shows a
   one-time warning, `prompts/scripted/ban-warning.md`, in a dialog. Continue to Sign In records that it was read

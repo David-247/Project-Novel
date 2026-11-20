@@ -40,12 +40,15 @@ const signInFor = (provider: ProviderId) => {
 }
 const siteOf = (provider: ProviderId) => signInFor(provider)?.site ?? provider
 
-/** Open the provider's sign-in in the browser and wait for the result (`connectionId`: sign that one in again). */
-export async function beginSignIn(provider: ProviderId = 'openrouter', connectionId?: string): Promise<void> {
+/**
+ * Open the provider's sign-in in the browser and wait for the result. `connectionId`: sign that one in
+ * again; `newAccount`: do not reuse a known account ("Use Another Account").
+ */
+export async function beginSignIn(provider: ProviderId = 'openrouter', connectionId?: string, newAccount?: boolean): Promise<void> {
   useSignIn.setState({ provider, renewing: connectionId ?? null })
   set('waiting', `Finish signing in to ${siteOf(provider)} in your browser. Novel waits up to 5 minutes.`)
   try {
-    await startOAuth(provider, connectionId)
+    await startOAuth(provider, connectionId, newAccount)
   } catch (e) {
     set('failed', messageOf(e, 'The sign-in could not start.'))
   }

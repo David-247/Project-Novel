@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { Fragment, useEffect, useId, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { useStore } from '@/shared/store'
 import { Button, Checkbox, Dialog, Select, TextInput, Tooltip, cn } from '@/shared/ui'
@@ -14,7 +14,7 @@ import { getAdapter, listAdapters } from '../providers/registry'
 import type { ModelInfo, ProviderAdapter } from '../providers/types'
 import { AI_SETTINGS_CONTROLS as C, HISTORY_NOTE, SUBSCRIPTION_NOTE } from './controls'
 import type { AiSettingsControlKey } from './controls'
-import { openKeyPage, openUsagePage } from './ipc'
+import { openKeyPage, openUsagePage, reusableAccount } from './ipc'
 import { beginSignIn, cancelSignIn, useSignIn } from './sign-in'
 import { baseUrlHint, baseUrlProblem, needsInsecureConfirm, normaliseBaseUrl, originOf } from './url'
 
@@ -334,11 +334,16 @@ function banWarning(): { title: string; paragraphs: string[] } {
  * Shown once, before the first sign-in with a consumer plan (design: the account-ban warning). Continue
  * remembers that it was read (preferences) and starts the sign-in; Cancel starts nothing.
  */
-function PlanWarningDialog({ provider, onClose }: { provider: ProviderId | null; onClose: () => void }) {
+interface PendingSignIn {
+  provider: ProviderId
+  newAccount: boolean
+}
+
+function PlanWarningDialog({ pending, onClose }: { pending: PendingSignIn | null; onClose: () => void }) {
   const { title, paragraphs } = banWarning()
   return (
     <Dialog
-      open={provider !== null}
+      open={pending !== null}
       onOpenChange={(o) => !o && onClose()}
       title={title}
       footer={
@@ -348,11 +353,11 @@ function PlanWarningDialog({ provider, onClose }: { provider: ProviderId | null;
             k="planWarningAccept"
             variant="primary"
             onClick={() => {
-              const p = provider
+              const p = pending
               onClose()
               if (!p) return
               useStore.getState().preferencesActions.set('tutorPlanWarningSeen', true)
-              void beginSignIn(p)
+              void beginSignIn(p.provider, undefined, p.newAccount)
             }}
           />
         </>
@@ -373,21 +378,46 @@ function PlanWarningDialog({ provider, onClose }: { provider: ProviderId | null;
 function SignInRow({ add }: { add: ReactNode }) {
   const { status, message } = useSignIn()
   const warningSeen = useStore((s) => s.preferences.tutorPlanWarningSeen)
-  const [warnFor, setWarnFor] = useState<ProviderId | null>(null)
-  const start = (a: ProviderAdapter) => {
-    if (a.signIn?.consumerPlan && !warningSeen) setWarnFor(a.id)
-    else void beginSignIn(a.id)
+  const connections = useStore((s) => s.tutorConnections.list)
+  const [warnFor, setWarnFor] = useState<PendingSignIn | null>(null)
+  // Per renewable sign-in: the known account Continue would reuse (its email, '' unknown), or null.
+  const [reusable, setReusable] = useState<Partial<Record<ProviderId, string | null>>>({})
+  useEffect(() => {
+    let live = true
+    for (const a of SIGN_INS.filter((x) => x.signIn?.renewable)) {
+      reusableAccount(a.id)
+        .then((email) => live && setReusable((r) => (r[a.id] === email ? r : { ...r, [a.id]: email })))
+        .catch(() => {})
+    }
+    return () => {
+      live = false
+    }
+  }, [connections, status])
+  const start = (a: ProviderAdapter, newAccount = false) => {
+    if (a.signIn?.consumerPlan && !warningSeen) setWarnFor({ provider: a.id, newAccount })
+    else void beginSignIn(a.id, undefined, newAccount)
   }
+  const known = SIGN_INS.map((a) => ({ a, email: reusable[a.id] })).filter((x): x is { a: ProviderAdapter; email: string } => typeof x.email === 'string')
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
         {add}
         {SIGN_INS.map((a) => (
-          <Action key={a.id} k={a.signIn?.control ?? 'signIn'} variant="primary" disabled={status === 'waiting'} onClick={() => start(a)} />
+          <Fragment key={a.id}>
+            <Action k={a.signIn?.control ?? 'signIn'} variant="primary" disabled={status === 'waiting'} onClick={() => start(a)} />
+            {typeof reusable[a.id] === 'string' ? (
+              <Action k="signInOtherAccount" disabled={status === 'waiting'} onClick={() => start(a, true)} />
+            ) : null}
+          </Fragment>
         ))}
         {status === 'waiting' ? <Action k="signInCancel" onClick={() => void cancelSignIn()} /> : null}
       </div>
-      <PlanWarningDialog provider={warnFor} onClose={() => setWarnFor(null)} />
+      {known.map(({ a, email }) => (
+        <p key={a.id} className="m-0 text-ui-xs text-text-muted" data-testid="ai-sign-in-reuse">
+          {`${C[a.signIn?.control ?? 'signIn'].label} signs in again as ${email || 'the account you used before'}. To add a different account, use ${C.signInOtherAccount.label}.`}
+        </p>
+      ))}
+      <PlanWarningDialog pending={warnFor} onClose={() => setWarnFor(null)} />
       <StatusLine
         testId="ai-sign-in-status"
         status={message ? { tone: status === 'failed' ? 'danger' : status === 'done' ? 'success' : 'muted', text: message } : null}

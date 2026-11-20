@@ -46,6 +46,7 @@ export const AI_COMMAND_NAMES = [
   'ai_oauth_cancel',
   'ai_open_key_page',
   'ai_open_usage_page',
+  'ai_oauth_reusable',
 ] as const
 
 /** Mirrors Rust's AiFetchEvent (serde tag "type"). */
@@ -167,6 +168,10 @@ export function createFakeAi() {
     usagePages: [] as string[],
     /** What removing a ChatGPT (plan sign-in) connection answers: the provider confirmed the sign-out. */
     signOutConfirmed: true,
+    /** What `ai_oauth_reusable` answers for ChatGPT: the known account's email, or null (none). */
+    reusableAccount: null as string | null,
+    /** Every ai_oauth_start that asked for another account ("Use Another Account"), by provider. */
+    oauthNewAccounts: [] as string[],
   }
   const running = new Map<number, () => void>()
   const earlyCancels = new Set<number>()
@@ -188,6 +193,8 @@ export function createFakeAi() {
     state.oauthRenewals.length = 0
     state.usagePages.length = 0
     state.signOutConfirmed = true
+    state.reusableAccount = null
+    state.oauthNewAccounts.length = 0
     running.clear()
     earlyCancels.clear()
   }
@@ -379,9 +386,15 @@ export function createFakeAi() {
           }
           state.oauthRenewals.push(c.id as string)
         }
+        if (args.newAccount !== undefined) {
+          if (provider !== 'chatgpt' || args.connectionId !== undefined) throw fail('bad_request', 'Sign In Again renews the same account.')
+          state.oauthNewAccounts.push(provider)
+        }
         state.oauthStarts.push(provider)
         return null
       }
+      case 'ai_oauth_reusable':
+        return args.provider === 'chatgpt' ? state.reusableAccount : null
       case 'ai_open_usage_page': {
         if (args.provider !== 'chatgpt') throw fail('bad_request', 'This provider has no usage page.')
         state.usagePages.push(args.provider)

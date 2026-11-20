@@ -183,6 +183,12 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
     /** Sign in with OpenRouter or ChatGPT: the providers Rust was asked to open, and finishing it as Rust does (returns the id). */
     oauthStarts: () => [...core.ai.oauthStarts],
     completeOAuth: (secret: string, provider?: 'openrouter' | 'chatgpt', name?: string) => core.completeOAuth(secret, provider, name),
+    /** A known ChatGPT account without a connection (what Continue with ChatGPT would reuse), or null. */
+    setReusableAccount: (email: string | null) => {
+      core.ai.reusableAccount = email
+    },
+    /** The sign-ins that asked for another account ("Use Another Account"). */
+    oauthNewAccounts: () => [...core.ai.oauthNewAccounts],
     /** "Manage Usage": the providers whose usage page Rust was asked to open. */
     usagePages: () => [...core.ai.usagePages],
     /** The tutor's chat history as stored (project id to chat titles). */

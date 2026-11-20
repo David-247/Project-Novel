@@ -21,6 +21,11 @@ export const AI_SETTINGS_CONTROLS = {
     label: 'Continue with ChatGPT',
     description: 'Sign in to ChatGPT in your browser so the tutor can use your ChatGPT plan.',
   },
+  signInOtherAccount: {
+    id: 'aiSettings.signIn.chatgpt.other',
+    label: 'Use Another Account',
+    description: 'Sign in to ChatGPT with a different account than the one Novel used before.',
+  },
   signInAgain: {
     id: 'aiSettings.signInAgain',
     label: 'Sign In Again',

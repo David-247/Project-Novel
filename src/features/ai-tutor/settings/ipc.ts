@@ -18,8 +18,16 @@ export const OAUTH_RESULT_EVENT = 'ai-oauth-result'
  * Open the provider's sign-in page in the browser; the outcome comes as an `ai-oauth-result` event.
  * `connectionId`: sign that saved connection in again (a renewable sign-in: ChatGPT).
  */
-export function startOAuth(provider: ProviderId, connectionId?: string): Promise<void> {
-  return invoke<void>('ai_oauth_start', connectionId ? { provider, connectionId } : { provider })
+export function startOAuth(provider: ProviderId, connectionId?: string, newAccount?: boolean): Promise<void> {
+  return invoke<void>('ai_oauth_start', connectionId ? { provider, connectionId } : newAccount ? { provider, newAccount: true } : { provider })
+}
+
+/**
+ * A renewable sign-in (ChatGPT): the email ("" when unknown) of the account Continue with ChatGPT would
+ * sign in with again, or null when it would register a new one.
+ */
+export function reusableAccount(provider: ProviderId): Promise<string | null> {
+  return invoke<string | null>('ai_oauth_reusable', { provider })
 }
 
 /** Open the provider's usage settings page ("Manage Usage"; Rust's allowlisted address for that provider). */

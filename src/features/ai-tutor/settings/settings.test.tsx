@@ -281,6 +281,42 @@ describe('Settings ▸ AI Tutor', () => {
     expect(screen.getByTestId('ai-settings-list-status')).toHaveTextContent('ChatGPT did not confirm the sign-out')
   })
 
+  it('a known ChatGPT account: Continue reuses it, Use Another Account registers another (N1)', async () => {
+    backend.ai.reusableAccount = 'writer@example.com'
+    useStore.getState().preferencesActions.set('tutorPlanWarningSeen', true)
+    renderPage()
+    expect(await screen.findByTestId('ai-sign-in-reuse')).toHaveTextContent(
+      'Continue with ChatGPT signs in again as writer@example.com. To add a different account, use Use Another Account.',
+    )
+    audit('reuse offered')
+    fireEvent.click(screen.getByRole('button', { name: 'Use Another Account' }))
+    await waitFor(() => expect(backend.ai.oauthStarts).toEqual(['chatgpt']))
+    expect(backend.ai.oauthNewAccounts).toEqual(['chatgpt'])
+    expect(screen.getByRole('button', { name: 'Use Another Account' })).toBeDisabled()
+    act(() => emit('ai-oauth-result', { ok: false, error: 'The sign-in timed out. Try again.' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Use Another Account' })).toBeEnabled())
+    // The plain button reuses (Rust decides; no newAccount flag is sent).
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }))
+    await waitFor(() => expect(backend.ai.oauthStarts).toEqual(['chatgpt', 'chatgpt']))
+    expect(backend.ai.oauthNewAccounts).toEqual(['chatgpt'])
+  })
+
+  it('Use Another Account also shows the ban warning first when it was never read', async () => {
+    backend.ai.reusableAccount = ''
+    renderPage()
+    expect(await screen.findByTestId('ai-sign-in-reuse')).toHaveTextContent('signs in again as the account you used before')
+    fireEvent.click(screen.getByRole('button', { name: 'Use Another Account' }))
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Before you sign in with your ChatGPT plan' })).getByRole('button', { name: 'Continue to Sign In' }))
+    await waitFor(() => expect(backend.ai.oauthNewAccounts).toEqual(['chatgpt']))
+  })
+
+  it('no known account: no Use Another Account and no reuse note', async () => {
+    renderPage()
+    await screen.findByRole('button', { name: 'Continue with ChatGPT' })
+    await waitFor(() => expect(screen.queryByTestId('ai-sign-in-reuse')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'Use Another Account' })).toBeNull()
+  })
+
   it('ChatGPT is a sign-in only: it is not in Add Connection’s provider list', async () => {
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: 'Add Connection…' }))

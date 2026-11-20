@@ -136,6 +136,24 @@ test('Continue with ChatGPT: the ban warning once, then Rust signs in; Manage Us
   expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
 })
 
+test('a known ChatGPT account: Use Another Account is offered, has a tooltip and works from the keyboard', async ({ page }) => {
+  await launch(page)
+  await page.evaluate(() => {
+    window.__nvE2E.setReusableAccount('writer@example.com')
+  })
+  await openAiPage(page)
+  await expect(dialog(page).getByTestId('ai-sign-in-reuse')).toContainText('Continue with ChatGPT signs in again as writer@example.com')
+  expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
+  const other = ctl(page, 'aiSettings.signIn.chatgpt.other')
+  await ctl(page, 'aiSettings.signIn.chatgpt').focus()
+  await pressTab(page)
+  await expect(other).toBeFocused()
+  await page.keyboard.press('Enter')
+  // First sign-in: the ban warning, then Rust is asked for another account.
+  await page.getByRole('dialog', { name: 'Before you sign in with your ChatGPT plan' }).getByRole('button', { name: 'Continue to Sign In' }).click()
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.oauthNewAccounts())).toEqual(['chatgpt'])
+})
+
 test('every control has a tooltip and is reachable with Tab', async ({ page }) => {
   await page.addInitScript(() => {
     window.__nvE2EConfig = { tutorConnections: [{ id: 'c1', provider: 'ollama', label: 'Ollama', auth: 'none', baseUrl: 'http://localhost:11434/v1' }] }
