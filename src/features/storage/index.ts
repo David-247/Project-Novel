@@ -26,6 +26,7 @@ export {
   clearRecoveryData,
   hasPendingRecovery,
   reopenRecoveryPrompt,
+  type DocumentReplaceInfo,
   type OpenedProject,
   type SaveOptions,
 } from './project'

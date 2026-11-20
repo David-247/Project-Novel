@@ -42,7 +42,7 @@ vi.mock('@/features/ai-tutor/providers/registry', () => ({
 
 import { AI_SETTINGS_PAGE_ID, closeTutor, isTutorOpen, TUTOR_CONTROLS as C, TUTOR_SHORTCUT, useTutorHistory } from '@/features/ai-tutor'
 import { closeSettings, openSettings } from '@/features/settings'
-import { openProject } from '@/features/storage'
+import { closeProject, openProject, saveProject } from '@/features/storage'
 import { App } from './App'
 
 type StreamPart = Awaited<ReturnType<MockLanguageModelV4['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
@@ -372,6 +372,54 @@ describe('projects and history (Review Focus 5)', () => {
     expect(backend.ai.historySaves.every((s) => s.projectId === 'proj-a')).toBe(true)
   })
 
+  it('C-M1: the first save of an untitled manuscript keeps the chat on screen and a reply still coming, and stores it under the new project', async () => {
+    await renderApp()
+    // Untitled: no project open (an earlier test may have left one).
+    await act(() => closeProject())
+    scripted([...text('First answer.'), finish('stop')])
+    act(() => void runCommand(C.toggle.id))
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'First question' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    // A second reply is streaming when the writer saves for the first time.
+    let finishStream: () => void = () => {}
+    scripted(
+      () =>
+        new ReadableStream<StreamPart>({
+          start(c) {
+            c.enqueue({ type: 'text-start', id: 't' })
+            c.enqueue({ type: 'text-delta', id: 't', delta: 'Half ' })
+            finishStream = () => {
+              c.enqueue({ type: 'text-delta', id: 't', delta: 'and whole.' })
+              c.enqueue({ type: 'text-end', id: 't' })
+              c.enqueue(finish('stop'))
+              c.close()
+            }
+          },
+        }),
+    )
+    fireEvent.change(composer(), { target: { value: 'Second question' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await waitFor(() => expect(screen.getAllByTestId('tutor-reply').at(-1)).toHaveTextContent('Half'))
+    const folder = '/books/new'
+    backend.dirs.add(folder)
+    backend.pick = folder
+    const saved = await act(() => saveProject())
+    expect(saved, JSON.stringify(backend.messages)).toBe(true)
+    expect(useStore.getState().project.path).toBe(folder)
+    // Still on screen, still streaming.
+    expect(screen.getAllByTestId('tutor-user-message').map((m) => m.textContent)).toEqual([expect.stringContaining('First question'), expect.stringContaining('Second question')])
+    act(() => finishStream())
+    await idle()
+    expect(screen.getAllByTestId('tutor-reply').at(-1)).toHaveTextContent('Half and whole.')
+    await act(() => useTutorHistory.getState().flush())
+    const projectId = JSON.parse(backend.files.get(`${folder}/project.json`)!).id as string
+    const stored = [...(backend.ai.history.get(projectId)?.values() ?? [])]
+    expect(stored.map((c) => c.title)).toEqual(['First question'])
+    expect(JSON.stringify(stored[0].messages)).toContain('Half and whole.')
+  })
+
   it('C1: opening another project mid-turn stops the tutor before its manuscript loads: no tool reads it, nothing of it is sent or saved under the old project', async () => {
     seed(A, 'proj-a', 'A')
     backend.dirs.add(B)
@@ -483,6 +531,13 @@ describe('projects and history (Review Focus 5)', () => {
     expect(c.querySelector(`[data-control-id="${C.correctionFix.id}"]`)).toHaveAttribute('aria-disabled', 'true')
     fireEvent.click(inPanel(C.history.id))
     const del = await within(await screen.findByTestId('tutor-history')).findByRole('button', { name: /Delete chat “Any typos\?”/ })
+    // It asks first (final C-M7): Cancel keeps the chat.
+    backend.answer = 'Cancel'
+    fireEvent.click(del)
+    await waitFor(() => expect(backend.messages.at(-1)?.text).toBe('Delete the chat “Any typos?”? It is removed from this computer and cannot be undone.'))
+    await act(() => new Promise((r) => setTimeout(r, 20)))
+    expect(backend.ai.history.get('proj-a')?.size).toBe(1)
+    backend.answer = 'Delete'
     fireEvent.click(del)
     await waitFor(() => expect(screen.getByTestId('tutor-history')).toHaveTextContent('No chats yet for this project.'))
     expect(backend.ai.history.get('proj-a')?.size ?? 0).toBe(0)

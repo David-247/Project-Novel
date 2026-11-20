@@ -152,6 +152,22 @@ describe('history store: the project changes under an open chat (Review Focus 5)
     expect(state().chat).toBeNull()
   })
 
+  it('Save As (the text kept) moves the open chat into the new project, with its id, and saves it there (final C-M1)', async () => {
+    // Untitled: the chat lives in memory only.
+    storage.meta = null
+    const id = state().startNew()
+    add(user('Hello'))
+    storage.meta = { id: 'project-2' }
+    ;(storage.listeners as Set<(p: unknown) => void>).forEach((cb) => cb({ path: '/books/new', meta: storage.meta, keptText: true }))
+    expect(state().chat?.id).toBe(id)
+    expect(state().projectId).toBe('project-2')
+    // A late write of the turn still streaming lands in the moved chat.
+    state().append(id, assistant('Hi'))
+    await vi.advanceTimersByTimeAsync(SAVE_DEBOUNCE_MS + 10)
+    expect(saves().map((s) => s.projectId)).toEqual(['project-2'])
+    expect(saves()[0].chat.messages).toEqual([user('Hello'), assistant('Hi')])
+  })
+
   it('drops the open chat when a project is opened', async () => {
     state().startNew()
     add(user('Hello'))

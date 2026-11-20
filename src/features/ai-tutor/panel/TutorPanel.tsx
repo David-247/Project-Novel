@@ -3,7 +3,7 @@ import { useStore } from '@/shared/store'
 import { cn, focusRing, IconButton, Tooltip } from '@/shared/ui'
 import { closeTutor, focusManuscript, TUTOR_PANEL_ATTR, useTutorOpen } from '../commands'
 import { useTutorHistory } from '../history/store'
-import { deleteChat, newChat, openChat, showHistory, useTutorChat } from './chat'
+import { askDeleteChat, newChat, openChat, showHistory, useTutorChat } from './chat'
 import { Composer } from './Composer'
 import { connectProvider } from './connect'
 import { TUTOR_CONTROLS as C } from './controls'
@@ -68,7 +68,7 @@ function HistoryList() {
                   </button>
                 </Tooltip>
                 <Tooltip copy={{ title: `Delete “${c.title}”`, description: C.historyDelete.description }} side="left">
-                  <IconButton label={`Delete chat “${c.title}”`} data-control-id={C.historyDelete.id} onClick={() => void deleteChat(c.id)}>
+                  <IconButton label={`Delete chat “${c.title}”`} data-control-id={C.historyDelete.id} onClick={() => void askDeleteChat(c.id, c.title)}>
                     <TrashIcon />
                   </IconButton>
                 </Tooltip>

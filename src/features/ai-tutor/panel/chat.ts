@@ -260,8 +260,16 @@ export async function shutdown(): Promise<void> {
   await useTutorHistory.getState().close()
 }
 
+/**
+ * Save As (or the first save of an untitled manuscript) is under way: the text stays, only the project
+ * changes, so the chat on screen and a reply still coming carry on; the history moves the chat into the
+ * new project (final C-M1).
+ */
+let carrying = false
+
 /** Another project opened, or the project closed: stop and forget the chat (Review Focus 5). */
 export function projectChanged(): void {
+  if (carrying) return
   abort?.abort()
   resetView()
   disposeSession()
@@ -273,12 +281,37 @@ export function projectChanged(): void {
  * the provider or this chat; wait for the turn to unwind; then save the chat to the project it belongs
  * to, which is still the open one (M1), and close it.
  */
-export async function beforeDocumentReplace(): Promise<void> {
+export async function beforeDocumentReplace(info: { keepsText: boolean } = { keepsText: false }): Promise<void> {
+  carrying = info.keepsText
+  if (carrying) {
+    // The previous project keeps the chat as it is now; the chat itself stays open.
+    await useTutorHistory.getState().flush()
+    return
+  }
   abort?.abort()
   resetView()
   disposeSession()
   await running
   await useTutorHistory.getState().close()
+}
+
+/** A project was opened or created (storage's onProjectOpened): Save As carries the chat, anything else resets it. */
+export function projectOpened(p: { keptText?: boolean }): void {
+  const carried = carrying && !!p.keptText
+  carrying = false
+  if (!carried) projectChanged()
+}
+
+/**
+ * The chats were cleared in Settings (final C-M3): stop the reply and forget the chat on screen, so the
+ * panel neither shows nor sends again what was deleted. The composer keeps what the writer typed.
+ */
+export async function chatsCleared(): Promise<void> {
+  await stop()
+  const draft = chat().draft
+  resetView()
+  disposeSession()
+  set({ draft })
 }
 
 // ---- Chips ---------------------------------------------------------------------------------------
@@ -559,6 +592,9 @@ function modelProblem(c: Connection, modelId: string): string | null {
 /** ➤ / Enter: send the draft (or `opts.text`) with the chips. Resolves when the reply has finished. */
 export async function send(opts: SendOptions = {}): Promise<void> {
   if (chat().busy) return
+  // The chat this send belongs to: after each await below it must still be the one on screen, with the
+  // same session on the same editor (another project may have opened meanwhile: final C-I1).
+  const gen = generation
   const text = (opts.text ?? chat().draft).trim()
   const chips = opts.chips ?? chat().chips
   if (!text) return
@@ -569,12 +605,15 @@ export async function send(opts: SendOptions = {}): Promise<void> {
   if (!s) return
   const attachments = chips.map((c) => c.attachment)
   const sent = attachments.map((a) => ({ a, ...attachmentText(a, s.idx) }))
-  if (!(await confirmSend(connection, modelHistory, sent))) return
+  if (!(await confirmSend(connection, modelHistory, sent, gen))) return
+  if (!live(gen, s)) return
   let modelId = chosenModel(connection)
   if (!modelId) {
     set({ busy: true })
     const models = await loadModels(connection)
+    if (gen !== generation) return
     set({ busy: false })
+    if (!live(gen, s)) return
     modelId = models.find((m) => modelSupportsTools(connection, m))?.id ?? null
   }
   const user: UserMessageView = { id: newId('u'), role: 'user', text, chips: chips.map((c) => ({ label: c.label, words: c.words })) }
@@ -586,6 +625,12 @@ export async function send(opts: SendOptions = {}): Promise<void> {
   set((st) => ({ messages: [...st.messages, user], draft: '', chips: opts.chips ? st.chips : [] }))
   const stored: StoredMessage['attachments'] = sent.map((x) => ({ label: attachmentLabel(x.a, s.idx.editor.state.doc), text: x.text }))
   await runTurn({ connection, modelId, userText: text, attachments, script: opts.script ?? null, stored })
+}
+
+/** The chat and session a send or Retry started with are still the ones on screen, on the open editor. */
+function live(gen: number, s: TutorSession): boolean {
+  const ed = getEditor()
+  return gen === generation && session === s && ed === s.idx.editor && !ed.isDestroyed
 }
 
 /** Attached text, counted per line without its paragraph id ("[p12] " or "[p12 footnote 3] "). */
@@ -641,12 +686,14 @@ export function historyPayload(history: readonly ModelMessage[]): { words: numbe
  * carries the whole book, asks first: the new attachments plus what the chat already holds and sends
  * again (a follow-up, Retry). Resolves false when the writer cancels.
  */
-async function confirmSend(connection: Connection, history: readonly ModelMessage[], sent: { a: Attachment; words: number }[]): Promise<boolean> {
+async function confirmSend(connection: Connection, history: readonly ModelMessage[], sent: { a: Attachment; words: number }[], gen: number): Promise<boolean> {
   const earlier = historyPayload(history)
   const words = earlier.words + sent.reduce((n, x) => n + x.words, 0)
   if (words <= CONFIRM_WORDS && !earlier.manuscript && !sent.some((x) => x.a.kind === 'manuscript')) return true
   set({ busy: true })
   const ok = await askConfirm('Send to the Tutor', `Send about ${formatCount(words)} words to ${connection.label}?`, 'Send')
+  // The chat was replaced while the question was open: the busy flag is the new chat's now.
+  if (gen !== generation) return false
   set({ busy: false })
   return ok
 }
@@ -738,13 +785,14 @@ async function runTurn(input: TurnInput): Promise<void> {
 export async function retry(): Promise<void> {
   const f = lastFailed
   if (!f || chat().busy) return
+  const gen = generation
   const list = useStore.getState().tutorConnections.list as Connection[]
   const connection = list.find((c) => c.id === f.connectionId) ?? activeConnection()
   const s = ensureSession()
   if (!connection || !s) return
   const sent = f.attachments.map((a) => ({ a, ...attachmentText(a, s.idx) }))
-  if (!(await confirmSend(connection, f.history, sent))) return
-  if (lastFailed !== f) return
+  if (!(await confirmSend(connection, f.history, sent, gen))) return
+  if (lastFailed !== f || !live(gen, s)) return
   lastFailed = null
   const stored: StoredMessage['attachments'] = sent.map((x) => ({ label: attachmentLabel(x.a, s.idx.editor.state.doc), text: x.text }))
   await runTurn({ connection, modelId: f.modelId, userText: f.userText, attachments: f.attachments, script: f.script, stored, history: f.history })
@@ -903,9 +951,20 @@ export async function deleteChat(id: string): Promise<void> {
   await useTutorHistory.getState().remove(id)
 }
 
+/**
+ * ⟲ History's delete: asks first, as Word does before anything it cannot undo (final C-M7). Resolves
+ * true when the chat was deleted.
+ */
+export async function askDeleteChat(id: string, title: string): Promise<boolean> {
+  const ok = await askConfirm('Delete Chat', `Delete the chat “${title}”? It is removed from this computer and cannot be undone.`, 'Delete')
+  if (ok) await deleteChat(id)
+  return ok
+}
+
 /** Test-only. */
 export function __resetTutorChatForTests(): void {
   abort?.abort()
+  carrying = false
   generation++
   reads.clear()
   lastFailed = null

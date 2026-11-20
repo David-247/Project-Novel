@@ -268,11 +268,20 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
   }
 })
 
-// A project was opened: the open chat and the list belong to the previous one.
-onProjectOpened(() => {
+// A project was opened: the open chat and the list belong to the previous one. Save As (or the first
+// save of an untitled manuscript) keeps the text, so the open chat goes with it: it now belongs to the
+// new project and is saved there (the previous project keeps the copy flushed before the switch).
+onProjectOpened((p?: { keptText?: boolean; meta: { id: string } }) => {
   generation++
   cancelTimer()
   dirty = false
+  const chat = useTutorHistory.getState().chat
+  if (p?.keptText && chat) {
+    useTutorHistory.setState({ chat, projectId: p.meta.id, chats: [] })
+    dirty = true
+    timer = setTimeout(() => void useTutorHistory.getState().flush(), SAVE_DEBOUNCE_MS)
+    return
+  }
   useTutorHistory.setState({ chat: null, projectId: null, chats: [] })
 })
 

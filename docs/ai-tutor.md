@@ -189,9 +189,11 @@ spell checker, not AI, so it does not pass through the guard.
 - **Chat history** is stored on this computer, in the app data folder, as `tutor-history/<project id>/<chat id>.json`.
   It is keyed by the project's `meta.id`, so renaming or moving the project folder keeps it. It is never written to
   the project folder.
+  Without a project a chat lives in memory only. The first save of an untitled manuscript (or Save As) keeps the
+  chat on screen, and a reply still coming, and stores it under the new project.
 - **Messages are stored as they were sent**, attached text included, so a chat can be resumed. The settings page says
   this plainly. History is not encrypted, like the project files. It is kept until the writer clears it: one chat
-  (Delete chat in the panel's history list), or the open project's chats or all chats (Settings ▸ AI Tutor). Novel has
+  (Delete chat in the panel's history list, which asks first), or the open project's chats or all chats (Settings ▸ AI Tutor). Novel has
   no Delete Project command yet. When it gets one, the command must offer to clear that project's history (design,
   Settled point 10).
 - **Connections** (`ai-connections.json` in the app data folder) hold the provider, a label, the address for local

@@ -5,7 +5,7 @@ import { notifyCommandStateChanged, registerCommands, type Command } from '@/sha
 import { useStore } from '@/shared/store'
 import { loadTutorConnections } from './connections/store'
 import { useTutorHistory } from './history/store'
-import { attach, beforeDocumentReplace, connectionChanged, projectChanged, requestComposerFocus, shutdown } from './panel/chat'
+import { attach, beforeDocumentReplace, connectionChanged, projectChanged, projectOpened, requestComposerFocus, shutdown } from './panel/chat'
 import { TUTOR_CONTROLS as C } from './panel/controls'
 import { listenForSignIn } from './settings/sign-in'
 import { SparkleIcon } from './panel/icons'
@@ -132,8 +132,9 @@ export function registerTutorCommands(): () => void {
     registerContextMenuItems(tutorMenuItems),
     registerExitTask(() => useTutorHistory.getState().flush()),
     // Before another manuscript is loaded (open, new, close, restore): stop, then save to this project (C1, M1).
+    // Save As keeps the text: the chat carries on into the new project (final C-M1).
     registerBeforeDocumentReplace(beforeDocumentReplace),
-    onProjectOpened(() => projectChanged()),
+    onProjectOpened((p) => projectOpened(p)),
     // Sign in with OpenRouter reports when the browser comes back, even after Settings was closed.
     listenForSignIn(),
     useStore.subscribe((s, p) => {

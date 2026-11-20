@@ -20,6 +20,8 @@ const hoisted = vi.hoisted(() => ({
   model: null as unknown,
   models: [] as { id: string; label: string; tools: 'yes' | 'no' | 'unknown' }[],
   listCalls: 0,
+  /** While set, listing the models waits for it (a slow network). */
+  listGate: null as Promise<void> | null,
 }))
 vi.mock('../providers/registry', () => ({
   getAdapter: () => ({
@@ -27,6 +29,7 @@ vi.mock('../providers/registry', () => ({
     languageModel: () => hoisted.model,
     listModels: async () => {
       hoisted.listCalls++
+      if (hoisted.listGate) await hoisted.listGate
       return hoisted.models
     },
   }),
@@ -150,6 +153,7 @@ beforeEach(() => {
   useStore.getState().rewriteActions.loaded([])
   hoisted.models = [{ id: 'gpt-test', label: 'GPT Test', tools: 'yes' }]
   hoisted.listCalls = 0
+  hoisted.listGate = null
   hoisted.model = null
 })
 afterEach(() => {
@@ -724,6 +728,56 @@ describe('connection and model', () => {
     expect(useTutorChat.getState().modelId).toBeNull()
     fireEvent.click(await screen.findByRole('menuitem', { name: /GPT Test/ }))
     expect(useTutorChat.getState().modelId).toBe('gpt-test')
+  })
+})
+
+describe('final review: a send after another project opened (C-I1)', () => {
+  it('C-I1: a send waiting for the model list is dropped when another project opens meanwhile: nothing is sent or saved', async () => {
+    const model = scripted([...text('Hi.'), finish('stop')])
+    await mount()
+    act(() => useStore.getState().tutorConnectionsActions.setConnections([{ ...CONNECTION, defaultModel: undefined }], CONNECTION.id))
+    let release!: () => void
+    hoisted.listGate = new Promise<void>((r) => (release = r))
+    type('Hello?')
+    press('Enter')
+    await waitFor(() => expect(hoisted.listCalls).toBe(1))
+    act(() => projectChanged())
+    await act(async () => {
+      release()
+      await new Promise((r) => setTimeout(r, 20))
+    })
+    expect(model.doStreamCalls).toHaveLength(0)
+    expect(useTutorChat.getState().messages).toEqual([])
+    expect(useTutorChat.getState().busy).toBe(false)
+    expect(useTutorHistory.getState().chat).toBeNull()
+  })
+
+  it('C-I1: a send whose consent question is answered after another project opened sends nothing', async () => {
+    const model = scripted([...text('Read it.'), finish('stop')])
+    await mount()
+    await attachFromMenu(/Whole Manuscript/)
+    // The writer opens another project while the question is open, then answers Send.
+    Object.defineProperty(backend, 'answer', {
+      configurable: true,
+      get: () => {
+        projectChanged()
+        return 'Send'
+      },
+      set: () => {},
+    })
+    try {
+      type('All of it')
+      press('Enter')
+      await waitFor(() => expect(backend.messages).toHaveLength(1))
+      await act(() => new Promise((r) => setTimeout(r, 20)))
+    } finally {
+      delete (backend as { answer?: string }).answer
+      backend.answer = 'Cancel'
+    }
+    expect(model.doStreamCalls).toHaveLength(0)
+    expect(useTutorChat.getState().messages).toEqual([])
+    expect(useTutorChat.getState().busy).toBe(false)
+    expect(useTutorHistory.getState().chat).toBeNull()
   })
 })
 

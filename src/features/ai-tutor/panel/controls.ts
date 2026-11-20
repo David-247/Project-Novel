@@ -32,7 +32,7 @@ export const TUTOR_CONTROLS = {
   newChat: { id: 'tutor.newChat', label: 'New chat', description: 'Start a fresh chat. The current one stays in the chat history.' },
   historyBack: { id: 'tutor.history.back', label: 'Back to chat', description: 'Leave the chat history and return to the current chat.' },
   historyOpen: { id: 'tutor.history.open', label: 'Open chat', description: 'Open this chat to read it or carry on.' },
-  historyDelete: { id: 'tutor.history.delete', label: 'Delete chat', description: 'Delete this chat from the history. This cannot be undone.' },
+  historyDelete: { id: 'tutor.history.delete', label: 'Delete chat', description: 'Delete this chat from the history. Asks first; this cannot be undone.' },
   prompt: { id: 'tutor.prompt', label: 'Suggested prompt', description: 'Ask the tutor this. Nothing is sent until you choose it.' },
   composer: {
     id: 'tutor.composer',

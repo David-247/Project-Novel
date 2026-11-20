@@ -80,6 +80,13 @@ import { withWriteLock } from './write-lock'
 export interface OpenedProject {
   path: string
   meta: ProjectMeta
+  /** Save As (or the first save of an untitled manuscript): the editor's text was kept, not replaced. */
+  keptText?: boolean
+}
+
+/** What a before-replace task is told: `keepsText` on Save As, where the text stays and only the project changes. */
+export interface DocumentReplaceInfo {
+  keepsText: boolean
 }
 
 /** Window in which a repeated manual save of an unchanged doc is ignored (menu + webview Mod-S both fire). */
@@ -303,7 +310,7 @@ async function closeIndex(): Promise<void> {
 }
 
 /** Work other slices finish before the editor's manuscript is replaced (open, new, close, restore). */
-const beforeReplaceTasks = new Set<() => Promise<void>>()
+const beforeReplaceTasks = new Set<(info: DocumentReplaceInfo) => Promise<void>>()
 
 /**
  * Run `task` before another manuscript replaces the one in the editor (opening or creating a project,
@@ -311,18 +318,18 @@ const beforeReplaceTasks = new Set<() => Promise<void>>()
  * its reply there and saves its chat to that project (Review Focus 5). A task that fails is logged and
  * does not stop the switch. Returns unregister.
  */
-export function registerBeforeDocumentReplace(task: () => Promise<void>): () => void {
+export function registerBeforeDocumentReplace(task: (info: DocumentReplaceInfo) => Promise<void>): () => void {
   beforeReplaceTasks.add(task)
   return () => {
     beforeReplaceTasks.delete(task)
   }
 }
 
-async function beforeDocumentReplace(): Promise<void> {
+async function beforeDocumentReplace(info: DocumentReplaceInfo = { keepsText: false }): Promise<void> {
   await Promise.all(
     [...beforeReplaceTasks].map(async (task) => {
       try {
-        await task()
+        await task(info)
       } catch (e) {
         console.error('A before-switch task failed:', e)
       }
@@ -355,7 +362,7 @@ async function switchIndex(folder: string): Promise<ProjectIndex | null> {
 }
 
 /** Switch module + store state to the project in `folder` (files read/written, index switched). */
-async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex | null) {
+async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex | null, keptText = false) {
   currentMeta = meta
   currentIndex = index
   bookGuard = null
@@ -363,7 +370,7 @@ async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex |
   setPendingRecovery(null)
   suppressSnapshotsAt(null)
   actions().projectOpened({ path: folder, title: meta.title, author: meta.author })
-  openedListeners.forEach((cb) => cb({ path: folder, meta }))
+  openedListeners.forEach((cb) => cb({ path: folder, meta, keptText }))
   await rememberRecent(meta.title)
 }
 
@@ -410,7 +417,7 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   await writeFileAtomic(joinPath(folder, BOOK_FILE), serializeBook(book), BOOK_FILE)
   await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(meta), PROJECT_FILE)
   // The previous project is still the open one here (Save As keeps the text, but not the project).
-  await beforeDocumentReplace()
+  await beforeDocumentReplace({ keepsText: !doc })
   if (doc) {
     loadDocument(p, doc)
     resetSideFiles(true)
@@ -421,7 +428,7 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
     resetSideFiles(false)
     sideFilesSaved(side.written)
   }
-  await activate(folder, meta, await switchIndex(folder))
+  await activate(folder, meta, await switchIndex(folder), !doc)
 }
 
 /** Open the project in `folder` (already the granted root). Throws ProjectError for missing/corrupt files. */
