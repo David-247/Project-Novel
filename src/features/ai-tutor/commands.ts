@@ -1,11 +1,11 @@
 import { useSyncExternalStore } from 'react'
 import { getEditor, registerContextMenuItems, type ContextMenuContext, type MenuItem } from '@/features/editor'
-import { onProjectOpened, registerExitTask } from '@/features/storage'
+import { onProjectOpened, registerBeforeDocumentReplace, registerExitTask } from '@/features/storage'
 import { notifyCommandStateChanged, registerCommands, type Command } from '@/shared/commands'
 import { useStore } from '@/shared/store'
 import { loadTutorConnections } from './connections/store'
 import { useTutorHistory } from './history/store'
-import { attach, connectionChanged, projectChanged, requestComposerFocus, shutdown } from './panel/chat'
+import { attach, beforeDocumentReplace, connectionChanged, projectChanged, requestComposerFocus, shutdown } from './panel/chat'
 import { TUTOR_CONTROLS as C } from './panel/controls'
 import { SparkleIcon } from './panel/icons'
 
@@ -130,6 +130,8 @@ export function registerTutorCommands(): () => void {
     registerCommands(tutorCommands()),
     registerContextMenuItems(tutorMenuItems),
     registerExitTask(() => useTutorHistory.getState().flush()),
+    // Before another manuscript is loaded (open, new, close, restore): stop, then save to this project (C1, M1).
+    registerBeforeDocumentReplace(beforeDocumentReplace),
     onProjectOpened(() => projectChanged()),
     useStore.subscribe((s, p) => {
       if (s.project.path !== p.project.path) projectChanged()

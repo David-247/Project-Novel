@@ -302,6 +302,34 @@ async function closeIndex(): Promise<void> {
   if (idx) await idx.close().catch((e) => console.warn('Closing project index failed:', e))
 }
 
+/** Work other slices finish before the editor's manuscript is replaced (open, new, close, restore). */
+const beforeReplaceTasks = new Set<() => Promise<void>>()
+
+/**
+ * Run `task` before another manuscript replaces the one in the editor (opening or creating a project,
+ * closing it, restoring a backup), while the current project is still the open one: the AI tutor stops
+ * its reply there and saves its chat to that project (Review Focus 5). A task that fails is logged and
+ * does not stop the switch. Returns unregister.
+ */
+export function registerBeforeDocumentReplace(task: () => Promise<void>): () => void {
+  beforeReplaceTasks.add(task)
+  return () => {
+    beforeReplaceTasks.delete(task)
+  }
+}
+
+async function beforeDocumentReplace(): Promise<void> {
+  await Promise.all(
+    [...beforeReplaceTasks].map(async (task) => {
+      try {
+        await task()
+      } catch (e) {
+        console.error('A before-switch task failed:', e)
+      }
+    }),
+  )
+}
+
 /** Load `doc` into the editor; a doc the editor schema rejects is reported as a damaged manuscript. */
 function loadDocument(p: DocumentProvider, doc: DocJSON): void {
   try {
@@ -381,6 +409,8 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   const bookVersion = getBookVersion()
   await writeFileAtomic(joinPath(folder, BOOK_FILE), serializeBook(book), BOOK_FILE)
   await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(meta), PROJECT_FILE)
+  // The previous project is still the open one here (Save As keeps the text, but not the project).
+  await beforeDocumentReplace()
   if (doc) {
     loadDocument(p, doc)
     resetSideFiles(true)
@@ -417,7 +447,9 @@ export async function openProjectAt(folder: string): Promise<void> {
     throw e
   }
   const book = await readBookFile(folder)
-  loadDocument(p, parseManuscript(docText))
+  const parsed = parseManuscript(docText)
+  await beforeDocumentReplace()
+  loadDocument(p, parsed)
   bookActions().loadBook(book.settings)
   // After the manuscript: a side file's content refers to it (comment anchors).
   const sideWarnings = await loadSideFiles(folder)
@@ -773,6 +805,7 @@ export function closeProjectInteractive(): Promise<boolean> {
     await finishSideFilesOnClose()
     const p = provider()
     if (!hasPendingRecovery() && !isProjectDirty(p)) await clearRecoveryData()
+    await beforeDocumentReplace()
     await closeProject()
     loadDocument(p, emptyDoc())
     // The untitled manuscript starts without the closed project's side-file data (its comments).
@@ -1049,6 +1082,7 @@ export async function restoreRecovery(): Promise<boolean> {
   if (!pending || pending.folder !== getCurrentProjectPath()) return false
   try {
     const p = provider()
+    await beforeDocumentReplace()
     loadDocument(p, pending.snapshot.doc)
     // Side files (comments) come back with the text they refer to.
     restoreSideFiles(pending.snapshot.sideFiles, pending.snapshot.sideFileGuards)

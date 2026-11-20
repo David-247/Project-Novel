@@ -19,7 +19,7 @@ import type { Connection } from '../connections/types'
 import { AiFetchError, createTauriFetch } from '../net/tauri-fetch'
 import { CHARTER_SOURCE, promptText, scriptText } from './assemble'
 import { EXPLAIN_INSTEAD } from './output-tools'
-import { createTutorSession, runTutorTurn, type TurnEvent, type TutorSession } from './run-turn'
+import { createTutorSession, runTutorTurn, stopWithTurn, type TurnEvent, type TutorSession } from './run-turn'
 import { blockPosOf, h1, makeEditor, p, t, textPosOf } from './test-doc'
 
 type LanguageModelV4CallOptions = Parameters<MockLanguageModelV4['doStream']>[0]
@@ -420,5 +420,31 @@ describe('runTutorTurn', () => {
     const { messages } = await turn({ history, userText: 'Hello' })
     expect(messages.slice(0, 3)).toEqual([...history, { role: 'user', content: 'Hello' }])
     expect(messages).toHaveLength(4)
+  })
+})
+
+describe('stopWithTurn (C1: tools bound to their turn)', () => {
+  it('a tool stopped mid-way returns no text, and a stopped turn runs no tool', async () => {
+    let release!: () => void
+    let ran = 0
+    const raw = {
+      read: {
+        description: 'reads',
+        inputSchema: undefined as never,
+        execute: async () => {
+          ran++
+          await new Promise<void>((r) => (release = r))
+          return { text: 'the new manuscript' }
+        },
+      },
+    }
+    const controller = new AbortController()
+    const tools = stopWithTurn(raw as never, controller.signal) as unknown as typeof raw
+    const pending = tools.read.execute()
+    controller.abort()
+    release()
+    expect(await pending).toEqual({ error: 'The writer stopped this request.' })
+    expect(await tools.read.execute()).toEqual({ error: 'The writer stopped this request.' })
+    expect(ran).toBe(1)
   })
 })

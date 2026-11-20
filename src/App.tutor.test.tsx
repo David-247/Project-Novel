@@ -108,6 +108,11 @@ function blockPos(i: number): number {
 
 function layOut() {
   const end = getEditor()!.state.doc.content.size
+  if (getEditor()!.state.doc.childCount < 4) {
+    useStore.getState().layoutActions.setPages([page(0, 0, end, 0)])
+    useStore.getState().layoutActions.setCurrentPage(0)
+    return
+  }
   const two = blockPos(3)
   useStore.getState().layoutActions.setPages([page(0, 0, two, 0), page(1, two, end, 1)])
   useStore.getState().layoutActions.setCurrentPage(0)
@@ -350,6 +355,86 @@ describe('projects and history (Review Focus 5)', () => {
     expect(backend.ai.historySaves.every((s) => s.projectId === 'proj-a')).toBe(true)
   })
 
+  it('C1: opening another project mid-turn stops the tutor before its manuscript loads: no tool reads it, nothing of it is sent or saved under the old project', async () => {
+    seed(A, 'proj-a', 'A')
+    backend.dirs.add(B)
+    const SECRET = 'Zanzibar marmalade'
+    const docB = { type: 'doc', content: [{ type: 'heading', attrs: { level: 1 }, content: [t('Elsewhere')] }, { type: 'paragraph', content: [t(`${SECRET} on the quay.`)] }] }
+    backend.files.set(`${B}/project.json`, JSON.stringify({ format: 'novel-project', schemaVersion: 1, id: 'proj-b', title: 'B', createdAt: 'a', updatedAt: 'b' }))
+    backend.files.set(`${B}/manuscript.json`, JSON.stringify(docB))
+    backend.recent = [...backend.recent, { path: B, name: 'B', openedAt: 'a' }]
+    await renderApp()
+    await open(A)
+    // The first step calls read_range only once the editor holds another manuscript (the window between
+    // the document swap and the project switch finishing); then the model would answer in a second step.
+    let release: () => void = () => {}
+    const unsub = useStore.subscribe((st, pr) => {
+      if (st.editor.docVersion !== pr.editor.docVersion && getEditor()?.state.doc.textContent.includes(SECRET)) release()
+    })
+    const model = scripted(
+      (options) =>
+        new ReadableStream<StreamPart>({
+          start(c) {
+            c.enqueue({ type: 'text-start', id: 't' })
+            c.enqueue({ type: 'text-delta', id: 't', delta: 'Let me read it. ' })
+            c.enqueue({ type: 'text-end', id: 't' })
+            release = () => {
+              try {
+                c.enqueue(call('read_range', { kind: 'attached' }))
+                c.enqueue(finish('tool-calls'))
+                c.close()
+              } catch {
+                // already aborted
+              }
+            }
+            options.abortSignal?.addEventListener('abort', () => {
+              try {
+                c.error(new DOMException('aborted', 'AbortError'))
+              } catch {
+                // already closed
+              }
+            })
+          },
+        }),
+      [...text('Here is what I read.'), finish('stop')],
+    )
+    act(() => void runCommand(C.toggle.id))
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Read my chapter' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await waitFor(() => expect(screen.getAllByTestId('tutor-reply').at(-1)).toHaveTextContent('Let me read it.'))
+    // A slow disk: the side files and the index take a while after the manuscript is in the editor.
+    backend.readDelayMs = 30
+    await open(B)
+    backend.readDelayMs = 0
+    await idle()
+    await new Promise((r) => setTimeout(r, 20))
+    unsub()
+    expect(getEditor()!.state.doc.textContent).toContain(SECRET)
+    // Nothing of project B went to the provider, and nothing was written to A's history.
+    for (const callOptions of model.doStreamCalls) expect(JSON.stringify(callOptions.prompt)).not.toContain(SECRET)
+    await act(() => useTutorHistory.getState().flush())
+    for (const save of backend.ai.historySaves) expect(JSON.stringify(save.chat)).not.toContain(SECRET)
+    expect(backend.ai.history.get('proj-b')).toBeUndefined()
+  })
+
+  it('M1: a change made just before another project opens is saved to the old project first', async () => {
+    seed(A, 'proj-a', 'A')
+    seed(B, 'proj-b', 'B')
+    await renderApp()
+    await open(A)
+    scripted([...text('An answer.'), finish('stop')])
+    act(() => void runCommand(C.toggle.id))
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Quick question' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    // Within the save debounce: nothing written yet.
+    expect(backend.ai.historySaves).toHaveLength(0)
+    await open(B)
+    expect([...(backend.ai.history.get('proj-a')?.values() ?? [])].map((c) => c.title)).toEqual(['Quick question'])
+  })
+
   it('⟲ lists the project chats; opening one brings it back (corrections can no longer be applied); delete removes it', async () => {
     seed(A, 'proj-a', 'A')
     await renderApp()
@@ -375,6 +460,9 @@ describe('projects and history (Review Focus 5)', () => {
     expect(screen.getAllByTestId('tutor-reply')[0]).toHaveTextContent('One typo.')
     const c = panel().querySelector<HTMLElement>('[data-correction-id]')!
     expect(c).toHaveAttribute('data-state', 'changed')
+    // Honest about why (M5): the paragraph may be untouched; the earlier session's ids are gone.
+    expect(c).toHaveTextContent('From an earlier session — ask again to refresh.')
+    expect(c).not.toHaveTextContent('This paragraph changed')
     expect(c.querySelector(`[data-control-id="${C.correctionFix.id}"]`)).toHaveAttribute('aria-disabled', 'true')
     fireEvent.click(inPanel(C.history.id))
     const del = await within(await screen.findByTestId('tutor-history')).findByRole('button', { name: /Delete chat “Any typos\?”/ })

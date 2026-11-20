@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import type { Transaction } from '@tiptap/pm/state'
-import { APICallError, stepCountIs, streamText, type ModelMessage } from 'ai'
+import { APICallError, stepCountIs, streamText, type ModelMessage, type ToolSet } from 'ai'
 import { getEditor } from '@/features/editor'
 import type { Connection } from '../connections/types'
 import { AiFetchError, type AiErrorKind } from '../net/tauri-fetch'
@@ -99,6 +99,30 @@ function turnError(e: unknown): { kind: AiErrorKind; message: string } {
 
 const isAbort = (e: unknown, signal: AbortSignal) => signal.aborted || (e instanceof Error && e.name === 'AbortError') || (e instanceof DOMException && e.name === 'AbortError')
 
+/**
+ * Tools bound to their turn (Review Focus 5, C1): once the turn is stopped (Stop, closing the panel,
+ * another manuscript about to load) a tool neither runs nor returns what it read, so nothing read after
+ * that point can reach the provider.
+ */
+export function stopWithTurn<T extends ToolSet>(tools: T, signal: AbortSignal): T {
+  const stopped = { error: 'The writer stopped this request.' }
+  const out: ToolSet = {}
+  for (const [name, t] of Object.entries(tools)) {
+    const execute = t.execute
+    out[name] = execute
+      ? {
+          ...t,
+          execute: async (input: unknown, options: Parameters<NonNullable<typeof execute>>[1]) => {
+            if (signal.aborted) return stopped
+            const result = await execute(input as never, options)
+            return signal.aborted ? stopped : result
+          },
+        }
+      : t
+  }
+  return out as T
+}
+
 export interface TurnArgs {
   connection: Connection
   modelId: string
@@ -166,15 +190,18 @@ export async function runTutorTurn(args: TurnArgs): Promise<ModelMessage[]> {
   }
   signal.addEventListener('abort', denyPending)
 
-  const tools = {
-    ...createReadTools({ idx, scope: { attachments }, requestRead, onScript: (name) => (script = name) }),
-    ...createOutputTools({
-      idx,
-      corrections,
-      onCorrections: (items) => onEvent({ type: 'corrections', items }),
-      onProposal: (change) => onEvent({ type: 'proposal', change }),
-    }),
-  }
+  const tools = stopWithTurn(
+    {
+      ...createReadTools({ idx, scope: { attachments }, requestRead, onScript: (name) => (script = name) }),
+      ...createOutputTools({
+        idx,
+        corrections,
+        onCorrections: (items) => onEvent({ type: 'corrections', items }),
+        onProposal: (change) => onEvent({ type: 'proposal', change }),
+      }),
+    },
+    signal,
+  )
 
   /** Response messages of the finished steps, in order. */
   const stepMessages: ModelMessage[] = []

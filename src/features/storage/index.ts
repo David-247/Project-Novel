@@ -17,6 +17,7 @@ export {
   getCurrentProjectMeta,
   updateProjectDetails,
   onProjectOpened,
+  registerBeforeDocumentReplace,
   createProjectAt,
   openProjectAt,
   isSaveInFlight,
