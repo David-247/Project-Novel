@@ -104,3 +104,74 @@ test('100k-word manuscript with spell check on: typing median < 50 ms; underline
   expect(Math.max(0, ...calls)).toBeLessThanOrEqual(200)
   budget(testInfo, 'typing median ms (100k words, spell check on)', typing.medianMs, 50)
 })
+
+/** The text of a fixture block. */
+const blockText = (b: Block) => (b.content ?? []).map((r) => r.text ?? '').join('')
+
+/**
+ * Corrections the fake tutor lists on one paragraph (`p1`, the first id the chat mints): "teh", and then
+ * words that occur once in it (as text, so the guard and the quote check accept each), capitalised.
+ */
+function correctionsFor(text: string, max: number) {
+  const items = [{ paragraph: 'p1', kind: 'spelling', original: 'teh', suggestion: 'the', explanation: 'Two letters swapped.' }]
+  for (const w of new Set(text.match(/\b[a-z]{4,}\b/g) ?? [])) {
+    if (items.length >= max) break
+    if (text.indexOf(w) !== text.lastIndexOf(w)) continue
+    items.push({ paragraph: 'p1', kind: 'style', original: w, suggestion: w[0].toUpperCase() + w.slice(1), explanation: 'A capital here.' })
+  }
+  return items
+}
+
+test('100k-word manuscript with spell check on and the tutor open with corrections listed: typing median < 50 ms', async ({ page }, testInfo) => {
+  test.setTimeout(240_000)
+  const { fx, doc } = misspeltFixture()
+  await page.addInitScript(() => {
+    ;(window as unknown as { __nvE2EConfig?: Record<string, unknown> }).__nvE2EConfig = {
+      tutorConnections: [{ id: 'conn-perf', provider: 'openai', label: 'OpenAI', auth: 'api_key', defaultModel: 'gpt-6.2-sol' }],
+    }
+  })
+  await launch(page)
+  await seedProject(page, '/projects/Spelt', 'Spelt', doc)
+  await openRecent(page, '/projects/Spelt')
+  await expect(saveStatus(page)).toHaveText('Spelt: All changes saved', { timeout: 60_000 })
+  await waitForLayout(page)
+
+  // Ask the tutor about a paragraph a third of the way in; it lists corrections on that paragraph.
+  const blocks = doc.content as Block[]
+  const target = blocks.findIndex((b, i) => i > blocks.length / 3 && b.type === 'paragraph' && i % 5 === 0)
+  const items = correctionsFor(blockText(blocks[target]), 15)
+  const block = editor(page).locator(':scope > :is(p, h1)').nth(target)
+  await clickBlockStart(page, block)
+  await waitForLayout(page)
+  await block.click({ button: 'right', position: { x: 4, y: 4 } })
+  await page.getByRole('menuitem', { name: 'Ask the Tutor About This' }).click()
+  const panel = page.getByTestId('tutor-panel')
+  await expect(panel).toBeVisible()
+  await page.evaluate((list) => window.__nvE2E.tutorQueue([{ text: 'Here is what I found.', tools: [{ name: 'list_corrections', input: { items: list } }] }, { text: 'Apply the ones you agree with.' }]), items)
+  const composer = panel.locator('[data-control-id="tutor.composer"]')
+  await composer.fill('Check this paragraph.')
+  await composer.press('Enter')
+  const listed = panel.locator('[data-correction-id]')
+  await expect(listed).toHaveCount(items.length, { timeout: 15_000 })
+  await expect(panel.getByTestId('tutor-reply').last()).not.toHaveAttribute('data-streaming', 'true')
+
+  // Type in another paragraph two below: every keystroke re-resolves the open corrections.
+  const other = editor(page).locator(':scope > :is(p, h1)').nth(target + 2)
+  await clickBlockStart(page, other)
+  await lineEnd(page)
+  await installLatencyProbe(page)
+  const typing = await measureTyping(page)
+  await expect(other).toContainText(TYPED)
+  // The corrections are still open: their paragraph was not touched.
+  const states = await listed.evaluateAll((els) => els.map((e) => e.getAttribute('data-state')))
+  expect(states.every((s) => s === 'open')).toBe(true)
+
+  await report(testInfo, 'perf-spellcheck-tutor', {
+    manuscript: { words: fx.words, blocks: blocks.length },
+    corrections: items.length,
+    typing,
+    budgets: { typingMedianMs: 50 },
+  })
+  expect(typing.keystrokes).toBeGreaterThanOrEqual(20)
+  budget(testInfo, 'typing median ms (100k words, spell check on, tutor open with corrections)', typing.medianMs, 50)
+})
