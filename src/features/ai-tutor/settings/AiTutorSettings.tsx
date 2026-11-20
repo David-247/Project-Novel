@@ -7,7 +7,7 @@ import { hasSecret, deleteSecret, setSecret } from '../connections/ipc'
 import { loadTutorConnections, removeTutorConnection, setActiveTutorConnection, upsertTutorConnection } from '../connections/store'
 import { USER_HOSTED_PROVIDERS, type Connection, type ProviderId } from '../connections/types'
 import { useTutorHistory } from '../history/store'
-import { forgetModels, useTutorChat } from '../panel/chat'
+import { chatsCleared, forgetModels, useTutorChat } from '../panel/chat'
 import { NO_TOOLS_REASON } from '../panel/controls'
 import { scriptedReply } from '../harness/assemble'
 import { getAdapter, listAdapters } from '../providers/registry'
@@ -700,6 +700,8 @@ function HistorySection({ id, onConfirm }: { id: string; onConfirm: (c: Confirm)
   const run = async (what: 'project' | 'all') => {
     const h = useTutorHistory.getState()
     await (what === 'project' ? h.clearProject() : h.clearAll())
+    // The panel forgets the cleared chat too: it neither shows it nor sends it again (final C-M3).
+    await chatsCleared()
     const error = useTutorHistory.getState().error
     setStatus(error ? { tone: 'danger', text: error } : { tone: 'success', text: what === 'project' ? "This project's chats were deleted." : 'All chats were deleted.' })
   }

@@ -483,6 +483,34 @@ describe('projects and history (Review Focus 5)', () => {
     expect(backend.ai.history.get('proj-b')).toBeUndefined()
   })
 
+  it("C-M3: clearing the project's chats in Settings resets the panel: the cleared chat is neither shown nor sent again", async () => {
+    seed(A, 'proj-a', 'A')
+    await renderApp()
+    await open(A)
+    scripted([...text('First answer.'), finish('stop')])
+    act(() => void runCommand(C.toggle.id))
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Remember the dragon' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    act(() => openSettings(AI_SETTINGS_PAGE_ID))
+    fireEvent.click(await screen.findByRole('button', { name: "Clear This Project's Chats" }))
+    const confirm = await waitFor(() => {
+      const b = document.querySelector<HTMLElement>('[data-control-id="aiSettings.clearProject.confirm"]')
+      expect(b).not.toBeNull()
+      return b!
+    })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(screen.getByTestId('tutor-greeting')).toBeInTheDocument())
+    act(() => closeSettings())
+    const model = scripted([...text('Fresh.'), finish('stop')])
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Hello again' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    expect(JSON.stringify(model.doStreamCalls[0].prompt)).not.toContain('Remember the dragon')
+  })
+
   it('M1: a change made just before another project opens is saved to the old project first', async () => {
     seed(A, 'proj-a', 'A')
     seed(B, 'proj-b', 'B')
