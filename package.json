@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:tutor-live": "node scripts/tutor-live-eval.mjs",
     "tauri": "tauri",
     "fetch:typst": "node scripts/fetch-typst.mjs"
   },
