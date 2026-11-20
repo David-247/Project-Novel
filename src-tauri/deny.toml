@@ -1,4 +1,5 @@
-# cargo-deny configuration: license gate for Rust crates (CI: `cargo deny check licenses`).
+# cargo-deny configuration: license gate for Rust crates (CI: `cargo deny check licenses`) and the
+# RustSec advisory gate (CI: `cargo deny check advisories`).
 # Every crate must be MIT-compatible (no GPL/AGPL/proprietary). MPL-2.0 is file-level copyleft and
 # is allowed for crates used unmodified (listed in README "Licenses").
 
@@ -33,3 +34,9 @@ allow = [
 confidence-threshold = 0.9
 # Our own crate.
 private = { ignore = true }
+
+[advisories]
+# Every advisory fails the gate except those listed here, each with the reason it is accepted for now.
+ignore = [
+  { id = "RUSTSEC-2026-0459", reason = "libsqlite3-sys 0.30.1 (bundled SQLite < 3.54.0) via tauri-plugin-sql 2.6.0 -> sqlx 0.8.6: SQLite can return stale page-cache memory when it opens a database with a crafted sibling -wal file. Predates Phase 5 (the AI tutor). Blocked upstream: sqlx-sqlite 0.8.6 pins libsqlite3-sys ^0.30.1, and the fix needs libsqlite3-sys 0.39. Exploiting it needs a crafted project index.sqlite (+ -wal) that the writer opens, and the stale bytes reach an attacker only if Novel writes them back into a file that travels back. Remove when tauri-plugin-sql/sqlx move to libsqlite3-sys >= 0.39." },
+]

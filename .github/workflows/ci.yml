@@ -56,6 +56,19 @@ jobs:
           manifest-path: src-tauri/Cargo.toml
           command: check licenses
 
+  advisories:
+    # Its own job (free ubuntu runner), so a newly published advisory shows up as this check failing
+    # rather than as the license gate. Accepted advisories are listed, with reasons, in src-tauri/deny.toml.
+    name: Rust advisories (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: RustSec advisories (cargo-deny)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check advisories
+
   rust:
     name: cargo test (${{ matrix.os }})
     strategy:
