@@ -106,12 +106,12 @@ pub fn auth_url(base: &str, port: u16, challenge: &str, state: &str) -> String {
 
 // ---- The loopback callback -------------------------------------------------------------------------
 
-fn refused(message: &str) -> AiError {
+pub(super) fn refused(message: &str) -> AiError {
     AiError::new("auth", message)
 }
 
 /// Equal without an early exit (the nonce is compared to what a local caller sent).
-fn same(a: &str, b: &str) -> bool {
+pub(super) fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
@@ -210,8 +210,18 @@ pub async fn wait_for_callback(
     listener: TcpListener,
     nonce: &str,
     timeout: Duration,
-    mut stop: watch::Receiver<Stop>,
+    stop: watch::Receiver<Stop>,
 ) -> Result<String, AiError> {
+    wait_for_reply(listener, timeout, stop, |head| parse_callback(head, nonce)).await
+}
+
+/// [`wait_for_callback`] with the provider's own callback parser (`chatgpt.rs` reads more than a code).
+pub async fn wait_for_reply<T>(
+    listener: TcpListener,
+    timeout: Duration,
+    mut stop: watch::Receiver<Stop>,
+    parse: impl Fn(&str) -> Result<T, AiError>,
+) -> Result<T, AiError> {
     let wait = async {
         let mut pending: JoinSet<Option<(TcpStream, String)>> = JoinSet::new();
         loop {
@@ -231,10 +241,10 @@ pub async fn wait_for_callback(
                 },
                 Some(done) = pending.join_next(), if !pending.is_empty() => {
                     let Ok(Some((mut stream, head))) = done else { continue };
-                    return match parse_callback(&head, nonce) {
-                        Ok(code) => {
+                    return match parse(&head) {
+                        Ok(reply) => {
                             respond(&mut stream, "200 OK", DONE_PAGE).await;
-                            Ok(code)
+                            Ok(reply)
                         }
                         Err(e) => {
                             let status = if head.starts_with("GET ") { "400 Bad Request" } else { "405 Method Not Allowed" };
@@ -314,7 +324,7 @@ pub async fn exchange_code(client: &reqwest::Client, url: &str, code: &str, veri
 // ---- Saving the signed-in connection -------------------------------------------------------------------
 
 /// A label not used yet: `name`, else "`name` 2", ...
-fn free_label(list: &[Connection], name: &str) -> String {
+pub(super) fn free_label(list: &[Connection], name: &str) -> String {
     let taken = |l: &str| list.iter().any(|c| c.label == l);
     if !taken(name) {
         return name.into();
@@ -375,7 +385,7 @@ pub struct OauthState {
 }
 
 impl OauthState {
-    fn begin(&self) -> (u64, watch::Receiver<Stop>) {
+    pub(super) fn begin(&self) -> (u64, watch::Receiver<Stop>) {
         let id = {
             let mut n = self.next.lock().unwrap_or_else(|e| e.into_inner());
             *n += 1;
@@ -394,7 +404,7 @@ impl OauthState {
         }
     }
 
-    fn finish(&self, id: u64) {
+    pub(super) fn finish(&self, id: u64) {
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         if pending.as_ref().is_some_and(|(p, _)| *p == id) {
             *pending = None;
@@ -403,25 +413,33 @@ impl OauthState {
 }
 
 /// Open an https page in the system browser.
-fn open_in_browser(url: &str) -> Result<(), AiError> {
+pub(super) fn open_in_browser(url: &str) -> Result<(), AiError> {
     if !url.starts_with("https://") {
         return Err(AiError::bad_request("Only https pages are opened."));
     }
     open::that_detached(url).map_err(|_| AiError::new("network", "Novel could not open your web browser."))
 }
 
-/// Start "Sign in with OpenRouter": open the browser and wait (in the background) for the callback.
-/// Resolves once the browser was asked to open; the outcome arrives as the `ai-oauth-result` event.
+/// Start "Sign in with OpenRouter" (or, for a provider with a plan sign-in, "Sign in with ChatGPT",
+/// `chatgpt.rs`; `connection_id` then names a saved connection to sign in again): open the browser and
+/// wait (in the background) for the callback. Resolves once the browser was asked to open; the outcome
+/// arrives as the `ai-oauth-result` event.
 #[tauri::command]
 pub async fn ai_oauth_start<R: Runtime>(
     app: AppHandle<R>,
     ai: State<'_, AiState>,
     oauth: State<'_, OauthState>,
     provider: String,
+    connection_id: Option<String>,
 ) -> Result<(), AiError> {
-    let sign_in = super::providers::descriptor(&provider)
-        .and_then(|d| d.sign_in)
-        .ok_or_else(|| AiError::bad_request("This provider has no sign-in."))?;
+    let descriptor = super::providers::descriptor(&provider).ok_or_else(|| AiError::bad_request("This provider has no sign-in."))?;
+    if let Some(plan) = descriptor.plan_sign_in {
+        return super::chatgpt::start(app, ai.http_client(), &oauth, provider, plan, connection_id).await;
+    }
+    if connection_id.is_some() {
+        return Err(AiError::bad_request("This provider cannot sign a connection in again."));
+    }
+    let sign_in = descriptor.sign_in.ok_or_else(|| AiError::bad_request("This provider has no sign-in."))?;
     let path = super::connections_file(&app)?;
     let pkce = new_pkce()?;
     let nonce = random_token(16)?;
@@ -446,22 +464,39 @@ pub async fn ai_oauth_start<R: Runtime>(
             super::blocking(move || save_signed_in(&path, &super::keychain::KeyringStore, &provider, sign_in.name, &key)).await
         }
         .await;
-        use tauri::Manager as _;
-        app2.state::<OauthState>().finish(id);
-        let result = match outcome {
-            Ok(connection_id) => OauthResult { ok: true, connection_id: Some(connection_id), error: None },
-            Err(e) if e.kind == "superseded" => return,
-            Err(e) => OauthResult { ok: false, connection_id: None, error: Some(e.message) },
-        };
-        let _ = app2.emit(RESULT_EVENT, result);
+        report(&app2, id, outcome);
     });
     Ok(())
+}
+
+/// End sign-in `flow` and tell the webview (`ai-oauth-result`): the connection id, or the error's
+/// message. A superseded flow says nothing (the newer one reports).
+pub(super) fn report<R: Runtime>(app: &AppHandle<R>, flow: u64, outcome: Result<String, AiError>) {
+    use tauri::Manager as _;
+    app.state::<OauthState>().finish(flow);
+    let result = match outcome {
+        Ok(connection_id) => OauthResult { ok: true, connection_id: Some(connection_id), error: None },
+        Err(e) if e.kind == "superseded" => return,
+        Err(e) => OauthResult { ok: false, connection_id: None, error: Some(e.message) },
+    };
+    let _ = app.emit(RESULT_EVENT, result);
 }
 
 /// Stop a sign-in that is waiting for the browser (it reports `ok: false`, cancelled).
 #[tauri::command]
 pub fn ai_oauth_cancel(oauth: State<'_, OauthState>) {
     oauth.cancel();
+}
+
+/// Open the provider's usage settings page ("Manage Usage": the allowlisted `usage_url` of its plan
+/// sign-in in `providers.rs`).
+#[tauri::command]
+pub fn ai_open_usage_page(provider: String) -> Result<(), AiError> {
+    let url = super::providers::descriptor(&provider)
+        .and_then(|d| d.plan_sign_in)
+        .map(|p| p.usage_url)
+        .ok_or_else(|| AiError::bad_request("This provider has no usage page."))?;
+    open_in_browser(url)
 }
 
 /// Open the provider's "create an API key" page (the allowlisted `key_url` in `providers.rs`).

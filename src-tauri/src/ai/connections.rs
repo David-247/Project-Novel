@@ -191,6 +191,21 @@ pub fn set_connection_secret(path: &Path, secrets: &dyn SecretStore, connection_
     super::keychain::set_secret(secrets, connection_id, &wrap(&c, secret))
 }
 
+/// [`set_connection_secret`] inside one [`write_lock`]: the connection cannot be removed between the
+/// check that it is saved and the keychain write (a refreshed token record, a renewed sign-in).
+pub fn replace_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &str, secret: &str) -> Result<(), AiError> {
+    let _lock = write_lock();
+    set_connection_secret(path, secrets, connection_id, secret)
+}
+
+/// The saved connection and its secret, if the keychain holds one bound to it. Rust-only (sign-out
+/// revocation, renewing a sign-in); no command returns it.
+pub fn connection_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &str) -> Result<Option<(Connection, Secret)>, AiError> {
+    let Ok(c) = find(path, connection_id) else { return Ok(None) };
+    let secret = secrets.get(connection_id)?.and_then(|s| unwrap_for(&c, s.expose()));
+    Ok(secret.map(|s| (c, s)))
+}
+
 /// True if the connection is saved and the keychain holds a secret bound to it as it is now.
 pub fn has_connection_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &str) -> Result<bool, AiError> {
     let Ok(c) = find(path, connection_id) else { return Ok(false) };
@@ -300,6 +315,10 @@ impl ConnectionResolver for FileResolver {
             }
         };
         Ok(ResolvedConnection { provider, base_url, secret, insecure_http_accepted })
+    }
+
+    fn store_secret(&self, connection_id: &str, secret: &Secret) -> Result<(), AiError> {
+        replace_secret(&self.path, self.secrets.as_ref(), connection_id, secret.expose())
     }
 }
 

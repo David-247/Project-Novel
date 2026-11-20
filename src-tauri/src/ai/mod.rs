@@ -21,6 +21,7 @@
 //! runtime with [`AiState::set_resolver`]. The app's resolver is `connections::FileResolver` (`app_resolver`,
 //! installed in `lib.rs`); tests inject their own.
 
+pub mod chatgpt;
 pub mod connections;
 pub mod fetch;
 pub mod history;
@@ -135,6 +136,12 @@ pub struct ResolvedConnection {
 /// Turns a connection id into its provider, saved base URL and secret (see the module docs).
 pub trait ConnectionResolver: Send + Sync + 'static {
     fn resolve(&self, connection_id: &str) -> Result<ResolvedConnection, AiError>;
+
+    /// Replace a saved connection's secret (a plan sign-in's refreshed token record, `chatgpt.rs`).
+    /// May block. A resolver that cannot store refuses.
+    fn store_secret(&self, _connection_id: &str, _secret: &Secret) -> Result<(), AiError> {
+        Err(AiError::new("auth", "The renewed sign-in could not be saved."))
+    }
 }
 
 /// A resolver that knows no connection (`AiState::default`, until `lib.rs` installs the real one).
@@ -202,9 +209,15 @@ impl AiState {
         let _registration = Registration { state: self, request_id };
         let resolver = self.resolver.read().unwrap_or_else(|e| e.into_inner()).clone();
         let id = connection_id.to_owned();
-        let conn = tokio::task::spawn_blocking(move || resolver.resolve(&id))
+        let r = resolver.clone();
+        let conn = tokio::task::spawn_blocking(move || r.resolve(&id))
             .await
             .map_err(|_| AiError::new("not_connected", "The AI connection could not be read."))??;
+        // A plan sign-in stores a token record: send its access token, refreshed first when it is due.
+        let conn = match conn.provider.plan_sign_in {
+            Some(plan) => chatgpt::with_access_token(&self.client, resolver, connection_id, conn, &plan).await?,
+            None => conn,
+        };
         fetch::run(&self.client, &conn, req, cancel, emit).await
     }
 
@@ -347,11 +360,24 @@ pub async fn ai_connection_upsert<R: Runtime>(app: AppHandle<R>, connection: con
     blocking(move || connections::upsert_connection(&path, &keychain::KeyringStore, connection)).await
 }
 
-/// Remove one connection and its key; the others stay as they are on disk.
+/// Remove one connection and its key; the others stay as they are on disk. A plan sign-in (ChatGPT) is
+/// signed out first: its refresh token is revoked at the provider (`chatgpt.rs`). Returns `None` for any
+/// other connection, else whether the provider confirmed the sign-out (the local tokens go either way).
 #[tauri::command]
-pub async fn ai_connection_remove<R: Runtime>(app: AppHandle<R>, connection_id: String) -> Result<(), AiError> {
+pub async fn ai_connection_remove<R: Runtime>(
+    app: AppHandle<R>,
+    ai: State<'_, AiState>,
+    connection_id: String,
+) -> Result<Option<bool>, AiError> {
     let path = connections_file(&app)?;
-    blocking(move || connections::remove_connection(&path, &keychain::KeyringStore, &connection_id)).await
+    let (p, id) = (path.clone(), connection_id.clone());
+    let saved = blocking(move || chatgpt::saved_sign_in(&p, &keychain::KeyringStore, &id)).await.unwrap_or(None);
+    let revoked = match saved {
+        Some((plan, record)) => Some(chatgpt::revoke(&ai.http_client(), &plan, &record).await),
+        None => None,
+    };
+    blocking(move || connections::remove_connection(&path, &keychain::KeyringStore, &connection_id)).await?;
+    Ok(revoked)
 }
 
 // ---- Chat history (Task 8) -------------------------------------------------------------------------

@@ -49,6 +49,7 @@ pub fn run() {
             ai::oauth::ai_oauth_start,
             ai::oauth::ai_oauth_cancel,
             ai::oauth::ai_open_key_page,
+            ai::oauth::ai_open_usage_page,
             export::export_pick_save_path,
             export::export_write_file,
             export::export_render_pdf,
