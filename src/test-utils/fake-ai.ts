@@ -9,9 +9,24 @@
  * Like Rust, a failure is sent as an `error` event and also rejects the invoke, and a cancel (also
  * one that overtakes its request) ends the stream with a `cancelled` error. No script means no
  * connection (`not_connected`).
+ *
+ * The keychain is `state.secrets` (connection id to secret; no command reads it back) and
+ * ai-connections.json is `state.connections`. Saving validates like Rust (unknown provider, duplicate
+ * id, a bad `baseUrl` for ollama, lmstudio and custom; a hosted provider's `baseUrl` is dropped) and
+ * deletes the secrets of removed connections. `failSecrets` makes the keychain commands fail.
  */
 
-export const AI_COMMAND_NAMES = ['ai_fetch', 'ai_fetch_cancel', 'ai_spike_autorun', 'ai_spike_log'] as const
+export const AI_COMMAND_NAMES = [
+  'ai_fetch',
+  'ai_fetch_cancel',
+  'ai_spike_autorun',
+  'ai_spike_log',
+  'ai_secret_set',
+  'ai_secret_delete',
+  'ai_secret_has',
+  'ai_connections_get',
+  'ai_connections_save',
+] as const
 
 /** Mirrors Rust's AiFetchEvent (serde tag "type"). */
 export type FakeAiEvent =
@@ -39,6 +54,26 @@ interface ChannelLike {
 
 const encoder = new TextEncoder()
 
+const PROVIDERS = ['anthropic', 'openai', 'xai', 'deepseek', 'zhipu', 'qwen', 'openrouter', 'ollama', 'lmstudio', 'custom', 'chatgpt']
+const USER_HOSTED = ['ollama', 'lmstudio', 'custom']
+
+/** Mirrors Rust's `check_base_url`: http(s), a host, no user info, query or fragment. */
+export function baseUrlProblem(raw: string): string | null {
+  if (!raw || [...raw].some((c) => c <= ' ')) return 'it is empty or has spaces'
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return 'it is not a URL'
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'it must start with http:// or https://'
+  if (!url.hostname) return 'it has no host'
+  if (url.username || url.password) return 'it must not contain a user name or password'
+  if (raw.includes('?')) return 'it must not contain a query (?)'
+  if (raw.includes('#')) return 'it must not contain a fragment (#)'
+  return null
+}
+
 /** Base64 of UTF-8 text, as Rust sends chunk bytes. */
 export const toBase64Text = (text: string) => btoa(String.fromCharCode(...encoder.encode(text)))
 
@@ -62,6 +97,12 @@ export function createFakeAi() {
     /** ai_spike_autorun's answer, and the ai_spike_log lines. */
     spikeAutorun: false,
     spikeLog: [] as string[],
+    /** The OS keychain: connection id to secret. */
+    secrets: new Map<string, string>(),
+    /** ai-connections.json's connections (plain objects, as Rust returns them). */
+    connections: [] as Record<string, unknown>[],
+    /** true: ai_secret_* fail as if the keychain were locked. */
+    failSecrets: false,
   }
   const running = new Map<number, () => void>()
   const earlyCancels = new Set<number>()
@@ -72,6 +113,9 @@ export function createFakeAi() {
     state.cancels.length = 0
     state.spikeAutorun = false
     state.spikeLog.length = 0
+    state.secrets.clear()
+    state.connections = []
+    state.failSecrets = false
     running.clear()
     earlyCancels.clear()
   }
@@ -113,6 +157,39 @@ export function createFakeAi() {
     return null
   }
 
+  function checkSecretArgs(args: Record<string, unknown>) {
+    const id = args.connectionId
+    if (state.failSecrets) throw fail('auth', 'The system keychain is locked or not available.')
+    if (typeof id !== 'string' || !id) throw fail('bad_request', 'The connection id is not valid.')
+    return id
+  }
+
+  function saveConnections(list: Record<string, unknown>[]) {
+    const ids = new Set<string>()
+    const saved = list.map((c) => {
+      const copy = { ...c }
+      const id = copy.id
+      if (typeof id !== 'string' || !id || ids.has(id)) throw fail('bad_request', 'A connection id is not valid or is used twice.')
+      ids.add(id)
+      const provider = copy.provider as string
+      if (!PROVIDERS.includes(provider)) throw fail('bad_request', 'A connection names an unknown provider.')
+      if (typeof copy.label !== 'string' || !copy.label.trim()) throw fail('bad_request', 'A connection label is empty.')
+      if (USER_HOSTED.includes(provider)) {
+        if (copy.baseUrl !== undefined) {
+          copy.baseUrl = String(copy.baseUrl).trim()
+          const problem = baseUrlProblem(copy.baseUrl as string)
+          if (problem) throw fail('bad_request', `The address is not valid: ${problem}.`)
+        }
+      } else {
+        delete copy.baseUrl
+        delete copy.insecureHttpAccepted
+      }
+      return copy
+    })
+    for (const old of state.connections) if (!ids.has(old.id as string)) state.secrets.delete(old.id as string)
+    state.connections = saved
+  }
+
   async function handle(cmd: string, args: Record<string, unknown>): Promise<unknown> {
     switch (cmd) {
       case 'ai_fetch':
@@ -129,6 +206,22 @@ export function createFakeAi() {
         return state.spikeAutorun
       case 'ai_spike_log':
         state.spikeLog.push(args.line as string)
+        return null
+      case 'ai_secret_set': {
+        const id = checkSecretArgs(args)
+        if (typeof args.secret !== 'string' || !args.secret) throw fail('bad_request', 'The credential is empty or too long.')
+        state.secrets.set(id, args.secret)
+        return null
+      }
+      case 'ai_secret_delete':
+        state.secrets.delete(checkSecretArgs(args))
+        return null
+      case 'ai_secret_has':
+        return state.secrets.has(checkSecretArgs(args))
+      case 'ai_connections_get':
+        return structuredClone(state.connections)
+      case 'ai_connections_save':
+        saveConnections(structuredClone(args.connections as Record<string, unknown>[]))
         return null
       default:
         throw new Error(`unexpected command ${cmd}`)

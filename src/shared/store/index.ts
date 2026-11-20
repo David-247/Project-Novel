@@ -10,6 +10,7 @@ import { createCommentsSlice } from './comments-slice'
 import { createTrackChangesSlice } from './track-changes-slice'
 import { createRewriteSlice } from './rewrite-slice'
 import { createWordCountSlice } from './word-count-slice'
+import { createTutorConnectionsSlice } from '@/features/ai-tutor'
 import type { RootState } from './types'
 
 /**
@@ -31,6 +32,7 @@ export const useStore = create<RootState>()((...a) => ({
   ...createTrackChangesSlice(...a),
   ...createRewriteSlice(...a),
   ...createWordCountSlice(...a),
+  ...createTutorConnectionsSlice(...a),
 }))
 
 export { useColorSchemeSync } from './use-color-scheme-sync'
@@ -62,4 +64,5 @@ export type { CommentsSlice, CommentThread, CommentMessage } from './comments-sl
 export type { TrackChangesSlice } from './track-changes-slice'
 export type { RewriteSlice, RewriteRecord, RewriteVersion, RewriteStatus, RewriteNotice, RewriteLocation } from './rewrite-slice'
 export type { WordCountSlice, CountsWithNotes, ChapterWordCounts, WordCountPublish } from './word-count-slice'
+export type { TutorConnectionsSlice } from '@/features/ai-tutor'
 export type { RootState, SliceCreator } from './types'

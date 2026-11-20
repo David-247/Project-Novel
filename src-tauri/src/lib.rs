@@ -21,6 +21,12 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder.menu(menu::initial_menu);
     builder
+        .setup(|app| {
+            // The real connection resolver: ai-connections.json (app data dir) + the OS keychain.
+            let file = app.path().app_data_dir()?.join(ai::connections::CONNECTIONS_FILE);
+            app.state::<ai::AiState>().set_resolver(ai::app_resolver(file));
+            Ok(())
+        })
         .on_menu_event(|app, event| menu::handle_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
             fonts::list_system_fonts,
@@ -28,6 +34,11 @@ pub fn run() {
             ai::ai_fetch_cancel,
             ai::ai_spike_autorun,
             ai::ai_spike_log,
+            ai::ai_secret_set,
+            ai::ai_secret_delete,
+            ai::ai_secret_has,
+            ai::ai_connections_get,
+            ai::ai_connections_save,
             export::export_pick_save_path,
             export::export_write_file,
             export::export_render_pdf,

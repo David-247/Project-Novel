@@ -28,6 +28,9 @@ whoami = "2"
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 tokio = { version = "=1.54.1", features = ["macros", "sync", "time", "rt"] }
+# AI provider keys live in the OS keychain (src/ai/keychain.rs): Credential Manager on Windows,
+# Keychain on macOS. No default features: no Linux secret-service backend, no async runtime.
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native", "windows-native"] }
 
 [dev-dependencies]
 tokio = { version = "=1.54.1", features = ["macros", "sync", "time", "rt", "rt-multi-thread", "net", "io-util"] }

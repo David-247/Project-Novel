@@ -148,6 +148,14 @@ pub(super) fn target_url(conn: &ResolvedConnection, path: &str) -> Result<Url, A
     if !matches!(base_url.scheme(), "http" | "https") || base_url.host_str().is_none() {
         return Err(blocked());
     }
+    // Plain http carries the prompt and the key in the clear: only to this machine, unless the user
+    // accepted it for this connection (a LAN server). Hosted providers are https, so never affected.
+    if base_url.scheme() == "http" && !is_loopback(&base_url) && !conn.insecure_http_accepted {
+        return Err(AiError::new(
+            "blocked_host",
+            "This connection uses plain http to another computer. Accept the risk for the connection in Settings, or use https.",
+        ));
+    }
     let url = Url::parse(&format!("{}{}", base.trim_end_matches('/'), path)).map_err(|_| blocked())?;
     let same_origin = url.scheme() == base_url.scheme()
         && url.host_str() == base_url.host_str()
@@ -156,6 +164,16 @@ pub(super) fn target_url(conn: &ResolvedConnection, path: &str) -> Result<Url, A
         return Err(AiError::new("blocked_host", "The request would leave the connected provider."));
     }
     Ok(url)
+}
+
+/// True for `localhost` and loopback addresses (127.0.0.0/8, ::1).
+pub(super) fn is_loopback(url: &Url) -> bool {
+    let Some(host) = url.host_str() else { return false };
+    let host = host.trim_start_matches('[').trim_end_matches(']').trim_end_matches('.').to_ascii_lowercase();
+    match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.is_loopback(),
+        Err(_) => host == "localhost" || host.ends_with(".localhost"),
+    }
 }
 
 /// The caller's allowlisted headers, then the provider's own, then the credential.
@@ -469,6 +487,7 @@ mod tests {
                 provider: providers::descriptor("custom").unwrap(),
                 base_url: Some(self.0.clone()),
                 secret: Some(Secret::new(SECRET)),
+                insecure_http_accepted: false,
             })
         }
     }
