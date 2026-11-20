@@ -98,7 +98,10 @@ pub fn write_lock() -> MutexGuard<'static, ()> {
 }
 
 /// Validate and atomically save `connections`, keeping the file's unknown top-level keys. Secrets
-/// of connections that are no longer listed are deleted (best effort).
+/// of connections that are no longer listed are deleted (best effort). Tests only: the app edits one
+/// connection at a time ([`upsert_connection`], [`remove_connection`]), so it can never drop one it has
+/// not seen (a sign-in that finished meanwhile).
+#[cfg(test)]
 pub fn save_connections(path: &Path, secrets: &dyn SecretStore, connections: Vec<Connection>) -> Result<(), AiError> {
     let _lock = write_lock();
     save_locked(path, secrets, connections)
@@ -124,7 +127,8 @@ pub fn remove_connection(path: &Path, secrets: &dyn SecretStore, connection_id: 
     save_locked(path, secrets, list)
 }
 
-/// `save_connections` for a caller that already holds [`write_lock`].
+/// Validate and atomically save the whole list, for a caller that already holds [`write_lock`]. Secrets
+/// of connections that are gone or re-pointed are deleted (best effort).
 pub fn save_locked(path: &Path, secrets: &dyn SecretStore, connections: Vec<Connection>) -> Result<(), AiError> {
     let connections = validate(connections)?;
     let existing = read_file(path)?;

@@ -8,13 +8,14 @@ vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tau
 beforeEach(() => backend.reset())
 
 describe('connection ipc', () => {
-  it('has no way to read a secret back', () => {
+  it('has no way to read a secret back, and no whole-list save', () => {
     expect(Object.keys(ipc)).not.toContain('getSecret')
-    expect(Object.keys(ipc).sort()).toEqual(['deleteSecret', 'getConnections', 'hasSecret', 'removeConnection', 'saveConnections', 'setSecret', 'upsertConnection'])
+    expect(Object.keys(ipc)).not.toContain('saveConnections')
+    expect(Object.keys(ipc).sort()).toEqual(['deleteSecret', 'getConnections', 'hasSecret', 'removeConnection', 'setSecret', 'upsertConnection'])
   })
 
   it('stores, reports and deletes a secret in the (fake) keychain', async () => {
-    await ipc.saveConnections([{ id: 'c1', provider: 'openai', label: 'x', auth: 'api_key' }])
+    await ipc.upsertConnection({ id: 'c1', provider: 'openai', label: 'x', auth: 'api_key' })
     expect(await ipc.hasSecret('c1')).toBe(false)
     await ipc.setSecret('c1', 'sk-1')
     expect(await ipc.hasSecret('c1')).toBe(true)
@@ -24,7 +25,7 @@ describe('connection ipc', () => {
   })
 
   it('never puts the secret in the connections file', async () => {
-    await ipc.saveConnections([{ id: 'c1', provider: 'anthropic', label: 'Claude', auth: 'api_key' }])
+    await ipc.upsertConnection({ id: 'c1', provider: 'anthropic', label: 'Claude', auth: 'api_key' })
     await ipc.setSecret('c1', 'sk-ant-SECRET')
     expect(JSON.stringify(await ipc.getConnections())).not.toContain('SECRET')
   })
@@ -32,17 +33,17 @@ describe('connection ipc', () => {
   it('rejects a bad base URL on save, like Rust', async () => {
     for (const baseUrl of ['http://h/v1?k=1', 'http://h/v1#f', 'http://u:p@h/v1', 'ftp://h/v1', 'nope']) {
       await expect(
-        ipc.saveConnections([{ id: 'c1', provider: 'custom', label: 'x', auth: 'none', baseUrl }]),
+        ipc.upsertConnection({ id: 'c1', provider: 'custom', label: 'x', auth: 'none', baseUrl }),
       ).rejects.toMatchObject({ kind: 'bad_request' })
     }
     expect(await ipc.getConnections()).toEqual([])
   })
 
   it('drops a hosted provider base URL and the secret of a removed connection', async () => {
-    await ipc.saveConnections([{ id: 'c1', provider: 'openai', label: 'x', auth: 'api_key', baseUrl: 'http://evil/v1' }])
+    await ipc.upsertConnection({ id: 'c1', provider: 'openai', label: 'x', auth: 'api_key', baseUrl: 'http://evil/v1' })
     expect((await ipc.getConnections())[0]).not.toHaveProperty('baseUrl')
     await ipc.setSecret('c1', 'k')
-    await ipc.saveConnections([])
+    await ipc.removeConnection('c1')
     expect(await ipc.hasSecret('c1')).toBe(false)
   })
 
@@ -60,23 +61,23 @@ describe('connection ipc', () => {
       ['port', { baseUrl: 'https://llm.example.com:8443/v1' }],
     ]
     it.each(changes)('deletes the secret when the %s changes', async (_name, change) => {
-      await ipc.saveConnections([base])
+      await ipc.upsertConnection(base)
       await ipc.setSecret('c1', 'sk-live')
-      await ipc.saveConnections([{ ...base, ...change }])
+      await ipc.upsertConnection({ ...base, ...change })
       expect(await ipc.hasSecret('c1')).toBe(false)
     })
 
     it('a hosted connection saved as a custom one loses its key', async () => {
-      await ipc.saveConnections([{ id: 'c1', provider: 'anthropic', label: 'x', auth: 'api_key' }])
+      await ipc.upsertConnection({ id: 'c1', provider: 'anthropic', label: 'x', auth: 'api_key' })
       await ipc.setSecret('c1', 'sk-ant')
-      await ipc.saveConnections([{ ...base, baseUrl: 'https://attacker.example' }])
+      await ipc.upsertConnection({ ...base, baseUrl: 'https://attacker.example' })
       expect(backend.ai.secrets.has('c1')).toBe(false)
     })
 
     it('keeps the secret when only the label, model or path changes', async () => {
-      await ipc.saveConnections([base])
+      await ipc.upsertConnection(base)
       await ipc.setSecret('c1', 'sk-live')
-      await ipc.saveConnections([{ ...base, label: 'renamed', defaultModel: 'm', baseUrl: 'https://LLM.example.com:443/other/' }])
+      await ipc.upsertConnection({ ...base, label: 'renamed', defaultModel: 'm', baseUrl: 'https://LLM.example.com:443/other/' })
       expect(await ipc.hasSecret('c1')).toBe(true)
     })
   })

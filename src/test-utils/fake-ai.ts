@@ -34,7 +34,6 @@ export const AI_COMMAND_NAMES = [
   'ai_secret_delete',
   'ai_secret_has',
   'ai_connections_get',
-  'ai_connections_save',
   'ai_connection_upsert',
   'ai_connection_remove',
   'tutor_history_list',
@@ -367,9 +366,6 @@ export function createFakeAi() {
         return state.secrets.has(checkSecretArgs(args))
       case 'ai_connections_get':
         return structuredClone(state.connections)
-      case 'ai_connections_save':
-        saveConnections(structuredClone(args.connections as Record<string, unknown>[]))
-        return null
       case 'ai_connection_upsert': {
         // As Rust: merged into the stored list, so other connections (and their keys) are kept.
         const c = structuredClone(args.connection as Record<string, unknown>)

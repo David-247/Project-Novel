@@ -366,16 +366,6 @@ pub async fn ai_connections_get<R: Runtime>(app: AppHandle<R>) -> Result<Vec<con
     blocking(move || connections::load_connections(&path)).await
 }
 
-/// Validate and replace the saved connections (atomic; see `connections.rs`).
-#[tauri::command]
-pub async fn ai_connections_save<R: Runtime>(
-    app: AppHandle<R>,
-    connections: Vec<connections::Connection>,
-) -> Result<(), AiError> {
-    let path = connections_file(&app)?;
-    blocking(move || connections::save_connections(&path, &keychain::KeyringStore, connections)).await
-}
-
 /// Add a connection, or replace the saved one with its id; the others stay as they are on disk
 /// (Settings edits through this, so it can never drop a connection it has not seen).
 #[tauri::command]
