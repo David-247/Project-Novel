@@ -165,6 +165,23 @@ describe('createReadTools', () => {
     expect(out.matches.map((m) => m.snippet)).toEqual(['quiet'])
   })
 
+  it('find_text keeps its positions after a letter whose lower case is longer (İ), case-insensitively (final B-M3)', async () => {
+    const ed = makeEditor(h1('One'), p(t('İİ saw Teh dog and teh cat.')))
+    editor = ed
+    const idx = createParagraphIndex(ed)
+    followEditor(idx)
+    const at = blockPosOf(ed, 'İİ saw') + 1
+    const from = at + 'İİ saw '.length
+    // Only the first "Teh" is attached: a shifted match would fall outside the selection, or read past it.
+    const { set } = tools(idx, [{ kind: 'selection', from, to: from + 'Teh'.length }])
+    const out = (await run(set, 'find_text', { query: 'teh' })) as { matches: { snippet: string }[] }
+    expect(out.matches.map((m) => m.snippet)).toEqual(['Teh'])
+    // Without a selection, both matches, with the sentence around them.
+    const whole = (await run(tools(idx).set, 'find_text', { query: 'TEH' })) as { matches: { snippet: string }[] }
+    expect(whole.matches).toHaveLength(2)
+    expect(whole.matches.map((m) => m.snippet)).toEqual(['İİ saw Teh dog and teh cat.', 'İİ saw Teh dog and teh cat.'])
+  })
+
   it('check_spelling drops a finding that straddles the edge of a selection', async () => {
     const { ed, idx } = setup()
     const at = blockPosOf(ed, 'teh dog') + 1

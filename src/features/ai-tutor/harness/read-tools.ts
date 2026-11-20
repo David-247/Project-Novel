@@ -270,16 +270,19 @@ export function createReadTools(ctx: ReadToolsContext): ToolSet {
         'Returns each match with its paragraph id, location and sentence. Text elsewhere is not searched; to look there, read it with read_range first (the writer is asked).',
       inputSchema: z.object({ query: z.string().min(1).max(200).describe('The text to find.') }),
       execute: async ({ query }) => {
-        const needle = query.toLocaleLowerCase()
+        // Case-insensitive on the text itself: lower-casing it first can change its length (İ → i̇) and shift
+        // every later index off the paragraph's own (final B-M3).
+        const needle = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu')
         const ranges = scopeRanges()
         const matches: { paragraph: string; location: Location; snippet: string }[] = []
         let more = 0
         doc().descendants((node, pos) => {
           if (!node.isTextblock) return true
           const c = blockCheckText(node, pos)
-          const hay = c.text.toLocaleLowerCase()
-          for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + needle.length)) {
-            const at = textRangeToDoc(c.segments, i, i + needle.length)
+          for (const m of c.text.matchAll(needle)) {
+            const i = m.index
+            const end = i + m[0].length
+            const at = textRangeToDoc(c.segments, i, end)
             const within = at && coveringRange(at, ranges)
             // Outside the scope: not reported at all, not even counted (no yes/no oracle).
             if (!at || !within) continue
@@ -290,7 +293,7 @@ export function createReadTools(ctx: ReadToolsContext): ToolSet {
             const id = idx.idFor(pos)
             // The snippet never reaches past the scope (a selection cuts a paragraph).
             const { lo, hi } = textSpanIn(c.segments, within)
-            matches.push({ paragraph: id, location: idx.locationOf(id, at.from), snippet: sentenceAround(c.text.slice(lo, hi), i - lo, i - lo + needle.length) })
+            matches.push({ paragraph: id, location: idx.locationOf(id, at.from), snippet: sentenceAround(c.text.slice(lo, hi), i - lo, end - lo) })
           }
           return false
         })
