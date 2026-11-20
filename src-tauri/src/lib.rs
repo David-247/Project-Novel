@@ -16,6 +16,7 @@ pub fn run() {
         .manage(storage::ProjectRoot::default())
         .manage(export::ExportState::default())
         .manage(ai::AiState::default())
+        .manage(ai::oauth::OauthState::default())
         .manage(menu::MenuState::<tauri::Wry>::default());
     // macOS: the native menu bar, replaced by the command registry's snapshot (menu_set) once the
     // frontend is up. Windows has no native menu: the frontend draws its own menu bar.
@@ -43,6 +44,9 @@ pub fn run() {
             ai::tutor_history_save,
             ai::tutor_history_delete,
             ai::tutor_history_clear_all,
+            ai::oauth::ai_oauth_start,
+            ai::oauth::ai_oauth_cancel,
+            ai::oauth::ai_open_key_page,
             export::export_pick_save_path,
             export::export_write_file,
             export::export_render_pdf,

@@ -25,6 +25,7 @@ pub mod connections;
 pub mod fetch;
 pub mod history;
 pub mod keychain;
+pub mod oauth;
 pub mod providers;
 
 use std::collections::{HashMap, VecDeque};
@@ -165,6 +166,11 @@ pub struct AiState {
 impl AiState {
     pub fn new(resolver: Arc<dyn ConnectionResolver>) -> Self {
         AiState { client: fetch::client(), resolver: RwLock::new(resolver), inflight: Mutex::default() }
+    }
+
+    /// The proxy's HTTP client (no redirects, no system proxy), shared with the OAuth code exchange.
+    pub fn http_client(&self) -> reqwest::Client {
+        self.client.clone()
     }
 
     /// Replace the resolver (`lib.rs` installs the connections file + keychain resolver at startup).
