@@ -53,7 +53,7 @@ async function run(tools: ToolSet, name: string, input: unknown): Promise<unknow
 }
 
 function tools(idx: ParagraphIndex, attachments: Parameters<typeof createReadTools>[0]['scope']['attachments'] = [], answer = false) {
-  const requestRead = vi.fn<(target: string) => Promise<boolean>>(async () => answer)
+  const requestRead = vi.fn<(target: string, words: number) => Promise<boolean>>(async () => answer)
   const onScript = vi.fn()
   return { set: createReadTools({ idx, scope: { attachments }, requestRead, onScript }), requestRead, onScript }
 }
@@ -84,7 +84,7 @@ describe('createReadTools', () => {
     const { idx } = setup()
     const { set, requestRead } = tools(idx, [], false)
     const out = await run(set, 'read_range', { kind: 'chapter', number: 2 })
-    expect(requestRead).toHaveBeenCalledWith('Chapter 2: Two')
+    expect(requestRead).toHaveBeenCalledWith('Chapter 2: Two', 7)
     expect(out).toEqual({ denied: true })
     expect(JSON.stringify(out)).not.toContain('secret')
   })
@@ -104,7 +104,7 @@ describe('createReadTools', () => {
     expect(((await run(set, 'read_range', { kind: 'page', number: 2 })) as { text: string }).text).toContain('Far teh away.')
     expect(requestRead).not.toHaveBeenCalled()
     expect(await run(set, 'read_range', { kind: 'chapter', number: 1 })).toEqual({ denied: true })
-    expect(requestRead).toHaveBeenCalledWith('Chapter 1: One')
+    expect(requestRead).toHaveBeenCalledWith('Chapter 1: One', 8)
   })
 
   it('reads the outline (chapter titles) without asking', async () => {

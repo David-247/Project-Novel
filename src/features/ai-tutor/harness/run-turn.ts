@@ -28,7 +28,7 @@ export type TurnEvent =
   | { type: 'tool'; name: string; status: 'start' | 'done' }
   | { type: 'corrections'; items: Correction[] }
   | { type: 'proposal'; change: ProposedChange }
-  | { type: 'read-request'; target: string; respond(ok: boolean): void }
+  | { type: 'read-request'; target: string; words?: number; respond(ok: boolean): void }
   | { type: 'error'; kind: AiFetchError['kind']; message: string }
   | { type: 'done'; incomplete: boolean }
 
@@ -44,8 +44,8 @@ export interface TutorSession {
   dispose(): void
 }
 
-export function createTutorSession(editor: Editor): TutorSession {
-  const idx = createParagraphIndex(editor)
+export function createTutorSession(editor: Editor, options: { idsAfter?: number } = {}): TutorSession {
+  const idx = createParagraphIndex(editor, { idsAfter: options.idsAfter })
   // Registered before the listener below: Tiptap calls listeners in order, so ids are mapped first.
   const unfollow = followEditor(idx)
   const corrections = createCorrectionBook(idx)
@@ -172,7 +172,7 @@ export async function runTutorTurn(args: TurnArgs): Promise<ModelMessage[]> {
   const instructions = () => `${assembleSystem(script)}\n\n${bookFacts()}`
 
   const pendingReads = new Set<(ok: boolean) => void>()
-  const requestRead = (target: string) =>
+  const requestRead = (target: string, words?: number) =>
     new Promise<boolean>((resolve) => {
       if (signal.aborted) return resolve(false)
       let answered = false
@@ -183,7 +183,7 @@ export async function runTutorTurn(args: TurnArgs): Promise<ModelMessage[]> {
         resolve(ok && !signal.aborted)
       }
       pendingReads.add(respond)
-      onEvent({ type: 'read-request', target, respond })
+      onEvent({ type: 'read-request', target, words, respond })
     })
   const denyPending = () => {
     for (const respond of [...pendingReads]) respond(false)

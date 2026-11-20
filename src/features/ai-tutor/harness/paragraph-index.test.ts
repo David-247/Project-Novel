@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createParagraphIndex, followEditor, type ParagraphIndex } from './paragraph-index'
+import { createParagraphIndex, followEditor, highestParagraphId, type ParagraphIndex } from './paragraph-index'
 import { blockPosOf, h1, makeEditor, p, t, textPosOf } from './test-doc'
 
 let editor: Editor | null = null
@@ -30,6 +30,22 @@ describe('createParagraphIndex', () => {
     const pos = blockPosOf(ed, 'Second')
     expect(idx.resolve('p2')).toEqual({ from: pos, to: pos + ed.state.doc.nodeAt(pos)!.nodeSize })
     expect(idx.resolve('p99')).toBe('unknown')
+  })
+
+  it('idsAfter: a session for a reopened chat mints above the old ids, so those stay unknown (final B-I2)', () => {
+    const ed = makeEditor(...BOOK)
+    editor = ed
+    const idx = createParagraphIndex(ed, { idsAfter: 7 })
+    expect(idx.idFor(blockPosOf(ed, 'First'))).toBe('p8')
+    expect(idx.idFor(blockPosOf(ed, 'Second'))).toBe('p9')
+    for (const old of ['p1', 'p2', 'p7']) expect(idx.resolve(old)).toBe('unknown')
+  })
+
+  it('highestParagraphId finds the largest id in text and tool results, ignoring other words', () => {
+    expect(highestParagraphId('')).toBe(0)
+    expect(highestParagraphId('[p3] a\n[p12 footnote 2] b')).toBe(12)
+    expect(highestParagraphId(JSON.stringify({ paragraph: 'p41', note: 'top9 mp3 p5x' }))).toBe(41)
+    expect(highestParagraphId('p1234567890123')).toBe(0)
   })
 
   it('carries a paragraph through an edit before it (the shifted range)', () => {

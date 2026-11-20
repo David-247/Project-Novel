@@ -487,4 +487,47 @@ describe('projects and history (Review Focus 5)', () => {
     await waitFor(() => expect(screen.getByTestId('tutor-history')).toHaveTextContent('No chats yet for this project.'))
     expect(backend.ai.history.get('proj-a')?.size ?? 0).toBe(0)
   })
+
+  /** Turn one in A: Current Page attached (p1–p3), one correction on p2; then New Chat and reopen it. */
+  async function reopenCorrectionChat() {
+    seed(A, 'proj-a', 'A')
+    await renderApp()
+    await open(A)
+    scripted(
+      [call('list_corrections', { items: [{ paragraph: 'p2', kind: 'spelling', original: 'teh', suggestion: 'the', explanation: 'A typo.' }] }), finish('tool-calls')],
+      [...text('One typo.'), finish('stop')],
+    )
+    act(() => void runCommand(C.toggle.id))
+    fireEvent.click(await within(await openMenu(C.attach.id)).findByRole('menuitem', { name: /Current Page/ }))
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Any typos?' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    fireEvent.click(inPanel(C.newChat.id))
+    await screen.findByTestId('tutor-greeting')
+    fireEvent.click(inPanel(C.history.id))
+    fireEvent.click(await within(await screen.findByTestId('tutor-history')).findByRole('button', { name: /^Any typos\?/ }))
+    await waitFor(() => expect(screen.getAllByTestId('tutor-reply')[0]).toHaveTextContent('One typo.'))
+  }
+
+  it("B-I2: a reopened chat's old paragraph ids are unknown to the new session: a correction naming one is rejected and the model is told to re-read", async () => {
+    await reopenCorrectionChat()
+    const model = scripted(
+      [call('list_corrections', { items: [{ paragraph: 'p2', kind: 'spelling', original: 'teh', suggestion: 'the', explanation: 'Apply it.' }] }), finish('tool-calls')],
+      [...text('I need to read it again.'), finish('stop')],
+    )
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Apply the fix you found' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    const second = JSON.stringify(model.doStreamCalls[1].prompt)
+    expect(second).toContain('unknown_paragraph')
+    // No new correction was listed; the one from the history still cannot be applied.
+    const listed = panel().querySelectorAll('[data-correction-id]')
+    expect(listed).toHaveLength(1)
+    expect(listed[0]).toHaveAttribute('data-state', 'changed')
+    // The new session mints above the chat's ids: the paragraph is p4 or later now.
+    const s = (await import('@/features/ai-tutor/panel/chat')).getTutorSession()!
+    expect(s.idx.idFor(blockPos(1))).toBe('p4')
+  })
 })

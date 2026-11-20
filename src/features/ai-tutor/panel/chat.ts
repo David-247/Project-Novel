@@ -9,6 +9,8 @@ import { USER_HOSTED_PROVIDERS, type Connection } from '../connections/types'
 import { scriptedReply, type ScriptName } from '../harness/assemble'
 import { attachmentLabel, attachmentText, type Attachment } from '../harness/attachments'
 import type { Correction, ProposedChange } from '../harness/output-tools'
+import { highestParagraphId } from '../harness/paragraph-index'
+import { READ_WORD_LIMIT } from '../harness/read-tools'
 import { createTutorSession, runTutorTurn, type TurnEvent, type TutorSession } from '../harness/run-turn'
 import { useTutorHistory } from '../history/store'
 import type { StoredMessage } from '../history/types'
@@ -50,6 +52,8 @@ export interface ProposalView {
 export interface ReadView {
   id: string
   target: string
+  /** About how many words the read holds (at most READ_WORD_LIMIT of them are sent); null when unknown. */
+  words: number | null
   answer: 'pending' | 'allowed' | 'denied'
 }
 
@@ -198,7 +202,9 @@ function ensureSession(): TutorSession | null {
   if (!ed || ed.isDestroyed) return null
   if (session && session.idx.editor === ed) return session
   disposeSession()
-  session = createTutorSession(ed)
+  // Ids above every one the chat already names (a chat reopened from the history): an old id is then
+  // 'unknown' to this session, never another paragraph's (final B-I2).
+  session = createTutorSession(ed, { idsAfter: highestParagraphId(JSON.stringify(modelHistory)) })
   const book = session.corrections
   unsubscribeSession = book.subscribe((changed) => mergeCorrections(changed, null))
   installChipMapping(ed)
@@ -485,7 +491,7 @@ function onTurnEvent(replyId: string, gen: number, attachments: Attachment[], e:
     case 'read-request': {
       const id = newId('rd')
       reads.set(id, e.respond)
-      updateReply(replyId, (r) => ({ ...r, parts: [...r.parts, { kind: 'read', read: { id, target: e.target, answer: 'pending' } }] }))
+      updateReply(replyId, (r) => ({ ...r, parts: [...r.parts, { kind: 'read', read: { id, target: e.target, words: e.words ?? null, answer: 'pending' } }] }))
       break
     }
     case 'error':
@@ -585,15 +591,41 @@ export async function send(opts: SendOptions = {}): Promise<void> {
 /** Attached text, counted per line without its paragraph id ("[p12] " or "[p12 footnote 3] "). */
 const blockWords = (body: string) => countText(body.replace(/^\[p\d+[^\]]*\] ?/gm, '')).words
 
+/** A read_range result's text and source, from a tool message's part; null for anything else. */
+function readResult(part: unknown): { source: string; text: string } | null {
+  const p = part as { type?: unknown; toolName?: unknown; output?: { type?: unknown; value?: unknown } } | null
+  if (!p || p.type !== 'tool-result' || p.toolName !== 'read_range' || !p.output) return null
+  let value = p.output.value
+  if (p.output.type === 'text' && typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return null
+    }
+  } else if (p.output.type !== 'json') return null
+  const v = value as { source?: unknown; text?: unknown } | null
+  return v && typeof v.text === 'string' ? { source: typeof v.source === 'string' ? v.source : '', text: v.text } : null
+}
+
 /**
- * What earlier turns of the chat send again with every request: their attached `<manuscript>` blocks
- * (the chat is sent as it was, attached text included), and whether one of them is the whole book.
+ * What earlier turns of the chat send again with every request: their attached `<manuscript>` blocks and
+ * the text read_range returned (the chat is sent as it was, attached and read text included), and
+ * whether one of them is the whole book (final B-I1).
  */
 export function historyPayload(history: readonly ModelMessage[]): { words: number; manuscript: boolean } {
   const whole = attachmentLabel({ kind: 'manuscript' })
   let words = 0
   let manuscript = false
   for (const m of history) {
+    if (m.role === 'tool') {
+      for (const part of m.content) {
+        const r = readResult(part)
+        if (!r) continue
+        if (r.source === whole) manuscript = true
+        words += blockWords(r.text)
+      }
+      continue
+    }
     if (m.role !== 'user') continue
     const text = typeof m.content === 'string' ? m.content : m.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
     for (const b of text.matchAll(/<manuscript source="([^"]*)">([\s\S]*?)<\/manuscript>/g)) {
@@ -617,6 +649,13 @@ async function confirmSend(connection: Connection, history: readonly ModelMessag
   const ok = await askConfirm('Send to the Tutor', `Send about ${formatCount(words)} words to ${connection.label}?`, 'Send')
   set({ busy: false })
   return ok
+}
+
+/** "about 84,000 words; up to 20,000 are sent" for an Allow (final B-I1). */
+export function readWordsNote(words: number): string {
+  return words > READ_WORD_LIMIT
+    ? `about ${formatCount(words)} words; up to ${formatCount(READ_WORD_LIMIT)} are sent`
+    : `about ${formatCount(words)} ${words === 1 ? 'word' : 'words'}`
 }
 
 interface TurnInput {
@@ -846,8 +885,9 @@ export async function openChat(id: string): Promise<void> {
   if (opened?.id !== id) return
   resetView()
   disposeSession()
-  ensureSession()
+  // Before the session: its ids start above the ones this chat names (final B-I2).
   modelHistory = opened.messages.map(asModelMessage)
+  ensureSession()
   set({ chatId: id, messages: viewOfStored(opened.messages), view: 'chat' })
   requestComposerFocus()
 }

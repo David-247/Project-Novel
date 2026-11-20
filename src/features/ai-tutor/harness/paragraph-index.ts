@@ -45,6 +45,20 @@ export interface ParagraphIndex {
 export interface ParagraphIndexOptions {
   /** Layout lines touched by `[from, to)`, null without a layout (default: the pagination slice's). */
   countLines?: (range: { from: number; to: number }) => number | null
+  /**
+   * Ids start above this number (default 0: the first is p1). A chat reopened from the history names
+   * ids of an earlier session; minting above the highest of them keeps every old id 'unknown' here, so
+   * a tool given one is told to read again instead of acting on another paragraph (final B-I2).
+   */
+  idsAfter?: number
+}
+
+/** The highest paragraph id number ("p12", "[p12 footnote 3]") named in `text`, or 0. */
+export function highestParagraphId(text: string): number {
+  let max = 0
+  // Up to 9 digits: a longer run of digits is not an id this app minted (and stays a safe integer).
+  for (const m of text.matchAll(/(?<![A-Za-z0-9_])p(\d{1,9})(?![0-9])/g)) max = Math.max(max, Number(m[1]))
+  return max
 }
 
 interface Entry {
@@ -61,7 +75,7 @@ export function createParagraphIndex(editor: Editor, options: ParagraphIndexOpti
   const mapping = new Mapping()
   /** The document after the last mapped transaction. */
   let doc = editor.state.doc
-  let minted = 0
+  let minted = Math.max(0, Math.floor(options.idsAfter ?? 0))
   const entries = new Map<string, Entry>()
   /** Paragraph position now -> id, valid while `byPosAt === mapping.maps.length` and `byPosDoc === doc`. */
   let byPos = new Map<number, string>()

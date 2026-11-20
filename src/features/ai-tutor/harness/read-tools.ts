@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
-import { chapterIndexAt, getChapters } from '@/features/editor'
+import { chapterIndexAt, countRange, getChapters } from '@/features/editor'
 import { blockCheckText, checkBlocks, hashText, textRangeToDoc, type Finding, type TextSegment } from '@/features/spellcheck'
 import { useStore } from '@/shared/store'
 import { isScriptName, SCRIPT_NAMES, scriptText, type ScriptName } from './assemble'
@@ -18,8 +18,8 @@ export interface ReadScope {
 export interface ReadToolsContext {
   idx: ParagraphIndex
   scope: ReadScope
-  /** Ask the writer ("The tutor wants to read Chapter 5. Allow?"); true on Allow. */
-  requestRead(target: string): Promise<boolean>
+  /** Ask the writer ("The tutor wants to read Chapter 5 (about 4,000 words). Allow?"); true on Allow. */
+  requestRead(target: string, words: number): Promise<boolean>
   /** The model chose a script (`use_script`); the harness appends it to the system prompt. */
   onScript?(name: ScriptName): void
 }
@@ -175,7 +175,8 @@ export function createReadTools(ctx: ReadToolsContext): ToolSet {
     const r = resolve(t)
     if ('error' in r) return r
     if (!covered(r.range, scopeRanges())) {
-      const allowed = await ctx.requestRead(r.label)
+      const c = countRange(doc(), r.range.from, r.range.to)
+      const allowed = await ctx.requestRead(r.label, c.body.words + c.footnotes.words)
       if (!allowed) return { denied: true }
       granted.push(r.attachment)
     }

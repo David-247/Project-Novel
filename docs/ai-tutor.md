@@ -174,10 +174,13 @@ spell checker, not AI, so it does not pass through the guard.
   Comments, headers and footers, and re-write versions that are not current are left out.
 - **Size.** Each chip shows its word count. A send that carries the whole manuscript, or more than **20,000 words**
   of manuscript text, asks every time: "Send about N words to <provider>?" The count includes the text the chat
-  already holds, which is sent again with a follow-up or a Retry.
+  already holds, which is sent again with a follow-up or a Retry: earlier attachments and the text the tutor read
+  with `read_range` (also when it read the current chapter without asking). A chat that once read the whole
+  manuscript asks on every follow-up.
 - **Read scope.** The tools (`read_range`, `find_text`, `check_spelling`, `check_grammar`) read only what the writer
   attached, or the current chapter when nothing is attached. Reading anything else asks in the chat: "The tutor
-  wants to read Chapter 5. Allow?" A No is final for that request.
+  wants to read Chapter 5 (about 4,000 words). Allow?" Past 20,000 words it says how much is sent ("about 84,000
+  words; up to 20,000 are sent"). A No is final for that request.
 - **Stopping.** Stop, closing the panel, or opening another project aborts the request. Tools stop acting, and
   nothing read after that point reaches the provider (Review Focus 5).
 

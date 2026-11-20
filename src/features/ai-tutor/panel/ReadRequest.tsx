@@ -1,13 +1,14 @@
 import { Button, Tooltip } from '@/shared/ui'
-import { answerRead, type ReadView } from './chat'
+import { answerRead, readWordsNote, type ReadView } from './chat'
 import { TUTOR_CONTROLS as C } from './controls'
 
-/** "The tutor wants to read Chapter 5. Allow?" inline in the reply (design, Settled point 8). */
+/** "The tutor wants to read Chapter 5 (about 4,000 words). Allow?" inline in the reply (design, Settled point 8; final B-I1). */
 export function ReadRequest({ read }: { read: ReadView }) {
   return (
     <div className="flex flex-col gap-2 rounded-panel border border-border-control bg-surface p-2.5" data-testid="tutor-read-request" role="group" aria-label="Read request">
       <p className="text-ui-sm text-text">
-        The tutor wants to read <strong className="font-semibold">{read.target}</strong>.
+        The tutor wants to read <strong className="font-semibold">{read.target}</strong>
+        {read.words !== null ? ` (${readWordsNote(read.words)})` : ''}.
         {read.answer === 'pending' ? ' Allow?' : ''}
       </p>
       {read.answer === 'pending' ? (

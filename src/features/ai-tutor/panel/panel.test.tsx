@@ -36,7 +36,7 @@ vi.mock('../providers/registry', () => ({
 
 import { closeTutor, openTutor, __resetTutorPanelForTests, tutorMenuItems } from '../commands'
 import { useTutorHistory } from '../history/store'
-import { __resetTutorChatForTests, getTutorSession, projectChanged, send as sendNow, stop, useTutorChat } from './chat'
+import { __resetTutorChatForTests, getTutorSession, projectChanged, readWordsNote, send as sendNow, stop, useTutorChat } from './chat'
 import { NO_TOOLS_REASON, TUTOR_CONTROLS as C } from './controls'
 import { setTutorConnectAction } from './connect'
 import { TutorPanel } from './TutorPanel'
@@ -420,7 +420,7 @@ describe('proposals and read requests', () => {
     type('And the next chapter?')
     press('Enter')
     const req = await screen.findByTestId('tutor-read-request')
-    expect(req).toHaveTextContent('The tutor wants to read Chapter 2: Two. Allow?')
+    expect(req).toHaveTextContent('The tutor wants to read Chapter 2: Two (about 3 words). Allow?')
     fireEvent.click(within(req).getByRole('button', { name: 'Allow' }))
     await idle()
     expect(req).toHaveTextContent('Allowed for this question.')
@@ -565,6 +565,57 @@ describe('fix round 1', () => {
       expect(useTutorChat.getState().busy).toBe(false)
     })
     await b
+  })
+})
+
+describe('final review: the consent count includes what the tutor read (B-I1)', () => {
+  const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ')
+
+  it('B-I1: text the tutor read (in scope, no Allow) counts toward the consent total of a follow-up', async () => {
+    const readTurn = (): Step[] => [[call('read_range', { kind: 'attached' }), finish('tool-calls')], [...text('Read.'), finish('stop')]]
+    const model = scripted(...readTurn(), ...readTurn(), ...readTurn())
+    // Page 1 is chapter One (the current chapter): read without asking, "One" + 8,000 + "x" words.
+    await mount([h1('One'), para(words(8_000)), para('x'), h1('Two'), para('y')])
+    for (const q of ['First?', 'Second?', 'Third?']) {
+      type(q)
+      press('Enter')
+      await idle()
+    }
+    // Three reads of the current chapter, none asked: each was under the limit with what came before.
+    expect(backend.messages).toEqual([])
+    expect(model.doStreamCalls).toHaveLength(6)
+    backend.answer = 'Cancel'
+    type('Fourth?')
+    press('Enter')
+    await waitFor(() => expect(backend.messages).toHaveLength(1))
+    expect(backend.messages[0].text).toBe('Send about 24,006 words to OpenAI?')
+    await idle()
+    expect(model.doStreamCalls).toHaveLength(6)
+  })
+
+  it('B-I1: an Allow on Whole manuscript shows its word count, and a follow-up that re-sends the read asks', async () => {
+    const model = scripted([call('read_range', { kind: 'manuscript' }), finish('tool-calls')], [...text('All read.'), finish('stop')])
+    await mount()
+    await attachFromMenu(/Current Page/)
+    type('Read everything')
+    press('Enter')
+    const req = await screen.findByTestId('tutor-read-request')
+    expect(req).toHaveTextContent('The tutor wants to read Whole manuscript (about 13 words). Allow?')
+    fireEvent.click(within(req).getByRole('button', { name: 'Allow' }))
+    await idle()
+    expect(backend.messages).toEqual([])
+    backend.answer = 'Cancel'
+    type('And now?')
+    press('Enter')
+    await waitFor(() => expect(backend.messages).toHaveLength(1))
+    expect(backend.messages[0].text).toMatch(/^Send about \d+ words to OpenAI\?$/)
+    await idle()
+    expect(model.doStreamCalls).toHaveLength(2)
+  })
+
+  it('B-I1: past the read limit, the Allow says how much is sent', () => {
+    expect(readWordsNote(84_000)).toBe('about 84,000 words; up to 20,000 are sent')
+    expect(readWordsNote(1)).toBe('about 1 word')
   })
 })
 
