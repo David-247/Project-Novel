@@ -22,3 +22,12 @@ tauri-plugin-dialog = "2.8.4"
 tauri-plugin-sql = { version = "2.6.0", features = ["sqlite"] }
 tempfile = "3.27.0"
 whoami = "2"
+# AI tutor network proxy (src/ai). TLS is rustls with the ring provider (aws-lc-rs, reqwest's
+# default rustls provider, carries an OpenSSL-licensed component and needs CMake/NASM to build).
+# No default features: no system proxy, no HTTP/2, no decompression, no cookies.
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "=0.23.37", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { version = "=1.54.1", features = ["macros", "sync", "time", "rt"] }
+
+[dev-dependencies]
+tokio = { version = "=1.54.1", features = ["macros", "sync", "time", "rt", "rt-multi-thread", "net", "io-util"] }
