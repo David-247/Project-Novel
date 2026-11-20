@@ -9,7 +9,7 @@
 //   changes (debounced) and applies the Motion preference.
 // - registerSettingsCommands(): Settings… (Mod-,) in the command registry (app menu on macOS, end of
 //   File elsewhere). The composition root calls it with the other slices' registrations.
-// - openSettings(): the dialog the gear and Settings… open.
+// - openSettings(page?): the dialog the gear and Settings… open (on General, or on the page named).
 // - getAuthor() / useAuthor(): { name, color } to attribute tracked changes and comments to.
 // - ensureAuthorName(): the name, asking once (when none is known) the first time it is needed.
 // - prefersReducedMotion() / useReducedMotion(): the Motion preference resolved against the OS.
@@ -22,6 +22,10 @@ export type { SettingsButtonProps } from './SettingsButton'
 export { useSettingsIntegration } from './integration'
 export { registerSettingsCommands } from './commands'
 export { openSettings, closeSettings } from './dialog-state'
+// registerSettingsPage({ id, label, description?, component }): another page in the dialog's page list
+// (after General), opened with openSettings(id). Returns unregister. The composition root registers them.
+export { registerSettingsPage, GENERAL_PAGE_ID } from './pages'
+export type { SettingsPage } from './pages'
 export { getAuthor, useAuthor, ensureAuthorName } from './author'
 export type { Author } from './author'
 // getAuthorProfile() / useAuthorProfile(): the manuscript contact block (legal name, pen name, address,

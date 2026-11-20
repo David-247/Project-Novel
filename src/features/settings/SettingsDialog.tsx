@@ -1,14 +1,16 @@
 import { useId, useRef, useState } from 'react'
-import type { ReactElement, ReactNode } from 'react'
+import type { KeyboardEvent, ReactElement, ReactNode } from 'react'
 import { PAPER_SURFACES, MAX_AUTHOR_NAME, PROFILE_MAX, useStore } from '@/shared/store'
 import type { PreferenceValues } from '@/shared/store'
 import { TRIM_SIZES } from '@/shared/book'
-import { Button, Dialog, Select, TextInput, Tooltip, cn, fieldBase } from '@/shared/ui'
+import { Button, Dialog, Select, TextInput, Tooltip, cn, fieldBase, focusRing } from '@/shared/ui'
 import type { SelectOption } from '@/shared/ui'
 import { answerAuthorPrompt } from './author'
 import { SETTINGS_CONTROLS as C } from './controls'
 import type { SettingsControlKey } from './controls'
-import { closeSettings, useDialogState } from './dialog-state'
+import { closeSettings, showSettingsPage, useDialogState } from './dialog-state'
+import { GENERAL_PAGE_ID, useSettingsPages } from './pages'
+import type { SettingsPage } from './pages'
 import { flushPreferences } from './persistence'
 
 const NAVIGATION_OPTIONS: SelectOption[] = [
@@ -45,7 +47,10 @@ function openColorPicker(input: HTMLInputElement | null) {
 
 /** Hosts the Settings dialog and the one-time author question (both portal). Render once in the app. */
 export function SettingsDialog() {
-  const { settingsOpen, promptOpen } = useDialogState()
+  const { settingsOpen, promptOpen, page } = useDialogState()
+  const extra = useSettingsPages()
+  // A page that is not registered (yet, or any more) shows General.
+  const current = extra.some((p) => p.id === page) ? page : GENERAL_PAGE_ID
   return (
     <>
       <Dialog
@@ -58,17 +63,20 @@ export function SettingsDialog() {
         }}
         title="Settings"
         description="Changes apply as you make them and are kept for every project on this computer."
-        className="sm:max-w-xl"
+        className={extra.length ? 'sm:max-w-3xl' : 'sm:max-w-xl'}
         footer={
           <>
-            <Tooltip>
-              <Button
-                data-control-id={C.reset.id}
-                onClick={() => useStore.getState().preferencesActions.reset()}
-              >
-                {C.reset.label}
-              </Button>
-            </Tooltip>
+            {/* Reset puts General's preferences back; another page has its own controls. */}
+            {current === GENERAL_PAGE_ID ? (
+              <Tooltip>
+                <Button
+                  data-control-id={C.reset.id}
+                  onClick={() => useStore.getState().preferencesActions.reset()}
+                >
+                  {C.reset.label}
+                </Button>
+              </Tooltip>
+            ) : null}
             <Tooltip>
               <Button
                 variant="primary"
@@ -84,10 +92,88 @@ export function SettingsDialog() {
           </>
         }
       >
-        {settingsOpen ? <SettingsForm /> : null}
+        {settingsOpen ? extra.length ? <SettingsPages current={current} pages={extra} /> : <SettingsForm /> : null}
       </Dialog>
       <AuthorPrompt open={promptOpen} />
     </>
+  )
+}
+
+/** A page's tooltip: the registry's line for the list (C.page), then what the page holds. */
+const pageTip = (what?: string) => (what ? `${PAGE_TIP} ${what}` : PAGE_TIP)
+const PAGE_TIP = 'Show this page of Settings.'
+
+const GENERAL: Pick<SettingsPage, 'id' | 'label' | 'description'> = {
+  id: GENERAL_PAGE_ID,
+  label: 'General',
+  description: 'Your name and colour, your author profile, the writing view and what new projects start with.',
+}
+
+/**
+ * Word's Options dialog: the pages down the left (a vertical tab list; one Tab stop, arrow keys move
+ * between pages), the chosen page at the right. Below 640 px the list runs across the top.
+ */
+function SettingsPages({ current, pages }: { current: string; pages: readonly SettingsPage[] }) {
+  const baseId = useId()
+  const all = [GENERAL, ...pages]
+  const tabId = (id: string) => `${baseId}-tab-${id}`
+  const panelId = `${baseId}-panel`
+  const Page = pages.find((p) => p.id === current)?.component
+  const move = (e: KeyboardEvent<HTMLDivElement>) => {
+    const i = all.findIndex((p) => p.id === current)
+    const next =
+      e.key === 'ArrowDown' || e.key === 'ArrowRight'
+        ? (i + 1) % all.length
+        : e.key === 'ArrowUp' || e.key === 'ArrowLeft'
+          ? (i - 1 + all.length) % all.length
+          : e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? all.length - 1
+              : -1
+    if (next < 0) return
+    e.preventDefault()
+    showSettingsPage(all[next].id)
+    document.getElementById(tabId(all[next].id))?.focus()
+  }
+  return (
+    <div className="flex flex-col gap-3 sm:flex-row sm:gap-5">
+      <div
+        role="tablist"
+        aria-label="Settings pages"
+        aria-orientation="vertical"
+        onKeyDown={move}
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border pb-2 sm:sticky sm:top-0 sm:w-36 sm:flex-col sm:self-start sm:overflow-visible sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3"
+      >
+        {all.map((p) => {
+          const selected = p.id === current
+          return (
+            <Tooltip key={p.id} side="right" copy={{ title: p.label, description: pageTip(p.description) }}>
+              <button
+                type="button"
+                role="tab"
+                id={tabId(p.id)}
+                aria-selected={selected}
+                aria-controls={panelId}
+                tabIndex={selected ? 0 : -1}
+                data-control-id={C.page.id}
+                onClick={() => showSettingsPage(p.id)}
+                className={cn(
+                  'min-h-control shrink-0 whitespace-nowrap rounded-control px-2.5 text-left text-ui',
+                  selected ? 'bg-accent-soft font-semibold text-text' : 'text-text-muted hover:bg-surface-hover hover:text-text',
+                  focusRing,
+                )}
+              >
+                {p.label}
+              </button>
+            </Tooltip>
+          )
+        })}
+      </div>
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(current)} className="min-w-0 flex-1">
+        {Page ? <Page /> : <SettingsForm />}
+      </div>
+    </div>
   )
 }
 

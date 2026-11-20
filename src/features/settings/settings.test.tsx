@@ -16,6 +16,7 @@ import {
   openSettings,
   prefersReducedMotion,
   registerSettingsCommands,
+  registerSettingsPage,
   SETTINGS_CONTROLS,
   SettingsButton,
   SettingsDialog,
@@ -431,6 +432,67 @@ describe('Settings dialog', () => {
       offKeys()
       offCommands()
     }
+  })
+})
+
+describe('Settings pages (Word Options: a page list at the left)', () => {
+  function renderDialog() {
+    return render(
+      <TooltipProvider lookup={getTooltipCopy}>
+        <SettingsDialog />
+      </TooltipProvider>,
+    )
+  }
+  const Extra = () => <p>Extra page body</p>
+
+  it('without extra pages the dialog is the General form alone', async () => {
+    renderDialog()
+    act(() => openSettings())
+    await screen.findByRole('dialog', { name: 'Settings' })
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.getByRole('region', { name: 'General' })).toBeInTheDocument()
+  })
+
+  it("openSettings(id) opens that page; the list switches pages by click and arrow keys; Reset is General's", async () => {
+    const off = registerSettingsPage({ id: 'extra', label: 'Extra', description: 'An extra page.', component: Extra })
+    try {
+      renderDialog()
+      act(() => openSettings('extra'))
+      await screen.findByRole('dialog', { name: 'Settings' })
+      const tabs = screen.getAllByRole('tab')
+      expect(tabs.map((t) => t.textContent)).toEqual(['General', 'Extra'])
+      expect(screen.getByRole('tab', { name: 'Extra' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tabpanel')).toHaveTextContent('Extra page body')
+      expect(screen.queryByRole('button', { name: 'Reset to defaults' })).toBeNull()
+      // One Tab stop: the selected page.
+      expect(tabs.map((t) => t.tabIndex)).toEqual([-1, 0])
+      fireEvent.click(screen.getByRole('tab', { name: 'General' }))
+      expect(screen.getByRole('region', { name: 'General' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Reset to defaults' })).toBeInTheDocument()
+      fireEvent.keyDown(screen.getByRole('tab', { name: 'General' }), { key: 'ArrowDown' })
+      expect(screen.getByRole('tab', { name: 'Extra' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tab', { name: 'Extra' })).toHaveFocus()
+      // Open already: openSettings(id) turns to the page.
+      act(() => openSettings('general'))
+      expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
+      act(() => openSettings('extra'))
+      expect(screen.getByRole('tabpanel')).toHaveTextContent('Extra page body')
+      const problems = auditTooltipCoverage(document.body)
+      expect(problems, formatCoverageProblems(problems)).toEqual([])
+    } finally {
+      off()
+    }
+  })
+
+  it('an unknown page id opens General, and a page can be unregistered', async () => {
+    const off = registerSettingsPage({ id: 'extra', label: 'Extra', component: Extra })
+    renderDialog()
+    act(() => openSettings('nope'))
+    await screen.findByRole('dialog', { name: 'Settings' })
+    expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')
+    act(() => off())
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(() => registerSettingsPage({ id: 'general', label: 'x', component: Extra })).toThrow()
   })
 })
 

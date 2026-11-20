@@ -147,6 +147,8 @@ test('every control has a tooltip, is reachable with Tab, and the audit finds no
 
   const expected = [
     'dialog.close',
+    // The page list (General, AI Tutor): one Tab stop, the selected page (Phase 5 T10).
+    'settings.page',
     'settings.authorName',
     'settings.authorColor',
     // 'Automatic colour' is disabled until a colour is chosen, so Tab skips it.
