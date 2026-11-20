@@ -66,7 +66,7 @@ export type { Editor, JSONContent } from '@tiptap/core'
 export { STYLE_DIALOG_CONTROLS } from './styles/controls'
 export { BookStyleSheet, STYLE_SCOPE } from './styles/BookStyleSheet'
 export { getResolvedStyles, useResolvedStyles } from './styles/resolved'
-export { defaultStyleIdFor, effectiveStyleId } from './styles/block-styles'
+export { defaultStyleIdFor, effectiveStyleId, restyleBlock } from './styles/block-styles'
 export {
   countStyleUses,
   createStyle,

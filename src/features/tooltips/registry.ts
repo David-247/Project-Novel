@@ -17,6 +17,7 @@ import { COMMENT_CONTROLS } from '@/features/comments'
 import { REWRITE_CONTROLS } from '@/features/rewrite'
 import { OUTLINE_CONTROLS } from '@/features/outline'
 import { SPELLCHECK_CONTROLS } from '@/features/spellcheck'
+import { TUTOR_CONTROLS } from '@/features/ai-tutor'
 import { EXPORT_WIZARD_CONTROLS } from '@/features/export'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
@@ -326,6 +327,17 @@ const SPELLCHECK_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
     .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description }]),
 )
 
+/**
+ * The AI tutor panel (ai-tutor slice): its header, composer, + menu, chips, replies, corrections, read
+ * requests and model picker. The toggle (`tutor.toggle`: menu item, ribbon buttons) reads its copy from
+ * the registry command; controls that name their instance (a chip, a chat, a model) pass their own copy.
+ */
+const TUTOR_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(TUTOR_CONTROLS)
+    .filter((c) => c.id !== TUTOR_CONTROLS.toggle.id)
+    .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description }]),
+)
+
 /** Review: Track Changes and the markup view picker with its choices (track-changes slice). */
 const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
   ...Object.fromEntries(
@@ -424,6 +436,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...REWRITE_TOOLTIPS,
   ...OUTLINE_TOOLTIPS,
   ...SPELLCHECK_TOOLTIPS,
+  ...TUTOR_TOOLTIPS,
   ...EXPORT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,

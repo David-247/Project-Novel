@@ -68,15 +68,15 @@ describe('spell check in the app', () => {
     expect(screen.getByRole('textbox', { name: 'Manuscript' })).toHaveAttribute('spellcheck', 'false')
   })
 
-  it('the context menu shows suggestions, Ignore Once, Add to Dictionary, then Cut / Copy / Paste, every item with a tooltip', async () => {
+  it('the context menu shows suggestions, Ignore Once, Add to Dictionary, Ask the Tutor About This, then Cut / Copy / Paste, every item with a tooltip', async () => {
     await appWith('I saw teh dog.')
     act(() => {
       openEditorContextMenu({ pos: 8, x: 20, y: 20 })
     })
     const menu = await screen.findByRole('menu')
     const items = [...menu.querySelectorAll('[role="menuitem"]')]
-    expect(items.map((i) => i.querySelector('span')?.textContent)).toEqual(['the', 'Ignore Once', 'Add to Dictionary', 'Cut', 'Copy', 'Paste'])
-    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(2)
+    expect(items.map((i) => i.querySelector('span')?.textContent)).toEqual(['the', 'Ignore Once', 'Add to Dictionary', 'Ask the Tutor About This', 'Cut', 'Copy', 'Paste'])
+    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(3)
     const problems = auditTooltipCoverage(document.body)
     expect(problems, formatCoverageProblems(problems)).toEqual([])
     // The suggestion's tooltip names its word.

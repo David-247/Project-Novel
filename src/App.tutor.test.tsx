@@ -1,0 +1,383 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { convertArrayToReadableStream, MockLanguageModelV4 } from 'ai/test'
+import { flushWordCount, getEditor, setDocJSON } from '@/features/editor'
+import { auditTooltipCoverage, formatCoverageProblems } from '@/features/tooltips'
+import { buildMenuModel, getCommand, getCommands, runCommand, type MenuNode } from '@/shared/commands'
+import { useStore, type PageInfo } from '@/shared/store'
+import { backend } from '@/test-utils/fake-tauri'
+
+vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
+vi.mock('@tauri-apps/plugin-dialog', async () => (await import('@/test-utils/fake-tauri')).dialogModule)
+vi.mock('@tauri-apps/plugin-sql', async () => (await import('@/test-utils/fake-tauri')).sqlModule)
+// The window and event APIs the whole app touches (theme, close request, native menu events).
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    theme: async () => null,
+    onThemeChanged: async () => () => {},
+    onCloseRequested: async () => () => {},
+    destroy: async () => {},
+    isFullscreen: async () => false,
+    setFullscreen: async () => {},
+  }),
+}))
+vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.4.0' }))
+
+// The fake provider: the AI SDK's mock model behind a test adapter (no request reaches ai_fetch).
+const hoisted = vi.hoisted(() => ({ model: null as unknown }))
+vi.mock('@/features/ai-tutor/providers/registry', () => ({
+  getAdapter: () => ({
+    label: 'Test provider',
+    languageModel: () => hoisted.model,
+    listModels: async () => [
+      { id: 'gpt-test', label: 'GPT Test', tools: 'yes' },
+      { id: 'tiny', label: 'Tiny', tools: 'unknown' },
+    ],
+  }),
+  listAdapters: () => [],
+  modelSupportsTools: (c: { toolSupport?: Record<string, boolean> }, m: { id: string; tools: string }) => c.toolSupport?.[m.id] ?? m.tools === 'yes',
+}))
+
+import { closeTutor, isTutorOpen, TUTOR_CONTROLS as C, TUTOR_SHORTCUT, useTutorHistory } from '@/features/ai-tutor'
+import { closeSettings } from '@/features/settings'
+import { openProject } from '@/features/storage'
+import { App } from './App'
+
+type StreamPart = Awaited<ReturnType<MockLanguageModelV4['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
+type CallOptions = Parameters<MockLanguageModelV4['doStream']>[0]
+
+beforeAll(() => {
+  const rect = { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, toJSON: () => ({}) }
+  const emptyRects = () => Object.assign([], { item: () => null }) as unknown as DOMRectList
+  Range.prototype.getClientRects ??= emptyRects
+  Range.prototype.getBoundingClientRect ??= () => rect as DOMRect
+  Element.prototype.getClientRects ??= emptyRects
+  Element.prototype.scrollIntoView ??= () => {}
+  Element.prototype.hasPointerCapture ??= () => false
+  Element.prototype.setPointerCapture ??= () => {}
+  Element.prototype.releasePointerCapture ??= () => {}
+  document.elementFromPoint ??= () => null
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+})
+
+const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 5, text: 5, reasoning: 0 } }
+const finish = (unified: 'stop' | 'tool-calls'): StreamPart => ({ type: 'finish', finishReason: { unified, raw: unified }, usage })
+const text = (...deltas: string[]): StreamPart[] => [{ type: 'text-start', id: 't' }, ...deltas.map((delta) => ({ type: 'text-delta' as const, id: 't', delta })), { type: 'text-end', id: 't' }]
+let callId = 0
+const call = (toolName: string, input: unknown): StreamPart => ({ type: 'tool-call', toolCallId: `call-${++callId}`, toolName, input: JSON.stringify(input) })
+type Step = StreamPart[] | ((options: CallOptions) => ReadableStream<StreamPart> | Promise<never>)
+function scripted(...steps: Step[]): MockLanguageModelV4 {
+  let n = 0
+  const model = new MockLanguageModelV4({
+    doStream: async (options) => {
+      const step = steps[n++]
+      if (!step) throw new Error('the script ran out')
+      return { stream: typeof step === 'function' ? await step(options) : convertArrayToReadableStream(step) }
+    },
+  })
+  hoisted.model = model
+  return model
+}
+
+const t = (s: string) => ({ type: 'text', text: s })
+const DOC = {
+  type: 'doc',
+  content: [
+    { type: 'heading', attrs: { level: 1 }, content: [t('One')] },
+    { type: 'paragraph', content: [t('I saw teh dog.')] },
+    { type: 'paragraph', content: [t('It ran acros the road.')] },
+    { type: 'heading', attrs: { level: 1 }, content: [t('Two')] },
+    { type: 'paragraph', content: [t('Far away.')] },
+  ],
+}
+const CONNECTION = { id: 'conn-1', provider: 'openai', label: 'OpenAI', auth: 'api_key', defaultModel: 'gpt-test' }
+
+const page = (index: number, from: number, to: number, chapterIndex: number): PageInfo => ({ index, side: index % 2 === 0 ? 'recto' : 'verso', from, to, isBlank: false, startsBlockType: null, chapterIndex })
+
+function blockPos(i: number): number {
+  const doc = getEditor()!.state.doc
+  let pos = 0
+  for (let k = 0; k < i; k++) pos += doc.child(k).nodeSize
+  return pos
+}
+
+function layOut() {
+  const end = getEditor()!.state.doc.content.size
+  const two = blockPos(3)
+  useStore.getState().layoutActions.setPages([page(0, 0, two, 0), page(1, two, end, 1)])
+  useStore.getState().layoutActions.setCurrentPage(0)
+}
+
+async function renderApp({ connected = true } = {}) {
+  backend.ai.connections = connected ? [CONNECTION] : []
+  render(<App />)
+  await waitFor(() => expect(getEditor()).not.toBeNull())
+  await waitFor(() => expect(getCommand(C.toggle.id)).toBeDefined())
+  act(() => setDocJSON(DOC as Parameters<typeof setDocJSON>[0]))
+  act(() => flushWordCount())
+  act(() => layOut())
+  if (connected) await waitFor(() => expect(useStore.getState().tutorConnections.activeId).toBe(CONNECTION.id))
+}
+
+const panel = () => screen.getByTestId('tutor-panel')
+const inPanel = (id: string) => panel().querySelector<HTMLElement>(`[data-control-id="${id}"]`)!
+const composer = () => inPanel(C.composer.id) as HTMLTextAreaElement
+const idle = async () => {
+  const { useTutorChat } = await import('@/features/ai-tutor/panel/chat')
+  await waitFor(() => expect(useTutorChat.getState().busy).toBe(false))
+}
+const audit = (where: string) => {
+  const problems = auditTooltipCoverage(document.body)
+  expect(problems, `${where}: ${formatCoverageProblems(problems)}`).toEqual([])
+}
+const focusComposer = () => waitFor(() => expect(document.activeElement).toBe(composer()))
+async function openMenu(id: string) {
+  await focusComposer()
+  fireEvent.keyDown(inPanel(id), { key: 'Enter' })
+  return screen.findByRole('menu')
+}
+
+beforeEach(() => {
+  backend.reset()
+  hoisted.model = null
+})
+afterEach(async () => {
+  act(() => closeTutor())
+  act(() => closeSettings())
+  cleanup()
+  setDocJSON({ type: 'doc', content: [{ type: 'paragraph' }] })
+  useStore.getState().layoutActions.resetLayout()
+})
+
+describe('the tutor in the app', () => {
+  it('View ▸ Tutor (Ctrl/Cmd+Shift+Y), Review ▸ Tutor and View ▸ Show ▸ Tutor open and close the docked panel', async () => {
+    await renderApp()
+    const cmd = getCommand(C.toggle.id)!
+    expect(cmd.shortcut).toBe('Mod-Shift-y')
+    expect(TUTOR_SHORTCUT).toBe('Mod-Shift-y')
+    const view = buildMenuModel(getCommands(), 'in-app').find((m) => m.id === 'view')!
+    const labels = (nodes: MenuNode[]): string[] => nodes.flatMap((n) => (n.kind === 'item' ? [n.command.label] : n.kind === 'submenu' ? labels(n.children) : []))
+    expect(labels(view.children)).toContain('Tutor')
+    // The ribbon: Review ▸ Tutor (its own group, with the sparkle) and View ▸ Show.
+    const buttons = document.querySelectorAll<HTMLElement>(`[data-control-id="ribbon.cmd.${C.toggle.id}"]`)
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0].closest('[data-ribbon-panel]')?.getAttribute('data-ribbon-panel')).toBe('review')
+    expect(buttons[1].closest('[data-ribbon-panel]')?.getAttribute('data-ribbon-panel')).toBe('view')
+    fireEvent.click(buttons[0])
+    expect(panel()).toBeInTheDocument()
+    expect(buttons[0]).toHaveAttribute('aria-pressed', 'true')
+    // Docked beside the pages, inside the editor region's row.
+    expect(panel().parentElement).toBe(screen.getByRole('main').parentElement)
+    expect(panel()).not.toHaveAttribute('data-overlay')
+    act(() => void runCommand(C.toggle.id))
+    expect(screen.queryByRole('complementary', { name: 'Tutor' })).toBeNull()
+    expect(isTutorOpen()).toBe(false)
+  })
+
+  it('Ctrl+Shift+Y toggles it from the manuscript', async () => {
+    await renderApp()
+    getEditor()!.view.focus()
+    fireEvent.keyDown(getEditor()!.view.dom, { key: 'Y', code: 'KeyY', ctrlKey: true, shiftKey: true, metaKey: false })
+    fireEvent.keyDown(getEditor()!.view.dom, { key: 'Y', code: 'KeyY', metaKey: true, shiftKey: true, ctrlKey: false })
+    // One of the two is Mod on this platform: the panel is open after it, and only once toggled.
+    expect(isTutorOpen()).toBe(true)
+  })
+
+  it('nothing reaches ai_fetch while the panel opens, chips are added and text is typed', async () => {
+    const model = scripted([...text('Hello.'), finish('stop')])
+    await renderApp()
+    act(() => void runCommand(C.toggle.id))
+    fireEvent.click(await within(await openMenu(C.attach.id)).findByRole('menuitem', { name: /Current Page/ }))
+    fireEvent.change(composer(), { target: { value: 'Anything wrong here?' } })
+    expect(model.doStreamCalls).toHaveLength(0)
+    expect(backend.ai.requests).toHaveLength(0)
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    expect(model.doStreamCalls).toHaveLength(1)
+    expect(backend.ai.requests).toHaveLength(0)
+  })
+})
+
+describe('tooltip and keyboard audits of the tutor panel', () => {
+  /** Every control in the panel is reachable from the keyboard: focusable, not removed from the tab order. */
+  function keyboardAudit(where: string) {
+    const unreachable = Array.from(panel().querySelectorAll<HTMLElement>('[data-control-id]'))
+      .filter((el) => el.getAttribute('aria-hidden') !== 'true')
+      .filter((el) => (el as HTMLButtonElement).disabled !== true)
+      .filter((el) => el.tabIndex < 0)
+      .map((el) => el.getAttribute('data-control-id'))
+    expect(unreachable, `${where}: not reachable by Tab`).toEqual([])
+  }
+
+  it('the greeting, the + menu and its chapter list, the model picker, a turn with corrections, a proposal, a read request and an error, the history', async () => {
+    await renderApp()
+    act(() => void runCommand(C.toggle.id))
+    audit('greeting')
+    keyboardAudit('greeting')
+    const ids = () => Array.from(panel().querySelectorAll('[data-control-id]'), (e) => e.getAttribute('data-control-id'))
+    expect(new Set(ids())).toEqual(new Set([C.history.id, C.newChat.id, C.close.id, C.prompt.id, C.composer.id, C.attach.id, C.send.id, C.model.id]))
+
+    // The + menu, then its chapter submenu (ArrowRight on Current Chapter).
+    const plus = await openMenu(C.attach.id)
+    expect(within(plus).getAllByRole('menuitem').map((i) => i.getAttribute('data-control-id'))).toEqual([C.attachPage.id, C.attachChapter.id, C.attachSelection.id, C.attachManuscript.id])
+    audit('+ menu')
+    const sub = within(plus).getByRole('menuitem', { name: /Current Chapter/ })
+    sub.focus()
+    fireEvent.keyDown(sub, { key: 'ArrowRight' })
+    const menus = await screen.findAllByRole('menu')
+    await waitFor(() => expect(screen.getAllByRole('menu').length).toBeGreaterThan(1))
+    const chapters = screen.getAllByRole('menu').at(-1)!
+    expect(within(chapters).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([expect.stringMatching(/^1One \(current\)\d+ words?$/), expect.stringMatching(/^2Two\d+ words?$/)])
+    void menus
+    audit('chapter submenu')
+    fireEvent.click(within(chapters).getAllByRole('menuitem')[1])
+    expect(panel().querySelectorAll('[data-testid="tutor-chip"]')).toHaveLength(1)
+    audit('a chip')
+    keyboardAudit('a chip')
+
+    // The model picker (the models are listed as it opens).
+    const picker = await openMenu(C.model.id)
+    await within(picker).findByRole('menuitem', { name: /Tiny/ })
+    audit('model picker')
+    fireEvent.keyDown(picker, { key: 'Escape' })
+
+    // A turn: corrections, a proposal and a read request, then an error with Retry.
+    scripted(
+      [
+        call('list_corrections', { items: [{ paragraph: 'p2', kind: 'spelling', original: 'Far', suggestion: 'For', explanation: 'Example.' }] }),
+        call('propose_change', { paragraphIds: ['p2'], revisedText: ['Far away!'], reason: 'Punctuation.' }),
+        call('read_range', { kind: 'chapter', number: 1 }),
+        finish('tool-calls'),
+      ],
+      () => Promise.reject(Object.assign(new Error('x'), { name: 'AiFetchError' })),
+    )
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Check chapter two.' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    const read = await screen.findByTestId('tutor-read-request')
+    await waitFor(() => expect(panel().querySelector('[data-correction-id]')).not.toBeNull())
+    expect(panel().querySelector('[data-control-id="tutor.stop"]')).not.toBeNull()
+    audit('streaming: corrections, a proposal, a read request, Stop')
+    keyboardAudit('streaming')
+    fireEvent.click(within(read).getByRole('button', { name: 'Allow' }))
+    await idle()
+    expect(screen.getByTestId('tutor-error')).toBeInTheDocument()
+    expect(inPanel(C.retry.id)).not.toBeNull()
+    audit('an error with Retry')
+    keyboardAudit('an error with Retry')
+
+    // The history view.
+    fireEvent.click(inPanel(C.history.id))
+    await screen.findByTestId('tutor-history')
+    audit('history')
+    keyboardAudit('history')
+  })
+
+  it('not connected: the scripted reply and "Connect a Provider…" (opens Settings)', async () => {
+    await renderApp({ connected: false })
+    act(() => void runCommand(C.toggle.id))
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Hello' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    const connect = await within(panel()).findByRole('button', { name: 'Connect a Provider…' })
+    audit('not connected')
+    fireEvent.click(connect)
+    expect(await screen.findByRole('dialog', { name: /Settings/ })).toBeInTheDocument()
+  })
+})
+
+describe('projects and history (Review Focus 5)', () => {
+  const A = '/books/a'
+  const B = '/books/b'
+  const seed = (folder: string, id: string, title: string) => {
+    backend.dirs.add(folder)
+    backend.files.set(`${folder}/project.json`, JSON.stringify({ format: 'novel-project', schemaVersion: 1, id, title, createdAt: 'a', updatedAt: 'b' }))
+    backend.files.set(`${folder}/manuscript.json`, JSON.stringify(DOC))
+    backend.recent = [...backend.recent, { path: folder, name: title, openedAt: 'a' }]
+  }
+  async function open(folder: string) {
+    backend.answer = "Don't Save"
+    const ok = await act(() => openProject(folder))
+    expect(ok, JSON.stringify(backend.messages)).toBe(true)
+    act(() => layOut())
+  }
+
+  it('a chat is saved under its project; another project opening mid-reply stops it and saves nothing there', async () => {
+    seed(A, 'proj-a', 'A')
+    seed(B, 'proj-b', 'B')
+    await renderApp()
+    await open(A)
+    scripted([...text('First answer.'), finish('stop')])
+    act(() => void runCommand(C.toggle.id))
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'First question' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    await act(() => useTutorHistory.getState().flush())
+    expect([...(backend.ai.history.get('proj-a')?.values() ?? [])].map((c) => c.title)).toEqual(['First question'])
+
+    let aborted = false
+    scripted(
+      (options) =>
+        new ReadableStream<StreamPart>({
+          start(c) {
+            c.enqueue({ type: 'text-start', id: 't' })
+            c.enqueue({ type: 'text-delta', id: 't', delta: 'Half' })
+            options.abortSignal?.addEventListener('abort', () => {
+              aborted = true
+              c.error(new DOMException('aborted', 'AbortError'))
+            })
+          },
+        }),
+    )
+    fireEvent.change(composer(), { target: { value: 'Second question' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await waitFor(() => expect(screen.getAllByTestId('tutor-reply').at(-1)).toHaveTextContent('Half'))
+    await open(B)
+    await waitFor(() => expect(aborted).toBe(true))
+    await idle()
+    // The panel starts afresh for the new project; nothing was written to B's history.
+    expect(screen.getByTestId('tutor-greeting')).toBeInTheDocument()
+    await act(() => useTutorHistory.getState().flush())
+    expect(backend.ai.history.get('proj-b')).toBeUndefined()
+    expect(backend.ai.historySaves.every((s) => s.projectId === 'proj-a')).toBe(true)
+  })
+
+  it('⟲ lists the project chats; opening one brings it back (corrections can no longer be applied); delete removes it', async () => {
+    seed(A, 'proj-a', 'A')
+    await renderApp()
+    await open(A)
+    scripted(
+      [call('list_corrections', { items: [{ paragraph: 'p2', kind: 'spelling', original: 'teh', suggestion: 'the', explanation: 'A typo.' }] }), finish('tool-calls')],
+      [...text('One typo.'), finish('stop')],
+    )
+    act(() => void runCommand(C.toggle.id))
+    fireEvent.click(await within(await openMenu(C.attach.id)).findByRole('menuitem', { name: /Current Page/ }))
+    await focusComposer()
+    fireEvent.change(composer(), { target: { value: 'Any typos?' } })
+    fireEvent.keyDown(composer(), { key: 'Enter' })
+    await idle()
+    fireEvent.click(inPanel(C.newChat.id))
+    await screen.findByTestId('tutor-greeting')
+    fireEvent.click(inPanel(C.history.id))
+    const list = await screen.findByTestId('tutor-history')
+    const item = await within(list).findByRole('button', { name: /^Any typos\?/ })
+    fireEvent.click(item)
+    await waitFor(() => expect(screen.getAllByTestId('tutor-user-message')[0]).toHaveTextContent('Any typos?'))
+    expect(screen.getAllByTestId('tutor-user-message')[0]).toHaveTextContent('Page 1')
+    expect(screen.getAllByTestId('tutor-reply')[0]).toHaveTextContent('One typo.')
+    const c = panel().querySelector<HTMLElement>('[data-correction-id]')!
+    expect(c).toHaveAttribute('data-state', 'changed')
+    expect(c.querySelector(`[data-control-id="${C.correctionFix.id}"]`)).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(inPanel(C.history.id))
+    const del = await within(await screen.findByTestId('tutor-history')).findByRole('button', { name: /Delete chat “Any typos\?”/ })
+    fireEvent.click(del)
+    await waitFor(() => expect(screen.getByTestId('tutor-history')).toHaveTextContent('No chats yet for this project.'))
+    expect(backend.ai.history.get('proj-a')?.size ?? 0).toBe(0)
+  })
+})

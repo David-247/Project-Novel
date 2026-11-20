@@ -7,7 +7,12 @@ import { TooltipProvider } from '@/shared/ui'
 import { HEADER_FOOTER_CONTROLS } from './controls'
 import { HeaderFooter, HeaderFooterButton, closeHeaderFooterDialog } from './index'
 
-vi.mock('@/features/storage', () => ({ updateProjectDetails: vi.fn(async () => true) }))
+vi.mock('@/features/storage', () => ({
+  updateProjectDetails: vi.fn(async () => true),
+  // The tooltips registry reads the AI tutor's control copy; its slice wires these at import.
+  onProjectOpened: () => () => {},
+  getCurrentProjectMeta: () => null,
+}))
 
 const ids = (root: ParentNode) => Array.from(root.querySelectorAll('[data-control-id]'), (c) => c.getAttribute('data-control-id'))
 

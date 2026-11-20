@@ -45,3 +45,18 @@ export type { TurnArgs, TurnEvent, TutorSession } from './harness/run-turn'
 // flow, so nothing calls clearProject on delete; Task 10's settings page offers it.
 export { useTutorHistory, chatTitle, SAVE_DEBOUNCE_MS } from './history/store'
 export type { Chat, ChatSummary, StoredMessage, StoredAttachment } from './history/types'
+
+// The tutor panel (Task 9; design "Chat panel"). Wiring (composition root):
+// - <TutorPanel /> as AppShell's `sidePanel`: docked at the right of the pages, floating over them below 768 px.
+// - registerTutorCommands(): View ▸ Tutor (Ctrl/Cmd+Shift+Y; ribbon View ▸ Show, and Review ▸ Tutor by its
+//   ribbon group), "Ask the Tutor About This" in the manuscript's context menu, the chat history flush on
+//   quit, and a stop on every project change. Returns unregister.
+// - useTutorIntegration(): reads the saved connections once preferences are loaded.
+// - setTutorConnectAction(fn): what "Connect a Provider…" opens (Settings).
+// - TUTOR_CONTROLS: tooltip copy (the tooltips registry reads it). SparkleIcon: the ribbon's Tutor icon.
+export { TutorPanel } from './panel/TutorPanel'
+export { registerTutorCommands, useTutorIntegration, openTutor, closeTutor, toggleTutor, isTutorOpen, tutorCommands } from './commands'
+export { setTutorConnectAction } from './panel/connect'
+export { TUTOR_CONTROLS, TUTOR_SHORTCUT, CONFIRM_WORDS, NO_TOOLS_REASON } from './panel/controls'
+export type { TutorControlMeta, TutorControlKey } from './panel/controls'
+export { SparkleIcon } from './panel/icons'

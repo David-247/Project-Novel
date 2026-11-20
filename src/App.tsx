@@ -34,6 +34,7 @@ import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
 import {
   ensureAuthorName,
   getAuthor,
+  openSettings,
   registerSettingsCommands,
   SettingsDialog,
   useSettingsIntegration,
@@ -60,6 +61,7 @@ import { createSpellcheckExtension, registerDictionarySideFile, registerSpellche
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
 import { createManuscriptExportRenderers, ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile, setExportRenderers } from '@/features/export'
 import { NavigationPane, registerOutlineCommands } from '@/features/outline'
+import { registerTutorCommands, setTutorConnectAction, TutorPanel, useTutorIntegration } from '@/features/ai-tutor'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -127,12 +129,21 @@ export function App() {
       registerOutlineCommands(),
       registerExportCommands(),
       registerSpellcheckCommands(),
+      // The AI tutor: View ▸ Tutor (and its ribbon buttons), "Ask the Tutor About This", its quit flush.
+      registerTutorCommands(),
       // The toolbar's tabs and groups (Word-style ribbon; commands join groups by their `ribbon` field).
       registerAppRibbon(),
     ]
     return () => offs.forEach((off) => off())
   }, [])
   useAppMenus()
+  // The tutor's saved connections, read once preferences are (the active one is a preference).
+  useTutorIntegration()
+  // "Connect a Provider…" in the tutor opens Settings (TODO Task 10: on its AI Tutor page).
+  useEffect(() => {
+    setTutorConnectAction(() => openSettings())
+    return () => setTutorConnectAction(null)
+  }, [])
   // comments.json is saved, autosaved and recovered with the manuscript (storage side file).
   useEffect(() => registerCommentsSideFile(), [])
   // rewrites.json likewise (re-write versions are saved, autosaved and recovered with the manuscript).
@@ -194,6 +205,7 @@ export function App() {
         menuBar={<AppMenuBar />}
         toolbar={<Ribbon quickAccess={<RibbonQuickAccess />} />}
         navigation={<NavigationPane />}
+        sidePanel={<TutorPanel />}
         editor={
           <>
             {/* Zero-height sticky anchor: the find panel floats at the top of the scrolling editor
