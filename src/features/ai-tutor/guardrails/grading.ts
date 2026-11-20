@@ -110,6 +110,57 @@ export function sharesRun(text: string, source: string, n = OVERLAP_WORDS): bool
   return false
 }
 
+/** Most sentences a quote of the writer's text may hold (charter, rule:quote-limit). */
+export const QUOTE_MAX_SENTENCES = 2
+/** How close a quote must be to the writer's text: 1 − word edits / quote words, per ellipsis segment. */
+export const QUOTE_SIMILARITY = 0.8
+
+const ELLIPSIS = /\s*(?:…|\.{3}|\[\s*(?:…|\.{3})\s*\])\s*/g
+
+/** Sentences in `text` (ellipses taken out first): runs of `.`, `!`, `?` followed by a space or the end. */
+const sentenceCount = (text: string) => {
+  const t = text.replace(ELLIPSIS, ' ').trim()
+  if (!t) return 0
+  const ends = t.match(/[.!?‽]+["'”’)\]*_]*(?=\s|$)/g)?.length ?? 0
+  return /[.!?‽]["'”’)\]*_]*$/.test(t) ? ends : ends + 1
+}
+
+/** Words for comparing a quote: lowercase, emphasis, quotes, dashes and punctuation dropped. */
+const quoteWords = (text: string) =>
+  words(text.replace(/[*_]+/g, '').replace(/[‘’]/g, "'").replace(/[“”"]/g, ' ').replace(/[—–-]+/g, ' '))
+
+/** The fewest word edits that turn `q` into some run of consecutive words of `src` (approximate substring). */
+function editsToSpan(q: readonly string[], src: readonly string[]): number {
+  let prev = new Array<number>(src.length + 1).fill(0)
+  for (let i = 1; i <= q.length; i++) {
+    const cur = new Array<number>(src.length + 1)
+    cur[0] = i
+    for (let j = 1; j <= src.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (q[i - 1] === src[j - 1] ? 0 : 1))
+    prev = cur
+  }
+  return Math.min(...prev)
+}
+
+/**
+ * Whether `text` quotes the writer's `manuscript`: at most QUOTE_MAX_SENTENCES sentences, and each sentence
+ * (each part between ellipses) matches a span of the manuscript to QUOTE_SIMILARITY after normalising case,
+ * punctuation, quotes, dashes and emphasis. A fixed typo or a changed word passes; a rewrite changes far
+ * more, or runs longer, and does not.
+ */
+export function isWriterQuote(text: string, manuscript: string): boolean {
+  if (sentenceCount(text) > QUOTE_MAX_SENTENCES) return false
+  const src = quoteWords(manuscript)
+  // Each sentence, and each part of it between ellipses, must match: a sentence the writer never wrote
+  // (an added one) does not.
+  const parts = text
+    .split(ELLIPSIS)
+    .flatMap((part) => part.split(/(?<=[.!?‽]["'”’)\]*_]*)\s+/))
+    .map(quoteWords)
+    .filter((p) => p.length)
+  if (!parts.length || !src.length) return false
+  return parts.every((q) => 1 - editsToSpan(q, src) / q.length >= QUOTE_SIMILARITY)
+}
+
 /** The body of a passage that starts at line `from`: up to a blank line (quoted lines carry on), a label or a heading. */
 function passage(lines: string[], from: number): { body: string[]; end: number } {
   const body: string[] = []
@@ -168,10 +219,10 @@ export function checkExamples(reply: string, manuscript = ''): ExampleCheck {
     if (QUOTE.test(lines[i])) {
       const { body, end } = passage(lines, i)
       i = end - 1
-      // Quoting up to two lines of the writer's own text (the charter's quote limit) is a quotation, not
-      // an example; any other quoted passage is an illustrative one without its label.
-      const quotesWriter = manuscript !== '' && body.length <= 2 && body.every((l) => manuscript.includes(l.replace(/^\s*>\s*/, '').replace(/^["“]|["”]$/g, '').trim()))
-      if (quotesWriter) continue
+      // A quote of the writer's own text (the charter allows 2 sentences), also with a fix applied, an
+      // ellipsis or emphasis, is a quotation, not an example; any other quoted passage is an illustrative
+      // one without its label.
+      if (manuscript && isWriterQuote(body.map((l) => l.replace(/^\s*>\s?/, '')).join(' '), manuscript)) continue
       measure(body, 'a quoted passage')
       problem ??= 'a quoted illustrative passage without the "Example:" label'
     }
