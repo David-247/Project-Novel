@@ -1,7 +1,7 @@
 import { useStore } from '@/shared/store'
 import { Button, cn, focusRing, Tooltip } from '@/shared/ui'
 import type { Correction, CorrectionKind } from '../harness/output-tools'
-import { CHANGED_REASON, fixAvailability, locationLabel, locationSpoken } from './apply'
+import { CHANGED_REASON, EARLIER_SESSION_REASON, fixAvailability, isFromEarlierSession, locationLabel, locationSpoken } from './apply'
 import { fixCorrection, getTutorSession, ignoreCorrection, jumpTo } from './chat'
 import { TUTOR_CONTROLS as C } from './controls'
 import { CheckIcon } from './icons'
@@ -23,7 +23,7 @@ function CorrectionItem({ c }: { c: Correction }) {
   useStore((s) => s.rewrite.openId)
   useStore((s) => s.rewrite.rewrites)
   const session = getTutorSession()
-  const fix = session ? fixAvailability(session.idx, c) : { ok: false as const, reason: CHANGED_REASON }
+  const fix = session ? fixAvailability(session.idx, c) : { ok: false as const, reason: isFromEarlierSession(c) ? EARLIER_SESSION_REASON : CHANGED_REASON }
   const reason = !fix.ok ? fix.reason : ''
   const where = locationLabel(c.location)
   const open = c.state === 'open'

@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { countRange, getChapters, chapterIndexAt, getEditor, type Editor } from '@/features/editor'
 import { askConfirm } from '@/features/storage'
 import { useStore } from '@/shared/store'
+import { countText } from '@/shared/text'
 import { USER_HOSTED_PROVIDERS, type Connection } from '../connections/types'
 import { scriptedReply, type ScriptName } from '../harness/assemble'
 import { attachmentLabel, attachmentText, type Attachment } from '../harness/attachments'
@@ -168,10 +169,19 @@ let running: Promise<void> | null = null
 /** Bumped when the chat is replaced or reset: a turn still finishing then changes nothing. */
 let generation = 0
 const reads = new Map<string, (ok: boolean) => void>()
-/** The attachments as stored with the failed turn (Retry stores them again). */
-let lastStored: StoredMessage['attachments'] = []
-/** The failed turn Retry runs again. */
-let lastFailed: { replyId: string; userText: string; attachments: Attachment[]; script: ScriptName | null; history: ModelMessage[] } | null = null
+/**
+ * The failed turn Retry runs again, with its connection and model (the model may have been picked at
+ * send, when the connection names no default: I2). Selection attachments follow edits (M3).
+ */
+let lastFailed: {
+  replyId: string
+  userText: string
+  attachments: Attachment[]
+  script: ScriptName | null
+  history: ModelMessage[]
+  connectionId: string
+  modelId: string
+} | null = null
 
 function ensureSession(): TutorSession | null {
   const ed = getEditor()
@@ -241,6 +251,20 @@ export function projectChanged(): void {
   disposeSession()
 }
 
+/**
+ * Before another manuscript replaces the open one (storage's registerBeforeDocumentReplace; C1): stop the
+ * reply and forget the chat at once, so no tool of this turn reads the new text and nothing of it reaches
+ * the provider or this chat; wait for the turn to unwind; then save the chat to the project it belongs
+ * to, which is still the open one (M1), and close it.
+ */
+export async function beforeDocumentReplace(): Promise<void> {
+  abort?.abort()
+  resetView()
+  disposeSession()
+  await running
+  await useTutorHistory.getState().close()
+}
+
 // ---- Chips ---------------------------------------------------------------------------------------
 
 let unmapChips: (() => void) | null = null
@@ -251,18 +275,21 @@ function installChipMapping(ed: Editor) {
   const onTransaction = ({ transaction, appendedTransactions }: { transaction: Transaction; appendedTransactions: Transaction[] }) => {
     const trs = [transaction, ...appendedTransactions].filter((tr) => tr.docChanged)
     if (!trs.length) return
+    const mapAttachment = (a: Attachment): Attachment => {
+      if (a.kind !== 'selection') return a
+      let { from, to } = a
+      for (const tr of trs) {
+        from = tr.mapping.map(from, 1)
+        to = tr.mapping.map(to, -1)
+      }
+      return { kind: 'selection', from, to }
+    }
+    // A failed turn's selection follows the edits too, for Retry (M3).
+    if (lastFailed?.attachments.some((a) => a.kind === 'selection')) lastFailed = { ...lastFailed, attachments: lastFailed.attachments.map(mapAttachment) }
     const chips = chat().chips
     if (!chips.some((c) => c.attachment.kind === 'selection')) return
     const next = chips
-      .map((c) => {
-        if (c.attachment.kind !== 'selection') return c
-        let { from, to } = c.attachment
-        for (const tr of trs) {
-          from = tr.mapping.map(from, 1)
-          to = tr.mapping.map(to, -1)
-        }
-        return { ...c, attachment: { kind: 'selection' as const, from, to } }
-      })
+      .map((c) => (c.attachment.kind === 'selection' ? { ...c, attachment: mapAttachment(c.attachment) } : c))
       .filter((c) => c.attachment.kind !== 'selection' || c.attachment.to > c.attachment.from)
     set({ chips: next })
   }
@@ -525,15 +552,8 @@ export async function send(opts: SendOptions = {}): Promise<void> {
   const s = ensureSession()
   if (!s) return
   const attachments = chips.map((c) => c.attachment)
-  // What is sent, counted as sent: ask first above the limit, or with the whole book (Settled point 8).
   const sent = attachments.map((a) => ({ a, ...attachmentText(a, s.idx) }))
-  const words = sent.reduce((n, x) => n + x.words, 0)
-  if (words > CONFIRM_WORDS || attachments.some((a) => a.kind === 'manuscript')) {
-    set({ busy: true })
-    const ok = await askConfirm('Send to the Tutor', `Send about ${formatCount(words)} words to ${connection.label}?`, 'Send')
-    set({ busy: false })
-    if (!ok) return
-  }
+  if (!(await confirmSend(connection, modelHistory, sent))) return
   let modelId = chosenModel(connection)
   if (!modelId) {
     set({ busy: true })
@@ -550,6 +570,43 @@ export async function send(opts: SendOptions = {}): Promise<void> {
   set((st) => ({ messages: [...st.messages, user], draft: '', chips: opts.chips ? st.chips : [] }))
   const stored: StoredMessage['attachments'] = sent.map((x) => ({ label: attachmentLabel(x.a, s.idx.editor.state.doc), text: x.text }))
   await runTurn({ connection, modelId, userText: text, attachments, script: opts.script ?? null, stored })
+}
+
+/** Attached text, counted per line without its paragraph id ("[p12] " or "[p12 footnote 3] "). */
+const blockWords = (body: string) => countText(body.replace(/^\[p\d+[^\]]*\] ?/gm, '')).words
+
+/**
+ * What earlier turns of the chat send again with every request: their attached `<manuscript>` blocks
+ * (the chat is sent as it was, attached text included), and whether one of them is the whole book.
+ */
+export function historyPayload(history: readonly ModelMessage[]): { words: number; manuscript: boolean } {
+  const whole = attachmentLabel({ kind: 'manuscript' })
+  let words = 0
+  let manuscript = false
+  for (const m of history) {
+    if (m.role !== 'user') continue
+    const text = typeof m.content === 'string' ? m.content : m.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n')
+    for (const b of text.matchAll(/<manuscript source="([^"]*)">([\s\S]*?)<\/manuscript>/g)) {
+      if (b[1] === whole) manuscript = true
+      words += blockWords(b[2])
+    }
+  }
+  return { words, manuscript }
+}
+
+/**
+ * Consent (Settled point 8, I1): every request whose manuscript text is above CONFIRM_WORDS, or that
+ * carries the whole book, asks first: the new attachments plus what the chat already holds and sends
+ * again (a follow-up, Retry). Resolves false when the writer cancels.
+ */
+async function confirmSend(connection: Connection, history: readonly ModelMessage[], sent: { a: Attachment; words: number }[]): Promise<boolean> {
+  const earlier = historyPayload(history)
+  const words = earlier.words + sent.reduce((n, x) => n + x.words, 0)
+  if (words <= CONFIRM_WORDS && !earlier.manuscript && !sent.some((x) => x.a.kind === 'manuscript')) return true
+  set({ busy: true })
+  const ok = await askConfirm('Send to the Tutor', `Send about ${formatCount(words)} words to ${connection.label}?`, 'Send')
+  set({ busy: false })
+  return ok
 }
 
 interface TurnInput {
@@ -579,7 +636,8 @@ async function runTurn(input: TurnInput): Promise<void> {
   const controller = new AbortController()
   abort = controller
   let done!: () => void
-  running = new Promise<void>((resolve) => (done = resolve))
+  const mine = new Promise<void>((resolve) => (done = resolve))
+  running = mine
   try {
     const result = await runTutorTurn({
       connection: input.connection,
@@ -611,26 +669,36 @@ async function runTurn(input: TurnInput): Promise<void> {
       useTutorHistory.getState().append(chatId!, msg)
     })
     updateReply(reply.id, (r) => ({ ...r, stopped, canRetry: failed, storedIndex: lastAssistant >= 0 ? base + lastAssistant : null }))
-    lastFailed = failed ? { replyId: reply.id, userText: input.userText, attachments: input.attachments, script: input.script, history: before } : null
     // A failed turn is kept as it came (marked incomplete); Retry asks again without it.
-    if (failed) lastStored = input.stored
+    lastFailed = failed
+      ? { replyId: reply.id, userText: input.userText, attachments: input.attachments, script: input.script, history: before, connectionId: input.connection.id, modelId: input.modelId }
+      : null
   } finally {
     if (abort === controller) abort = null
     if (gen === generation) set({ busy: false })
     done()
-    running = null
+    // A newer turn may have started while this one unwound (after an abort): its promise stays (M2).
+    if (running === mine) running = null
   }
 }
 
-/** Retry on the newest failed reply: the same question and attachments, the chat as it was before. */
+/**
+ * Retry on the newest failed reply: the same question and attachments (a selection where it is now), the
+ * same connection and model (I2), the chat as it was before. Asks first like any send (I1).
+ */
 export async function retry(): Promise<void> {
   const f = lastFailed
-  const connection = activeConnection()
-  if (!f || chat().busy || !connection) return
-  const modelId = chosenModel(connection)
-  if (!modelId) return
+  if (!f || chat().busy) return
+  const list = useStore.getState().tutorConnections.list as Connection[]
+  const connection = list.find((c) => c.id === f.connectionId) ?? activeConnection()
+  const s = ensureSession()
+  if (!connection || !s) return
+  const sent = f.attachments.map((a) => ({ a, ...attachmentText(a, s.idx) }))
+  if (!(await confirmSend(connection, f.history, sent))) return
+  if (lastFailed !== f) return
   lastFailed = null
-  await runTurn({ connection, modelId, userText: f.userText, attachments: f.attachments, script: f.script, stored: lastStored, history: f.history })
+  const stored: StoredMessage['attachments'] = sent.map((x) => ({ label: attachmentLabel(x.a, s.idx.editor.state.doc), text: x.text }))
+  await runTurn({ connection, modelId: f.modelId, userText: f.userText, attachments: f.attachments, script: f.script, stored, history: f.history })
 }
 
 /** A suggested prompt: its text, a script, and the attachment it needs (none for scripted ones). */

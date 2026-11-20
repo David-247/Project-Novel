@@ -36,7 +36,7 @@ vi.mock('../providers/registry', () => ({
 
 import { closeTutor, openTutor, __resetTutorPanelForTests, tutorMenuItems } from '../commands'
 import { useTutorHistory } from '../history/store'
-import { __resetTutorChatForTests, getTutorSession, useTutorChat } from './chat'
+import { __resetTutorChatForTests, getTutorSession, projectChanged, send as sendNow, stop, useTutorChat } from './chat'
 import { NO_TOOLS_REASON, TUTOR_CONTROLS as C } from './controls'
 import { setTutorConnectAction } from './connect'
 import { TutorPanel } from './TutorPanel'
@@ -258,6 +258,9 @@ describe('the composer', () => {
     expect(backend.messages).toEqual([])
     expect(model.doStreamCalls).toHaveLength(1)
 
+    // A new chat: only this message's attachment counts (a follow-up would carry the first 20,000 words too).
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+    await waitFor(() => expect(useTutorChat.getState().messages).toHaveLength(0))
     act(() => ed.view.dispatch(ed.state.tr.insertText(' extra', ed.state.doc.content.size - 1)))
     select()
     await attachFromMenu(/Selection/)
@@ -435,6 +438,133 @@ describe('proposals and read requests', () => {
     await idle()
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).not.toContain('Far away.')
     expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('denied')
+  })
+})
+
+describe('fix round 1', () => {
+  const rateLimited = () =>
+    Promise.reject(new APICallError({ message: 'Too Many Requests', url: 'https://provider.invalid/chat', requestBodyValues: {}, statusCode: 429, isRetryable: true }))
+
+  it('I1: a follow-up that re-sends an earlier Whole manuscript attachment asks again', async () => {
+    scripted([...text('Read it.'), finish('stop')], [...text('Chapter 2 is fine.'), finish('stop')])
+    await mount()
+    await attachFromMenu(/Whole Manuscript/)
+    backend.answer = 'Send'
+    type('Look at all of it.')
+    press('Enter')
+    await idle()
+    expect(backend.messages).toHaveLength(1)
+    // No chips now, but the chat carries the whole book: it is sent again, so it asks again.
+    backend.answer = 'Cancel'
+    type('And chapter 2?')
+    press('Enter')
+    await waitFor(() => expect(backend.messages).toHaveLength(2))
+    expect(backend.messages[1].text).toMatch(/^Send about \d+ words to OpenAI\?$/)
+    await idle()
+    expect(composer().value).toBe('And chapter 2?')
+  })
+
+  it('I1: a follow-up whose earlier attachments plus the new ones pass 20,000 words asks', async () => {
+    const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ')
+    scripted([...text('One.'), finish('stop')], [...text('Two.'), finish('stop')])
+    const ed = await mount([para(words(12_000)), para(words(9_000))])
+    act(() => ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, 1, ed.state.doc.child(0).nodeSize - 1))))
+    await attachFromMenu(/Selection/)
+    type('First')
+    press('Enter')
+    await idle()
+    expect(backend.messages).toHaveLength(0)
+    const second = ed.state.doc.child(0).nodeSize
+    act(() => ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, second + 1, ed.state.doc.content.size - 1))))
+    await attachFromMenu(/Selection/)
+    backend.answer = 'Cancel'
+    type('Second')
+    press('Enter')
+    await waitFor(() => expect(backend.messages).toHaveLength(1))
+    expect(backend.messages[0].text).toBe('Send about 21,000 words to OpenAI?')
+  })
+
+  it('I1: Retry of a Whole manuscript send asks again; Cancel sends nothing', async () => {
+    const model = scripted(rateLimited, [...text('Now.'), finish('stop')])
+    await mount()
+    await attachFromMenu(/Whole Manuscript/)
+    backend.answer = 'Send'
+    type('All of it')
+    press('Enter')
+    await idle()
+    expect(screen.getByTestId('tutor-error')).toBeInTheDocument()
+    backend.answer = 'Cancel'
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(backend.messages).toHaveLength(2))
+    await idle()
+    expect(model.doStreamCalls).toHaveLength(1)
+    backend.answer = 'Send'
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await idle()
+    expect(model.doStreamCalls).toHaveLength(2)
+    expect(lastReply()).toHaveTextContent('Now.')
+  })
+
+  it('I2: Retry works when the connection has no default model (the model was picked at send)', async () => {
+    const model = scripted(rateLimited, [...text('Second try.'), finish('stop')])
+    await mount()
+    act(() => useStore.getState().tutorConnectionsActions.setConnections([{ ...CONNECTION, defaultModel: undefined }], CONNECTION.id))
+    type('Hello?')
+    press('Enter')
+    await idle()
+    expect(hoisted.listCalls).toBe(1)
+    expect(model.doStreamCalls).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await idle()
+    expect(model.doStreamCalls).toHaveLength(2)
+    expect(model.doStreamCalls[1].prompt.filter((m) => m.role === 'user')).toHaveLength(1)
+    expect(lastReply()).toHaveTextContent('Second try.')
+  })
+
+  it("M3: Retry sends the selection where it is now, after edits before it", async () => {
+    const model = scripted(rateLimited, [...text('OK.'), finish('stop')])
+    const ed = await mount()
+    const at = blockPos(2) + 1
+    act(() => ed.view.dispatch(ed.state.tr.setSelection(TextSelection.create(ed.state.doc, at, at + 'It ran acros'.length))))
+    await attachFromMenu(/Selection/)
+    type('Spelling?')
+    press('Enter')
+    await idle()
+    act(() => ed.view.dispatch(ed.state.tr.insertText('Suddenly ', blockPos(1) + 1)))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await idle()
+    const sent = JSON.stringify(model.doStreamCalls[1].prompt)
+    expect(sent).toContain('It ran acros')
+    expect(sent).not.toContain('Suddenly')
+  })
+
+  it("M2: an aborted turn finishing late does not let stop() return before the newer turn is done", async () => {
+    const pending = () => (options: CallOptions) =>
+      new ReadableStream<StreamPart>({
+        start(c) {
+          c.enqueue({ type: 'text-start', id: 't' })
+          c.enqueue({ type: 'text-delta', id: 't', delta: 'streaming' })
+          options.abortSignal?.addEventListener('abort', () => c.error(new DOMException('aborted', 'AbortError')))
+        },
+      })
+    scripted(pending(), pending())
+    await mount()
+    type('A')
+    press('Enter')
+    await waitFor(() => expect(lastReply()).toHaveTextContent('streaming'))
+    // A project switch aborts A; B is sent before A has unwound, so A's turn finishes after B started.
+    let b!: Promise<void>
+    act(() => {
+      projectChanged()
+      b = sendNow({ text: 'B' })
+    })
+    await waitFor(() => expect(lastReply()).toHaveTextContent('streaming'))
+    await act(async () => {
+      await stop()
+      // stop() resolves only once B's turn has finished.
+      expect(useTutorChat.getState().busy).toBe(false)
+    })
+    await b
   })
 })
 

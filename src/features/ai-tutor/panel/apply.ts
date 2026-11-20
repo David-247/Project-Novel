@@ -33,6 +33,10 @@ export function locationSpoken(l: Location): string {
 }
 
 export const CHANGED_REASON = 'This paragraph changed; ask again to refresh.'
+/** A correction from a chat reopened from the history: its session's paragraph ids are gone (M5). */
+export const EARLIER_SESSION_REASON = 'From an earlier session — ask again to refresh.'
+/** Corrections of a reopened chat carry ids made from their stored message ("h3-c1"). */
+export const isFromEarlierSession = (c: Pick<Correction, 'id'>) => /^h\d+-/.test(c.id)
 export const LOCKED_REASON = 'This passage is in re-write, so change it in the re-write view.'
 export const VIEW_OPEN_REASON = 'Close the re-write view first.'
 export const SPLIT_REASON = 'The text runs across a tracked change or a footnote, so edit it by hand.'
@@ -58,6 +62,7 @@ export function placeCorrection(idx: ParagraphIndex, c: Pick<Correction, 'paragr
 
 /** Whether Fix may run now: the placement, else the reason it is off (also its tooltip). */
 export function fixAvailability(idx: ParagraphIndex, c: Correction): Placement {
+  if (isFromEarlierSession(c)) return { ok: false, reason: c.state === 'applied' || c.state === 'ignored' ? '' : EARLIER_SESSION_REASON }
   if (c.state !== 'open') return { ok: false, reason: c.state === 'changed' ? CHANGED_REASON : '' }
   if (useStore.getState().rewrite.openId) return { ok: false, reason: VIEW_OPEN_REASON }
   const place = placeCorrection(idx, c)
