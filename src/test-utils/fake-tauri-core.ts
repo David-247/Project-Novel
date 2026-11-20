@@ -1,6 +1,6 @@
 /**
  * TEST-ONLY in-memory stand-in for the Tauri backend: the Rust storage commands (src-tauri/src/storage.rs),
- * list_system_fonts, the export platform commands (./fake-export.ts), and the plugin commands the app uses (dialog message, SQL, window theme/destroy).
+ * list_system_fonts, the export platform commands (./fake-export.ts), the AI network proxy (./fake-ai.ts), and the plugin commands the app uses (dialog message, SQL, window theme/destroy).
  * One command core, shared by:
  *   - Vitest: src/test-utils/fake-tauri.ts (module mocks; Map persistence),
  *   - Playwright: src/test-utils/e2e-backend.ts (mockIPC; IndexedDB persistence, e2e builds only).
@@ -12,6 +12,7 @@
  * adapter, from which a new core can be hydrated ("relaunch" over the same disk).
  */
 
+import { AI_COMMAND_NAMES, createFakeAi } from './fake-ai'
 import { createFakeExport, EXPORT_COMMAND_NAMES } from './fake-export'
 
 export interface RecentEntry {
@@ -112,6 +113,7 @@ export const HANDLED_COMMANDS = [
   'plugin:window|set_fullscreen',
   'plugin:app|version',
   ...EXPORT_COMMAND_NAMES,
+  ...AI_COMMAND_NAMES,
 ] as const
 
 /** What `plugin:app|version` answers (tauri.conf.json `version` in the real app). */
@@ -184,9 +186,11 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
   }
 
   const exportFake = createFakeExport(() => state.fonts, () => state.active)
+  const aiFake = createFakeAi()
 
   function reset(): void {
     exportFake.reset()
+    aiFake.reset()
     state.files.clear()
     state.dirs.clear()
     state.writes.length = 0
@@ -295,6 +299,7 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
   ): Promise<unknown> {
     const path = args.path as string
     if ((EXPORT_COMMAND_NAMES as readonly string[]).includes(cmd)) return exportFake.handle(cmd, args, invokeOptions)
+    if ((AI_COMMAND_NAMES as readonly string[]).includes(cmd)) return aiFake.handle(cmd, args)
     switch (cmd) {
       case 'list_system_fonts':
         if (state.failFonts) throw new Error('font enumeration failed')
@@ -521,6 +526,8 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     exports: exportFake.state,
     /** A relaunch for the export platform (Rust forgets its Save-dialog grants). */
     restartExportSession: exportFake.restartSession,
+    /** AI network proxy fake (scripted streams, recorded requests and cancels). */
+    ai: aiFake.state,
     handle,
     reset,
     hydrate,

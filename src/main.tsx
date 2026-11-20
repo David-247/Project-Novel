@@ -10,6 +10,9 @@ async function boot() {
     const { installE2EBackend } = await import('./test-utils/e2e-backend')
     await installE2EBackend()
   }
+  // Dev server only (`pnpm tauri dev`): the AI tutor spike, `window.__tutorSpike()` (removed in
+  // Phase 5 Task 9). DEV is false in every build, so bundles drop this import.
+  if (import.meta.env.DEV) void import('./features/ai-tutor/spike').then((m) => m.installTutorSpike())
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />

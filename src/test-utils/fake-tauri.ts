@@ -32,9 +32,11 @@ export const core = createFakeTauriCore({
   },
 })
 
-type Backend = typeof core.state & typeof dialog & { reset(): void }
+type Backend = typeof core.state & typeof dialog & { ai: typeof core.ai; reset(): void }
 
 export const backend: Backend = Object.assign(core.state, dialog, {
+  /** AI proxy fake: `backend.ai.script = { events: sseResponse([...]) }` (./fake-ai.ts). */
+  ai: core.ai,
   reset() {
     core.reset()
     disk.records.clear()
@@ -47,7 +49,23 @@ export const backend: Backend = Object.assign(core.state, dialog, {
 export const invokeMock = (cmd: string, args: Record<string, unknown> = {}, options?: { headers?: unknown }) =>
   core.handle(cmd, args, options)
 
-export const coreModule = { isTauri: () => true, invoke: invokeMock }
+/**
+ * `@tauri-apps/api/core` Channel: the fake core sends each message straight to `onmessage` (the
+ * e2e backend gets the real Channel, whose `onmessage` works the same way).
+ */
+class FakeChannel<T = unknown> {
+  static nextId = 0
+  readonly id = FakeChannel.nextId++
+  onmessage: (message: T) => void
+  constructor(onmessage?: (message: T) => void) {
+    this.onmessage = onmessage ?? (() => {})
+  }
+  toJSON() {
+    return `__CHANNEL__:${this.id}`
+  }
+}
+
+export const coreModule = { isTauri: () => true, invoke: invokeMock, Channel: FakeChannel }
 
 /** @tauri-apps/plugin-dialog `message()`, sent as the plugin sends it. */
 export const dialogModule = {
