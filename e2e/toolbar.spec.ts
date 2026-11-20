@@ -48,14 +48,17 @@ test('ribbon controls have 32px targets, one row and no horizontal scroll at the
   await page.setViewportSize({ width: 2400, height: 700 })
   await page.goto('/')
   const toolbar = page.getByRole('toolbar', { name: 'Formatting' })
-  // Every tab stays mounted, so the toolbar holds every control at a wide window (76): 5 tabs, 16 formatting
+  // Every tab stays mounted, so the toolbar holds every control at a wide window (78): 5 tabs, 16 formatting
   // controls + 4 Styles + undo, redo, find.open, Replace (Home); insert.menu + 3 break buttons +
   // footnote.options + Footnote + Comment (Insert); book.trimSize + book.headerFooter + the paper picker
-  // (group + 4 options) + Book Details + Export: Manuscript… and Export Manuscript Again (Layout); Spelling & Grammar, Word Count (Proofing) + review.track + review.markup + comment.new + Previous /
-  // Next Comment + Show Resolved Comments + Previous / Next Change + Accept and Reject split buttons (2 halves
-  // each) + Re-write Passage, Re-writes, Previous / Next Re-write (Review); Single Page, Two-Page Spread, Book, Continuous Scroll, 5 zoom buttons, Navigation Pane, comment.panel, Full Screen (View).
-  // (5 + 24 + 7 + 10 + 18 + 12.)
-  await expect(toolbar.locator('[data-control-id]')).toHaveCount(76)
+  // (group + 4 options) + Book Details + Export: Manuscript… and Export Manuscript Again (Layout); Spelling & Grammar,
+  // Word Count, Tutor (Proofing) + review.track + review.markup + comment.new + Previous / Next Comment + Show
+  // Resolved Comments + Previous / Next Change + Accept and Reject split buttons (2 halves each) + Re-write
+  // Passage, Re-writes, Previous / Next Re-write (Review); Single Page, Two-Page Spread, Book, Continuous Scroll,
+  // 5 zoom buttons, Navigation Pane, comment.panel, Tutor, Full Screen (View).
+  // (5 + 24 + 7 + 10 + 19 + 13. Phase 5's tutor.toggle has two buttons: its placement in Review ▸ Proofing,
+  // decision 153cd258, and View ▸ Show's own.)
+  await expect(toolbar.locator('[data-control-id]')).toHaveCount(78)
   await expect(toolbar.locator('[data-control-id^="ribbon.group."], [data-control-id="ribbon.more"]')).toHaveCount(0)
 
   await page.setViewportSize({ width: 480, height: 700 })

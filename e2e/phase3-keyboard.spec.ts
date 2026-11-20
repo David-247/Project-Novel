@@ -245,7 +245,24 @@ test('keyboard only: track changes, comments, re-write, settings, page turns and
   await expect(page.locator('[data-control-id="ribbon.tab.review"]')).toHaveAttribute('aria-selected', 'true')
   // (No changes yet: the Accept / Reject split buttons are disabled, both halves, so the arrows skip
   // them like any disabled control; ribbon.spec.ts walks into an enabled pair.)
-  for (const id of ['review.track', 'review.markup', 'comment.new', 'ribbon.group.review.rewrite']) await keyTo(page, 'ArrowRight', id, 20)
+  for (const id of ['review.track', 'review.markup']) await keyTo(page, 'ArrowRight', id, 20)
+  // Since Phase 5, Proofing (Spelling & Grammar, Word Count, Tutor) is a collapsible group, no longer a
+  // one-button group that moves into More first: at 1400px the Review tab has a few px to spare on Windows,
+  // and none with macOS's wider fonts, where Comments (next by priority) collapses into its group button.
+  // Either way New Comment is reached by keyboard: as a button, or as the first item of the Comments dropdown.
+  if (await page.locator('[data-control-id="comment.new"]').isVisible()) {
+    await keyTo(page, 'ArrowRight', 'comment.new', 20)
+  } else {
+    await keyTo(page, 'ArrowRight', 'ribbon.group.review.comments', 20)
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('menu')).toBeVisible()
+    await expect.poll(() => focusedId(page)).not.toBe('ribbon.group.review.comments')
+    await keyTo(page, 'ArrowDown', 'comment.new', 6)
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    await expect.poll(() => focusedId(page)).toBe('ribbon.group.review.comments')
+  }
+  await keyTo(page, 'ArrowRight', 'ribbon.group.review.rewrite', 20)
   await keyTo(page, 'ArrowLeft', 'review.track', 20)
   await page.keyboard.press('Enter')
   await expect(page.locator('[data-control-id="review.track"]')).toHaveAttribute('aria-pressed', 'true')

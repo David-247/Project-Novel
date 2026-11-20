@@ -42,7 +42,13 @@ const PHASE3_CONTROLS = [
 ]
 
 async function audit(page: Page, where: string, ids: string[] = []) {
-  for (const id of ids) await expect((await reveal(page, id)).first(), `${where}: ${id} rendered`).toBeVisible()
+  for (const id of ids) {
+    const menus = await page.getByRole('menu').count()
+    await expect((await reveal(page, id)).first(), `${where}: ${id} rendered`).toBeVisible()
+    // reveal() opens a collapsed group's dropdown when the window is too narrow for the group (since Phase 5,
+    // Review > Comments at 1400px with macOS's fonts): close it, so the next id's reveal opens its own.
+    if ((await page.getByRole('menu').count()) > menus) await escapeFrom(page, page.getByRole('menu'))
+  }
   const problems = await page.evaluate(() => window.__nvE2E.auditTooltips())
   expect(problems, where).toEqual([])
   return page.evaluate(() => window.__nvE2E.countControls())
