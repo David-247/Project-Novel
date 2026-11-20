@@ -278,6 +278,7 @@ only to the provider you connect, and only when you send something. How it works
 | --- | --- | --- |
 | Spell and grammar check | View > Spelling & Grammar | Misspellings and grammar slips are underlined as you type. Right-click one for suggestions, Ignore Once or Add to Dictionary. It works offline. |
 | Connect a provider | File > Settings… (macOS: Novel > Settings…), AI Tutor, then Add Connection… | An API key (Anthropic, OpenAI, xAI, DeepSeek, GLM, Qwen, OpenRouter), **Sign in with OpenRouter** (your browser opens; the key comes back to Novel), a local model (Ollama or LM Studio, no key), or any OpenAI-compatible address. **Test Connection** lists the models. The key goes to the system keychain. Open Edit again and the field is empty, with "Key saved" beside it. |
+| Use your ChatGPT plan | Settings > AI Tutor, **Continue with ChatGPT** | A one-time warning about using a consumer plan in another app, then your browser opens at ChatGPT. Allow Novel to use your plan, and the connection "ChatGPT (your email)" appears, "Using your ChatGPT plan". **Manage Usage** opens your ChatGPT usage settings. **Sign In Again** renews an ended sign-in. **Remove** signs Novel out at OpenAI. It needs a ChatGPT plan that allows use in other apps (Go, Plus, Pro or Business). |
 | Open the tutor | View > Tutor, Review > Tutor, or Mod+Shift+Y | The panel opens at the right with a greeting and three suggested prompts. Below 768 px it floats over the pages. Nothing is sent until you press Send (or Enter), choose a suggested prompt, or click Allow. |
 | Give it context | **+** in the panel: Current Page, a chapter, Selection or Whole Manuscript. Or right-click the text: Ask the Tutor About This | Each chip shows its word count. Whole Manuscript, or more than 20,000 words, asks "Send about N words to …?" first. Without chips the tutor reads only the current chapter, and asks in the chat before reading anything else. |
 | Ask about a mistake | Attach the page and ask "Is the underlined word wrong?" | An explanation (the rule, then when breaking it works) and a correction list. **Go to text** shows the place, **Fix** applies it (Undo takes it back), **Ignore** sets it aside. Edit the text after the list came in and that correction shows "changed": it can no longer be applied. |
@@ -290,7 +291,8 @@ only to the provider you connect, and only when you send something. How it works
 
 - Claude subscriptions (Pro, Max) cannot be used: Anthropic's terms limit subscription login to Anthropic's own apps.
   Use an Anthropic API key, or OpenRouter.
-- Sign in with ChatGPT is not in this version.
+- Sign in with ChatGPT uses OpenAI's flow for open-source apps, which OpenAI calls a preview. The plan's own usage
+  limits apply, and some plans or workspaces may not allow it.
 - The tutor needs a model that can call tools. Models known not to are shown as "not supported". For a model of
   unknown support, tick "This model supports tools" in its connection if you know it can.
 - Chat history is not encrypted, like the project files.
@@ -318,6 +320,12 @@ The storage slice talks to the editor only through the `DocumentProvider` contra
   are never written to project files, `ai-connections.json`, preferences, SQLite, logs or error messages.
 - **Sign in with OpenRouter** runs OAuth PKCE in Rust, with a one-time `127.0.0.1` callback and a `state` nonce. The
   system browser is opened from Rust; the webview has no way to open URLs.
+- **Sign in with ChatGPT** follows OpenAI's documented flow for open-source apps
+  ([docs/research/chatgpt-sign-in.md](docs/research/chatgpt-sign-in.md)). Novel registers as itself, never with
+  another app's client id. The flow is PKCE in Rust, with a `state` and an OIDC `nonce`, and the ID token's
+  signature is checked against OpenAI's keys. The access and refresh tokens stay in the keychain and are refreshed
+  in Rust. Requests go to the public Responses API at `api.openai.com`, never to ChatGPT's backend. Removing the
+  connection revokes the sign-in at OpenAI.
 - **Chat history** is kept in the app data folder (`tutor-history/`), never in the project folder, and is not
   encrypted. Settings > AI Tutor clears it.
 - **What is sent**: the text the writer attached (No Markup view, footnotes included; no comments), the chat so far,

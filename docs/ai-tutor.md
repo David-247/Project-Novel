@@ -21,7 +21,8 @@ webview: src/features/ai-tutor/                     Rust: src-tauri/src/ai/
               read and output tools, the guard        keychain.rs     OS keychain (keyring)
   providers/  one adapter per provider       ──▶     connections.rs  ai-connections.json
   net/        tauri-fetch.ts (fetch over ai_fetch)    oauth.rs        Sign in with OpenRouter
-  history/    chat history (via Rust)                 history.rs      tutor-history/
+  history/    chat history (via Rust)                 chatgpt.rs      Sign in with ChatGPT
+                                                      history.rs      tutor-history/
 ```
 
 - **One network path.** The SDK is given `fetch: createTauriFetch(connectionId)` (`net/tauri-fetch.ts`). It sends the
@@ -37,7 +38,8 @@ webview: src/features/ai-tutor/                     Rust: src-tauri/src/ai/
   The SDK's dummy key headers are stripped in the shim, and Rust adds the credential itself, after everything else.
 - **Keys** live in the OS keychain (Windows Credential Manager, the macOS Keychain), with service `Novel AI Tutor` and
   the connection id as the account. The webview can set a key, delete one, or ask whether one exists. It can never
-  read one back. No key appears in a project file, in SQLite, in a log line or in an error message.
+  read one back. A secret too long for one Windows Credential Manager entry (about 1,280 characters), such as a
+  ChatGPT sign-in's tokens, is split over `<id>`, `<id>#1`, `<id>#2` and so on (`keychain.rs`). No key appears in a project file, in SQLite, in a log line or in an error message.
 - **Errors** reach the panel as typed kinds (`auth`, `rate_limit`, `network`, `provider`, `cancelled` and others),
   with a human message and Retry. A partial reply stays, marked incomplete.
 
@@ -57,6 +59,7 @@ imports, provider hosts, and branching on a provider id outside those two places
 | Zhipu (GLM) | API key | `@ai-sdk/openai-compatible` |
 | Qwen (Alibaba Model Studio) | API key | `@ai-sdk/openai-compatible` |
 | OpenRouter | Sign in with OpenRouter, or an API key | `@ai-sdk/openai-compatible` |
+| ChatGPT (your plan) | Continue with ChatGPT (sign-in only) | `@ai-sdk/openai` (Responses API) |
 | Ollama, LM Studio (local) | The server address, no key | `@ai-sdk/openai-compatible` |
 | Custom (OpenAI-compatible) | Any http or https address, optional key | `@ai-sdk/openai-compatible` |
 
@@ -71,8 +74,28 @@ imports, provider hosts, and branching on a provider id outside those two places
   the `state` nonce on the callback, and trades the code for an API key, which goes straight to the keychain. The
   result is an ordinary OpenRouter connection. "Get a Key" opens each provider's key page in the browser, also from
   Rust.
-- **The account-ban warning.** Signing in with a consumer subscription (Sign in with ChatGPT, Task 12) first shows a
-  one-time warning, `prompts/scripted/ban-warning.md`. It says that third-party use of a consumer plan is governed by
+- **Sign in with ChatGPT.** This is the writer's ChatGPT plan, through OpenAI's documented flow for open-source,
+  locally run apps. The research and every source are in
+  [research/chatgpt-sign-in.md](research/chatgpt-sign-in.md). Rust runs it (`chatgpt.rs`, with the endpoints in
+  `providers.rs`, `PlanSignIn`):
+  - **Registration.** A first sign-in registers Novel as itself (`client_id=dynamic_agent_client`,
+    `agent_name_hint=Novel`, and this installation's host id from `chatgpt-host.json`), and OpenAI returns the
+    issued client id.
+  - **The flow.** PKCE S256, a `state` and an OIDC `nonce`, on the same `127.0.0.1` listener as OpenRouter, with
+    the path `/auth/callback`. Rust exchanges the code, checks the ID token's RS256 signature (`ring`) with its
+    issuer, audience, expiry and nonce, and requires the `chatgpt.tokens.use.direct` scope.
+  - **Storage.** The tokens, the issued client id and the account are one record in the keychain.
+  - **Use.** `ai_fetch` refreshes the token in Rust, five minutes before it expires and one refresh at a time, then
+    sends it as Bearer to the public Responses API (`api.openai.com/v1`).
+  - **The adapter.** `providers/chatgpt.ts` applies the route's preview rules: `store: false`, streaming,
+    developer-role instructions, tools grouped in the `novel` namespace, and no `temperature` or
+    `max_output_tokens`. Models come from the account's own `GET /models` list.
+  - **Settings.** The page has **Manage Usage** (ChatGPT's usage settings, opened from Rust) and **Sign In Again**,
+    which reuses the issued client id and keeps only the same account. Remove revokes the refresh token at
+    OpenAI first.
+- **The account-ban warning.** Signing in with a consumer subscription (Continue with ChatGPT) first shows a
+  one-time warning, `prompts/scripted/ban-warning.md`, in a dialog. Continue to Sign In records that it was read
+  (the `tutorPlanWarningSeen` preference). It says that third-party use of a consumer plan is governed by
   the provider's terms, that the provider can restrict or suspend accounts, and that the writer continues at their
   own risk. API keys and local models carry no such risk.
 - **Claude subscriptions are not supported, and never will be.** Anthropic's terms (February 2026) limit
