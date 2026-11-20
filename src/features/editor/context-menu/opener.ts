@@ -35,9 +35,26 @@ export const isContextMenuKey = (e: KeyboardEvent): boolean =>
 /** After a key opened the menu, the browser may still fire its own (keyboard) contextmenu event. */
 const KEY_ECHO_MS = 1000
 
-/** Open at the caret: just below the selection head. */
+/**
+ * The caret now. ProseMirror reads a native selection change (a click, an arrow key) a moment later,
+ * so a key pressed right after it would see the old one: the DOM selection, when it is in the view,
+ * is the caret.
+ */
+function caretPos(view: EditorView): number {
+  const dom = view.dom.ownerDocument.getSelection()
+  if (dom?.focusNode && view.dom.contains(dom.focusNode)) {
+    try {
+      return view.posAtDOM(dom.focusNode, dom.focusOffset)
+    } catch {
+      // Not a place in the document (a widget): the state's selection.
+    }
+  }
+  return view.state.selection.head
+}
+
+/** Open at the caret: just below it. */
 function openAtCaret(view: EditorView): boolean {
-  const head = view.state.selection.head
+  const head = caretPos(view)
   let x: number
   let y: number
   try {

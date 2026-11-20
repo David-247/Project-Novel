@@ -51,10 +51,9 @@ test('right-click a misspelling on a page and apply a suggestion (one undo step)
 
 test('Shift+F10 opens the menu at the caret with the keyboard; Escape returns to the text', async ({ page }) => {
   await open(page)
-  // The caret inside "teh".
-  await clickBlockStart(page, editor(page).locator(':scope > p').first())
-  const offset = '“Aelinor’s” horse saw te'.length
-  for (let i = 0; i < offset; i++) await page.keyboard.press('ArrowRight')
+  // The caret inside "teh" (a click on the word; arrow-key walks land unevenly around the pages).
+  await underline(page).click()
+  await expect(editor(page)).toBeFocused()
   await page.keyboard.press('Shift+F10')
   await expect(menu(page)).toBeVisible()
   await expect(menu(page).getByRole('menuitem', { name: 'the' })).toBeFocused()
