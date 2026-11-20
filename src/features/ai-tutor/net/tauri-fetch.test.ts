@@ -55,6 +55,31 @@ describe('createTauriFetch', () => {
     expect((error as AiFetchError).kind).toBe('rate_limit')
   })
 
+  it('keeps the queued chunks when the invoke rejects before any error event (a rejection racing the channel)', async () => {
+    backend.ai.script = {
+      events: sseResponse(['one ', 'two ', 'three']).slice(0, 4),
+      burstFrom: 1,
+      rejectWith: { kind: 'network', message: 'The connection dropped.' },
+    }
+    const res = await createTauriFetch('c1')('https://provider.invalid/v1/chat/completions', { method: 'POST', body: '{}' })
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    const reader = res.body!.getReader()
+    const got: string[] = []
+    let error: unknown = null
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        got.push(decoder.decode(value))
+      }
+    } catch (e) {
+      error = e
+    }
+    expect(got.join('')).toBe('one two three')
+    expect(error).toBeInstanceOf(AiFetchError)
+    expect((error as AiFetchError).kind).toBe('network')
+  })
+
   it('streams the scripted SSE text deltas through streamText in order', async () => {
     backend.ai.script = { events: sseResponse([delta('Hel'), delta('lo, '), delta('writer', 'stop') + 'data: [DONE]\n\n']) }
     const result = streamText({ model: model(), prompt: 'hi' })

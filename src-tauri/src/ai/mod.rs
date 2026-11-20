@@ -19,8 +19,7 @@
 //! `resolve` may block (keychain); it runs on a blocking thread. Return `AiError::not_connected()`
 //! for an unknown or signed-out connection. Install one with `AiState::new(resolver)` or swap it at
 //! runtime with [`AiState::set_resolver`]. The app's resolver is `connections::FileResolver` (`app_resolver`,
-//! installed in `lib.rs`); debug builds also accept the spike connection, see `spike_resolver`;
-//! tests inject their own.
+//! installed in `lib.rs`); tests inject their own.
 
 pub mod connections;
 pub mod fetch;
@@ -252,83 +251,13 @@ impl Drop for Registration<'_> {
     }
 }
 
-/// The app's resolver: saved connections plus the keychain. Debug builds with the spike env var set
-/// also answer the connection `"spike"` (removed in Task 9).
+/// The app's resolver: saved connections plus the keychain.
 pub fn app_resolver(connections_file: std::path::PathBuf) -> Arc<dyn ConnectionResolver> {
-    let files = Arc::new(connections::FileResolver::new(connections_file, Arc::new(keychain::KeyringStore)));
-    #[cfg(debug_assertions)]
-    if let Some(spike) = spike_resolver() {
-        return Arc::new(WithSpike { spike, files });
-    }
-    files
-}
-
-#[cfg(debug_assertions)]
-struct WithSpike {
-    spike: SpikeResolver,
-    files: Arc<connections::FileResolver>,
-}
-
-#[cfg(debug_assertions)]
-impl ConnectionResolver for WithSpike {
-    fn resolve(&self, connection_id: &str) -> Result<ResolvedConnection, AiError> {
-        if connection_id == "spike" {
-            self.spike.resolve(connection_id)
-        } else {
-            self.files.resolve(connection_id)
-        }
-    }
+    Arc::new(connections::FileResolver::new(connections_file, Arc::new(keychain::KeyringStore)))
 }
 
 fn default_resolver() -> Arc<dyn ConnectionResolver> {
-    #[cfg(debug_assertions)]
-    if let Some(r) = spike_resolver() {
-        return Arc::new(r);
-    }
     Arc::new(NoConnections)
-}
-
-// ---- Spike (Task 1, debug builds only; removed in Task 9) -----------------------------------------
-
-/// Env var naming an OpenAI-compatible base URL for the spike connection `"spike"` (debug builds).
-#[cfg(debug_assertions)]
-const SPIKE_BASE_URL_ENV: &str = "NOVEL_AI_SPIKE_BASE_URL";
-
-#[cfg(debug_assertions)]
-struct SpikeResolver(String);
-
-#[cfg(debug_assertions)]
-impl ConnectionResolver for SpikeResolver {
-    fn resolve(&self, connection_id: &str) -> Result<ResolvedConnection, AiError> {
-        if connection_id != "spike" {
-            return Err(AiError::not_connected());
-        }
-        let provider = providers::descriptor("custom").ok_or_else(AiError::not_connected)?;
-        Ok(ResolvedConnection { provider, base_url: Some(self.0.clone()), secret: None, insecure_http_accepted: false })
-    }
-}
-
-#[cfg(debug_assertions)]
-fn spike_resolver() -> Option<SpikeResolver> {
-    std::env::var(SPIKE_BASE_URL_ENV).ok().filter(|v| !v.is_empty()).map(SpikeResolver)
-}
-
-/// Debug builds with the spike env var set: true, so the webview runs `__tutorSpike()` at startup.
-#[tauri::command]
-pub fn ai_spike_autorun() -> bool {
-    #[cfg(debug_assertions)]
-    return spike_resolver().is_some();
-    #[cfg(not(debug_assertions))]
-    false
-}
-
-/// Debug builds: print one spike result line to the terminal.
-#[tauri::command]
-pub fn ai_spike_log(line: String) {
-    #[cfg(debug_assertions)]
-    println!("[tutor-spike] {line}");
-    #[cfg(not(debug_assertions))]
-    let _ = line;
 }
 
 // ---- Commands ----------------------------------------------------------------------------------

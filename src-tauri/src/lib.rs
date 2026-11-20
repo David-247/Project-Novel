@@ -33,8 +33,6 @@ pub fn run() {
             fonts::list_system_fonts,
             ai::ai_fetch,
             ai::ai_fetch_cancel,
-            ai::ai_spike_autorun,
-            ai::ai_spike_log,
             ai::ai_secret_set,
             ai::ai_secret_delete,
             ai::ai_secret_has,

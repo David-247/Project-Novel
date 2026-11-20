@@ -204,12 +204,14 @@ export function createTauriFetch(connectionId: string): typeof fetch {
       }
     }
 
+    // The command's rejection can overtake the channel's last events: like a provider error event, it
+    // waits behind the chunks already queued (an abort was handled by onAbort, at once).
     invoke('ai_fetch', {
       requestId,
       connectionId,
       req: { method, path: url.pathname + url.search, headers, body: body ?? null },
       onEvent: channel,
-    }).catch((e: unknown) => fail(toAiError(e)))
+    }).catch((e: unknown) => fail(toAiError(e), !signal?.aborted))
 
     return head
   }

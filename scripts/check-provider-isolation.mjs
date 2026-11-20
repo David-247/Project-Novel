@@ -24,8 +24,6 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const ALLOWED_PREFIXES = [
   'src/features/ai-tutor/providers/',
   'src-tauri/src/ai/providers.rs',
-  // Dev-only Task 1 spike, deleted in Task 9 (then drop this line).
-  'src/features/ai-tutor/spike.ts',
 ]
 
 const SDK_IMPORT = /(?:from\s+|import\s*\(\s*|import\s+|require\s*\(\s*)['"]@ai-sdk\/(?!provider(?:-utils)?['"/])[\w.-]+/

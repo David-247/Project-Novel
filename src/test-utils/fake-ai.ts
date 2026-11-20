@@ -23,8 +23,6 @@
 export const AI_COMMAND_NAMES = [
   'ai_fetch',
   'ai_fetch_cancel',
-  'ai_spike_autorun',
-  'ai_spike_log',
   'ai_secret_set',
   'ai_secret_delete',
   'ai_secret_has',
@@ -57,6 +55,11 @@ export interface FakeAiScript {
   pauseAfter?: number
   /** From this event index on, send the events back to back in one task (chunks pile up unread). */
   burstFrom?: number
+  /**
+   * After the events, reject the invoke with this error without sending an `error` event first: the
+   * rejection races the channel (Rust's command result can arrive before the channel's last events).
+   */
+  rejectWith?: { kind: string; message: string }
 }
 
 interface ChannelLike {
@@ -105,9 +108,6 @@ export function createFakeAi() {
     requests: [] as { requestId: number; connectionId: string; req: FakeAiRequest }[],
     /** Every ai_fetch_cancel request id, in order. */
     cancels: [] as number[],
-    /** ai_spike_autorun's answer, and the ai_spike_log lines. */
-    spikeAutorun: false,
-    spikeLog: [] as string[],
     /** The OS keychain: connection id to secret. */
     secrets: new Map<string, string>(),
     /** ai-connections.json's connections (plain objects, as Rust returns them). */
@@ -128,8 +128,6 @@ export function createFakeAi() {
     state.script = null
     state.requests.length = 0
     state.cancels.length = 0
-    state.spikeAutorun = false
-    state.spikeLog.length = 0
     state.secrets.clear()
     state.connections = []
     state.failSecrets = false
@@ -171,6 +169,7 @@ export function createFakeAi() {
       }
       if (script!.pauseAfter === script!.events.length) await new Promise<void>((resolve) => (wake = resolve))
       if (cancelled) failWith('cancelled', 'The request was cancelled.')
+      if (script!.rejectWith) throw fail(script!.rejectWith.kind, script!.rejectWith.message)
     } finally {
       running.delete(requestId)
     }
@@ -279,11 +278,6 @@ export function createFakeAi() {
         else earlyCancels.add(id)
         return null
       }
-      case 'ai_spike_autorun':
-        return state.spikeAutorun
-      case 'ai_spike_log':
-        state.spikeLog.push(args.line as string)
-        return null
       case 'ai_secret_set': {
         const id = checkSecretArgs(args)
         if (typeof args.secret !== 'string' || !args.secret) throw fail('bad_request', 'The credential is empty or too long.')
