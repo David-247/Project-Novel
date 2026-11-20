@@ -68,6 +68,8 @@ pub struct PlanSignIn {
     pub scopes: &'static str,
     /// The scope without which the tokens may not be used for the plan.
     pub plan_scope: &'static str,
+    /// The only request paths (after `base_url`) the plan token is sent to.
+    pub allowed_paths: &'static [&'static str],
     /// The loopback path (only the port may vary between sign-ins).
     pub callback_path: &'static str,
     /// "Manage Usage": the provider's usage settings page.
@@ -145,6 +147,8 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
             resource: "https://api.openai.com/v1",
             scopes: "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
             plan_scope: "chatgpt.tokens.use.direct",
+            // "Models and inference": the model list and the Responses API, nothing else.
+            allowed_paths: &["/responses", "/models"],
             callback_path: "/auth/callback",
             usage_url: "https://chatgpt.com/settings/usage",
         }),

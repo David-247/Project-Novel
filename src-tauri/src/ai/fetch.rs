@@ -160,7 +160,10 @@ pub(super) fn target_url(conn: &ResolvedConnection, path: &str) -> Result<Url, A
     let same_origin = url.scheme() == base_url.scheme()
         && url.host_str() == base_url.host_str()
         && url.port_or_known_default() == base_url.port_or_known_default();
-    if !same_origin || !url.path().starts_with(base_url.path().trim_end_matches('/')) {
+    // Under the base path, at a `/` boundary (`/v1/...`, never `/v1foo`).
+    let base_path = base_url.path().trim_end_matches('/');
+    let under_base = base_path.is_empty() || url.path() == base_path || url.path().starts_with(&format!("{base_path}/"));
+    if !same_origin || !under_base {
         return Err(AiError::new("blocked_host", "The request would leave the connected provider."));
     }
     Ok(url)

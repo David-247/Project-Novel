@@ -25,9 +25,15 @@
 //!   deletes the record.
 //! - **Sign in again.** For a saved connection the authorization reuses its issued client id (with
 //!   `id_token_hint` and `login_hint`), and the new tokens replace the old only for the same account.
+//! - **Known accounts.** OpenAI asks apps to keep the account/client mapping across sign-out and a
+//!   declined plan scope, and to reuse the issued client id rather than register again. `chatgpt-host.json`
+//!   (no secret: a public client's id, the account's `sub` and email) lists each account Novel registered,
+//!   with the connection that uses it. Remove keeps the entry; Continue with ChatGPT reuses the one known
+//!   account that has no connection (with `prompt=consent` if the plan was declined last time).
 
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -70,11 +76,33 @@ fn token_ok(s: &str, max: usize) -> bool {
 
 // ---- The host id ------------------------------------------------------------------------------------
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct HostFile {
     version: u32,
     host_id: String,
+    #[serde(default)]
+    accounts: Vec<KnownAccount>,
+}
+
+/// An account Novel registered a client for (`chatgpt-host.json`; nothing here is a secret).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownAccount {
+    pub sub: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// The client OpenAI issued for this account (a public client's id, not a credential).
+    pub client_id: String,
+    /// The saved connection that uses it; `None` after Remove or a declined plan scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_id: Option<String>,
+    /// The last sign-in declined the plan scope: the next one asks for consent again.
+    #[serde(default)]
+    pub plan_declined: bool,
+    /// The last reuse came back with another account: the next new sign-in registers instead.
+    #[serde(default)]
+    pub skip: bool,
 }
 
 /// A random UUID (version 4) as `urn:uuid:...`, from the OS's secure random numbers.
@@ -98,37 +126,103 @@ fn host_id_ok(id: &str) -> bool {
 
 static HOST: Mutex<()> = Mutex::new(());
 
-/// This installation's host id: the saved one, else a new one, saved before it is first used.
-pub fn host_id(path: &Path) -> Result<String, AiError> {
-    let _lock = HOST.lock().unwrap_or_else(|e| e.into_inner());
+/// The host file as saved, or a new one (a new host id) when it is missing or damaged. Call under `HOST`.
+fn load_host(path: &Path) -> Result<HostFile, AiError> {
     if let Ok(text) = std::fs::read_to_string(path) {
         if let Ok(f) = serde_json::from_str::<HostFile>(&text) {
             if f.version == 1 && host_id_ok(&f.host_id) {
-                return Ok(f.host_id);
+                return Ok(f);
             }
         }
     }
-    let id = new_host_id()?;
-    let text = serde_json::to_string_pretty(&HostFile { version: 1, host_id: id.clone() })
-        .map_err(|_| AiError::bad_request("The sign-in could not start."))?;
+    let f = HostFile { version: 1, host_id: new_host_id()?, accounts: Vec::new() };
+    save_host(path, &f)?;
+    Ok(f)
+}
+
+fn save_host(path: &Path, f: &HostFile) -> Result<(), AiError> {
+    let text = serde_json::to_string_pretty(f).map_err(|_| AiError::bad_request("The sign-in could not start."))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|_| AiError::bad_request("The app data folder could not be created."))?;
     }
-    crate::storage::write_atomic(path, text.as_bytes()).map_err(|_| AiError::bad_request("The sign-in could not start: the host id could not be saved."))?;
-    Ok(id)
+    crate::storage::write_atomic(path, text.as_bytes()).map_err(|_| AiError::bad_request("The ChatGPT host file could not be saved."))
+}
+
+/// This installation's host id: the saved one, else a new one, saved before it is first used.
+pub fn host_id(path: &Path) -> Result<String, AiError> {
+    let _lock = HOST.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(load_host(path)?.host_id)
+}
+
+/// Record (or update, by `sub`) an account and its issued client id.
+pub fn remember_account(path: &Path, account: KnownAccount) -> Result<(), AiError> {
+    let _lock = HOST.lock().unwrap_or_else(|e| e.into_inner());
+    let mut f = load_host(path)?;
+    // One connection per entry: a connection id moves with the account that now uses it.
+    if let Some(c) = &account.connection_id {
+        for a in f.accounts.iter_mut().filter(|a| a.sub != account.sub && a.connection_id.as_deref() == Some(c)) {
+            a.connection_id = None;
+        }
+    }
+    match f.accounts.iter_mut().find(|a| a.sub == account.sub) {
+        Some(a) => *a = account,
+        None => f.accounts.push(account),
+    }
+    save_host(path, &f)
+}
+
+/// A connection was removed: its account stays known, without a connection.
+pub fn forget_connection(path: &Path, connection_id: &str) -> Result<(), AiError> {
+    let _lock = HOST.lock().unwrap_or_else(|e| e.into_inner());
+    let mut f = load_host(path)?;
+    let mut changed = false;
+    for a in f.accounts.iter_mut().filter(|a| a.connection_id.as_deref() == Some(connection_id)) {
+        a.connection_id = None;
+        changed = true;
+    }
+    if changed {
+        save_host(path, &f)?;
+    }
+    Ok(())
+}
+
+fn skip_account(path: &Path, sub: &str) -> Result<(), AiError> {
+    let _lock = HOST.lock().unwrap_or_else(|e| e.into_inner());
+    let mut f = load_host(path)?;
+    if let Some(a) = f.accounts.iter_mut().find(|a| a.sub == sub) {
+        a.skip = true;
+        save_host(path, &f)?;
+    }
+    Ok(())
+}
+
+/// The account a new sign-in should reuse: the one known account without a live connection (`live`:
+/// the ids of the saved connections). None when there is no such account, or more than one.
+pub fn reusable_account(path: &Path, live: &[String]) -> Result<Option<KnownAccount>, AiError> {
+    let _lock = HOST.lock().unwrap_or_else(|e| e.into_inner());
+    let f = load_host(path)?;
+    let free: Vec<&KnownAccount> =
+        f.accounts.iter().filter(|a| !a.skip && a.connection_id.as_ref().is_none_or(|c| !live.contains(c))).collect();
+    Ok(match free.as_slice() {
+        [one] => Some((*one).clone()),
+        _ => None,
+    })
 }
 
 // ---- The authorization request -----------------------------------------------------------------------
 
-/// What a renewed sign-in of a saved connection sends and checks.
+/// What a sign-in with a saved issued client id sends and checks: a saved connection's renewal, or a
+/// known account without a connection (`connection_id` None).
 #[derive(Clone)]
 pub struct Reauth {
-    pub connection_id: String,
+    pub connection_id: Option<String>,
     pub client_id: String,
     /// The account the connection belongs to: the new tokens must be for it.
     pub sub: String,
     pub id_token_hint: Option<String>,
     pub login_hint: Option<String>,
+    /// Ask for consent again (the plan scope was declined last time; `prompt=consent`).
+    pub prompt_consent: bool,
 }
 
 pub fn redirect_uri(plan: &PlanSignIn, port: u16) -> String {
@@ -156,6 +250,9 @@ pub fn authorize_url(plan: &PlanSignIn, port: u16, challenge: &str, state: &str,
             }
             if let Some(h) = &r.login_hint {
                 q.append_pair("login_hint", h);
+            }
+            if r.prompt_consent {
+                q.append_pair("prompt", "consent");
             }
         }
         q.append_pair("response_type", "code")
@@ -402,14 +499,17 @@ pub fn verify_id_token(token: &str, jwks: &Value, plan: &PlanSignIn, client_id: 
     }
     let aud_ok = match &claims["aud"] {
         Value::String(a) => a == client_id,
-        Value::Array(list) => list.iter().any(|a| a == client_id),
+        Value::Array(list) if list.len() == 1 => list[0] == client_id,
+        // Several audiences: OIDC Core 3.1.3.7 asks for `azp`, and it must be this client.
+        Value::Array(list) => list.iter().any(|a| a == client_id) && claims["azp"] == client_id,
         _ => false,
     };
     if !aud_ok {
         return Err(bad());
     }
     let exp = claims["exp"].as_i64().ok_or_else(bad)?;
-    if exp + CLOCK_SKEW_SECS < now || claims["iat"].as_i64().is_none() {
+    let iat = claims["iat"].as_i64().ok_or_else(bad)?;
+    if exp + CLOCK_SKEW_SECS < now || iat > now + CLOCK_SKEW_SECS {
         return Err(bad());
     }
     if !claims["nonce"].as_str().is_some_and(|n| oauth::same(n, nonce)) {
@@ -544,15 +644,51 @@ pub async fn refresh(client: &reqwest::Client, plan: &PlanSignIn, record: &Token
     Ok(next)
 }
 
-/// One refresh at a time: the refresh token rotates, so two refreshes of one session must not race.
-static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// One refresh at a time: the refresh token rotates, so two refreshes of one session must not race. Sign-out
+/// and a renewed sign-in take it too, so neither can interleave with a refresh.
+pub static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Refreshed records the keychain refused to store, by connection id: kept in memory (the refresh token
+/// has already rotated, so the stored one is spent) and stored again on the next request.
+static PENDING: Mutex<BTreeMap<String, TokenRecord>> = Mutex::new(BTreeMap::new());
+
+fn pending_get(connection_id: &str) -> Option<TokenRecord> {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).get(connection_id).cloned()
+}
+
+fn pending_put(connection_id: &str, record: TokenRecord) {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).insert(connection_id.to_owned(), record);
+}
+
+fn pending_forget(connection_id: &str) {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).remove(connection_id);
+}
 
 fn read_record(conn: &ResolvedConnection) -> Result<TokenRecord, AiError> {
     conn.secret.as_ref().and_then(TokenRecord::parse).ok_or_else(|| AiError::new("auth", SIGNED_OUT))
 }
 
+/// The plan token may be sent only to the routes OpenAI documents for it (`allowed_paths`: `/responses`,
+/// `/models`), whatever the webview asks.
+pub fn check_path(plan: &PlanSignIn, path: &str) -> Result<(), AiError> {
+    let route = path.split(['?', '#']).next().unwrap_or_default();
+    if plan.allowed_paths.contains(&route) {
+        Ok(())
+    } else {
+        Err(AiError::new("blocked_host", "Your ChatGPT plan can be used only for the tutor's chat and its model list."))
+    }
+}
+
+async fn store(resolver: &Arc<dyn ConnectionResolver>, connection_id: &str, record: &TokenRecord) -> Result<(), AiError> {
+    let (r, id, secret) = (resolver.clone(), connection_id.to_owned(), record.to_secret());
+    tokio::task::spawn_blocking(move || r.store_secret(&id, &secret))
+        .await
+        .map_err(|_| AiError::new("auth", "The renewed sign-in could not be saved."))?
+}
+
 /// `conn` with its token record replaced by the access token `ai_fetch` sends (refreshed and saved
-/// first when it is due). Refused when the plan scope was not granted.
+/// first when it is due). Refused when the plan scope was not granted. If the keychain refuses the
+/// refreshed record, this request still uses it and it is kept in memory until a store succeeds.
 pub async fn with_access_token(
     client: &reqwest::Client,
     resolver: Arc<dyn ConnectionResolver>,
@@ -560,27 +696,40 @@ pub async fn with_access_token(
     conn: ResolvedConnection,
     plan: &PlanSignIn,
 ) -> Result<ResolvedConnection, AiError> {
-    let mut record = read_record(&conn)?;
+    let mut record = match pending_get(connection_id) {
+        Some(p) => p,
+        None => read_record(&conn)?,
+    };
     if !record.plan_enabled(plan) {
         return Err(AiError::new(
             "auth",
             "Novel was not allowed to use your ChatGPT plan. Choose Sign In Again for this connection and allow it, or use an API key.",
         ));
     }
-    if record.needs_refresh(now_secs()) {
+    if pending_get(connection_id).is_some() || record.needs_refresh(now_secs()) {
         let _one = REFRESH.lock().await;
-        // Another request may have refreshed while this one waited: read the record again.
-        let (r, id) = (resolver.clone(), connection_id.to_owned());
-        let latest = tokio::task::spawn_blocking(move || r.resolve(&id))
-            .await
-            .map_err(|_| AiError::new("not_connected", "The AI connection could not be read."))??;
-        record = read_record(&latest)?;
+        // Another request may have refreshed (or stored) while this one waited: look again.
+        record = match pending_get(connection_id) {
+            Some(p) => {
+                if store(&resolver, connection_id, &p).await.is_ok() {
+                    pending_forget(connection_id);
+                }
+                p
+            }
+            None => {
+                let (r, id) = (resolver.clone(), connection_id.to_owned());
+                let latest = tokio::task::spawn_blocking(move || r.resolve(&id))
+                    .await
+                    .map_err(|_| AiError::new("not_connected", "The AI connection could not be read."))??;
+                read_record(&latest)?
+            }
+        };
         if record.needs_refresh(now_secs()) {
             let next = refresh(client, plan, &record, now_secs()).await?;
-            let (r, id, secret) = (resolver, connection_id.to_owned(), next.to_secret());
-            tokio::task::spawn_blocking(move || r.store_secret(&id, &secret))
-                .await
-                .map_err(|_| AiError::new("auth", "The renewed sign-in could not be saved."))??;
+            match store(&resolver, connection_id, &next).await {
+                Ok(()) => pending_forget(connection_id),
+                Err(_) => pending_put(connection_id, next.clone()),
+            }
             record = next;
         }
     }
@@ -590,10 +739,84 @@ pub async fn with_access_token(
 // ---- Sign out ------------------------------------------------------------------------------------------------
 
 /// The plan sign-in and token record of a saved connection, if it is one and the record can be read.
+#[cfg(test)]
 pub fn saved_sign_in(path: &Path, secrets: &dyn SecretStore, connection_id: &str) -> Result<Option<(PlanSignIn, TokenRecord)>, AiError> {
     let Some((c, secret)) = connections::connection_secret(path, secrets, connection_id)? else { return Ok(None) };
     let Some(plan) = providers::descriptor(&c.provider).and_then(|d| d.plan_sign_in) else { return Ok(None) };
     Ok(TokenRecord::parse(&secret).map(|r| (plan, r)))
+}
+
+/// What sign-out found before revoking.
+enum SignOutRead {
+    /// Not a plan connection (or not saved): nothing to sign out.
+    NotPlan,
+    /// A plan connection with no tokens stored.
+    NoTokens,
+    Tokens(Box<PlanSignIn>, Box<TokenRecord>),
+    /// A plan connection whose tokens could not be read: the provider may still hold a live session.
+    Unreadable,
+}
+
+fn read_for_sign_out(path: &Path, secrets: &dyn SecretStore, connection_id: &str) -> SignOutRead {
+    let Ok(list) = connections::load_connections(path) else { return SignOutRead::Unreadable };
+    let Some(c) = list.iter().find(|c| c.id == connection_id) else { return SignOutRead::NotPlan };
+    let Some(plan) = providers::descriptor(&c.provider).and_then(|d| d.plan_sign_in) else { return SignOutRead::NotPlan };
+    match connections::connection_secret(path, secrets, connection_id) {
+        Ok(None) => SignOutRead::NoTokens,
+        Ok(Some((_, secret))) => match TokenRecord::parse(&secret) {
+            Some(r) => SignOutRead::Tokens(Box::new(plan), Box::new(r)),
+            None => SignOutRead::Unreadable,
+        },
+        Err(_) => SignOutRead::Unreadable,
+    }
+}
+
+/// Remove a connection; a plan sign-in is signed out first (its refresh token revoked). All of it under
+/// `REFRESH`, so a refresh cannot rotate the token between the read and the revoke. Returns `None` when
+/// there was nothing to sign out, else whether the provider confirmed (false also when the tokens could
+/// not be read). The account stays known (`chatgpt-host.json`), without the connection.
+pub async fn sign_out_and_remove(
+    client: &reqwest::Client,
+    path: PathBuf,
+    host_path: PathBuf,
+    secrets: Arc<dyn SecretStore>,
+    connection_id: String,
+) -> Result<Option<bool>, AiError> {
+    sign_out_inner(client, None, path, host_path, secrets, connection_id).await
+}
+
+/// [`sign_out_and_remove`], with the plan's endpoints replaceable (tests).
+async fn sign_out_inner(
+    client: &reqwest::Client,
+    plan_override: Option<&PlanSignIn>,
+    path: PathBuf,
+    host_path: PathBuf,
+    secrets: Arc<dyn SecretStore>,
+    connection_id: String,
+) -> Result<Option<bool>, AiError> {
+    let _one = REFRESH.lock().await;
+    let (p, s, id) = (path.clone(), secrets.clone(), connection_id.clone());
+    let read = super::blocking(move || Ok(read_for_sign_out(&p, s.as_ref(), &id))).await?;
+    let revoked = match read {
+        SignOutRead::NotPlan => None,
+        SignOutRead::NoTokens => {
+            pending_forget(&connection_id);
+            None
+        }
+        SignOutRead::Tokens(plan, record) => {
+            // A refreshed record the keychain refused is the live one.
+            let live = pending_get(&connection_id).unwrap_or(*record);
+            Some(revoke(client, plan_override.unwrap_or(&*plan), &live).await)
+        }
+        SignOutRead::Unreadable => Some(false),
+    };
+    pending_forget(&connection_id);
+    let id = connection_id.clone();
+    super::blocking(move || connections::remove_connection(&path, secrets.as_ref(), &id)).await?;
+    if revoked.is_some() {
+        let _ = super::blocking(move || forget_connection(&host_path, &connection_id)).await;
+    }
+    Ok(revoked)
 }
 
 /// Revoke the renewable session (the refresh token) at the provider. True when it confirmed (an empty
@@ -626,7 +849,86 @@ pub fn save_renewed(path: &Path, secrets: &dyn SecretStore, provider: &str, conn
         return Err(AiError::not_connected());
     }
     connections::replace_secret(path, secrets, connection_id, record.to_secret().expose())?;
+    pending_forget(connection_id);
     Ok(connection_id.to_owned())
+}
+
+/// Code to tokens to a verified account (the network half of a sign-in).
+pub async fn exchange_and_verify(
+    client: &reqwest::Client,
+    plan: &PlanSignIn,
+    callback: &Callback,
+    verifier: &str,
+    redirect: &str,
+    nonce: &str,
+    now: i64,
+) -> Result<(TokenRecord, Identity), AiError> {
+    let tokens = exchange_code(client, plan, &callback.client_id, &callback.code, verifier, redirect).await?;
+    let jwks = fetch_jwks(client, plan.jwks_url).await?;
+    let id_token = tokens.id_token.clone().unwrap_or_default();
+    let identity = verify_id_token(&id_token, &jwks, plan, &callback.client_id, nonce, now)?;
+    let record = record_from(tokens, callback.client_id.clone(), identity.clone(), now)?;
+    Ok((record, identity))
+}
+
+/// Paths and store a sign-in saves into.
+pub struct SignInFiles<'a> {
+    pub connections: &'a Path,
+    pub host: &'a Path,
+    pub secrets: &'a dyn SecretStore,
+}
+
+/// Save a verified sign-in (the storage half; call under `REFRESH`). The issued client id is kept as a
+/// known account in every case where OpenAI asks for it: a granted plan (with the connection), a declined
+/// plan (without one: the next sign-in reuses the client and asks for consent). Returns the connection id.
+pub fn save_sign_in(
+    files: &SignInFiles<'_>,
+    provider: &str,
+    plan: &PlanSignIn,
+    reauth: Option<&Reauth>,
+    record: TokenRecord,
+    identity: &Identity,
+) -> Result<String, AiError> {
+    if let Some(r) = reauth {
+        if !oauth::same(&r.sub, &identity.sub) {
+            return Err(match &r.connection_id {
+                Some(_) => AiError::new(
+                    "auth",
+                    "You signed in with a different ChatGPT account, so this connection was kept as it was. To add that account, use Continue with ChatGPT.",
+                ),
+                None => {
+                    // Reusing a known account's client came back with another account: register next time.
+                    skip_account(files.host, &r.sub)?;
+                    AiError::new(
+                        "auth",
+                        "You signed in with a different ChatGPT account than the one Novel knows, so nothing was saved. Continue with ChatGPT again to add this account.",
+                    )
+                }
+            });
+        }
+    }
+    let known = |connection_id: Option<String>, plan_declined: bool| KnownAccount {
+        sub: identity.sub.clone(),
+        email: identity.email.clone(),
+        client_id: record.client_id.clone(),
+        connection_id,
+        plan_declined,
+        skip: false,
+    };
+    let renewing = reauth.and_then(|r| r.connection_id.clone());
+    if !record.plan_enabled(plan) {
+        remember_account(files.host, known(renewing, true))?;
+        return Err(AiError::new(
+            "auth",
+            "You signed in, but did not allow Novel to use your ChatGPT plan, so no connection was added. Try again and allow it, or use an API key.",
+        ));
+    }
+    let id = match &renewing {
+        Some(id) => save_renewed(files.connections, files.secrets, provider, id, &record)?,
+        None => oauth::save_signed_in(files.connections, files.secrets, provider, &connection_name(plan, identity), &record.to_secret())?,
+    };
+    remember_account(files.host, known(Some(id.clone()), false))?;
+    Ok(id)
 }
 
 /// The new connection's name: "ChatGPT (email)" when the account has an email, else "ChatGPT".
@@ -644,7 +946,27 @@ fn reauth_for(path: &Path, provider: &str, connection_id: &str) -> Result<Reauth
         return Err(missing());
     }
     let r = TokenRecord::parse(&secret).ok_or_else(missing)?;
-    Ok(Reauth { connection_id: connection_id.to_owned(), client_id: r.client_id, sub: r.sub, id_token_hint: r.id_token, login_hint: r.email })
+    Ok(Reauth {
+        connection_id: Some(connection_id.to_owned()),
+        client_id: r.client_id,
+        sub: r.sub,
+        id_token_hint: r.id_token,
+        login_hint: r.email,
+        prompt_consent: false,
+    })
+}
+
+/// A new sign-in: the known account to reuse, if there is exactly one without a connection.
+fn reuse_for(path: &Path, host_path: &Path) -> Result<Option<Reauth>, AiError> {
+    let live: Vec<String> = connections::load_connections(path)?.into_iter().map(|c| c.id).collect();
+    Ok(reusable_account(host_path, &live)?.map(|a| Reauth {
+        connection_id: None,
+        client_id: a.client_id,
+        sub: a.sub,
+        id_token_hint: None,
+        login_hint: a.email,
+        prompt_consent: a.plan_declined,
+    }))
 }
 
 fn app_file<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, AiError> {
@@ -663,12 +985,13 @@ pub async fn start<R: Runtime>(
 ) -> Result<(), AiError> {
     let path = super::connections_file(&app)?;
     let host_path = app_file(&app, HOST_FILE)?;
-    let (p, prov) = (path.clone(), provider.clone());
+    let (p, prov, hp) = (path.clone(), provider.clone(), host_path.clone());
     let reauth = match connection_id {
         Some(id) => Some(super::blocking(move || reauth_for(&p, &prov, &id)).await?),
-        None => None,
+        None => super::blocking(move || reuse_for(&p, &hp)).await?,
     };
-    let host = super::blocking(move || host_id(&host_path)).await?;
+    let hp = host_path.clone();
+    let host = super::blocking(move || host_id(&hp)).await?;
     let pkce = oauth::new_pkce()?;
     let state = oauth::random_token(16)?;
     let nonce = oauth::random_token(16)?;
@@ -688,34 +1011,16 @@ pub async fn start<R: Runtime>(
             let saved_client = reauth.as_ref().map(|r| r.client_id.clone());
             let callback = oauth::wait_for_reply(listener, CALLBACK_TIMEOUT, stop, |head| parse_callback(head, &plan, &state, saved_client.as_deref())).await?;
             let redirect = redirect_uri(&plan, port);
-            let tokens = exchange_code(&client, &plan, &callback.client_id, &callback.code, &pkce.verifier, &redirect).await?;
-            let jwks = fetch_jwks(&client, plan.jwks_url).await?;
-            let id_token = tokens.id_token.clone().unwrap_or_default();
-            let identity = verify_id_token(&id_token, &jwks, &plan, &callback.client_id, &nonce, now_secs())?;
-            if let Some(r) = &reauth {
-                if !oauth::same(&r.sub, &identity.sub) {
-                    return Err(AiError::new(
-                        "auth",
-                        "You signed in with a different ChatGPT account, so this connection was kept as it was. To add that account, use Continue with ChatGPT.",
-                    ));
-                }
-            }
-            let record = record_from(tokens, callback.client_id, identity.clone(), now_secs())?;
-            if !record.plan_enabled(&plan) {
-                return Err(AiError::new(
-                    "auth",
-                    "You signed in, but did not allow Novel to use your ChatGPT plan, so nothing was saved. Try again and allow it, or use an API key.",
-                ));
-            }
+            let (record, identity) = exchange_and_verify(&client, &plan, &callback, &pkce.verifier, &redirect, &nonce, now_secs()).await?;
             // Cancelled (or replaced) meanwhile: the tokens are dropped, nothing is saved.
             oauth::still_wanted(&wanted)?;
-            match reauth {
-                Some(r) => super::blocking(move || save_renewed(&path, &KeyringStore, &provider, &r.connection_id, &record)).await,
-                None => {
-                    let name = connection_name(&plan, &identity);
-                    super::blocking(move || oauth::save_signed_in(&path, &KeyringStore, &provider, &name, &record.to_secret())).await
-                }
-            }
+            // Under REFRESH: a refresh of the connection being renewed cannot overwrite the new record.
+            let _one = REFRESH.lock().await;
+            super::blocking(move || {
+                let files = SignInFiles { connections: &path, host: &host_path, secrets: &KeyringStore };
+                save_sign_in(&files, &provider, &plan, reauth.as_ref(), record, &identity)
+            })
+            .await
         }
         .await;
         oauth::report(&app2, flow, outcome);
@@ -791,20 +1096,26 @@ mod tests {
 
     #[test]
     fn a_renewal_reuses_the_issued_client_and_sends_the_hints() {
-        let r = Reauth {
-            connection_id: "c".into(),
+        let mut r = Reauth {
+            connection_id: Some("c".into()),
             client_id: "oaiapp_123".into(),
             sub: "s".into(),
             id_token_hint: Some("old.id.token".into()),
             login_hint: Some("a@example.com".into()),
+            prompt_consent: false,
         };
         let q = query(&authorize_url(&plan(), 5, "c", "s", "n", "urn:uuid:h", Some(&r)));
-        let get = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
-        assert_eq!(get("client_id"), Some("oaiapp_123"));
+        let get = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.to_owned());
+        assert_eq!(get("client_id").as_deref(), Some("oaiapp_123"));
         assert_eq!(get("agent_name_hint"), None, "only on a first registration");
-        assert_eq!(get("id_token_hint"), Some("old.id.token"));
-        assert_eq!(get("login_hint"), Some("a@example.com"));
-        assert_eq!(get("ext_agent_host_id"), Some("urn:uuid:h"));
+        assert_eq!(get("id_token_hint").as_deref(), Some("old.id.token"));
+        assert_eq!(get("login_hint").as_deref(), Some("a@example.com"));
+        assert_eq!(get("ext_agent_host_id").as_deref(), Some("urn:uuid:h"));
+        assert_eq!(get("prompt"), None);
+        // After a declined plan scope the reuse asks for consent again.
+        r.prompt_consent = true;
+        let q = query(&authorize_url(&plan(), 5, "c", "s", "n", "urn:uuid:h", Some(&r)));
+        assert!(q.contains(&("prompt".to_owned(), "consent".to_owned())));
     }
 
     #[test]
@@ -844,76 +1155,81 @@ mod tests {
         assert!(!format!("{e:?}").contains("SECRET-CODE"));
     }
 
-    // ---- ID tokens: a test RSA key (generated for these tests only; not used anywhere else) ----
+    // ---- ID tokens: pre-signed fixtures (testdata/chatgpt-id-tokens.json; public key only) ----
 
-    /// Sign `claims` with the test key as an RS256 JWT with `kid`.
-    fn jwt(claims: &Value, kid: &str) -> String {
-        let key = ring::signature::RsaKeyPair::from_pkcs8(&test_key_pkcs8()).unwrap();
-        let h = URL_SAFE_NO_PAD.encode(serde_json::json!({ "alg": "RS256", "kid": kid, "typ": "JWT" }).to_string());
-        let p = URL_SAFE_NO_PAD.encode(claims.to_string());
-        let input = format!("{h}.{p}");
-        let mut sig = vec![0u8; key.public().modulus_len()];
-        key.sign(&ring::signature::RSA_PKCS1_SHA256, &ring::rand::SystemRandom::new(), input.as_bytes(), &mut sig).unwrap();
-        format!("{input}.{}", URL_SAFE_NO_PAD.encode(sig))
+    fn fixtures() -> Value {
+        serde_json::from_str(include_str!("testdata/chatgpt-id-tokens.json")).unwrap()
+    }
+
+    fn token(name: &str) -> String {
+        fixtures()["tokens"][name].as_str().unwrap_or_else(|| panic!("fixture {name}")).to_owned()
     }
 
     fn test_jwks() -> Value {
-        use ring::signature::KeyPair as _;
-        let key = ring::signature::RsaKeyPair::from_pkcs8(&test_key_pkcs8()).unwrap();
-        let comps: ring::signature::RsaPublicKeyComponents<Vec<u8>> = key.public_key().into();
+        // "other": a key too small for RS256 (a token naming it never verifies).
         serde_json::json!({ "keys": [
             { "kty": "RSA", "kid": "other", "use": "sig", "alg": "RS256", "n": "AQAB", "e": "AQAB" },
-            { "kty": "RSA", "kid": "k1", "use": "sig", "alg": "RS256", "n": URL_SAFE_NO_PAD.encode(&comps.n), "e": URL_SAFE_NO_PAD.encode(&comps.e) },
+            fixtures()["jwk"],
         ]})
-    }
-
-    fn test_key_pkcs8() -> Vec<u8> {
-        use base64::engine::general_purpose::STANDARD;
-        STANDARD.decode(TEST_KEY_PKCS8.split_whitespace().collect::<String>()).unwrap()
     }
 
     const NOW: i64 = 1_800_000_000;
 
-    fn claims() -> Value {
-        serde_json::json!({
-            "iss": "https://auth.openai.com", "sub": "user-sub", "aud": ["oaiapp_1"], "nonce": "N0NCE",
-            "iat": NOW - 10, "exp": NOW + 3600, "email": "writer@example.com",
-        })
+    #[test]
+    fn no_private_key_is_in_the_fixtures() {
+        let text = include_str!("testdata/chatgpt-id-tokens.json");
+        assert!(!text.contains("PRIVATE") && fixtures()["jwk"].get("d").is_none());
     }
 
     #[test]
     fn a_good_id_token_verifies() {
-        let id = verify_id_token(&jwt(&claims(), "k1"), &test_jwks(), &plan(), "oaiapp_1", "N0NCE", NOW).unwrap();
+        let id = verify_id_token(&token("good"), &test_jwks(), &plan(), "oaiapp_1", "N0NCE", NOW).unwrap();
         assert_eq!(id, Identity { sub: "user-sub".into(), email: Some("writer@example.com".into()) });
-        // A string audience works too.
-        let mut c = claims();
-        c["aud"] = "oaiapp_1".into();
-        assert!(verify_id_token(&jwt(&c, "k1"), &test_jwks(), &plan(), "oaiapp_1", "N0NCE", NOW).is_ok());
+        assert!(verify_id_token(&token("aud_string"), &test_jwks(), &plan(), "oaiapp_1", "N0NCE", NOW).is_ok());
+        // Several audiences with azp = this client.
+        assert!(verify_id_token(&token("multi_aud_azp"), &test_jwks(), &plan(), "oaiapp_1", "N0NCE", NOW).is_ok());
     }
 
     #[test]
     fn a_bad_id_token_is_refused() {
         let check = |token: &str, client: &str, nonce: &str, now: i64| verify_id_token(token, &test_jwks(), &plan(), client, nonce, now);
-        let good = jwt(&claims(), "k1");
+        let good = token("good");
         assert!(check(&good, "oaiapp_2", "N0NCE", NOW).is_err(), "audience");
         assert!(check(&good, "oaiapp_1", "OTHER", NOW).is_err(), "nonce");
         assert!(check(&good, "oaiapp_1", "N0NCE", NOW + 3600 + CLOCK_SKEW_SECS + 1).is_err(), "expired");
-        assert!(check(&jwt(&claims(), "unknown-kid"), "oaiapp_1", "N0NCE", NOW).is_err(), "unknown key");
-        assert!(check(&jwt(&claims(), "other"), "oaiapp_1", "N0NCE", NOW).is_err(), "signed by another key");
-        for (field, value) in [("iss", Value::from("https://evil.example")), ("sub", Value::from("")), ("iat", Value::Null), ("nonce", Value::Null)] {
-            let mut c = claims();
-            c[field] = value;
-            assert!(check(&jwt(&c, "k1"), "oaiapp_1", "N0NCE", NOW).is_err(), "{field}");
+        for name in [
+            "kid_unknown",         // unknown key
+            "kid_other",           // a key that is not the signer's
+            "iss_bad",             // another issuer
+            "sub_empty",           // no account
+            "iat_missing",         // no issue time
+            "nonce_missing",       // no nonce
+            "iat_future",          // issued an hour from now (M8)
+            "multi_aud_no_azp",    // several audiences and no azp (M8)
+            "multi_aud_azp_other", // azp names another client (M8)
+        ] {
+            assert!(check(&token(name), "oaiapp_1", "N0NCE", NOW).is_err(), "{name}");
         }
         // A tampered payload, an alg of none, garbage.
         let parts: Vec<&str> = good.split('.').collect();
-        let mut evil = claims();
+        let mut evil: Value = serde_json::from_slice(&b64(parts[1]).unwrap()).unwrap();
         evil["sub"] = "attacker".into();
         let tampered = format!("{}.{}.{}", parts[0], URL_SAFE_NO_PAD.encode(evil.to_string()), parts[2]);
         assert!(check(&tampered, "oaiapp_1", "N0NCE", NOW).is_err(), "tampered");
         let none = format!("{}.{}.", URL_SAFE_NO_PAD.encode(r#"{"alg":"none","kid":"k1"}"#), parts[1]);
         assert!(check(&none, "oaiapp_1", "N0NCE", NOW).is_err(), "alg none");
         assert!(check("not-a-jwt", "oaiapp_1", "N0NCE", NOW).is_err());
+    }
+
+    #[test]
+    fn the_plan_token_goes_only_to_the_documented_routes() {
+        let p = plan();
+        for ok in ["/responses", "/models", "/models?x=1"] {
+            assert!(check_path(&p, ok).is_ok(), "{ok}");
+        }
+        for bad in ["/chat/completions", "/files", "/responses/abc", "/responsesx", "/v1/responses", "/models/gpt", ""] {
+            assert_eq!(check_path(&p, bad).unwrap_err().kind, "blocked_host", "{bad}");
+        }
     }
 
     // ---- Records and refresh ----
@@ -1068,6 +1384,13 @@ mod tests {
     struct OneConnection {
         secret: Mutex<Secret>,
         stores: Mutex<u32>,
+        fail_store: Mutex<bool>,
+    }
+
+    impl OneConnection {
+        fn new(secret: Secret) -> Arc<Self> {
+            Arc::new(OneConnection { secret: Mutex::new(secret), stores: Mutex::new(0), fail_store: Mutex::new(false) })
+        }
     }
 
     impl ConnectionResolver for OneConnection {
@@ -1080,6 +1403,9 @@ mod tests {
             })
         }
         fn store_secret(&self, _id: &str, secret: &Secret) -> Result<(), AiError> {
+            if *self.fail_store.lock().unwrap() {
+                return Err(AiError::new("auth", "The system keychain could not be used."));
+            }
             *self.secret.lock().unwrap() = secret.clone();
             *self.stores.lock().unwrap() += 1;
             Ok(())
@@ -1090,14 +1416,14 @@ mod tests {
     async fn ai_fetch_sends_the_access_token_and_refreshes_when_due() {
         let client = super::super::fetch::client();
         // Fresh: no refresh, the access token replaces the record.
-        let fresh = Arc::new(OneConnection { secret: Mutex::new(record(now_secs() + 3600).to_secret()), stores: Mutex::new(0) });
+        let fresh = OneConnection::new(record(now_secs() + 3600).to_secret());
         let conn = fresh.resolve("c").unwrap();
         let out = with_access_token(&client, fresh.clone(), "c", conn, &plan()).await.unwrap();
         assert_eq!(out.secret.unwrap().expose(), "ACCESS-OLD");
         assert_eq!(*fresh.stores.lock().unwrap(), 0);
         // Due: refreshed, saved, and the new token is sent.
         let (base, _) = mock("200 OK", r#"{"access_token":"ACCESS-NEW","refresh_token":"REFRESH-NEW","expires_in":3600}"#).await;
-        let due = Arc::new(OneConnection { secret: Mutex::new(record(now_secs() + 10).to_secret()), stores: Mutex::new(0) });
+        let due = OneConnection::new(record(now_secs() + 10).to_secret());
         let conn = due.resolve("c").unwrap();
         let out = with_access_token(&client, due.clone(), "c", conn, &plan_at(&base)).await.unwrap();
         assert_eq!(out.secret.unwrap().expose(), "ACCESS-NEW");
@@ -1107,7 +1433,7 @@ mod tests {
         // Without the plan scope nothing is sent.
         let mut no_plan = record(now_secs() + 3600);
         no_plan.scopes = vec!["openid".into()];
-        let r = Arc::new(OneConnection { secret: Mutex::new(no_plan.to_secret()), stores: Mutex::new(0) });
+        let r = OneConnection::new(no_plan.to_secret());
         let conn = r.resolve("c").unwrap();
         assert_eq!(with_access_token(&client, r, "c", conn, &plan()).await.unwrap_err().kind, "auth");
     }
@@ -1154,8 +1480,257 @@ mod tests {
         assert_eq!(conn.provider.base_url, Some("https://api.openai.com/v1"));
     }
 
-    /// A throwaway 2048-bit RSA key, base64 PKCS#8 DER, made for these tests only (`openssl genpkey
-    /// -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl pkcs8 -topk8 -nocrypt -outform DER`). It
-    /// signs nothing outside them.
-    const TEST_KEY_PKCS8: &str = include_str!("testdata/chatgpt-test-rsa.pk8.b64");
+    /// A local HTTP server answering `routes` (path, status, body), one request per connection, until
+    /// dropped. Returns its base URL and the request lines it saw.
+    async fn routed(routes: Vec<(&'static str, &'static str, String)>) -> (String, Arc<Mutex<Vec<String>>>) {
+        let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = l.accept().await else { return };
+                let mut buf = vec![0u8; 16 * 1024];
+                let mut got = Vec::new();
+                loop {
+                    let n = s.read(&mut buf).await.unwrap_or(0);
+                    got.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&got);
+                    if let Some(i) = text.find("\r\n\r\n") {
+                        let len = text[..i]
+                            .lines()
+                            .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                            .unwrap_or(0);
+                        if got.len() >= i + 4 + len {
+                            break;
+                        }
+                    }
+                    if n == 0 {
+                        break;
+                    }
+                }
+                let text = String::from_utf8_lossy(&got).into_owned();
+                let line = text.lines().next().unwrap_or_default().to_owned();
+                log.lock().unwrap().push(line.clone());
+                let path = line.split(' ').nth(1).unwrap_or_default().to_owned();
+                let (status, body) = routes.iter().find(|(p, _, _)| *p == path).map(|(_, st, b)| (*st, b.clone())).unwrap_or(("404 Not Found", String::new()));
+                let reply = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let _ = s.write_all(reply.as_bytes()).await;
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), seen)
+    }
+
+    fn token_reply(scope: &str) -> String {
+        serde_json::json!({
+            "access_token": "ACCESS-1", "refresh_token": "REFRESH-1", "id_token": token("good"),
+            "token_type": "Bearer", "expires_in": 3600, "scope": scope,
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_exchanges_checks_the_id_token_against_the_keys_and_keeps_the_scopes() {
+        let jwks = test_jwks().to_string();
+        let (base, seen) = routed(vec![
+            ("/oauth/token", "200 OK", token_reply("openid offline_access resource.invoke chatgpt.tokens.use.direct")),
+            ("/jwks", "200 OK", jwks),
+        ])
+        .await;
+        let cb = Callback { code: "CODE".into(), client_id: "oaiapp_1".into() };
+        let (record, identity) = exchange_and_verify(&super::super::fetch::client(), &plan_at(&base), &cb, "V", "http://127.0.0.1:9/auth/callback", "N0NCE", NOW).await.unwrap();
+        assert_eq!(identity.sub, "user-sub");
+        assert_eq!((record.client_id.as_str(), record.access_token.as_str(), record.refresh_token.as_str()), ("oaiapp_1", "ACCESS-1", "REFRESH-1"));
+        assert!(record.plan_enabled(&plan()));
+        assert_eq!(seen.lock().unwrap().iter().map(|l| l.split(' ').take(2).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>(), ["POST /oauth/token", "GET /jwks"]);
+        // The wrong nonce fails the check: nothing to save.
+        let (base, _) = routed(vec![("/oauth/token", "200 OK", token_reply("openid")), ("/jwks", "200 OK", test_jwks().to_string())]).await;
+        assert!(exchange_and_verify(&super::super::fetch::client(), &plan_at(&base), &cb, "V", "x", "OTHER", NOW).await.is_err());
+    }
+
+    struct Files {
+        dir: tempfile::TempDir,
+        secrets: MemoryStore,
+    }
+
+    impl Files {
+        fn new() -> Self {
+            Files { dir: tempfile::tempdir().unwrap(), secrets: MemoryStore::default() }
+        }
+        fn conns(&self) -> PathBuf {
+            self.dir.path().join(connections::CONNECTIONS_FILE)
+        }
+        fn host(&self) -> PathBuf {
+            self.dir.path().join(HOST_FILE)
+        }
+        fn save(&self, reauth: Option<&Reauth>, record: TokenRecord, identity: &Identity) -> Result<String, AiError> {
+            let (c, h) = (self.conns(), self.host());
+            let files = SignInFiles { connections: &c, host: &h, secrets: &self.secrets };
+            save_sign_in(&files, "chatgpt", &plan(), reauth, record, identity)
+        }
+        fn accounts(&self) -> Vec<KnownAccount> {
+            serde_json::from_str::<HostFile>(&std::fs::read_to_string(self.host()).unwrap()).unwrap().accounts
+        }
+        fn live(&self) -> Vec<String> {
+            connections::load_connections(&self.conns()).unwrap().into_iter().map(|c| c.id).collect()
+        }
+    }
+
+    /// Sign out with the plan's endpoints on a mock.
+    async fn sign_out_with(p: &PlanSignIn, conns: PathBuf, host: PathBuf, secrets: Arc<dyn SecretStore>, id: String) -> Result<Option<bool>, AiError> {
+        sign_out_inner(&super::super::fetch::client(), Some(p), conns, host, secrets, id).await
+    }
+
+    fn writer() -> Identity {
+        Identity { sub: "user-sub".into(), email: Some("writer@example.com".into()) }
+    }
+
+    fn reuse(f: &Files) -> Option<Reauth> {
+        reuse_for(&f.conns(), &f.host()).unwrap()
+    }
+
+    #[test]
+    fn a_granted_sign_in_saves_the_connection_and_remembers_the_issued_client() {
+        let f = Files::new();
+        let id = f.save(None, record(NOW + 3600), &writer()).unwrap();
+        assert_eq!(f.live(), std::slice::from_ref(&id));
+        let accounts = f.accounts();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!((accounts[0].client_id.as_str(), accounts[0].connection_id.as_deref()), ("oaiapp_1", Some(id.as_str())));
+        // The host file holds no token.
+        let text = std::fs::read_to_string(f.host()).unwrap();
+        for t in ["ACCESS-OLD", "REFRESH-OLD", "id.tok.en"] {
+            assert!(!text.contains(t), "{t}");
+        }
+        // The account has a connection: a new sign-in registers (another account) rather than reuse.
+        assert!(reuse(&f).is_none());
+    }
+
+    #[test]
+    fn a_declined_plan_keeps_the_client_and_the_retry_reuses_it_asking_for_consent() {
+        let f = Files::new();
+        let mut declined = record(NOW + 3600);
+        declined.scopes = vec!["openid".into(), "email".into()];
+        let e = f.save(None, declined, &writer()).unwrap_err();
+        assert!(e.message.contains("did not allow Novel to use your ChatGPT plan"), "{}", e.message);
+        assert!(f.live().is_empty(), "no connection without the plan");
+        assert!(f.accounts()[0].plan_declined);
+        let r = reuse(&f).unwrap();
+        assert_eq!((r.client_id.as_str(), r.login_hint.as_deref(), r.prompt_consent), ("oaiapp_1", Some("writer@example.com"), true));
+        assert!(r.connection_id.is_none() && r.id_token_hint.is_none());
+        let q = query(&authorize_url(&plan(), 1, "c", "s", "n", "urn:uuid:h", Some(&r)));
+        assert!(q.contains(&("client_id".to_owned(), "oaiapp_1".to_owned())), "not dynamic_agent_client");
+        assert!(!q.iter().any(|(k, _)| k == "agent_name_hint"));
+        // The retry, granted, adds the connection under the same client.
+        let id = f.save(Some(&r), record(NOW + 3600), &writer()).unwrap();
+        assert_eq!(f.accounts()[0].connection_id.as_deref(), Some(id.as_str()));
+        assert!(!f.accounts()[0].plan_declined);
+    }
+
+    #[tokio::test]
+    async fn remove_signs_out_under_the_lock_and_keeps_the_client_for_the_next_sign_in() {
+        let f = Files::new();
+        let id = f.save(None, record(NOW + 3600), &writer()).unwrap();
+        let (base, seen) = routed(vec![("/oauth/revoke", "200 OK", String::new())]).await;
+        // The descriptor's revoke URL is fixed, so sign out through the plan on the mock.
+        let store: Arc<dyn SecretStore> = Arc::new(MemoryStore(Mutex::new(f.secrets.0.lock().unwrap().clone())));
+        let revoked = sign_out_with(&plan_at(&base), f.conns(), f.host(), store.clone(), id.clone()).await.unwrap();
+        assert_eq!(revoked, Some(true));
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(f.live().is_empty());
+        assert!(store.get(&id).unwrap().is_none(), "the tokens are gone");
+        // The account and its client stay; the next Continue with ChatGPT reuses them.
+        let acc = &f.accounts()[0];
+        assert_eq!((acc.client_id.as_str(), acc.connection_id.as_deref()), ("oaiapp_1", None));
+        let r = reuse(&f).unwrap();
+        assert_eq!((r.client_id.as_str(), r.prompt_consent), ("oaiapp_1", false));
+    }
+
+    #[tokio::test]
+    async fn remove_with_unreadable_tokens_reports_an_unconfirmed_sign_out() {
+        let f = Files::new();
+        let id = f.save(None, record(NOW + 3600), &writer()).unwrap();
+        // The stored value is no token record (damaged): the sign-out cannot be confirmed (M4).
+        let c = connections::load_connections(&f.conns()).unwrap().remove(0);
+        let damaged = MemoryStore::default();
+        damaged.set(&id, &serde_json::json!({ "v": 1, "b": "chatgpt|oauth|https://api.openai.com", "s": "not a record" }).to_string()).unwrap();
+        assert_eq!(c.provider, "chatgpt");
+        let (base, seen) = routed(vec![]).await;
+        let revoked = sign_out_with(&plan_at(&base), f.conns(), f.host(), Arc::new(damaged), id).await.unwrap();
+        assert_eq!(revoked, Some(false));
+        assert!(seen.lock().unwrap().is_empty());
+        assert!(f.live().is_empty());
+        // Not a plan connection: nothing to sign out.
+        connections::save_connections(&f.conns(), &f.secrets, vec![Connection {
+            id: "k".into(),
+            provider: "openai".into(),
+            label: "OpenAI".into(),
+            auth: connections::ConnectionAuth::ApiKey,
+            base_url: None,
+            default_model: None,
+            tool_support: None,
+            insecure_http_accepted: None,
+            extra: Default::default(),
+        }])
+        .unwrap();
+        let none = sign_out_with(&plan_at(&base), f.conns(), f.host(), Arc::new(MemoryStore::default()), "k".into()).await.unwrap();
+        assert_eq!(none, None);
+    }
+
+    #[test]
+    fn reusing_a_known_client_that_comes_back_with_another_account_saves_nothing_and_registers_next_time() {
+        let f = Files::new();
+        let mut declined = record(NOW + 3600);
+        declined.scopes = vec!["openid".into()];
+        let _ = f.save(None, declined, &writer());
+        let r = reuse(&f).unwrap();
+        let other = Identity { sub: "someone-else".into(), email: None };
+        let e = f.save(Some(&r), record(NOW + 3600), &other).unwrap_err();
+        assert!(e.message.contains("different ChatGPT account"), "{}", e.message);
+        assert!(f.live().is_empty());
+        assert!(reuse(&f).is_none(), "the next new sign-in registers");
+    }
+
+    #[test]
+    fn two_known_accounts_without_connections_are_not_guessed() {
+        let f = Files::new();
+        for (sub, client) in [("a", "oaiapp_a"), ("b", "oaiapp_b")] {
+            remember_account(&f.host(), KnownAccount { sub: sub.into(), email: None, client_id: client.into(), connection_id: None, plan_declined: false, skip: false }).unwrap();
+        }
+        assert!(reuse(&f).is_none());
+        forget_connection(&f.host(), "nothing").unwrap();
+        // The host id is kept across account writes.
+        let id = host_id(&f.host()).unwrap();
+        remember_account(&f.host(), KnownAccount { sub: "a".into(), email: None, client_id: "oaiapp_a2".into(), connection_id: None, plan_declined: false, skip: false }).unwrap();
+        assert_eq!(host_id(&f.host()).unwrap(), id);
+        assert_eq!(f.accounts().iter().find(|a| a.sub == "a").unwrap().client_id, "oaiapp_a2");
+    }
+
+    #[tokio::test]
+    async fn a_refreshed_record_the_keychain_refuses_is_used_and_kept_until_it_is_stored() {
+        let client = super::super::fetch::client();
+        let (base, seen) = routed(vec![(
+            "/oauth/token",
+            "200 OK",
+            r#"{"access_token":"ACCESS-NEW","refresh_token":"REFRESH-NEW","expires_in":3600}"#.to_owned(),
+        )])
+        .await;
+        let p = plan_at(&base);
+        let conn_id = "pending-test-connection";
+        let r = OneConnection::new(record(now_secs() + 10).to_secret());
+        *r.fail_store.lock().unwrap() = true;
+        let out = with_access_token(&client, r.clone(), conn_id, r.resolve(conn_id).unwrap(), &p).await.unwrap();
+        assert_eq!(out.secret.unwrap().expose(), "ACCESS-NEW", "the request still gets the new token");
+        assert_eq!(*r.stores.lock().unwrap(), 0);
+        // The keychain still holds the spent record; the next request uses the kept one, no second refresh.
+        let out = with_access_token(&client, r.clone(), conn_id, r.resolve(conn_id).unwrap(), &p).await.unwrap();
+        assert_eq!(out.secret.unwrap().expose(), "ACCESS-NEW");
+        assert_eq!(seen.lock().unwrap().len(), 1, "one refresh POST");
+        // Once the keychain works again, the kept record is stored and forgotten.
+        *r.fail_store.lock().unwrap() = false;
+        with_access_token(&client, r.clone(), conn_id, r.resolve(conn_id).unwrap(), &p).await.unwrap();
+        assert_eq!(TokenRecord::parse(&r.secret.lock().unwrap()).unwrap().refresh_token, "REFRESH-NEW");
+        assert!(pending_get(conn_id).is_none());
+    }
+
 }

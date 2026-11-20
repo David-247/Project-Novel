@@ -210,12 +210,29 @@ impl AiState {
         let resolver = self.resolver.read().unwrap_or_else(|e| e.into_inner()).clone();
         let id = connection_id.to_owned();
         let r = resolver.clone();
-        let conn = tokio::task::spawn_blocking(move || r.resolve(&id))
+        let resolved = tokio::task::spawn_blocking(move || r.resolve(&id))
             .await
-            .map_err(|_| AiError::new("not_connected", "The AI connection could not be read."))??;
-        // A plan sign-in stores a token record: send its access token, refreshed first when it is due.
+            .map_err(|_| AiError::new("not_connected", "The AI connection could not be read."))?;
+        let conn = match resolved {
+            Ok(c) => c,
+            // A split secret read while it was being rewritten (keychain.rs): once more, after any refresh
+            // in progress has stored its record.
+            Err(e) if e == keychain::transient() => {
+                let _one = chatgpt::REFRESH.lock().await;
+                let (r, id) = (resolver.clone(), connection_id.to_owned());
+                tokio::task::spawn_blocking(move || r.resolve(&id))
+                    .await
+                    .map_err(|_| AiError::new("not_connected", "The AI connection could not be read."))??
+            }
+            Err(e) => return Err(e),
+        };
+        // A plan sign-in stores a token record: only its documented routes, with its access token,
+        // refreshed first when it is due.
         let conn = match conn.provider.plan_sign_in {
-            Some(plan) => chatgpt::with_access_token(&self.client, resolver, connection_id, conn, &plan).await?,
+            Some(plan) => {
+                chatgpt::check_path(&plan, &req.path)?;
+                chatgpt::with_access_token(&self.client, resolver, connection_id, conn, &plan).await?
+            }
             None => conn,
         };
         fetch::run(&self.client, &conn, req, cancel, emit).await
@@ -370,14 +387,12 @@ pub async fn ai_connection_remove<R: Runtime>(
     connection_id: String,
 ) -> Result<Option<bool>, AiError> {
     let path = connections_file(&app)?;
-    let (p, id) = (path.clone(), connection_id.clone());
-    let saved = blocking(move || chatgpt::saved_sign_in(&p, &keychain::KeyringStore, &id)).await.unwrap_or(None);
-    let revoked = match saved {
-        Some((plan, record)) => Some(chatgpt::revoke(&ai.http_client(), &plan, &record).await),
-        None => None,
-    };
-    blocking(move || connections::remove_connection(&path, &keychain::KeyringStore, &connection_id)).await?;
-    Ok(revoked)
+    let host = app
+        .path()
+        .app_data_dir()
+        .map(|d| d.join(chatgpt::HOST_FILE))
+        .map_err(|_| AiError::bad_request("The app data folder is not available."))?;
+    chatgpt::sign_out_and_remove(&ai.http_client(), path, host, Arc::new(keychain::KeyringStore), connection_id).await
 }
 
 // ---- Chat history (Task 8) -------------------------------------------------------------------------
