@@ -391,7 +391,6 @@ export const RIBBON_GROUPS: RibbonGroupSpec[] = [
     order: 50,
     priority: 65,
     icon: icons.tutor,
-    collapsible: false,
     Content: () => <RibbonCommand commandId={TUTOR_CONTROLS.toggle.id} icon={icons.tutor} label="Tutor" />,
     menu: [cmd(TUTOR_CONTROLS.toggle.id)],
   },

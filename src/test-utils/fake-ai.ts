@@ -100,10 +100,33 @@ export function sseResponse(chunks: string[]): FakeAiEvent[] {
   ]
 }
 
+/** One OpenAI chat-completions stream chunk (`data: {...}`) with `delta` and an optional finish reason. */
+function chatChunk(delta: Record<string, unknown>, finish: string | null = null): string {
+  return `data: ${JSON.stringify({ id: 'chatcmpl-fake', object: 'chat.completion.chunk', created: 0, model: 'fake', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
+}
+
+/**
+ * The fake provider for e2e (and its Vitest check): an OpenAI Chat Completions stream (what the openai,
+ * compatible and local adapters read) that says `text` in a few deltas and/or calls `tools`, then ends.
+ */
+export function openAiChatStream(reply: { text?: string; tools?: { name: string; input: unknown }[] }): FakeAiEvent[] {
+  const chunks: string[] = [chatChunk({ role: 'assistant', content: '' })]
+  const words = reply.text ? reply.text.match(/\S+\s*/g) ?? [] : []
+  for (let i = 0; i < words.length; i += 3) chunks.push(chatChunk({ content: words.slice(i, i + 3).join('') }))
+  ;(reply.tools ?? []).forEach((t, index) =>
+    chunks.push(chatChunk({ tool_calls: [{ index, id: `call_${index + 1}`, type: 'function', function: { name: t.name, arguments: JSON.stringify(t.input) } }] })),
+  )
+  chunks.push(chatChunk({}, reply.tools?.length ? 'tool_calls' : 'stop'))
+  chunks.push('data: [DONE]\n\n')
+  return sseResponse(chunks)
+}
+
 export function createFakeAi() {
   const state = {
     /** What the next ai_fetch streams (sticky); null = no connection. */
     script: null as FakeAiScript | null,
+    /** Scripts for the next requests, one each, in order (before `script`): a turn's model calls. */
+    queue: [] as FakeAiScript[],
     /** Every ai_fetch, in order. */
     requests: [] as { requestId: number; connectionId: string; req: FakeAiRequest }[],
     /** Every ai_fetch_cancel request id, in order. */
@@ -126,6 +149,7 @@ export function createFakeAi() {
 
   function reset() {
     state.script = null
+    state.queue.length = 0
     state.requests.length = 0
     state.cancels.length = 0
     state.secrets.clear()
@@ -150,7 +174,7 @@ export function createFakeAi() {
     }
     state.requests.push({ requestId, connectionId: args.connectionId as string, req: args.req as FakeAiRequest })
     if (earlyCancels.delete(requestId)) failWith('cancelled', 'The request was cancelled.')
-    const script = state.script
+    const script = state.queue.shift() ?? state.script
     if (!script) failWith('not_connected', 'This AI connection is not set up. Connect a provider in Settings.')
     let cancelled = false
     let wake = () => {}

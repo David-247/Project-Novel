@@ -45,6 +45,7 @@ import { getCommands, runCommand } from '@/shared/commands'
 import { formatShortcut } from '@/shared/ui'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
+import { openAiChatStream } from './fake-ai'
 
 /** Set by tests before the app boots (page.addInitScript). */
 export interface E2EConfig {
@@ -54,6 +55,8 @@ export interface E2EConfig {
   fonts?: string[]
   /** The OS user's name preferences_default_author returns ('' = none known). */
   defaultAuthor?: string
+  /** ai-connections.json at launch (the AI tutor's connections; the fake provider answers them all). */
+  tutorConnections?: Record<string, unknown>[]
 }
 
 // ---- IndexedDB persistence -------------------------------------------------
@@ -155,6 +158,17 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
      * default teh -> the), `grammar` (phrase -> suggestions), `calls`, `fail`.
      */
     spell: core.spell,
+    /**
+     * The AI tutor's fake provider (src/test-utils/fake-ai.ts): each queued reply answers one model call
+     * as an OpenAI chat-completions stream (text, and/or tool calls). `aiRequests` counts ai_fetch calls
+     * (nothing may reach it before the writer sends).
+     */
+    tutorQueue: (replies: { text?: string; tools?: { name: string; input: unknown }[] }[]) => {
+      for (const r of replies) core.ai.queue.push({ events: openAiChatStream(r) })
+    },
+    aiRequests: () => core.ai.requests.length,
+    /** The tutor's chat history as stored (project id to chat titles). */
+    tutorHistory: () => Object.fromEntries([...core.ai.history].map(([project, chats]) => [project, [...chats.values()].map((c) => c.title)])),
     /** The export wizard's fixture: manuscript.json, comments.json, rewrites.json and the book's styles. */
     exportWizardFixture: () => ({ doc: WIZARD_FIXTURE_DOC, comments: WIZARD_FIXTURE_COMMENTS, rewrites: WIZARD_FIXTURE_REWRITES, styles: WIZARD_FIXTURE_STYLES }),
     /** The export wizard's state (open, step, the run's phase). */
@@ -556,6 +570,7 @@ export async function installE2EBackend(): Promise<void> {
   core.state.failFonts = !!config.failFonts
   if (config.fonts) core.state.fonts = config.fonts
   if (config.defaultAuthor !== undefined) core.state.defaultAuthor = config.defaultAuthor
+  if (config.tutorConnections) core.ai.connections = structuredClone(config.tutorConnections)
   // A preferences.json seed for this launch, when there is no file yet (e2e/helpers.ts
   // seedPreferences: specs that need continuous scroll navigation).
   const seed = (window as unknown as { __nvE2EPreferences?: string }).__nvE2EPreferences

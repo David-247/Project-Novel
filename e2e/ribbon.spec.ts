@@ -132,6 +132,7 @@ const REACH: Record<RibbonTab, Record<string, [string, string][]>> = {
       ['ribbon.cmd.rewrite.prev', 'rewrite.prev'],
       ['ribbon.cmd.rewrite.next', 'rewrite.next'],
     ],
+    'review.tutor': [['ribbon.cmd.tutor.toggle', 'tutor.toggle']],
   },
   view: {
     'view.views': [
