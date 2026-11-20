@@ -174,6 +174,9 @@ export function createOutputTools(ctx: OutputToolsContext): ToolSet {
     if (isRejection(p)) return p
     const at = p.text.indexOf(item.original)
     if (at < 0) return { rejected: 'not_found', instruction: `Quote "original" exactly as it is in ${p.id}.` }
+    // Never guess which one: the writer would see the fix land on the wrong occurrence.
+    if (p.text.indexOf(item.original, at + 1) >= 0)
+      return { rejected: 'ambiguous', instruction: `"${item.original}" occurs more than once in ${p.id}. Quote enough of the words around it to make it unique.` }
     if (item.suggestion === item.original) return { rejected: 'no_change', instruction: EXPLAIN_INSTEAD }
     const revised = p.text.slice(0, at) + item.suggestion + p.text.slice(at + item.original.length)
     // The suggestion is guarded in its paragraph, so the passage is the paragraph, not the snippet.

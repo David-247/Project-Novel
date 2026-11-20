@@ -5,7 +5,7 @@
  *   backend.ai.script = { events: sseResponse(['data: {...}\n\n', 'data: [DONE]\n\n']) }
  *
  * Each event is sent on the request's channel (`onEvent`, anything with an `onmessage` handler) on
- * its own macrotask. `pauseAfter: n` holds the stream after the n-th event until it is cancelled.
+ * its own macrotask (from `burstFrom: n` on, all in one task). `pauseAfter: n` holds the stream after the n-th event until it is cancelled.
  * Like Rust, a failure is sent as an `error` event and also rejects the invoke, and a cancel (also
  * one that overtakes its request) ends the stream with a `cancelled` error. No script means no
  * connection (`not_connected`).
@@ -47,6 +47,8 @@ export interface FakeAiScript {
   events: FakeAiEvent[]
   /** Hold the stream after this many events until cancelled. */
   pauseAfter?: number
+  /** From this event index on, send the events back to back in one task (chunks pile up unread). */
+  burstFrom?: number
 }
 
 interface ChannelLike {
@@ -144,7 +146,7 @@ export function createFakeAi() {
     try {
       for (let i = 0; i < script!.events.length; i++) {
         if (i === script!.pauseAfter) await new Promise<void>((resolve) => (wake = resolve))
-        else await new Promise((resolve) => setTimeout(resolve, 0))
+        else if (script!.burstFrom === undefined || i <= script!.burstFrom) await new Promise((resolve) => setTimeout(resolve, 0))
         if (cancelled) failWith('cancelled', 'The request was cancelled.')
         const event = script!.events[i]
         send(event)

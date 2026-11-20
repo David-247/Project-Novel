@@ -20,6 +20,8 @@ describe('checkMechanical', () => {
     ['curly quotes for straight ones', 'He said "no" and left.', 'He said “no” and left.', 'mechanical'],
     ['a capital at the start of a sentence', 'It rained. the sun came out.', 'It rained. The sun came out.', 'mechanical'],
     ['a fix in dialogue with a tag', '"Stop!" she said. "Your to late."', '"Stop!" she said. "You\'re too late."', 'mechanical'],
+    ['two sentences merged, no words added', 'I saw the dog. It barked.', 'I saw the dog, it barked.', 'mechanical'],
+    ['a one-word sentence with its typo fixed', 'Yse. I agree.', 'Yes. I agree.', 'mechanical'],
     ['10 % of a passage, one word per sentence', PASSAGE, PASSAGE.replace(/(Dog [1-5] ran) past/g, '$1 passed'), 'mechanical'],
   ]
   it.each(allowed)('allows %s', (_name, original, revised, kind) => {
@@ -34,6 +36,8 @@ describe('checkMechanical', () => {
     ['a sentence split in two', 'I saw the dog and it barked.', 'I saw the dog. It barked.', 'added_sentence'],
     ['a line break inserted', 'I saw the dog and it barked.', 'I saw the dog\nand it barked.', 'added_sentence'],
     ['20 % of the words changed across a passage of 1-word fixes', PASSAGE, tenFixes, 'passage_fraction'],
+    ['two sentences merged and a new one appended', 'I saw the dog. It barked.', 'I saw the dog, it barked. Run.', 'added_sentence'],
+    ['a sentence replaced by a new one in front of a kept one', 'It barked. I ran.', 'Dogs bark loudly. It barked, I ran.', 'added_sentence'],
     ['a sentence deleted', 'I saw the dog. It barked at the moon.', 'I saw the dog.', 'too_many_words'],
   ]
   it.each(rejected)('rejects %s', (_name, original, revised, reason) => {
@@ -63,6 +67,14 @@ describe('checkPassage (several paragraphs)', () => {
     const paragraphs = Array.from({ length: 5 }, (_, i) => `Dog ${i + 1} ran past here. Dog ${i + 1} ran past there.`)
     expect(checkPassage(paragraphs, paragraphs.map((t) => t.replace(/ past here/, ' passed here')))).toEqual({ ok: true, kind: 'mechanical' })
     expect(checkPassage(paragraphs, paragraphs.map((t) => t.replace(/ past /g, ' passed ')))).toEqual({ ok: false, reason: 'passage_fraction' })
+  })
+
+  it('counts only the changed paragraphs: padding a rewrite with unchanged ones does not dilute it', () => {
+    const rewrite = Array.from({ length: 5 }, (_, i) => `Dog ${i + 1} ran past the house.`).join(' ')
+    const revised = rewrite.replace(/ran past the/g, 'walked by a')
+    expect(checkPassage([rewrite], [revised])).toEqual({ ok: false, reason: 'passage_fraction' })
+    const filler = Array.from({ length: 10 }, (_, i) => `Cat ${i + 1} sat here.`).join(' ')
+    expect(checkPassage([rewrite, filler, filler], [revised, filler, filler])).toEqual({ ok: false, reason: 'passage_fraction' })
   })
 
   it('is formatting only when every paragraph is unchanged', () => {

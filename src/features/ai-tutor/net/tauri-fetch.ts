@@ -116,6 +116,8 @@ export function createTauriFetch(connectionId: string): typeof fetch {
     let settled = false
     let controller: ReadableStreamDefaultController<Uint8Array> | null = null
     let finished = false
+    /** A provider error that came while chunks were still unread: raised once the reader drains them. */
+    let lateError: unknown = null
     let resolveHead!: (r: Response) => void
     let rejectHead!: (e: unknown) => void
     const head = new Promise<Response>((resolve, reject) => {
@@ -123,20 +125,30 @@ export function createTauriFetch(connectionId: string): typeof fetch {
       rejectHead = reject
     })
 
-    /** End the request with an error: reject the fetch, or error the body once it has started. */
-    const fail = (e: unknown) => {
+    /**
+     * End the request with an error: reject the fetch, or error the body once it has started. A body
+     * error from the provider (`drain`) waits until the chunks already queued are read, so the partial
+     * reply is kept (Review Focus 3); erroring a stream at once would throw its queue away. An abort
+     * errors at once.
+     */
+    const fail = (e: unknown, drain = false) => {
       if (finished) return
       finished = true
       signal?.removeEventListener('abort', onAbort)
       if (!settled) {
         settled = true
         rejectHead(e)
-      } else {
-        try {
-          controller?.error(e)
-        } catch {
-          // the body was already cancelled by its reader
-        }
+        return
+      }
+      // highWaterMark 0: desiredSize is minus the number of queued chunks.
+      if (drain && controller && (controller.desiredSize ?? 0) < 0) {
+        lateError = e
+        return
+      }
+      try {
+        controller?.error(e)
+      } catch {
+        // the body was already cancelled by its reader
       }
     }
 
@@ -157,6 +169,10 @@ export function createTauriFetch(connectionId: string): typeof fetch {
                 start: (c) => {
                   controller = c
                 },
+                // Called when a read finds the queue empty: the late error's turn.
+                pull: (c) => {
+                  if (lateError !== null) c.error(lateError)
+                },
                 cancel: () => {
                   // The reader gave up: stop the request too.
                   if (finished) return
@@ -164,7 +180,7 @@ export function createTauriFetch(connectionId: string): typeof fetch {
                   signal?.removeEventListener('abort', onAbort)
                   void invoke('ai_fetch_cancel', { requestId }).catch(() => {})
                 },
-              })
+              }, { highWaterMark: 0 })
           settled = true
           resolveHead(new Response(stream, { status: event.status, headers: event.headers }))
           break
@@ -183,7 +199,7 @@ export function createTauriFetch(connectionId: string): typeof fetch {
           }
           break
         case 'error':
-          fail(toAiError(event))
+          fail(toAiError(event), true)
           break
       }
     }

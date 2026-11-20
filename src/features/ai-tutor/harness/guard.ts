@@ -13,17 +13,25 @@
  * 2. **Tokens.** Both texts are cut into tokens: a *word* is a run of letters and digits, with inner
  *    apostrophes or hyphens (`don't`, `well-known`, `Paul’s`); every other non-space character is a
  *    *punctuation* token on its own. Whitespace is not a token.
- * 3. **Diff.** The token lists are diffed (longest common subsequence). Each hunk (a maximal run of
+ * 3. **Diff.** The token lists are diffed (longest common subsequence, a kept word weighing twice a
+ *    kept punctuation mark). Each hunk (a maximal run of
  *    removed and added tokens between unchanged ones) changes `max(words removed, words added)` words:
  *    a replaced word counts 1, an inserted or deleted word 1 each. Punctuation tokens count 0, so
  *    adding a comma, or straight quotes made curly, change no words. A hunk belongs to the sentence of
  *    the original holding its first token (an insertion: the token before it).
  * 4. **Sentences.** `splitSentences` cuts the texts (rules below). It rejects, in this order:
  *    - `added_sentence`: the revision has more sentences than the original (an appended sentence, a
- *      sentence split in two, a line break added). Splitting a run-on sentence is explained in chat.
+ *      sentence split in two, a line break added), or it has a *fresh* sentence (one with words, none
+ *      of them kept from the original by the diff) that no *lost* original sentence (one with words,
+ *      none of them kept) accounts for: more fresh sentences than lost ones. So two sentences merged
+ *      to make room for a new one is caught, while a merge alone, or a one-word sentence with its typo
+ *      fixed (`Yse.` → `Yes.`: one fresh, one lost), passes. Splitting a run-on sentence is explained
+ *      in chat.
  *    - `too_many_words`: some sentence has more than `GUARD_LIMITS.wordsPerSentence` changed words.
  *    - `passage_fraction`: the changed words of the whole text exceed
- *      `max(wordsPerSentence, passageFraction × the original's words)`. The floor keeps a short passage
+ *      `max(wordsPerSentence, passageFraction × the original's words)`, where for several paragraphs
+ *      (`checkPassage`) only the paragraphs whose text changed count, words and changes alike: unchanged
+ *      paragraphs cannot dilute a rewrite (ruling R12 sets the floor). The floor keeps a short passage
  *      (one sentence of four words) from failing on a single typo; a passage can always take what one
  *      sentence may.
  *    Otherwise `{ ok: true, kind: 'mechanical' }`.
@@ -130,7 +138,11 @@ function tokenize(text: string): { tokens: Token[]; sentences: number } {
 
 type Op = { kind: 'same' | 'del' | 'add'; a: number; b: number }
 
-/** A shortest edit script from `a` to `b` (LCS), with the common prefix and suffix trimmed first. */
+/**
+ * An edit script from `a` to `b`: a longest common subsequence where a kept word weighs more than a kept
+ * punctuation mark (so `barked` stays aligned rather than a full stop elsewhere), with the common prefix
+ * and suffix trimmed first.
+ */
 function diff(a: readonly Token[], b: readonly Token[]): Op[] {
   let pre = 0
   while (pre < a.length && pre < b.length && a[pre].text === b[pre].text) pre++
@@ -138,16 +150,18 @@ function diff(a: readonly Token[], b: readonly Token[]): Op[] {
   while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf].text === b[b.length - 1 - suf].text) suf++
   const n = a.length - pre - suf
   const m = b.length - pre - suf
-  // lcs[i][j]: LCS length of a[pre+i..] and b[pre+j..] within the middle.
+  const weight = (t: Token) => (t.word ? 2 : 1)
+  const same = (i: number, j: number) => a[pre + i].text === b[pre + j].text
+  // lcs[i][j]: the best weight of a[pre+i..] and b[pre+j..] within the middle.
   const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1))
   for (let i = n - 1; i >= 0; i--)
-    for (let j = m - 1; j >= 0; j--) lcs[i][j] = a[pre + i].text === b[pre + j].text ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
+    for (let j = m - 1; j >= 0; j--) lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1], same(i, j) ? lcs[i + 1][j + 1] + weight(a[pre + i]) : 0)
   const ops: Op[] = []
   for (let k = 0; k < pre; k++) ops.push({ kind: 'same', a: k, b: k })
   let i = 0
   let j = 0
   while (i < n || j < m) {
-    if (i < n && j < m && a[pre + i].text === b[pre + j].text) ops.push({ kind: 'same', a: pre + i++, b: pre + j++ })
+    if (i < n && j < m && same(i, j) && lcs[i][j] === lcs[i + 1][j + 1] + weight(a[pre + i])) ops.push({ kind: 'same', a: pre + i++, b: pre + j++ })
     else if (j < m && (i === n || lcs[i][j + 1] >= lcs[i + 1][j])) ops.push({ kind: 'add', a: pre + i, b: pre + j++ })
     else ops.push({ kind: 'del', a: pre + i++, b: pre + j })
   }
@@ -155,15 +169,37 @@ function diff(a: readonly Token[], b: readonly Token[]): Op[] {
   return ops
 }
 
-/**
- * The changed words of `revised` against `original` (step 3 of the module comment): in total, per
- * sentence of the original, and the original's word count.
- */
-export function countChangedWords(original: string, revised: string): { total: number; perSentence: number[]; words: number } {
+interface Analysis {
+  total: number
+  perSentence: number[]
+  words: number
+  /** Revised sentences with words, none of them kept from the original. */
+  fresh: number
+  /** Original sentences with words, none of them kept in the revision. */
+  lost: number
+}
+
+/** Sentences of `tokens` (`count` of them) that have words but none of them in `kept`. */
+function sentencesWithoutKept(tokens: readonly Token[], count: number, kept: ReadonlySet<number>): number {
+  const hasWord = Array<boolean>(count).fill(false)
+  const hasKept = Array<boolean>(count).fill(false)
+  tokens.forEach((t, i) => {
+    if (!t.word) return
+    hasWord[t.sentence] = true
+    if (kept.has(i)) hasKept[t.sentence] = true
+  })
+  return hasWord.filter((w, i) => w && !hasKept[i]).length
+}
+
+function analyze(original: string, revised: string): Analysis {
   const a = tokenize(original)
   const b = tokenize(revised)
   const perSentence = Array<number>(a.sentences).fill(0)
   const ops = diff(a.tokens, b.tokens)
+  const keptA = new Set(ops.filter((o) => o.kind === 'same').map((o) => o.a))
+  const keptB = new Set(ops.filter((o) => o.kind === 'same').map((o) => o.b))
+  const fresh = sentencesWithoutKept(b.tokens, b.sentences, keptB)
+  const lost = sentencesWithoutKept(a.tokens, a.sentences, keptA)
   let total = 0
   for (let k = 0; k < ops.length; ) {
     if (ops[k].kind === 'same') {
@@ -190,7 +226,16 @@ export function countChangedWords(original: string, revised: string): { total: n
     if (perSentence.length) perSentence[sentence] += changed
     else perSentence.push(changed)
   }
-  return { total, perSentence, words: a.tokens.filter((t) => t.word).length }
+  return { total, perSentence, words: a.tokens.filter((t) => t.word).length, fresh, lost }
+}
+
+/**
+ * The changed words of `revised` against `original` (step 3 of the module comment): in total, per
+ * sentence of the original, and the original's word count.
+ */
+export function countChangedWords(original: string, revised: string): { total: number; perSentence: number[]; words: number } {
+  const { total, perSentence, words } = analyze(original, revised)
+  return { total, perSentence, words }
 }
 
 /** Whether `revised` is a mechanical (or formatting-only) change of `original`. See the module comment. */
@@ -201,16 +246,19 @@ export function checkMechanical(original: string, revised: string): GuardResult 
 /**
  * `checkMechanical` for a passage of several paragraphs (`revised[i]` replaces `original[i]`): the
  * sentence rules hold in each paragraph (a sentence moved into the next paragraph is an added one), and
- * the passage fraction counts all of them together. Formatting only when every paragraph is unchanged.
+ * the passage fraction counts the changed paragraphs together (unchanged ones are left out, so padding
+ * a rewrite with untouched paragraphs cannot dilute it). Formatting only when every paragraph is
+ * unchanged.
  */
 export function checkPassage(original: readonly string[], revised: readonly string[]): GuardResult {
   if (original.length !== revised.length) throw new Error('checkPassage: one revised text per paragraph')
   if (original.every((o, i) => o === revised[i])) return { ok: true, kind: 'formatting' }
-  if (original.some((o, i) => splitSentences(revised[i]).length > splitSentences(o).length)) return { ok: false, reason: 'added_sentence' }
+  const changed = original.map((o, i) => ({ o, r: revised[i] })).filter(({ o, r }) => o !== r)
+  const analyses = changed.map(({ o, r }) => ({ c: analyze(o, r), more: splitSentences(r).length > splitSentences(o).length }))
+  if (analyses.some(({ c, more }) => more || c.fresh > c.lost)) return { ok: false, reason: 'added_sentence' }
   let total = 0
   let words = 0
-  for (let i = 0; i < original.length; i++) {
-    const c = countChangedWords(original[i], revised[i])
+  for (const { c } of analyses) {
     if (c.perSentence.some((n) => n > GUARD_LIMITS.wordsPerSentence)) return { ok: false, reason: 'too_many_words' }
     total += c.total
     words += c.words

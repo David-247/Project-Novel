@@ -30,6 +30,31 @@ const decoder = new TextDecoder()
 beforeEach(() => backend.reset())
 
 describe('createTauriFetch', () => {
+  it('keeps the chunks queued ahead of a late error: the body errors only once they are read', async () => {
+    backend.ai.script = {
+      events: [...sseResponse(['one ', 'two ', 'three']).slice(0, 4), { type: 'error', kind: 'rate_limit', message: 'Slow down.' }],
+      burstFrom: 1,
+    }
+    const res = await createTauriFetch('c1')('https://provider.invalid/v1/chat/completions', { method: 'POST', body: '{}' })
+    // Let the burst (three chunks and the error) arrive before anything is read.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    const reader = res.body!.getReader()
+    const got: string[] = []
+    let error: unknown = null
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        got.push(decoder.decode(value))
+      }
+    } catch (e) {
+      error = e
+    }
+    expect(got.join('')).toBe('one two three')
+    expect(error).toBeInstanceOf(AiFetchError)
+    expect((error as AiFetchError).kind).toBe('rate_limit')
+  })
+
   it('streams the scripted SSE text deltas through streamText in order', async () => {
     backend.ai.script = { events: sseResponse([delta('Hel'), delta('lo, '), delta('writer', 'stop') + 'data: [DONE]\n\n']) }
     const result = streamText({ model: model(), prompt: 'hi' })

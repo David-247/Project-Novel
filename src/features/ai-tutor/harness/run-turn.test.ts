@@ -4,6 +4,8 @@ import { convertArrayToReadableStream, MockLanguageModelV4 } from 'ai/test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useStore, type PageInfo } from '@/shared/store'
 import { backend } from '@/test-utils/fake-tauri'
+import { sseResponse } from '@/test-utils/fake-ai'
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 
 vi.mock('@tauri-apps/api/core', async () => (await import('@/test-utils/fake-tauri')).coreModule)
 
@@ -14,7 +16,7 @@ vi.mock('../providers/registry', () => ({
 
 import { __resetSpellcheckCacheForTests } from '@/features/spellcheck'
 import type { Connection } from '../connections/types'
-import { AiFetchError } from '../net/tauri-fetch'
+import { AiFetchError, createTauriFetch } from '../net/tauri-fetch'
 import { CHARTER_SOURCE, promptText, scriptText } from './assemble'
 import { EXPLAIN_INSTEAD } from './output-tools'
 import { createTutorSession, runTutorTurn, type TurnEvent, type TutorSession } from './run-turn'
@@ -190,6 +192,31 @@ describe('runTutorTurn', () => {
     expect(result.value.rejected[0].instruction).toBe(EXPLAIN_INSTEAD)
   })
 
+  it('rejects an original that occurs more than once in its paragraph, asking for more context', async () => {
+    const ed = makeEditor(h1('One'), p(t('The cat sat by their door and their gate.')))
+    editor = ed
+    session = createTutorSession(ed)
+    const id = session.idx.idFor(blockPosOf(ed, 'The cat'))
+    const model = scripted(
+      [
+        call('list_corrections', {
+          items: [
+            { paragraph: id, kind: 'grammar', original: 'their', suggestion: 'there', explanation: 'Ambiguous.' },
+            { paragraph: id, kind: 'grammar', original: 'by their', suggestion: 'by the', explanation: 'Unique.' },
+          ],
+        }),
+        finish('tool-calls'),
+      ],
+      [...text('Done.'), finish('stop')],
+    )
+    const { events } = await turn()
+    expect(ofType(events, 'corrections').flatMap((e) => e.items.map((c) => c.original))).toEqual(['by their'])
+    const [result] = toolResultsOf(model.doStreamCalls[1]) as { value: { rejected: { item: number; rejected: string; instruction: string }[] } }[]
+    expect(result.value.rejected).toHaveLength(1)
+    expect(result.value.rejected[0]).toMatchObject({ item: 0, rejected: 'ambiguous' })
+    expect(result.value.rejected[0].instruction).toMatch(/more than once/)
+  })
+
   it('allows a paragraph-style change with the text unchanged, and rejects an unknown style', async () => {
     const { dog } = setup()
     scripted(
@@ -291,6 +318,27 @@ describe('runTutorTurn', () => {
     expect(ofType(events, 'error')).toEqual([{ type: 'error', kind: 'rate_limit', message: 'The provider is limiting requests. Try again in a moment.' }])
     expect(events.at(-1)).toEqual({ type: 'done', incomplete: true })
     expect(messages.at(-1)).toEqual({ role: 'assistant', content: 'The first half' })
+  })
+
+  it('keeps every delta queued ahead of a late proxy error, through the real fetch shim (Review Focus 3)', async () => {
+    setup()
+    const sse = (content: string) =>
+      `data: ${JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 0, model: 'm', choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] })}
+
+`
+    // The head, then three chunks and the error in one task: the chunks are still queued when it arrives.
+    backend.ai.script = {
+      events: [...sseResponse([sse('The first '), sse('half and '), sse('the tail')]).slice(0, 4), { type: 'error', kind: 'rate_limit', message: 'Slow down.' }],
+      burstFrom: 1,
+    }
+    hoisted.model = createOpenAICompatible({ name: 'test', baseURL: 'https://provider.invalid/v1', apiKey: 'x', fetch: createTauriFetch('conn-1') }).chatModel('m')
+    const { events, messages } = await turn()
+    expect(ofType(events, 'text').map((e) => e.delta).join('')).toBe('The first half and the tail')
+    expect(events.slice(-2)).toEqual([
+      { type: 'error', kind: 'rate_limit', message: 'Slow down.' },
+      { type: 'done', incomplete: true },
+    ])
+    expect(messages.at(-1)).toEqual({ role: 'assistant', content: 'The first half and the tail' })
   })
 
   it('maps a 429 before any reply (the request rejected) to error{kind:rate_limit}', async () => {

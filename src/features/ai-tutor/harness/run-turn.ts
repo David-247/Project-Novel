@@ -86,17 +86,15 @@ function kindForStatus(status: number | undefined): AiErrorKind {
  * anything else gets a fixed message for its kind, never the error's own text (it could quote a body).
  */
 function turnError(e: unknown): { kind: AiErrorKind; message: string } {
-  let x: unknown = e
-  for (let depth = 0; x && depth < 5; depth++) {
-    if (x instanceof AiFetchError) return { kind: x.kind, message: x.message }
-    if (APICallError.isInstance(x)) {
-      const kind = kindForStatus(x.statusCode)
-      return { kind, message: MESSAGES[kind] }
-    }
-    const next: unknown = typeof x === 'object' ? ((x as { cause?: unknown }).cause ?? (x as { lastError?: unknown }).lastError) : undefined
-    x = next
-  }
-  return { kind: 'provider', message: MESSAGES.provider }
+  // The SDK wraps a proxy error that breaks a streaming body ("Failed to process successful response"),
+  // so the whole cause chain is searched for it before an HTTP status is used.
+  const chain: unknown[] = []
+  for (let x: unknown = e; x && typeof x === 'object' && chain.length < 6; x = (x as { cause?: unknown }).cause ?? (x as { lastError?: unknown }).lastError) chain.push(x)
+  const proxy = chain.find((x): x is AiFetchError => x instanceof AiFetchError)
+  if (proxy) return { kind: proxy.kind, message: proxy.message }
+  const api = chain.find((x) => APICallError.isInstance(x))
+  const kind = api ? kindForStatus(api.statusCode) : 'provider'
+  return { kind, message: MESSAGES[kind] }
 }
 
 const isAbort = (e: unknown, signal: AbortSignal) => signal.aborted || (e instanceof Error && e.name === 'AbortError') || (e instanceof DOMException && e.name === 'AbortError')
