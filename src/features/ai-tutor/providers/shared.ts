@@ -1,0 +1,61 @@
+import { generateText, tool, type LanguageModel } from 'ai'
+import { z } from 'zod'
+import { createTauriFetch } from '../net/tauri-fetch'
+import type { Connection } from '../connections/types'
+import type { ModelInfo } from './types'
+
+/**
+ * The origin every SDK provider is built with. The fetch shim drops it and forwards only the path;
+ * Rust adds the real host (the provider's fixed base URL, which already carries any `/v1`-style
+ * prefix, or the connection's saved address). So the SDK must see a bare origin: its own paths
+ * (`/messages`, `/chat/completions`, `/models`) are then exactly what Rust expects.
+ */
+export const PLACEHOLDER_ORIGIN = 'https://provider.invalid'
+
+/** The SDK insists on a key; it is a dummy, stripped by the shim, and Rust adds the stored one. */
+export const DUMMY_KEY = 'from-keychain'
+
+export const sdkOptions = (c: Connection) => ({
+  baseURL: PLACEHOLDER_ORIGIN,
+  apiKey: DUMMY_KEY,
+  fetch: createTauriFetch(c.id),
+})
+
+/** A curated list entry: these ids are known to support tool calls. */
+export const curated = (list: readonly [id: string, label: string][]): ModelInfo[] =>
+  list.map(([id, label]) => ({ id, label, tools: 'yes' as const }))
+
+/** GET `/models` (OpenAI-style `{data:[{id}]}`) through the proxy. Tool support is unknown. */
+export async function listOpenAiModels(c: Connection, tools: ModelInfo['tools'] = 'unknown'): Promise<ModelInfo[]> {
+  const res = await createTauriFetch(c.id)(`${PLACEHOLDER_ORIGIN}/models`, { method: 'GET' })
+  if (!res.ok) throw new Error(`Could not list models (HTTP ${res.status}).`)
+  const json = (await res.json()) as { data?: { id?: unknown; name?: unknown; supported_parameters?: unknown }[] }
+  return (json.data ?? [])
+    .filter((m) => typeof m.id === 'string')
+    .map((m) => ({
+      id: m.id as string,
+      label: typeof m.name === 'string' ? m.name : (m.id as string),
+      tools: Array.isArray(m.supported_parameters)
+        ? m.supported_parameters.includes('tools')
+          ? ('yes' as const)
+          : ('no' as const)
+        : tools,
+    }))
+}
+
+/** One trivial tool-call request: true only when the model answers by calling `ping`. Never throws. */
+export async function probeToolCall(model: LanguageModel): Promise<boolean> {
+  try {
+    const result = await generateText({
+      model,
+      prompt: 'Call the ping tool now. Do not answer in text.',
+      tools: { ping: tool({ description: 'Reply to a ping.', inputSchema: z.object({}) }) },
+      toolChoice: 'required',
+      maxRetries: 0,
+      maxOutputTokens: 64,
+    })
+    return result.toolCalls.length > 0
+  } catch {
+    return false
+  }
+}
