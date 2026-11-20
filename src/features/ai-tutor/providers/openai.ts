@@ -1,5 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { curated, sdkOptions } from './shared'
+import { curated, listHostedModels, sdkOptions } from './shared'
 import type { ProviderAdapter } from './types'
 
 // Source: OpenAI API model list, https://developers.openai.com/api/docs/models (read 2026-11-19).
@@ -15,7 +15,7 @@ export const openai: ProviderAdapter = {
   label: 'OpenAI',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://platform.openai.com/api-keys',
-  listModels: async () => MODELS,
+  listModels: (c) => listHostedModels(c, MODELS),
   // `.chat` is Chat Completions (`/chat/completions`); the default model object would use `/responses`.
   languageModel: (c, modelId) => createOpenAI(sdkOptions(c)).chat(modelId),
 }

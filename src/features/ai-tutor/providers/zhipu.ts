@@ -1,16 +1,20 @@
 import { compatModel } from './compat'
-import { curated } from './shared'
+import { curated, listHostedModels } from './shared'
 import type { ProviderAdapter } from './types'
 
-// Source: Zhipu AI open platform model overview, https://docs.bigmodel.cn/cn/guide/start/model-overview
-// (read 2026-11-19).
-const MODELS = curated([['glm-4.6', 'GLM-4.6']])
+// Source: Zhipu AI pricing/model overview, https://docs.bigmodel.cn/cn/guide/start/model-overview (2026-11-19),
+// which lists GLM-5.x but says nothing about tools; Alibaba's function-calling page lists GLM-5.x as
+// tool-capable, which is why they are marked so here.
+const MODELS = curated([
+  ['glm-5.3', 'GLM-5.3'],
+  ['glm-5.2', 'GLM-5.2'],
+])
 
 export const zhipu: ProviderAdapter = {
   id: 'zhipu',
   label: 'GLM (Zhipu AI)',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
-  listModels: async () => MODELS,
+  listModels: (c) => listHostedModels(c, MODELS),
   languageModel: compatModel,
 }

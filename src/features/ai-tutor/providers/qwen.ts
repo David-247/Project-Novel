@@ -1,12 +1,13 @@
 import { compatModel } from './compat'
-import { curated } from './shared'
+import { curated, listHostedModels } from './shared'
 import type { ProviderAdapter } from './types'
 
-// Source: Alibaba Cloud Model Studio, https://www.alibabacloud.com/help/en/model-studio/models. The
-// stable aliases qwen-max and qwen-plus are its function-calling text models (checked 2026-11-19).
+// Source: https://www.alibabacloud.com/help/en/model-studio/models and its qwen-function-calling page
+// (2026-11-19). These are API model ids, not family labels.
 const MODELS = curated([
-  ['qwen-max', 'Qwen Max'],
-  ['qwen-plus', 'Qwen Plus'],
+  ['qwen4-max', 'Qwen4 Max'],
+  ['qwen3.7-plus', 'Qwen3.7 Plus'],
+  ['qwen3.8-flash', 'Qwen3.8 Flash'],
 ])
 
 export const qwen: ProviderAdapter = {
@@ -14,6 +15,6 @@ export const qwen: ProviderAdapter = {
   label: 'Qwen (Alibaba)',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://modelstudio.console.alibabacloud.com/',
-  listModels: async () => MODELS,
+  listModels: (c) => listHostedModels(c, MODELS),
   languageModel: compatModel,
 }

@@ -1,5 +1,5 @@
 import { createXai } from '@ai-sdk/xai'
-import { curated, sdkOptions } from './shared'
+import { curated, listHostedModels, sdkOptions } from './shared'
 import type { ProviderAdapter } from './types'
 
 // Source: xAI model list, https://docs.x.ai/developers/models (read 2026-11-19).
@@ -11,6 +11,6 @@ export const xai: ProviderAdapter = {
   label: 'xAI',
   connectKinds: ['api_key'],
   keyHelpUrl: 'https://console.x.ai',
-  listModels: async () => MODELS,
+  listModels: (c) => listHostedModels(c, MODELS),
   languageModel: (c, modelId) => createXai(sdkOptions(c)).languageModel(modelId),
 }

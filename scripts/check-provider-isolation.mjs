@@ -9,6 +9,9 @@
 //   2. No provider API host outside those two places: a request target baked in elsewhere would
 //      bypass the descriptor table (and the CSP-closed proxy's host rules). Tests (and Rust `#[cfg(test)]`
 //      modules) are exempt here too; they may name a host as test data.
+//   3. No branching on a provider id outside providers/: `provider === 'x'` / `!== 'x'` (either side,
+//      also `.provider`) and `case 'x':` labels (except `case 'custom':`, an everyday word). Provider differences belong in an adapter, not in callers.
+//      Same exemptions as rule 1 (tests, src/test-utils); Rust is not scanned for this rule.
 //
 //   node scripts/check-provider-isolation.mjs
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -29,6 +32,13 @@ const SDK_IMPORT = /(?:from\s+|import\s*\(\s*|import\s+|require\s*\(\s*)['"]@ai-
 const HOSTS =
   /api\.anthropic\.com|api\.openai\.com|chatgpt\.com\/backend-api|api\.x\.ai|api\.deepseek\.com|open\.bigmodel\.cn|dashscope[\w.-]*\.aliyuncs\.com|openrouter\.ai\/api/i
 
+const IDS = 'anthropic|openai|xai|deepseek|zhipu|qwen|openrouter|ollama|lmstudio|custom|chatgpt'
+// `case 'custom':` is an ordinary word elsewhere (header/footer slots), so only the case rule skips it.
+const IDS_CASE = IDS.replace('|custom', '')
+const BRANCH = new RegExp(
+  String.raw`\bprovider\s*[!=]==?\s*['"](?:${IDS})['"]|['"](?:${IDS})['"]\s*[!=]==?\s*[\w.?]*\bprovider\b|\bcase\s+['"](?:${IDS_CASE})['"]\s*:`,
+)
+
 const isTest = (p) => /\.test\.tsx?$/.test(p) || p.startsWith('src/test-utils/')
 
 /** The violations in one file's text: [{ line, rule }]. */
@@ -40,6 +50,7 @@ export function violations(path, text) {
   const out = []
   text.split('\n').forEach((line, i) => {
     if (SDK_IMPORT.test(line)) out.push({ line: i + 1, rule: 'SDK provider package import outside providers/' })
+    if (!path.endsWith('.rs') && BRANCH.test(line)) out.push({ line: i + 1, rule: 'branching on a provider id outside providers/' })
     if (HOSTS.test(line)) out.push({ line: i + 1, rule: 'provider API host outside providers/ and providers.rs' })
   })
   return out

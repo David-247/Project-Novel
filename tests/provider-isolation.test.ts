@@ -19,6 +19,27 @@ describe('provider isolation gate', () => {
     expect(host).toHaveLength(1)
   })
 
+  it('flags branching on a provider id (comparison and case label) outside providers/', () => {
+    for (const line of [
+      "if (c.provider === 'anthropic') {",
+      'if (conn.provider !== "xai") return',
+      "const ok = provider === 'custom'",
+      "if ('ollama' === c.provider) {",
+      "  case 'openrouter':",
+    ]) {
+      expect(violations('src/features/ai-tutor/chat/x.ts', line), line).toHaveLength(1)
+    }
+  })
+
+  it('does not flag other uses of a provider id, or branching inside providers/ and tests', () => {
+    for (const line of ["const ids = ['anthropic', 'openai']", "if (c.provider === other.provider) {", "case 'other':", "id: 'anthropic',"]) {
+      expect(violations('src/features/ai-tutor/chat/x.ts', line), line).toEqual([])
+    }
+    expect(violations('src/features/ai-tutor/providers/x.ts', "if (c.provider === 'anthropic') {")).toEqual([])
+    expect(violations('src/features/ai-tutor/chat/x.test.ts', "if (c.provider === 'anthropic') {")).toEqual([])
+    expect(violations('src/test-utils/x.ts', "case 'xai':")).toEqual([])
+  })
+
   it('allows providers/, providers.rs, provider-neutral packages, tests and the id union', () => {
     expect(violations('src/features/ai-tutor/providers/a.ts', "import x from '@ai-sdk/anthropic'")).toEqual([])
     expect(violations('src-tauri/src/ai/providers.rs', 'base_url: "https://api.x.ai/v1"')).toEqual([])

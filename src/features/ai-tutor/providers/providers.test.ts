@@ -126,6 +126,42 @@ describe('adapters route through the proxy', () => {
   })
 })
 
+describe('hosted listModels', () => {
+  it('merges the curated list (first, tools kept) with the provider models, extras unknown', async () => {
+    backend.ai.script = { events: jsonResponse({ data: [{ id: 'gpt-extra' }, { id: 'gpt-6.2-sol' }, { id: 'gpt-other', display_name: 'Other' }] }) }
+    const curatedIds = (await (async () => { backend.ai.script = null; return getAdapter('openai').listModels(conn('openai')) })()).map((m) => m.id)
+    backend.ai.script = { events: jsonResponse({ data: [{ id: 'gpt-extra' }, { id: 'gpt-6.2-sol' }, { id: 'gpt-other', display_name: 'Other' }] }) }
+    const models = await getAdapter('openai').listModels(conn('openai'))
+    expect(models.map((m) => m.id)).toEqual([...curatedIds, 'gpt-extra', 'gpt-other'])
+    expect(models.filter((m) => curatedIds.includes(m.id)).every((m) => m.tools === 'yes')).toBe(true)
+    expect(models.slice(curatedIds.length)).toEqual([
+      { id: 'gpt-extra', label: 'gpt-extra', tools: 'unknown' },
+      { id: 'gpt-other', label: 'Other', tools: 'unknown' },
+    ])
+    expect(backend.ai.requests[0].req).toMatchObject({ method: 'GET', path: '/models' })
+  })
+
+  it('does not trust the provider to mark extra ids as tool-capable', async () => {
+    backend.ai.script = { events: jsonResponse({ data: [{ id: 'new-model', supported_parameters: ['tools'] }] }) }
+    const models = await getAdapter('anthropic').listModels(conn('anthropic'))
+    const extra = models.find((m) => m.id === 'new-model')!
+    expect(extra.tools).toBe('unknown')
+    expect(modelSupportsTools(conn('anthropic'), extra)).toBe(false)
+    expect(modelSupportsTools(conn('anthropic', { toolSupport: { 'new-model': true } }), extra)).toBe(true)
+  })
+
+  it.each([
+    ['a failing request', [{ type: 'error', kind: 'provider', message: 'boom' }] as FakeAiEvent[]],
+    ['an HTTP error', [{ type: 'head', status: 500, headers: [] }, { type: 'end' }] as FakeAiEvent[]],
+    ['a malformed body', [{ type: 'head', status: 200, headers: [] }, { type: 'chunk', data: toBase64Text('not json') }, { type: 'end' }] as FakeAiEvent[]],
+  ])('falls back to the curated list on %s', async (_name, events) => {
+    backend.ai.script = { events }
+    const models = await getAdapter('deepseek').listModels(conn('deepseek'))
+    expect(models.map((m) => m.id)).toEqual(['deepseek-v4-pro', 'deepseek-flash'])
+    expect(models.every((m) => m.tools === 'yes')).toBe(true)
+  })
+})
+
 describe('modelSupportsTools', () => {
   const m = (tools: 'yes' | 'no' | 'unknown') => ({ id: 'm1', label: 'm1', tools })
 

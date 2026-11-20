@@ -29,12 +29,12 @@ export const curated = (list: readonly [id: string, label: string][]): ModelInfo
 export async function listOpenAiModels(c: Connection, tools: ModelInfo['tools'] = 'unknown'): Promise<ModelInfo[]> {
   const res = await createTauriFetch(c.id)(`${PLACEHOLDER_ORIGIN}/models`, { method: 'GET' })
   if (!res.ok) throw new Error(`Could not list models (HTTP ${res.status}).`)
-  const json = (await res.json()) as { data?: { id?: unknown; name?: unknown; supported_parameters?: unknown }[] }
+  const json = (await res.json()) as { data?: { id?: unknown; name?: unknown; display_name?: unknown; supported_parameters?: unknown }[] }
   return (json.data ?? [])
     .filter((m) => typeof m.id === 'string')
     .map((m) => ({
       id: m.id as string,
-      label: typeof m.name === 'string' ? m.name : (m.id as string),
+      label: typeof m.display_name === 'string' ? m.display_name : typeof m.name === 'string' ? m.name : (m.id as string),
       tools: Array.isArray(m.supported_parameters)
         ? m.supported_parameters.includes('tools')
           ? ('yes' as const)
@@ -58,4 +58,20 @@ export async function probeToolCall(model: LanguageModel): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * A hosted provider's models: the curated list (tool-capable, kept first with its flag) merged with the
+ * provider's own `/models`, whose extra ids are `unknown` (unsupported until the user overrides it). Any
+ * failure of that request falls back to the curated list alone, so a stale curated id never locks a user out.
+ */
+export async function listHostedModels(c: Connection, list: ModelInfo[]): Promise<ModelInfo[]> {
+  let remote: ModelInfo[]
+  try {
+    remote = await listOpenAiModels(c)
+  } catch {
+    return list
+  }
+  const known = new Set(list.map((m) => m.id))
+  return [...list, ...remote.filter((m) => !known.has(m.id)).map((m) => ({ ...m, tools: 'unknown' as const }))]
 }
