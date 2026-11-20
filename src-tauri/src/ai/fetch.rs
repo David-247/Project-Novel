@@ -535,6 +535,7 @@ mod tests {
                 base_url: Some(self.0.clone()),
                 secret: Some(Secret::new(SECRET)),
                 insecure_http_accepted: false,
+                binding: String::new(),
             })
         }
     }

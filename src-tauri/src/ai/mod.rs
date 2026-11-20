@@ -131,15 +131,21 @@ pub struct ResolvedConnection {
     /// The user accepted plain `http` for a non-loopback host (a LAN server). Ignored for https and
     /// loopback hosts.
     pub insecure_http_accepted: bool,
+    /// What the secret was released for: the saved connection's provider, auth and origin
+    /// (`connections::binding`). Empty when no saved connection backs it (tests).
+    pub binding: String,
 }
 
 /// Turns a connection id into its provider, saved base URL and secret (see the module docs).
 pub trait ConnectionResolver: Send + Sync + 'static {
     fn resolve(&self, connection_id: &str) -> Result<ResolvedConnection, AiError>;
 
-    /// Replace a saved connection's secret (a plan sign-in's refreshed token record, `chatgpt.rs`).
-    /// May block. A resolver that cannot store refuses.
-    fn store_secret(&self, _connection_id: &str, _secret: &Secret) -> Result<(), AiError> {
+    /// Replace a saved connection's secret (a plan sign-in's refreshed token record, `chatgpt.rs`),
+    /// only while the connection still has `expected_binding` (the `binding` of the
+    /// [`ResolvedConnection`] the old secret was read from): a connection re-pointed or removed
+    /// meanwhile gets nothing (`connections::changed_meanwhile`). May block. A resolver that cannot
+    /// store refuses.
+    fn store_secret(&self, _connection_id: &str, _expected_binding: &str, _secret: &Secret) -> Result<(), AiError> {
         Err(AiError::new("auth", "The renewed sign-in could not be saved."))
     }
 }

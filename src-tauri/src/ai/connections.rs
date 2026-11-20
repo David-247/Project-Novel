@@ -198,6 +198,25 @@ pub fn replace_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &st
     set_connection_secret(path, secrets, connection_id, secret)
 }
 
+/// The connection was re-pointed (provider, auth or origin) or removed after its secret was read: a
+/// secret derived from the old one (a refreshed token record) is dropped, never bound to the new target.
+pub fn changed_meanwhile() -> AiError {
+    AiError::new("not_connected", "This AI connection was changed while its sign-in was being renewed. Sign in again if you still need it.")
+}
+
+/// [`replace_secret`], only if the saved connection still has `expected_binding` (what the old secret
+/// was read for). Otherwise nothing is written and the error is [`changed_meanwhile`].
+pub fn replace_bound_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &str, expected_binding: &str, secret: &str) -> Result<(), AiError> {
+    super::keychain::check_secret(secret)?;
+    let _lock = write_lock();
+    // Removed: changed. A file that cannot be read is an ordinary failure (the caller keeps the record).
+    let c = find(path, connection_id).map_err(|e| if e == AiError::not_connected() { changed_meanwhile() } else { e })?;
+    if binding(&c) != expected_binding {
+        return Err(changed_meanwhile());
+    }
+    super::keychain::set_secret(secrets, connection_id, &wrap(&c, secret))
+}
+
 /// The saved connection and its secret, if the keychain holds one bound to it. Rust-only (sign-out
 /// revocation, renewing a sign-in); no command returns it.
 pub fn connection_secret(path: &Path, secrets: &dyn SecretStore, connection_id: &str) -> Result<Option<(Connection, Secret)>, AiError> {
@@ -315,11 +334,11 @@ impl ConnectionResolver for FileResolver {
                 stored
             }
         };
-        Ok(ResolvedConnection { provider, base_url, secret, insecure_http_accepted })
+        Ok(ResolvedConnection { provider, base_url, secret, insecure_http_accepted, binding: binding(&connection) })
     }
 
-    fn store_secret(&self, connection_id: &str, secret: &Secret) -> Result<(), AiError> {
-        replace_secret(&self.path, self.secrets.as_ref(), connection_id, secret.expose())
+    fn store_secret(&self, connection_id: &str, expected_binding: &str, secret: &Secret) -> Result<(), AiError> {
+        replace_bound_secret(&self.path, self.secrets.as_ref(), connection_id, expected_binding, secret.expose())
     }
 }
 
@@ -685,5 +704,37 @@ mod tests {
         let f = Fixture::new();
         assert_eq!(f.set_secret("nope", "k").unwrap_err().kind, "not_connected");
         assert!(f.secrets.get("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_stored_secret_must_match_the_connection_it_was_read_for() {
+        let f = Fixture::new();
+        let mut plan = conn("p1", "chatgpt", None);
+        plan.auth = ConnectionAuth::Oauth;
+        f.save(vec![plan.clone()]).unwrap();
+        f.set_secret("p1", "RECORD-1").unwrap();
+        let r = f.resolver();
+        let read = r.resolve("p1").unwrap();
+        // Unchanged: the replacement is stored, bound as before.
+        r.store_secret("p1", &read.binding, &Secret::new("RECORD-2")).unwrap();
+        assert_eq!(r.resolve("p1").unwrap().secret.unwrap().expose(), "RECORD-2");
+        // Re-pointed (provider, auth or origin) after the read: refused, nothing stored for the new target.
+        let mut evil = conn("p1", "custom", Some("https://evil.example/v1"));
+        evil.auth = ConnectionAuth::Oauth;
+        let mut api_key = plan.clone();
+        api_key.auth = ConnectionAuth::ApiKey;
+        for changed in [evil, api_key] {
+            f.save(vec![plan.clone()]).unwrap();
+            f.set_secret("p1", "RECORD-2").unwrap();
+            upsert_connection(&f.path(), f.secrets.as_ref(), changed.clone()).unwrap();
+            assert_eq!(r.store_secret("p1", &read.binding, &Secret::new("RECORD-3")), Err(changed_meanwhile()), "{changed:?}");
+            assert!(f.secrets.get("p1").unwrap().is_none(), "{changed:?}");
+            assert!(r.resolve("p1").map(|c| c.secret.is_none()).unwrap_or(true), "{changed:?}");
+        }
+        // Removed after the read: refused too.
+        f.save(vec![plan.clone()]).unwrap();
+        remove_connection(&f.path(), f.secrets.as_ref(), "p1").unwrap();
+        assert_eq!(r.store_secret("p1", &read.binding, &Secret::new("RECORD-4")), Err(changed_meanwhile()));
+        assert!(f.secrets.get("p1").unwrap().is_none());
     }
 }

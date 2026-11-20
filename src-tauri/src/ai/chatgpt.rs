@@ -662,16 +662,32 @@ pub async fn refresh(client: &reqwest::Client, plan: &PlanSignIn, record: &Token
 /// and a renewed sign-in take it too, so neither can interleave with a refresh.
 pub static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Refreshed records the keychain refused to store, by connection id: kept in memory (the refresh token
-/// has already rotated, so the stored one is spent) and stored again on the next request.
-static PENDING: Mutex<BTreeMap<String, TokenRecord>> = Mutex::new(BTreeMap::new());
+/// Refreshed records the keychain refused to store, by connection id, with the connection binding they
+/// were refreshed for: kept in memory (the refresh token has already rotated, so the stored one is spent)
+/// and stored again on the next request, only while the connection still has that binding.
+static PENDING: Mutex<BTreeMap<String, (String, TokenRecord)>> = Mutex::new(BTreeMap::new());
 
-fn pending_get(connection_id: &str) -> Option<TokenRecord> {
-    PENDING.lock().unwrap_or_else(|e| e.into_inner()).get(connection_id).cloned()
+/// The kept record for `connection_id`, if it was refreshed for `binding`. One kept for another binding
+/// (the connection was re-pointed) is dropped.
+fn pending_get(connection_id: &str, binding: &str) -> Option<TokenRecord> {
+    let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    match pending.get(connection_id) {
+        Some((b, r)) if b == binding => Some(r.clone()),
+        Some(_) => {
+            pending.remove(connection_id);
+            None
+        }
+        None => None,
+    }
 }
 
-fn pending_put(connection_id: &str, record: TokenRecord) {
-    PENDING.lock().unwrap_or_else(|e| e.into_inner()).insert(connection_id.to_owned(), record);
+/// The kept record for `connection_id`, whatever it was refreshed for (sign-out revokes it).
+fn pending_live(connection_id: &str) -> Option<TokenRecord> {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).get(connection_id).map(|(_, r)| r.clone())
+}
+
+fn pending_put(connection_id: &str, binding: &str, record: TokenRecord) {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).insert(connection_id.to_owned(), (binding.to_owned(), record));
 }
 
 fn pending_forget(connection_id: &str) {
@@ -693,11 +709,31 @@ pub fn check_path(plan: &PlanSignIn, path: &str) -> Result<(), AiError> {
     }
 }
 
-async fn store(resolver: &Arc<dyn ConnectionResolver>, connection_id: &str, record: &TokenRecord) -> Result<(), AiError> {
-    let (r, id, secret) = (resolver.clone(), connection_id.to_owned(), record.to_secret());
-    tokio::task::spawn_blocking(move || r.store_secret(&id, &secret))
+async fn store(resolver: &Arc<dyn ConnectionResolver>, connection_id: &str, binding: &str, record: &TokenRecord) -> Result<(), AiError> {
+    let (r, id, b, secret) = (resolver.clone(), connection_id.to_owned(), binding.to_owned(), record.to_secret());
+    tokio::task::spawn_blocking(move || r.store_secret(&id, &b, &secret))
         .await
         .map_err(|_| AiError::new("auth", "The renewed sign-in could not be saved."))?
+}
+
+/// Store a refreshed record for the connection as it was read (`binding`). Stored: forgotten from
+/// memory. Re-pointed or removed meanwhile: dropped, and the request fails. Any other failure: kept in
+/// memory for the next request, and this one goes ahead.
+async fn store_or_keep(resolver: &Arc<dyn ConnectionResolver>, connection_id: &str, binding: &str, record: &TokenRecord) -> Result<(), AiError> {
+    match store(resolver, connection_id, binding, record).await {
+        Ok(()) => {
+            pending_forget(connection_id);
+            Ok(())
+        }
+        Err(e) if e == connections::changed_meanwhile() => {
+            pending_forget(connection_id);
+            Err(e)
+        }
+        Err(_) => {
+            pending_put(connection_id, binding, record.clone());
+            Ok(())
+        }
+    }
 }
 
 /// `conn` with its token record replaced by the access token `ai_fetch` sends (refreshed and saved
@@ -710,7 +746,10 @@ pub async fn with_access_token(
     conn: ResolvedConnection,
     plan: &PlanSignIn,
 ) -> Result<ResolvedConnection, AiError> {
-    let mut record = match pending_get(connection_id) {
+    // Everything below is for the connection as it was read; a refreshed record is stored only while the
+    // connection still has this binding (a webview that re-points it meanwhile gets nothing).
+    let binding = conn.binding.clone();
+    let mut record = match pending_get(connection_id, &binding) {
         Some(p) => p,
         None => read_record(&conn)?,
     };
@@ -720,14 +759,12 @@ pub async fn with_access_token(
             "Novel was not allowed to use your ChatGPT plan. Choose Sign In Again for this connection and allow it, or use an API key.",
         ));
     }
-    if pending_get(connection_id).is_some() || record.needs_refresh(now_secs()) {
+    if pending_get(connection_id, &binding).is_some() || record.needs_refresh(now_secs()) {
         let _one = REFRESH.lock().await;
         // Another request may have refreshed (or stored) while this one waited: look again.
-        record = match pending_get(connection_id) {
+        record = match pending_get(connection_id, &binding) {
             Some(p) => {
-                if store(&resolver, connection_id, &p).await.is_ok() {
-                    pending_forget(connection_id);
-                }
+                store_or_keep(&resolver, connection_id, &binding, &p).await?;
                 p
             }
             None => {
@@ -735,15 +772,15 @@ pub async fn with_access_token(
                 let latest = tokio::task::spawn_blocking(move || r.resolve(&id))
                     .await
                     .map_err(|_| AiError::new("not_connected", "The AI connection could not be read."))??;
+                if latest.binding != binding {
+                    return Err(connections::changed_meanwhile());
+                }
                 read_record(&latest)?
             }
         };
         if record.needs_refresh(now_secs()) {
             let next = refresh(client, plan, &record, now_secs()).await?;
-            match store(&resolver, connection_id, &next).await {
-                Ok(()) => pending_forget(connection_id),
-                Err(_) => pending_put(connection_id, next.clone()),
-            }
+            store_or_keep(&resolver, connection_id, &binding, &next).await?;
             record = next;
         }
     }
@@ -819,7 +856,7 @@ async fn sign_out_inner(
         }
         SignOutRead::Tokens(plan, record) => {
             // A refreshed record the keychain refused is the live one.
-            let live = pending_get(&connection_id).unwrap_or(*record);
+            let live = pending_live(&connection_id).unwrap_or(*record);
             Some(revoke(client, plan_override.unwrap_or(&*plan), &live).await)
         }
         SignOutRead::Unreadable => Some(false),
@@ -1477,9 +1514,11 @@ mod tests {
                 base_url: None,
                 secret: Some(self.secret.lock().unwrap().clone()),
                 insecure_http_accepted: false,
+                binding: "chatgpt|oauth|test".into(),
             })
         }
-        fn store_secret(&self, _id: &str, secret: &Secret) -> Result<(), AiError> {
+        fn store_secret(&self, _id: &str, expected: &str, secret: &Secret) -> Result<(), AiError> {
+            assert_eq!(expected, "chatgpt|oauth|test");
             if *self.fail_store.lock().unwrap() {
                 return Err(AiError::new("auth", "The system keychain could not be used."));
             }
@@ -1807,7 +1846,47 @@ mod tests {
         *r.fail_store.lock().unwrap() = false;
         with_access_token(&client, r.clone(), conn_id, r.resolve(conn_id).unwrap(), &p).await.unwrap();
         assert_eq!(TokenRecord::parse(&r.secret.lock().unwrap()).unwrap().refresh_token, "REFRESH-NEW");
-        assert!(pending_get(conn_id).is_none());
+        assert!(pending_live(conn_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_refresh_that_finishes_after_the_connection_was_re_pointed_stores_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let conns = dir.path().join(connections::CONNECTIONS_FILE);
+        let host = dir.path().join(HOST_FILE);
+        let secrets = Arc::new(MemoryStore::default());
+        let files = SignInFiles { connections: &conns, host: &host, secrets: secrets.as_ref() };
+        let id = save_sign_in(&files, "chatgpt", &plan(), None, record(now_secs() + 10), &writer()).unwrap();
+        // The token endpoint: while the refresh is in flight, the webview re-points the connection to an
+        // origin of its choosing; then the endpoint answers with a new record.
+        let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let base = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
+        let (c2, s2, id2) = (conns.clone(), secrets.clone(), id.clone());
+        tokio::spawn(async move {
+            let (mut s, _) = l.accept().await.unwrap();
+            let mut buf = vec![0u8; 16 * 1024];
+            let mut got = Vec::new();
+            while !String::from_utf8_lossy(&got).contains("refresh_token=REFRESH-OLD") {
+                let n = s.read(&mut buf).await.unwrap();
+                assert!(n > 0, "the refresh request arrives");
+                got.extend_from_slice(&buf[..n]);
+            }
+            let mut evil = connections::load_connections(&c2).unwrap().into_iter().find(|c| c.id == id2).unwrap();
+            evil.provider = "custom".into();
+            evil.base_url = Some("https://evil.example/v1".into());
+            connections::upsert_connection(&c2, s2.as_ref(), evil).unwrap();
+            let body = r#"{"access_token":"ACCESS-NEW","refresh_token":"REFRESH-NEW","expires_in":3600}"#;
+            let reply = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            s.write_all(reply.as_bytes()).await.unwrap();
+        });
+        let resolver: Arc<dyn ConnectionResolver> = Arc::new(connections::FileResolver::new(conns.clone(), secrets.clone()));
+        let conn = resolver.resolve(&id).unwrap();
+        let e = with_access_token(&super::super::fetch::client(), resolver.clone(), &id, conn, &plan_at(&base)).await.unwrap_err();
+        assert_eq!(e, connections::changed_meanwhile());
+        // Nothing in the keychain for the re-pointed connection, nothing kept in memory to store later.
+        assert!(secrets.get(&id).unwrap().is_none());
+        assert!(resolver.resolve(&id).unwrap().secret.is_none());
+        assert!(pending_live(&id).is_none());
     }
 
     fn reuse_with_dead_client() -> (Files, Reauth) {
