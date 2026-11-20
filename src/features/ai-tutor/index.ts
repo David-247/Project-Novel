@@ -24,3 +24,16 @@ export { createParagraphIndex, followEditor } from './harness/paragraph-index'
 export type { Location, ParagraphIndex, ParagraphIndexOptions } from './harness/paragraph-index'
 export { createReadTools, READ_WORD_LIMIT } from './harness/read-tools'
 export type { ReadScope, ReadToolsContext } from './harness/read-tools'
+
+// The harness's output side and the loop (Task 7; design "The no-prose guard").
+// - checkMechanical / checkPassage with GUARD_LIMITS: the only code guard, on AI text that would enter
+//   the manuscript (propose_change, list_corrections suggestions). Chat text is not filtered.
+// - createOutputTools({ idx, corrections, onCorrections, onProposal }): list_corrections, propose_change.
+// - createTutorSession(editor): a chat's paragraph ids and corrections, following the editor; corrections
+//   turn 'changed' when the writer edits their paragraph. runTutorTurn(args): one turn (streamText).
+export { checkMechanical, checkPassage, countChangedWords, splitSentences, GUARD_LIMITS } from './harness/guard'
+export type { GuardResult } from './harness/guard'
+export { createOutputTools, createCorrectionBook, EXPLAIN_INSTEAD } from './harness/output-tools'
+export type { Correction, CorrectionBook, CorrectionKind, CorrectionState, ProposedChange, Rejection, OutputToolsContext } from './harness/output-tools'
+export { createTutorSession, runTutorTurn, MAX_STEPS } from './harness/run-turn'
+export type { TurnArgs, TurnEvent, TutorSession } from './harness/run-turn'
