@@ -22,6 +22,32 @@ import { detectPlatform, matchesShortcut, type Platform } from '@/shared/ui'
 
 let exitFlow: Promise<boolean> | null = null
 
+/** Work other slices finish before the app closes or quits (the tutor's chat history in app data). */
+const exitTasks = new Set<() => Promise<void>>()
+
+/**
+ * Run `task` in the close / quit flow, after the unsaved-changes prompt said go ahead and before the
+ * window goes. A task that fails is logged and does not stop the exit. Returns unregister.
+ */
+export function registerExitTask(task: () => Promise<void>): () => void {
+  exitTasks.add(task)
+  return () => {
+    exitTasks.delete(task)
+  }
+}
+
+async function runExitTasks(): Promise<void> {
+  await Promise.all(
+    [...exitTasks].map(async (task) => {
+      try {
+        await task()
+      } catch (e) {
+        console.error('An exit task failed:', e)
+      }
+    }),
+  )
+}
+
 /**
  * The one close/quit flow: unsaved-changes prompt, stop autosave, then drop
  * crash-recovery data only if nothing unsaved remains (it was saved, or the
@@ -34,6 +60,7 @@ export function prepareToExit(action: 'closing' | 'quitting'): Promise<boolean> 
     try {
       if (!(await confirmUnsavedChanges(action))) return false
       await finishSideFilesOnClose()
+      await runExitTasks()
       await stopAutosave()
       // A preference changed in the last 300 ms must not be lost to the exit (never rejects).
       await flushPreferences()

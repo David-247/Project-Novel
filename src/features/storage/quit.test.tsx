@@ -30,7 +30,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }))
 
-import { autosaveNow, MENU_EVENTS, newProject, useStorageIntegration } from './index'
+import { autosaveNow, MENU_EVENTS, newProject, registerExitTask, useStorageIntegration } from './index'
 import { handleQuitRequest, prepareToExit } from './integration'
 import { formatBackupTime, saveStatusText as saveStatusTextForTests } from './SaveStatusIndicator'
 import { __resetAutosaveForTests } from './autosave'
@@ -110,6 +110,40 @@ describe('quit', () => {
     expect(backend.messages).toEqual([])
     expect(backend.files.has(RECOVERY)).toBe(false)
     expect(destroy).toHaveBeenCalledOnce()
+  })
+
+  it('runs the registered exit tasks (the tutor history flush) before closing, not after a Cancel', async () => {
+    const order: string[] = []
+    const off = registerExitTask(async () => {
+      order.push('task')
+    })
+    try {
+      backend.answer = 'Cancel'
+      await quit()
+      expect(order).toEqual([])
+      backend.answer = "Don't Save"
+      destroy.mockImplementationOnce(async () => {
+        order.push('destroy')
+      })
+      await quit()
+      expect(order).toEqual(['task', 'destroy'])
+    } finally {
+      off()
+    }
+  })
+
+  it('an exit task that fails does not stop the quit', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const off = registerExitTask(async () => {
+      throw new Error('flush failed')
+    })
+    try {
+      backend.answer = "Don't Save"
+      await quit()
+      expect(destroy).toHaveBeenCalledOnce()
+    } finally {
+      off()
+    }
   })
 
   it('if closing the window fails after the prompt, autosave keeps running', async () => {
