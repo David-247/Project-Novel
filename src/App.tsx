@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AppShell, useReloadGuard } from '@/features/app-shell'
 import {
   FindReplacePanel,
@@ -56,7 +56,7 @@ import {
   setTrackChangesAuthorSource,
   TrackChangesNotice,
 } from '@/features/track-changes'
-import { registerDictionarySideFile } from '@/features/spellcheck'
+import { createSpellcheckExtension, registerDictionarySideFile, registerSpellcheckCommands, registerSpellcheckMenu } from '@/features/spellcheck'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
 import { createManuscriptExportRenderers, ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile, setExportRenderers } from '@/features/export'
 import { NavigationPane, registerOutlineCommands } from '@/features/outline'
@@ -126,6 +126,7 @@ export function App() {
       registerRewriteCommands(),
       registerOutlineCommands(),
       registerExportCommands(),
+      registerSpellcheckCommands(),
       // The toolbar's tabs and groups (Word-style ribbon; commands join groups by their `ribbon` field).
       registerAppRibbon(),
     ]
@@ -140,6 +141,10 @@ export function App() {
   useEffect(() => registerExportSideFile(), [])
   // dictionary.json (the project's spell-check words) likewise.
   useEffect(() => registerDictionarySideFile(), [])
+  // Spell check: the manuscript's underlines (an editor extension from the spellcheck slice) and their
+  // suggestions, Ignore Once and Add to Dictionary in the manuscript's context menu.
+  const [manuscriptExtensions] = useState(() => [createSpellcheckExtension()])
+  useEffect(() => registerSpellcheckMenu(), [])
   // The export wizard's DOCX and PDF generators (File > Export > Manuscript…).
   useEffect(() => setExportRenderers(createManuscriptExportRenderers()), [])
   // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.
@@ -202,7 +207,7 @@ export function App() {
               {/* The comments margin panel sits beside the pages (a drawer in a narrow window). */}
               <CommentsLayout>
                 <PaginatedView>
-                  <NovelEditor paged />
+                  <NovelEditor paged extensions={manuscriptExtensions} />
                 </PaginatedView>
               </CommentsLayout>
             </RewriteHost>

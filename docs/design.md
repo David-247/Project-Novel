@@ -762,3 +762,43 @@ Slice `src/features/outline/` (public interface `index.ts`), modelled on Word's 
   getChapters runs once per document version however often the pane asks. Rows are memoized on their own values (their callbacks are stable),
   so typing in one chapter re-renders its rows only. Perf: e2e/outline-perf.spec.ts (typing on 100k words with
   the pane open under 50 ms, blocking on Windows Chromium CI). No drag-to-reorder (Phase 4 review default).
+
+## Spell check underlines and the editor context menu (Phase 5)
+
+Slices: `src/features/spellcheck/` (the underlines, `extension.ts`; the menu items and View command,
+`menu.ts`) and `src/features/editor/context-menu/` (the menu and its registry). Word is the model.
+
+- **Underlines**: spelling is a red wavy underline (`.spell-error`), grammar a blue double one
+  (`.grammar-error`). Colours are paper-surface tokens, `--page-spell-error` and `--page-grammar-error`
+  (`src/shared/theme/surfaces.css`), contrast-tested at 3:1 against the page, the selection and both
+  find fills on all four surfaces (`SURFACE_CONTRAST_PAIRS`). Only `text-decoration` changes, so an
+  underline never reflows a page. Forced colours draw them in `CanvasText`. The webview's own checker is
+  off (`spellcheck="false"` on the manuscript).
+- **What is checked**: each block's text as No Markup shows it (tracked deletions out, insertions in;
+  footnote references out; a hard break reads as a newline). `spellcheck/block-text.ts` keeps the
+  segments that map block-text offsets (UTF-16, as Harper returns them) back to document positions, so
+  an underline lands on the right characters after curly quotes, accents, emoji, hidden deletions and
+  footnote references. A finding that spans hidden content can be ignored or added, not replaced.
+- **When**: 400 ms after the last edit, scroll, page turn or reflow, never in the keystroke's own
+  transaction. The blocks on the pages in view and one page either side (the store's `layout`), then up
+  to 200 blocks changed elsewhere (a Replace All; beyond that their underlines are dropped until their
+  page is in view), at most 200 blocks per engine call. Unchanged text is answered from the slice's
+  cache. Results land as one decoration-only transaction (no history, no document change); underlines
+  elsewhere are carried through edits by mapping. The word being typed at the caret is not flagged
+  until the caret leaves it.
+- **View ▸ Spelling & Grammar** (`view.spellcheck`, checkable, also Review ▸ Proofing in the ribbon,
+  before Word Count): turns the underlines on or off; saved as `spellcheck.enabled` in preferences.json
+  (default on).
+- **Context menu** (right-click, Shift+F10, the Menu key; listed in Keyboard Shortcuts): Radix
+  ContextMenu opened at the pointer, or just below the caret from the keyboard (then the first item has
+  the focus). A right-click outside the selection first moves the caret there. Word's order: the
+  suggestions (bold; "(No Spelling Suggestions)" when there are none), Ignore Once, Add to Dictionary
+  (spelling only; the user dictionary), then Cut, Copy and Paste (the Edit commands). A suggestion
+  replaces the text in one undoable step, only if the text is still what was flagged. Escape or a choice
+  returns the focus to the manuscript. Every item has a tooltip; a suggestion's names its word.
+- **Adding items**: `registerContextMenuItems(provider)` (editor slice) → unregister. A provider gets
+  `{ editor, pos, selection }` each time the menu opens and returns `MenuItem`s (`id` is the
+  `data-control-id`, registered in the tooltips registry; `group` and `order` place it: suggestions
+  0-99, proofing 100-199, other actions such as the tutor's 200-299, the clipboard 300-399).
+- **Perf**: e2e/spellcheck-perf.spec.ts, typing on the 100k fixture with spell check on, under 50 ms,
+  blocking on Windows Chromium CI like plain typing.

@@ -16,6 +16,7 @@ import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import { COMMENT_CONTROLS } from '@/features/comments'
 import { REWRITE_CONTROLS } from '@/features/rewrite'
 import { OUTLINE_CONTROLS } from '@/features/outline'
+import { SPELLCHECK_CONTROLS } from '@/features/spellcheck'
 import { EXPORT_WIZARD_CONTROLS } from '@/features/export'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
@@ -314,6 +315,17 @@ const OUTLINE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
     .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: 'shortcut' in c ? (c.shortcut as string) : undefined }]),
 )
 
+/**
+ * The spell check's context menu items (spellcheck slice). A suggestion's tooltip names its word (the
+ * item passes its own copy); these entries are the controls'. The toggle (`view.spellcheck`: menu item,
+ * ribbon button) reads its copy from the registry command.
+ */
+const SPELLCHECK_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(SPELLCHECK_CONTROLS)
+    .filter((c) => c.id !== SPELLCHECK_CONTROLS.toggle.id)
+    .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description }]),
+)
+
 /** Review: Track Changes and the markup view picker with its choices (track-changes slice). */
 const REVIEW_TOOLTIPS: Record<string, TooltipCopy> = {
   ...Object.fromEntries(
@@ -411,6 +423,7 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...COMMENT_TOOLTIPS,
   ...REWRITE_TOOLTIPS,
   ...OUTLINE_TOOLTIPS,
+  ...SPELLCHECK_TOOLTIPS,
   ...EXPORT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,

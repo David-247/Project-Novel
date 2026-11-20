@@ -1,0 +1,29 @@
+/*
+ * Spell and grammar underlines (extension.ts). Colours are the paper surface tokens
+ * --page-spell-error / --page-grammar-error (src/shared/theme/surfaces.css, contrast-tested on every
+ * page surface in both themes). Only text-decoration: no box or font changes, so nothing reflows.
+ */
+.spell-error {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--page-spell-error);
+  text-decoration-thickness: 1.5px;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 0.18em;
+}
+
+.grammar-error {
+  text-decoration-line: underline;
+  text-decoration-style: double;
+  text-decoration-color: var(--page-grammar-error);
+  text-decoration-thickness: 1.5px;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 0.18em;
+}
+
+@media (forced-colors: active) {
+  .spell-error,
+  .grammar-error {
+    text-decoration-color: CanvasText;
+  }
+}

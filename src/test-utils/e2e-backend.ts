@@ -150,6 +150,11 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
      * `cancels`, `reveals`.
      */
     exports: core.exports,
+    /**
+     * Spell checker fake (src/test-utils/fake-spellcheck.ts): `misspellings` (word -> suggestions,
+     * default teh -> the), `grammar` (phrase -> suggestions), `calls`, `fail`.
+     */
+    spell: core.spell,
     /** The export wizard's fixture: manuscript.json, comments.json, rewrites.json and the book's styles. */
     exportWizardFixture: () => ({ doc: WIZARD_FIXTURE_DOC, comments: WIZARD_FIXTURE_COMMENTS, rewrites: WIZARD_FIXTURE_REWRITES, styles: WIZARD_FIXTURE_STYLES }),
     /** The export wizard's state (open, step, the run's phase). */

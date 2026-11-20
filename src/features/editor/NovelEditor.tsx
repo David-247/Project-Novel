@@ -41,7 +41,8 @@ export function NovelEditor({ paged = false, extensions: extra }: NovelEditorPro
         role: 'textbox',
         'aria-multiline': 'true',
         'aria-label': 'Manuscript',
-        spellcheck: 'true',
+        // The webview's own checker is off: Harper underlines (spellcheck slice) replace it.
+        spellcheck: 'false',
       },
     },
   })

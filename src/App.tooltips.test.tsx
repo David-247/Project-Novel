@@ -90,6 +90,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'comment.prev',
           'comment.next',
           'comment.showResolved',
+          'view.spellcheck',
           'review.wordCount',
           'review.change.prev',
           'review.change.next',
