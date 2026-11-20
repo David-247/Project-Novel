@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkMechanical, checkPassage, countChangedWords, GUARD_LIMITS, splitSentences } from './guard'
+import { __diffForTests, checkMechanical, checkPassage, countChangedWords, GUARD_LIMITS, splitSentences } from './guard'
 
 /** Ten five-word sentences. */
 const PASSAGE = Array.from({ length: 10 }, (_, i) => `Dog ${i + 1} ran past here.`).join(' ')
@@ -101,5 +101,68 @@ describe('splitSentences', () => {
   ]
   it.each(cases)('splits %s', (_name, text, expected) => {
     expect(splitSentences(text)).toEqual(expected)
+  })
+})
+
+describe('the diff behind the guard: memory (final B-M10)', () => {
+  type Tok = { text: string; word: boolean; sentence: number }
+  const toks = (s: string): Tok[] => s.split(' ').map((text) => ({ text, word: /\w/.test(text), sentence: 0 }))
+
+  /** The full n × m table the guard used before: the reference for the same edit script. */
+  function reference(a: readonly Tok[], b: readonly Tok[]) {
+    let pre = 0
+    while (pre < a.length && pre < b.length && a[pre].text === b[pre].text) pre++
+    let suf = 0
+    while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf].text === b[b.length - 1 - suf].text) suf++
+    const n = a.length - pre - suf
+    const m = b.length - pre - suf
+    const weight = (t: Tok) => (t.word ? 2 : 1)
+    const same = (i: number, j: number) => a[pre + i].text === b[pre + j].text
+    const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1))
+    for (let i = n - 1; i >= 0; i--)
+      for (let j = m - 1; j >= 0; j--) lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1], same(i, j) ? lcs[i + 1][j + 1] + weight(a[pre + i]) : 0)
+    const ops: { kind: string; a: number; b: number }[] = []
+    for (let k = 0; k < pre; k++) ops.push({ kind: 'same', a: k, b: k })
+    let i = 0
+    let j = 0
+    while (i < n || j < m) {
+      if (i < n && j < m && same(i, j) && lcs[i][j] === lcs[i + 1][j + 1] + weight(a[pre + i])) ops.push({ kind: 'same', a: pre + i++, b: pre + j++ })
+      else if (j < m && (i === n || lcs[i][j + 1] >= lcs[i + 1][j])) ops.push({ kind: 'add', a: pre + i, b: pre + j++ })
+      else ops.push({ kind: 'del', a: pre + i++, b: pre + j })
+    }
+    for (let k = 0; k < suf; k++) ops.push({ kind: 'same', a: a.length - suf + k, b: b.length - suf + k })
+    return ops
+  }
+
+  it('gives exactly the edit script of the full table, on many random texts', () => {
+    let seed = 7
+    const rand = (k: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      return seed % k
+    }
+    const pool = ['the', 'dog', 'ran', ',', '.', 'a', 'cat', '!', 'sat']
+    for (let run = 0; run < 300; run++) {
+      const a = Array.from({ length: rand(40) }, () => pool[rand(pool.length)]).join(' ')
+      const b = Array.from({ length: rand(40) }, () => pool[rand(pool.length)]).join(' ')
+      const ta = a ? toks(a) : []
+      const tb = b ? toks(b) : []
+      expect(__diffForTests(ta, tb).ops, `${a} | ${b}`).toEqual(reference(ta, tb))
+    }
+  })
+
+  it('holds only about √n rows of the table, so a long proposal cannot exhaust memory', () => {
+    const a = toks(Array.from({ length: 4000 }, (_, i) => (i % 9 === 8 ? '.' : `w${i % 50}`)).join(' '))
+    const b = toks(['first', ...a.slice(1).map((t) => t.text).slice(0, -1), 'last'].join(' '))
+    const { ops, rowsHeld } = __diffForTests(a, b)
+    expect(ops.filter((o) => o.kind !== 'same')).toHaveLength(4)
+    // A full table would hold 4,001 rows of 4,001 cells (about 64 MB); this holds a small fraction.
+    expect(rowsHeld).toBeLessThan(200)
+  })
+
+  it('a 20,000-character revision of a 20,000-character paragraph is judged as before', () => {
+    const sentence = 'The old dog ran past the gate and on into the dark wood. '
+    const original = sentence.repeat(Math.floor(20_000 / sentence.length))
+    const revised = original.replace('The old dog', 'Teh old dog').replace(/wood\. $/, 'woods. ')
+    expect(checkMechanical(original, revised)).toEqual({ ok: true, kind: 'mechanical' })
   })
 })

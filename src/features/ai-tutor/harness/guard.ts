@@ -144,6 +144,19 @@ type Op = { kind: 'same' | 'del' | 'add'; a: number; b: number }
  * and suffix trimmed first.
  */
 function diff(a: readonly Token[], b: readonly Token[]): Op[] {
+  return diffHolding(a, b).ops
+}
+
+/**
+ * `diff`, and how many rows of the table it held at once. The table is the classic one (lcs[i][j]: the
+ * best weight of a[pre+i..] and b[pre+j..] within the middle), but it is never held whole: a
+ * model-controlled revision of up to 20,000 characters against a long paragraph would need an n × m
+ * table of gigabytes (final B-M10). Every `step`-th row (step ≈ √n) is kept from the first pass, and
+ * the walk that reads the edit script off the table recomputes one block of `step` rows at a time from
+ * the checkpoint below it. The values are the same as the whole table's, so the edit script is too;
+ * memory is O(√n · m), time about twice the single pass.
+ */
+function diffHolding(a: readonly Token[], b: readonly Token[]): { ops: Op[]; rowsHeld: number } {
   let pre = 0
   while (pre < a.length && pre < b.length && a[pre].text === b[pre].text) pre++
   let suf = 0
@@ -152,22 +165,72 @@ function diff(a: readonly Token[], b: readonly Token[]): Op[] {
   const m = b.length - pre - suf
   const weight = (t: Token) => (t.word ? 2 : 1)
   const same = (i: number, j: number) => a[pre + i].text === b[pre + j].text
-  // lcs[i][j]: the best weight of a[pre+i..] and b[pre+j..] within the middle.
-  const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1))
-  for (let i = n - 1; i >= 0; i--)
-    for (let j = m - 1; j >= 0; j--) lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1], same(i, j) ? lcs[i + 1][j + 1] + weight(a[pre + i]) : 0)
+  /** Row i of the table into `into`, from row i + 1 (`below`). */
+  const fill = (into: Uint32Array, below: Uint32Array, i: number) => {
+    into[m] = 0
+    const w = weight(a[pre + i])
+    for (let j = m - 1; j >= 0; j--) into[j] = Math.max(below[j], into[j + 1], same(i, j) ? below[j + 1] + w : 0)
+  }
+  const step = Math.max(1, Math.ceil(Math.sqrt(n + 1)))
+  // Checkpoints: row n (all zeros) and every row whose index is a multiple of `step`.
+  const checkpoints = new Map<number, Uint32Array>()
+  let below: Uint32Array = new Uint32Array(m + 1)
+  checkpoints.set(n, below)
+  // Two rows that take turns between checkpoints (the one being filled is never the one below it).
+  const spare = [new Uint32Array(m + 1), new Uint32Array(m + 1)]
+  let turn = 0
+  for (let i = n - 1; i >= 0; i--) {
+    let into: Uint32Array
+    if (i % step === 0) {
+      into = new Uint32Array(m + 1)
+      checkpoints.set(i, into)
+    } else {
+      into = spare[turn]
+      turn ^= 1
+    }
+    fill(into, below, i)
+    below = into
+  }
+  // The block of rows (base, base + step) between two checkpoints, recomputed when the walk enters it.
+  let blockBase = -1
+  let block: Uint32Array[] = []
+  const row = (i: number): Uint32Array => {
+    const kept = checkpoints.get(i)
+    if (kept) return kept
+    const base = i - (i % step)
+    if (base !== blockBase) {
+      const top = Math.min(base + step, n)
+      const rows: Uint32Array[] = []
+      let under = checkpoints.get(top)!
+      for (let k = top - 1; k > base; k--) {
+        const r = block.length > top - 1 - k ? block[top - 1 - k] : new Uint32Array(m + 1)
+        fill(r, under, k)
+        rows.push(r)
+        under = r
+      }
+      block = rows
+      blockBase = base
+    }
+    // block[0] is row top - 1, block[last] is row base + 1.
+    return block[Math.min(blockBase + step, n) - 1 - i]
+  }
   const ops: Op[] = []
   for (let k = 0; k < pre; k++) ops.push({ kind: 'same', a: k, b: k })
   let i = 0
   let j = 0
   while (i < n || j < m) {
-    if (i < n && j < m && same(i, j) && lcs[i][j] === lcs[i + 1][j + 1] + weight(a[pre + i])) ops.push({ kind: 'same', a: pre + i++, b: pre + j++ })
-    else if (j < m && (i === n || lcs[i][j + 1] >= lcs[i + 1][j])) ops.push({ kind: 'add', a: pre + i, b: pre + j++ })
+    const here = i < n ? row(i) : null
+    const next = i < n ? row(i + 1) : null
+    if (here && next && j < m && same(i, j) && here[j] === next[j + 1] + weight(a[pre + i])) ops.push({ kind: 'same', a: pre + i++, b: pre + j++ })
+    else if (j < m && (i === n || here![j + 1] >= next![j])) ops.push({ kind: 'add', a: pre + i, b: pre + j++ })
     else ops.push({ kind: 'del', a: pre + i++, b: pre + j })
   }
   for (let k = 0; k < suf; k++) ops.push({ kind: 'same', a: a.length - suf + k, b: b.length - suf + k })
-  return ops
+  return { ops, rowsHeld: checkpoints.size + spare.length + Math.max(0, step - 1) }
 }
+
+/** Test-only: the guard's edit script, and the most rows of the table it held at once (final B-M10). */
+export const __diffForTests = (a: readonly Token[], b: readonly Token[]) => diffHolding(a, b)
 
 interface Analysis {
   total: number
