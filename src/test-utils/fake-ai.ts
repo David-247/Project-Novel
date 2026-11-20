@@ -19,10 +19,12 @@
  * Chat history (`tutor_history_*`) is `state.history` (project id to chat id to chat) with Rust's id check
  * (`^[A-Za-z0-9-]{1,64}$`) and 8 MB size cap; `historySaves` logs every save, `failHistory` makes the commands fail.
  *
- * Sign in with OpenRouter: `ai_oauth_start` only records the provider (`oauthStarts`; Rust would open the
- * browser). A test finishes the sign-in with `completeOAuth(key)` (adds the oauth connection and its secret,
- * as Rust does) and then emits `ai-oauth-result` itself. `ai_open_key_page` records the provider
- * (`keyPages`); `oauthCancels` counts `ai_oauth_cancel`.
+ * Sign in with OpenRouter or ChatGPT: `ai_oauth_start` only records the provider (`oauthStarts`; Rust would
+ * open the browser) and, for a renewal, the connection id (`oauthRenewals`). A test finishes the sign-in with
+ * `completeOAuth(secret, provider?, name?)` (adds the oauth connection and its secret, as Rust does) and then
+ * emits `ai-oauth-result` itself. `ai_open_key_page` records the provider (`keyPages`), `ai_open_usage_page`
+ * too (`usagePages`); `oauthCancels` counts `ai_oauth_cancel`. Removing a ChatGPT connection answers whether
+ * the sign-out was confirmed (`signOutConfirmed`, default true), as Rust does; any other answers null.
  */
 
 export const AI_COMMAND_NAMES = [
@@ -43,6 +45,7 @@ export const AI_COMMAND_NAMES = [
   'ai_oauth_start',
   'ai_oauth_cancel',
   'ai_open_key_page',
+  'ai_open_usage_page',
 ] as const
 
 /** Mirrors Rust's AiFetchEvent (serde tag "type"). */
@@ -158,6 +161,12 @@ export function createFakeAi() {
     oauthCancels: 0,
     /** Every ai_open_key_page provider, in order. */
     keyPages: [] as string[],
+    /** Every ai_oauth_start renewal's connection id, in order. */
+    oauthRenewals: [] as string[],
+    /** Every ai_open_usage_page provider, in order. */
+    usagePages: [] as string[],
+    /** What removing a ChatGPT (plan sign-in) connection answers: the provider confirmed the sign-out. */
+    signOutConfirmed: true,
   }
   const running = new Map<number, () => void>()
   const earlyCancels = new Set<number>()
@@ -176,6 +185,9 @@ export function createFakeAi() {
     state.oauthStarts.length = 0
     state.oauthCancels = 0
     state.keyPages.length = 0
+    state.oauthRenewals.length = 0
+    state.usagePages.length = 0
+    state.signOutConfirmed = true
     running.clear()
     earlyCancels.clear()
   }
@@ -344,19 +356,37 @@ export function createFakeAi() {
         saveConnections(structuredClone(list))
         return null
       }
-      case 'ai_connection_remove':
+      case 'ai_connection_remove': {
+        const gone = state.connections.find((x) => x.id === args.connectionId)
+        const plan = gone?.provider === 'chatgpt' && gone.auth === 'oauth' && state.secrets.has(gone.id as string)
         saveConnections(structuredClone(state.connections.filter((x) => x.id !== args.connectionId)))
-        return null
+        return plan ? state.signOutConfirmed : null
+      }
       case 'tutor_history_list':
       case 'tutor_history_load':
       case 'tutor_history_save':
       case 'tutor_history_delete':
       case 'tutor_history_clear_all':
         return historyCommand(cmd, args)
-      case 'ai_oauth_start':
-        if (args.provider !== 'openrouter') throw fail('bad_request', 'This provider has no sign-in.')
-        state.oauthStarts.push(args.provider)
+      case 'ai_oauth_start': {
+        const provider = String(args.provider)
+        if (provider !== 'openrouter' && provider !== 'chatgpt') throw fail('bad_request', 'This provider has no sign-in.')
+        if (args.connectionId !== undefined) {
+          if (provider !== 'chatgpt') throw fail('bad_request', 'This provider cannot sign a connection in again.')
+          const c = state.connections.find((x) => x.id === args.connectionId)
+          if (!c || c.provider !== provider || !state.secrets.has(c.id as string)) {
+            throw fail('bad_request', 'This connection has no ChatGPT sign-in to renew. Remove it, then Continue with ChatGPT.')
+          }
+          state.oauthRenewals.push(c.id as string)
+        }
+        state.oauthStarts.push(provider)
         return null
+      }
+      case 'ai_open_usage_page': {
+        if (args.provider !== 'chatgpt') throw fail('bad_request', 'This provider has no usage page.')
+        state.usagePages.push(args.provider)
+        return null
+      }
       case 'ai_oauth_cancel':
         state.oauthCancels++
         return null
@@ -371,14 +401,17 @@ export function createFakeAi() {
     }
   }
 
-  /** Finish a sign-in as Rust does: a new OpenRouter oauth connection with `key` in the keychain. Returns its id. */
-  function completeOAuth(key: string): string {
+  /**
+   * Finish a sign-in as Rust does: a new oauth connection of `provider` named `name` (then "name 2", ...)
+   * with `secret` in the keychain (OpenRouter: the key; ChatGPT: Rust's token record). Returns its id.
+   */
+  function completeOAuth(secret: string, provider: 'openrouter' | 'chatgpt' = 'openrouter', name = provider === 'chatgpt' ? 'ChatGPT' : 'OpenRouter'): string {
     const taken = new Set(state.connections.map((c) => c.label))
-    let label = 'OpenRouter'
-    for (let n = 2; taken.has(label); n++) label = `OpenRouter ${n}`
-    const id = `openrouter-${state.connections.length + 1}x${Math.random().toString(36).slice(2, 8)}`
-    state.connections = [...state.connections, { id, provider: 'openrouter', label, auth: 'oauth' }]
-    state.secrets.set(id, key)
+    let label = name
+    for (let n = 2; taken.has(label); n++) label = `${name} ${n}`
+    const id = `${provider}-${state.connections.length + 1}x${Math.random().toString(36).slice(2, 8)}`
+    state.connections = [...state.connections, { id, provider, label, auth: 'oauth' }]
+    state.secrets.set(id, secret)
     return id
   }
 

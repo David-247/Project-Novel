@@ -9,17 +9,19 @@ import { USER_HOSTED_PROVIDERS, type Connection, type ProviderId } from '../conn
 import { useTutorHistory } from '../history/store'
 import { forgetModels, useTutorChat } from '../panel/chat'
 import { NO_TOOLS_REASON } from '../panel/controls'
+import { scriptedReply } from '../harness/assemble'
 import { getAdapter, listAdapters } from '../providers/registry'
-import type { ModelInfo } from '../providers/types'
+import type { ModelInfo, ProviderAdapter } from '../providers/types'
 import { AI_SETTINGS_CONTROLS as C, HISTORY_NOTE, SUBSCRIPTION_NOTE } from './controls'
 import type { AiSettingsControlKey } from './controls'
-import { openKeyPage } from './ipc'
+import { openKeyPage, openUsagePage } from './ipc'
 import { beginSignIn, cancelSignIn, useSignIn } from './sign-in'
 import { baseUrlHint, baseUrlProblem, needsInsecureConfirm, normaliseBaseUrl, originOf } from './url'
 
 /**
- * Settings ▸ AI Tutor (Phase 5 Task 10; design "Network and credentials"). The saved connections (add,
- * edit, remove, set as default), Sign in with OpenRouter, and the chat history. A key typed here goes
+ * Settings ▸ AI Tutor (Phase 5 Tasks 10 and 12; design "Network and credentials"). The saved connections
+ * (add, edit, remove, set as default), Continue with ChatGPT and Sign in with OpenRouter, and the chat
+ * history. A consumer-plan sign-in (ChatGPT) shows the ban warning once, before the first sign-in. A key typed here goes
  * straight to the keychain (`setSecret`, after the connection is saved: the secret is bound to it) and is
  * never shown again: the field always opens empty, with "Key saved" when the keychain holds one.
  */
@@ -108,8 +110,14 @@ interface Draft {
   acceptedOrigin: string | null
 }
 
-/** Chosen in the form (ChatGPT sign-in is Task 12; its adapter does not exist yet). */
-const PROVIDER_OPTIONS: SelectOption[] = listAdapters().map((a) => ({ value: a.id, label: a.label }))
+/** Chosen in the form: providers that connect with a key or with nothing (a sign-in-only one has its own button). */
+const PROVIDER_OPTIONS: SelectOption[] = listAdapters()
+  .filter((a) => a.connectKinds.some((k) => k !== 'oauth'))
+  .map((a) => ({ value: a.id, label: a.label }))
+/** The sign-in buttons, the consumer plan (ChatGPT) first. */
+const SIGN_INS: ProviderAdapter[] = listAdapters()
+  .filter((a) => a.signIn)
+  .sort((a, b) => Number(!!b.signIn?.consumerPlan) - Number(!!a.signIn?.consumerPlan))
 const userHosted = (p: ProviderId) => USER_HOSTED_PROVIDERS.includes(p)
 /** A key when the provider takes one (optional when it also works without); a sign-in stays a sign-in. */
 const authOf = (p: ProviderId, existing?: Connection): Connection['auth'] =>
@@ -155,6 +163,7 @@ const providerLabel = (p: ProviderId) => {
 
 export function AiTutorSettings() {
   const connections = useStore((s) => s.tutorConnections.list) as Connection[]
+  const signingIn = useSignIn((s) => s.status === 'waiting')
   const activeId = useStore((s) => s.tutorConnections.activeId)
   const loaded = useStore((s) => s.tutorConnections.loaded)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -183,25 +192,40 @@ export function AiTutorSettings() {
 
   const refreshKey = (id: string) => hasSecret(id).then((has) => setKeys((k) => ({ ...k, [id]: has })), () => {})
 
-  const remove = (c: Connection) =>
+  const remove = (c: Connection) => {
+    const site = signInOf(c)?.site
     setConfirm({
       title: `Remove “${c.label}”?`,
-      message: 'The tutor can no longer use it, and its saved key is deleted from this computer’s keychain.',
+      message:
+        c.auth === 'oauth' && signInOf(c)?.renewable
+          ? `The tutor can no longer use it. Novel signs out of ${site} and deletes the sign-in from this computer’s keychain.`
+          : 'The tutor can no longer use it, and its saved key is deleted from this computer’s keychain.',
       yes: 'removeConfirm',
       danger: true,
       onYes: async () => {
         try {
           // Removes just this one: a connection added since the list was drawn stays (I1).
-          await removeTutorConnection(c.id)
+          const signedOut = await removeTutorConnection(c.id)
           await deleteSecret(c.id).catch(() => {})
           forgetModels(c.id)
           if (draft?.id === c.id) setDraft(null)
-          setListStatus({ tone: 'muted', text: `Removed “${c.label}”.` })
+          setListStatus(
+            signedOut === false
+              ? {
+                  tone: 'danger',
+                  text: `Removed “${c.label}”, but ${site ?? 'the provider'} did not confirm the sign-out. To be sure, disconnect Novel in your ${site ?? 'account'} settings, under Security and login.`,
+                }
+              : { tone: 'muted', text: `Removed “${c.label}”.` },
+          )
         } catch (e) {
           setListStatus({ tone: 'danger', text: messageOf(e, 'The connection could not be removed.') })
         }
       },
     })
+  }
+
+  const openUsage = (c: Connection) =>
+    openUsagePage(c.provider).catch((e: unknown) => setListStatus({ tone: 'danger', text: messageOf(e, 'The page could not be opened.') }))
 
   return (
     <div className="flex flex-col">
@@ -223,12 +247,26 @@ export function AiTutorSettings() {
                       </p>
                       <p className="m-0 text-ui-xs text-text-muted">
                         {providerLabel(c.provider)}
-                        {c.auth === 'oauth' ? ' · Signed in' : c.auth === 'api_key' ? (keys[c.id] ? ' · Key saved' : keyOptional(c.provider) ? '' : ' · No key saved') : ''}
+                        {c.auth === 'oauth'
+                          ? signInOf(c)?.consumerPlan
+                            ? ` · Signed in · Using your ${signInOf(c)?.site} plan`
+                            : ' · Signed in'
+                          : c.auth === 'api_key'
+                            ? keys[c.id]
+                              ? ' · Key saved'
+                              : keyOptional(c.provider)
+                                ? ''
+                                : ' · No key saved'
+                            : ''}
                         {c.defaultModel ? ` · ${c.defaultModel}` : ''}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {isDefault ? null : <Action k="setDefault" label={c.label} onClick={() => setActiveTutorConnection(c.id)} />}
+                      {c.auth === 'oauth' && signInOf(c)?.usagePage ? <Action k="manageUsage" label={c.label} onClick={() => void openUsage(c)} /> : null}
+                      {c.auth === 'oauth' && signInOf(c)?.renewable ? (
+                        <Action k="signInAgain" label={c.label} disabled={signingIn} onClick={() => void beginSignIn(c.provider, c.id)} />
+                      ) : null}
                       <Action k="edit" label={c.label} onClick={() => setDraft(draftOf(c))} />
                       <Action k="remove" label={c.label} onClick={() => remove(c)} />
                     </div>
@@ -238,7 +276,7 @@ export function AiTutorSettings() {
             </ul>
           ) : (
             <p className="m-0 text-ui-sm text-text-muted">
-              No connections yet. Sign in with OpenRouter, or add a provider with an API key or a model on this computer.
+              No connections yet. Continue with ChatGPT or sign in with OpenRouter, or add a provider with an API key or a model on this computer.
             </p>
           )}
           <StatusLine status={listStatus} testId="ai-settings-list-status" />
@@ -276,16 +314,80 @@ function Section({ id, title, children }: { id: string; title: string; children:
   )
 }
 
-/** Add Connection… (while no form is open) and Sign in with OpenRouter, with the sign-in's progress. */
+/** The sign-in of a saved connection's provider, if it has one. */
+function signInOf(c: Connection) {
+  try {
+    return getAdapter(c.provider).signIn
+  } catch {
+    return undefined
+  }
+}
+
+/** The ban warning's heading (its first bold line) and its paragraphs. */
+function banWarning(): { title: string; paragraphs: string[] } {
+  const [first = '', ...rest] = scriptedReply('ban-warning').split(/\n\s*\n/)
+  const bold = /^\*\*(.+)\*\*$/.exec(first.trim())
+  return bold ? { title: bold[1], paragraphs: rest } : { title: 'Before you sign in', paragraphs: [first, ...rest] }
+}
+
+/**
+ * Shown once, before the first sign-in with a consumer plan (design: the account-ban warning). Continue
+ * remembers that it was read (preferences) and starts the sign-in; Cancel starts nothing.
+ */
+function PlanWarningDialog({ provider, onClose }: { provider: ProviderId | null; onClose: () => void }) {
+  const { title, paragraphs } = banWarning()
+  return (
+    <Dialog
+      open={provider !== null}
+      onOpenChange={(o) => !o && onClose()}
+      title={title}
+      footer={
+        <>
+          <Action k="confirmNo" onClick={onClose} />
+          <Action
+            k="planWarningAccept"
+            variant="primary"
+            onClick={() => {
+              const p = provider
+              onClose()
+              if (!p) return
+              useStore.getState().preferencesActions.set('tutorPlanWarningSeen', true)
+              void beginSignIn(p)
+            }}
+          />
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2" data-testid="ai-plan-warning">
+        {paragraphs.map((p, i) => (
+          <p key={i} className="m-0 text-ui-sm">
+            {p.replace(/\s*\n\s*/g, ' ')}
+          </p>
+        ))}
+      </div>
+    </Dialog>
+  )
+}
+
+/** Add Connection… (while no form is open) and the sign-in buttons (ChatGPT, OpenRouter), with the sign-in's progress. */
 function SignInRow({ add }: { add: ReactNode }) {
   const { status, message } = useSignIn()
+  const warningSeen = useStore((s) => s.preferences.tutorPlanWarningSeen)
+  const [warnFor, setWarnFor] = useState<ProviderId | null>(null)
+  const start = (a: ProviderAdapter) => {
+    if (a.signIn?.consumerPlan && !warningSeen) setWarnFor(a.id)
+    else void beginSignIn(a.id)
+  }
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
         {add}
-        <Action k="signIn" variant="primary" disabled={status === 'waiting'} onClick={() => void beginSignIn()} />
+        {SIGN_INS.map((a) => (
+          <Action key={a.id} k={a.signIn?.control ?? 'signIn'} variant="primary" disabled={status === 'waiting'} onClick={() => start(a)} />
+        ))}
         {status === 'waiting' ? <Action k="signInCancel" onClick={() => void cancelSignIn()} /> : null}
       </div>
+      <PlanWarningDialog provider={warnFor} onClose={() => setWarnFor(null)} />
       <StatusLine
         testId="ai-sign-in-status"
         status={message ? { tone: status === 'failed' ? 'danger' : status === 'done' ? 'success' : 'muted', text: message } : null}
@@ -474,7 +576,9 @@ function ConnectionForm({ initial, connections, hasKey, onKeyChanged, onConfirm,
       {field('label', (p) => <TextInput {...p} value={d.label} maxLength={200} onChange={(e) => patch({ label: e.target.value })} />)}
       {auth === 'oauth' ? (
         <p className="m-0 text-ui-xs text-text-muted">
-          Signed in with OpenRouter{hasKey ? '. Key saved' : ''}. To use another account, remove this connection and sign in again.
+          {adapter.signIn?.renewable
+            ? `Signed in with ${adapter.signIn.site}. If the sign-in has ended, use Sign In Again. To add another account, use Continue with ${adapter.signIn.site}.`
+            : `Signed in with ${adapter.signIn?.site ?? adapter.label}${hasKey ? '. Key saved' : ''}. To use another account, remove this connection and sign in again.`}
         </p>
       ) : auth === 'api_key' ? (
         field(

@@ -31,7 +31,11 @@ export function upsertConnection(connection: Connection): Promise<void> {
   return invoke<void>('ai_connection_upsert', { connection })
 }
 
-/** Remove one connection and its key; the others stay as they are on disk. */
-export function removeConnection(connectionId: string): Promise<void> {
-  return invoke<void>('ai_connection_remove', { connectionId })
+/**
+ * Remove one connection and its key; the others stay as they are on disk. A plan sign-in (ChatGPT) is
+ * signed out at the provider first: the result says whether the provider confirmed it (null: not a
+ * plan sign-in).
+ */
+export async function removeConnection(connectionId: string): Promise<boolean | null> {
+  return (await invoke<boolean | null>('ai_connection_remove', { connectionId })) ?? null
 }

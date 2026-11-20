@@ -53,16 +53,26 @@ const STREAM_PATHS: [ProviderId, string][] = [
   ['ollama', '/chat/completions'],
   ['lmstudio', '/chat/completions'],
   ['custom', '/chat/completions'],
+  ['chatgpt', '/responses'],
 ]
 
 beforeEach(() => backend.reset())
 
 describe('registry', () => {
-  it('has one adapter per provider the proxy serves, except the ChatGPT sign-in (Task 12)', () => {
+  it('has one adapter per provider the proxy serves', () => {
     const ids = listAdapters().map((a) => a.id)
-    expect(ids).toEqual(PROVIDER_IDS.filter((id) => id !== 'chatgpt'))
+    expect(ids).toEqual([...PROVIDER_IDS])
     for (const id of ids) expect(getAdapter(id).id).toBe(id)
-    expect(() => getAdapter('chatgpt')).toThrow()
+  })
+
+  it('offers a sign-in for OpenRouter and ChatGPT; only ChatGPT is a consumer plan, renewable, with a usage page', () => {
+    const signIns = listAdapters().filter((a) => a.signIn)
+    expect(signIns.map((a) => a.id).sort()).toEqual(['chatgpt', 'openrouter'])
+    expect(getAdapter('chatgpt').signIn).toMatchObject({ control: 'signInChatGpt', consumerPlan: true, renewable: true, usagePage: true })
+    expect(getAdapter('openrouter').signIn).toMatchObject({ control: 'signIn', consumerPlan: false, renewable: false, usagePage: false })
+    // ChatGPT is sign-in only: no key, no key page.
+    expect(getAdapter('chatgpt').connectKinds).toEqual(['oauth'])
+    expect(getAdapter('chatgpt').keyHelpUrl).toBeUndefined()
   })
 
   it('offers a probe only for the local and custom providers', () => {
@@ -124,6 +134,70 @@ describe('adapters route through the proxy', () => {
       { id: 'a/with-tools', label: 'With tools', tools: 'yes' },
       { id: 'b/no-tools', label: 'b/no-tools', tools: 'no' },
     ])
+  })
+})
+
+describe('chatgpt (the plan route)', () => {
+  const plan = conn('chatgpt', { auth: 'oauth' })
+
+  /** The body the chatgpt adapter sends for one streamed call with a system prompt, a tool and sampling settings. */
+  async function sentBody(): Promise<Record<string, unknown>> {
+    backend.ai.script = { events: sseResponse(['data: [DONE]\n\n']) }
+    const model = getAdapter('chatgpt').languageModel(plan, 'gpt-6.1-sol') as unknown as {
+      doStream(o: unknown): Promise<{ stream: ReadableStream<unknown> }>
+    }
+    const { stream } = await model.doStream({
+      prompt: [
+        { role: 'system', content: 'You are the tutor.' },
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      ],
+      tools: [{ type: 'function', name: 'read_text', description: 'Read.', inputSchema: { type: 'object', properties: {} } }],
+      temperature: 0.3,
+      topP: 0.9,
+      maxOutputTokens: 500,
+    })
+    await drain(stream)
+    return JSON.parse(backend.ai.requests[0].req.body ?? '{}') as Record<string, unknown>
+  }
+
+  it('streams with store false, instructions as a developer message, namespaced tools and no refused fields', async () => {
+    const body = await sentBody()
+    expect(backend.ai.requests[0].req).toMatchObject({ method: 'POST', path: '/responses' })
+    expect(body.store).toBe(false)
+    expect(body.stream).toBe(true)
+    const input = body.input as { role?: string; type?: string }[]
+    expect(input.some((i) => i.role === 'system')).toBe(false)
+    expect(input[0].role).toBe('developer')
+    const tools = body.tools as { type: string; name: string; tools?: { name: string }[] }[]
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({ type: 'namespace', name: 'novel' })
+    expect(tools[0].tools?.map((t) => t.name)).toEqual(['read_text'])
+    for (const refused of ['temperature', 'top_p', 'max_output_tokens', 'previous_response_id', 'metadata', 'user', 'safety_identifier']) {
+      expect(body, refused).not.toHaveProperty(refused)
+    }
+  })
+
+  it("lists the account's models from GET /models (models[].slug), only those meant for display, tools supported", async () => {
+    backend.ai.script = {
+      events: jsonResponse({
+        models: [
+          { slug: 'gpt-6.2-sol', display_name: 'GPT-6.2 Sol', visibility: 'list' },
+          { slug: 'hidden-model', display_name: 'Hidden', visibility: 'hide' },
+          { slug: 'gpt-6.1-terra', visibility: 'list' },
+        ],
+      }),
+    }
+    const models = await getAdapter('chatgpt').listModels(plan)
+    expect(models).toEqual([
+      { id: 'gpt-6.2-sol', label: 'GPT-6.2 Sol', tools: 'yes' },
+      { id: 'gpt-6.1-terra', label: 'gpt-6.1-terra', tools: 'yes' },
+    ])
+    expect(backend.ai.requests[0].req).toMatchObject({ method: 'GET', path: '/models' })
+  })
+
+  it('reports a failed model list (there is no curated fallback for an account)', async () => {
+    backend.ai.script = { events: [{ type: 'head', status: 401, headers: [] }, { type: 'end' }] }
+    await expect(getAdapter('chatgpt').listModels(plan)).rejects.toThrow(/401/)
   })
 })
 

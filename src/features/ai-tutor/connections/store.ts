@@ -56,10 +56,14 @@ export async function upsertTutorConnection(c: Connection): Promise<void> {
   await reload()
 }
 
-/** Remove one connection (Rust deletes its key); the others stay as they are on disk. */
-export async function removeTutorConnection(id: string): Promise<void> {
-  await ipc.removeConnection(id)
+/**
+ * Remove one connection (Rust deletes its key, and signs a plan sign-in out at the provider); the others
+ * stay as they are on disk. Returns whether the provider confirmed the sign-out (null: nothing to sign out).
+ */
+export async function removeTutorConnection(id: string): Promise<boolean | null> {
+  const signedOut = await ipc.removeConnection(id)
   await reload()
+  return signedOut
 }
 
 /** Use this connection (ignored, as none, when it is not in the list); null clears. */

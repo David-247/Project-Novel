@@ -1,5 +1,6 @@
 import type { Connection, ProviderId } from '../connections/types'
 import { anthropic } from './anthropic'
+import { chatgpt } from './chatgpt'
 import { custom } from './custom'
 import { deepseek } from './deepseek'
 import { lmstudio } from './lmstudio'
@@ -11,8 +12,7 @@ import type { ModelInfo, ProviderAdapter } from './types'
 import { xai } from './xai'
 import { zhipu } from './zhipu'
 
-// The ChatGPT sign-in provider gets its adapter in Task 12.
-const ADAPTERS = [anthropic, openai, xai, deepseek, zhipu, qwen, openrouter, ollama, lmstudio, custom] satisfies ProviderAdapter[]
+const ADAPTERS = [anthropic, openai, xai, deepseek, zhipu, qwen, openrouter, ollama, lmstudio, custom, chatgpt] satisfies ProviderAdapter[]
 
 export const listAdapters = (): ProviderAdapter[] => [...ADAPTERS]
 

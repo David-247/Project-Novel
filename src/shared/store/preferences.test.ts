@@ -64,6 +64,7 @@ describe('preferences.json', () => {
       navigationPane: true,
       navigationPaneWidth: 320,
       tutorActiveConnection: 'conn-1',
+      tutorPlanWarningSeen: true,
       spellcheck: { enabled: false, words: ['Aelinor', 'Zoë'] },
     }
     const parsed = parsePreferences(serializePreferences({ ...values, extra: {} }))
@@ -86,6 +87,10 @@ describe('preferences.json', () => {
     expect(read({ tutorActiveConnection: '' })).toBeNull()
     expect(read({ tutorActiveConnection: 7 })).toBeNull()
     expect(read({ tutorActiveConnection: 'x'.repeat(129) })).toBeNull()
+    const seen = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values.tutorPlanWarningSeen
+    expect(defaultPreferenceValues().tutorPlanWarningSeen).toBe(false)
+    expect(seen({ tutorPlanWarningSeen: true })).toBe(true)
+    expect(seen({ tutorPlanWarningSeen: 'yes' })).toBe(false)
   })
 
   it('writes the version first-class and trims the name', () => {

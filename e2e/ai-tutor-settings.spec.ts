@@ -11,6 +11,8 @@ import { launch, pressTab } from './helpers'
  *    preferences.json, and the field is empty when the form opens again ("Key saved");
  *  - plain http to another computer needs the confirmation;
  *  - Sign in with OpenRouter: Rust is asked (the fake records it), the result event adds the connection;
+ *  - Continue with ChatGPT (T12): the ban warning once before the first sign-in, then as OpenRouter; Manage
+ *    Usage and Sign In Again go to Rust by provider and connection id;
  *  - audits: tooltips, keyboard reachability, WCAG AA contrast in OS light and dark;
  *  - screenshots for the report (chromium only).
  */
@@ -102,6 +104,38 @@ test('Sign in with OpenRouter: Rust opens the browser; its result adds the conne
   expect(await page.evaluate(() => document.body.innerHTML)).not.toContain('sk-or-v1-e2e-secret')
 })
 
+test('Continue with ChatGPT: the ban warning once, then Rust signs in; Manage Usage and Sign In Again', async ({ page }) => {
+  await launch(page)
+  await openAiPage(page)
+  await ctl(page, 'aiSettings.signIn.chatgpt').click()
+  const warning = page.getByRole('dialog', { name: 'Before you sign in with your ChatGPT plan' })
+  await expect(warning).toContainText("governed by the provider's terms of use")
+  expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
+  await warning.getByRole('button', { name: 'Continue to Sign In' }).click()
+  await expect(warning).toBeHidden()
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.oauthStarts())).toEqual(['chatgpt'])
+  await expect(dialog(page).getByTestId('ai-sign-in-status')).toContainText('Finish signing in to ChatGPT in your browser')
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.preferencesFile())).toContain('"tutorPlanWarningSeen": true')
+  const record = '{"v":1,"accessToken":"e2e-ACCESS-secret","refreshToken":"e2e-REFRESH-secret"}'
+  const id = await page.evaluate((r) => window.__nvE2E.completeOAuth(r, 'chatgpt', 'ChatGPT (writer@example.com)'), record)
+  await page.evaluate((i) => window.__nvE2E.emit('ai-oauth-result', { ok: true, connectionId: i }), id)
+  await expect(dialog(page).getByTestId('ai-sign-in-status')).toContainText('the tutor now uses your ChatGPT plan')
+  const row = dialog(page).getByRole('listitem')
+  await expect(row).toContainText('Signed in · Using your ChatGPT plan')
+  await expect(row).toContainText('(Default)')
+  for (const s of ['e2e-ACCESS-secret', 'e2e-REFRESH-secret']) {
+    expect(await page.evaluate(() => document.body.innerHTML)).not.toContain(s)
+    expect(await page.evaluate(() => window.__nvE2E.tutorConnectionsFile())).not.toContain(s)
+  }
+  await row.getByRole('button', { name: 'Manage Usage ChatGPT (writer@example.com)' }).click()
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.usagePages())).toEqual(['chatgpt'])
+  // The warning was read once: the next sign-in (a renewal here) goes straight to the browser.
+  await row.getByRole('button', { name: 'Sign In Again ChatGPT (writer@example.com)' }).click()
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.oauthStarts())).toEqual(['chatgpt', 'chatgpt'])
+  await expect(page.getByRole('dialog', { name: 'Before you sign in with your ChatGPT plan' })).toHaveCount(0)
+  expect(await page.evaluate(() => window.__nvE2E.auditTooltips())).toEqual([])
+})
+
 test('every control has a tooltip and is reachable with Tab', async ({ page }) => {
   await page.addInitScript(() => {
     window.__nvE2EConfig = { tutorConnections: [{ id: 'c1', provider: 'ollama', label: 'Ollama', auth: 'none', baseUrl: 'http://localhost:11434/v1' }] }
@@ -117,6 +151,7 @@ test('every control has a tooltip and is reachable with Tab', async ({ page }) =
     'aiSettings.setDefault',
     'aiSettings.edit',
     'aiSettings.remove',
+    'aiSettings.signIn.chatgpt',
     'aiSettings.signIn',
     'aiSettings.label',
     'aiSettings.baseUrl',
@@ -166,6 +201,7 @@ async function signedInWithForm(page: Page) {
       tutorConnections: [
         { id: 'c1', provider: 'anthropic', label: 'Anthropic', auth: 'api_key', defaultModel: 'claude-sonnet-5-5' },
         { id: 'c2', provider: 'ollama', label: 'Ollama on this computer', auth: 'none', baseUrl: 'http://localhost:11434/v1' },
+        { id: 'c3', provider: 'chatgpt', label: 'ChatGPT (writer@example.com)', auth: 'oauth' },
       ],
     }
   })
@@ -200,6 +236,28 @@ test('WCAG AA contrast of the page in OS light and dark', async ({ page }, testI
   expect(failures).toEqual([])
 })
 
+test('WCAG AA contrast of the ban warning in OS light and dark', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.endsWith('-scroll'), 'colours do not depend on page navigation')
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  await launch(page)
+  await openAiPage(page)
+  await ctl(page, 'aiSettings.signIn.chatgpt').click()
+  const warning = page.getByRole('dialog', { name: 'Before you sign in with your ChatGPT plan' })
+  await expect(warning).toBeVisible()
+  const failures: string[] = []
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+    await page.mouse.move(0, 0)
+    const n = await mark(page, 'plan-warning', '[role="dialog"]:has([data-testid="ai-plan-warning"])')
+    if (n < 5) failures.push(`${scheme}: only ${n} elements found`)
+    const got = await settled(page, [{ what: 'plan-warning', sel: '[data-nv-probe="plan-warning"]', kind: 'auto', all: true, min: 5 }])
+    for (const m of [...got.missing, ...got.errors]) failures.push(`${scheme} ${m}`)
+    for (const x of got.samples) if (x.ratio < x.min) failures.push(`${scheme} ${x.what}: ${x.ratio}:1 < ${x.min}:1 (fg ${x.fg} on ${x.bg})`)
+  }
+  expect(failures).toEqual([])
+})
+
 const SHOTS = join(process.cwd(), '.superpowers', 'sdd', '2026-11-19-ai-tutor', 'screenshots')
 
 test('screenshots of the page for the report: light and dark', async ({ page }, testInfo) => {
@@ -223,4 +281,22 @@ test('screenshots of the page for the report: light and dark', async ({ page }, 
   await page.setViewportSize({ width: 420, height: 800 })
   await page.mouse.move(0, 0)
   await dialog(page).screenshot({ path: join(SHOTS, 'task-10-light-narrow.png') })
+})
+
+test('screenshots of the ban warning for the report (T12)', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'one set of screenshots (chromium)')
+  mkdirSync(SHOTS, { recursive: true })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  await launch(page)
+  await openAiPage(page)
+  await ctl(page, 'aiSettings.signIn.chatgpt').click()
+  const warning = page.getByRole('dialog', { name: 'Before you sign in with your ChatGPT plan' })
+  await expect(warning).toBeVisible()
+  await page.mouse.move(0, 0)
+  await warning.screenshot({ path: join(SHOTS, 'task-12-light-ban-warning.png') })
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' })
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await page.mouse.move(0, 0)
+  await warning.screenshot({ path: join(SHOTS, 'task-12-dark-ban-warning.png') })
 })

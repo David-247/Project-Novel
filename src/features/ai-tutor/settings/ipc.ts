@@ -14,9 +14,17 @@ export interface OAuthResult {
 
 export const OAUTH_RESULT_EVENT = 'ai-oauth-result'
 
-/** Open the provider's sign-in page in the browser; the outcome comes as an `ai-oauth-result` event. */
-export function startOAuth(provider: 'openrouter'): Promise<void> {
-  return invoke<void>('ai_oauth_start', { provider })
+/**
+ * Open the provider's sign-in page in the browser; the outcome comes as an `ai-oauth-result` event.
+ * `connectionId`: sign that saved connection in again (a renewable sign-in: ChatGPT).
+ */
+export function startOAuth(provider: ProviderId, connectionId?: string): Promise<void> {
+  return invoke<void>('ai_oauth_start', connectionId ? { provider, connectionId } : { provider })
+}
+
+/** Open the provider's usage settings page ("Manage Usage"; Rust's allowlisted address for that provider). */
+export function openUsagePage(provider: ProviderId): Promise<void> {
+  return invoke<void>('ai_open_usage_page', { provider })
 }
 
 /** Stop waiting for the browser (the pending sign-in reports `ok: false`). */

@@ -52,6 +52,8 @@ export interface PreferenceValues {
   navigationPaneWidth: number
   /** The AI tutor's active connection id (Phase 5); null = none chosen. */
   tutorActiveConnection: string | null
+  /** The writer has seen the AI tutor's consumer-plan warning (Sign in with ChatGPT, shown once before the first sign-in). */
+  tutorPlanWarningSeen: boolean
   /**
    * Spell check (Phase 5). `enabled`: View ▸ Spelling & Grammar, the editor's underlines (default on).
    * `words`: the user dictionary, words the spell checker accepts in every project.
@@ -157,6 +159,7 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     navigationPane: false,
     navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH,
     tutorActiveConnection: null,
+    tutorPlanWarningSeen: false,
     spellcheck: { enabled: true, words: NO_WORDS as string[] },
   }
 }
@@ -182,6 +185,7 @@ const READERS: { [K in keyof PreferenceValues]: (v: unknown) => PreferenceValues
   navigationPane: (v) => (typeof v === 'boolean' ? v : undefined),
   navigationPaneWidth: (v) => (typeof v === 'number' && Number.isFinite(v) ? clampNavPaneWidth(v) : undefined),
   tutorActiveConnection: (v) => (v === null ? null : typeof v === 'string' && v !== '' && v.length <= 128 ? v : undefined),
+  tutorPlanWarningSeen: (v) => (typeof v === 'boolean' ? v : undefined),
   spellcheck: readSpellcheck,
 }
 
@@ -254,6 +258,7 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     navigationPane: p.navigationPane,
     navigationPaneWidth: clampNavPaneWidth(p.navigationPaneWidth),
     tutorActiveConnection: p.tutorActiveConnection,
+    tutorPlanWarningSeen: p.tutorPlanWarningSeen === true,
     spellcheck: { enabled: p.spellcheck.enabled !== false, words: readDictionaryWords(p.spellcheck.words) },
   }
   return JSON.stringify(out, null, 2) + '\n'

@@ -16,6 +16,26 @@ export const AI_SETTINGS_CONTROLS = {
     label: 'Sign in with OpenRouter',
     description: 'Sign in to OpenRouter in your browser. Novel gets a key and keeps it in the keychain.',
   },
+  signInChatGpt: {
+    id: 'aiSettings.signIn.chatgpt',
+    label: 'Continue with ChatGPT',
+    description: 'Sign in to ChatGPT in your browser so the tutor can use your ChatGPT plan.',
+  },
+  signInAgain: {
+    id: 'aiSettings.signInAgain',
+    label: 'Sign In Again',
+    description: 'Renew this connection’s sign-in in your browser, with the same account.',
+  },
+  manageUsage: {
+    id: 'aiSettings.manageUsage',
+    label: 'Manage Usage',
+    description: 'Open your plan’s usage settings in your browser, where you can see and limit what Novel uses.',
+  },
+  planWarningAccept: {
+    id: 'aiSettings.planWarning.accept',
+    label: 'Continue to Sign In',
+    description: 'You have read the warning. Open the sign-in page in your browser.',
+  },
   signInCancel: { id: 'aiSettings.signIn.cancel', label: 'Cancel Sign-in', description: 'Stop waiting for the browser. No connection is added.' },
   add: { id: 'aiSettings.add', label: 'Add Connection…', description: 'Connect the tutor to a provider with an API key, or to a model on this computer or your network.' },
   setDefault: { id: 'aiSettings.setDefault', label: 'Set as Default', description: 'The tutor uses this connection unless you choose another one in its panel.' },

@@ -211,6 +211,7 @@ describe('writing preferences.json', () => {
         'reduceMotion',
         'spellcheck',
         'tutorActiveConnection',
+        'tutorPlanWarningSeen',
         'version',
       ],
     )

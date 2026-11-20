@@ -220,6 +220,75 @@ describe('Settings ▸ AI Tutor', () => {
     expect(form()).toHaveTextContent('Signed in with OpenRouter')
   })
 
+  it('Continue with ChatGPT: the ban warning comes once, before the first sign-in; Cancel starts nothing', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue with ChatGPT' }))
+    const warning = await screen.findByRole('dialog', { name: 'Before you sign in with your ChatGPT plan' })
+    expect(within(warning).getByTestId('ai-plan-warning')).toHaveTextContent('governed by the provider\'s terms of use')
+    expect(within(warning).getByTestId('ai-plan-warning')).toHaveTextContent('at your own risk')
+    audit('ban warning')
+    fireEvent.click(within(warning).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(backend.ai.oauthStarts).toEqual([])
+    expect(useStore.getState().preferences.tutorPlanWarningSeen).toBe(false)
+    // Continue: remembered, and Rust opens the browser.
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Continue to Sign In' }))
+    await waitFor(() => expect(backend.ai.oauthStarts).toEqual(['chatgpt']))
+    expect(useStore.getState().preferences.tutorPlanWarningSeen).toBe(true)
+    expect(screen.getByTestId('ai-sign-in-status')).toHaveTextContent('Finish signing in to ChatGPT in your browser')
+    // Rust finishes: the token record is in the keychain; the event carries the id only.
+    const id = core.completeOAuth('{"v":1,"accessToken":"TOKEN-SECRET"}', 'chatgpt', 'ChatGPT (writer@example.com)')
+    act(() => emit('ai-oauth-result', { ok: true, connectionId: id }))
+    await waitFor(() => expect(screen.getByTestId('ai-sign-in-status')).toHaveTextContent('the tutor now uses your ChatGPT plan'))
+    expect(useStore.getState().tutorConnections.activeId).toBe(id)
+    const row = screen.getByText('ChatGPT (writer@example.com)', { selector: 'p' }).closest('li')!
+    expect(row).toHaveTextContent('Signed in · Using your ChatGPT plan')
+    expect(document.body.textContent).not.toContain('TOKEN-SECRET')
+    // The second sign-in goes straight to the browser.
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }))
+    await waitFor(() => expect(backend.ai.oauthStarts).toEqual(['chatgpt', 'chatgpt']))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    audit('signed in')
+  })
+
+  it('a ChatGPT connection: Manage Usage, Sign In Again (same connection), and Remove signs out', async () => {
+    backend.ai.connections = [{ id: 'gpt', provider: 'chatgpt', label: 'ChatGPT', auth: 'oauth' }]
+    backend.ai.secrets.set('gpt', '{"v":1}')
+    useStore.getState().preferencesActions.set('tutorPlanWarningSeen', true)
+    renderPage()
+    const row = (await screen.findByText('ChatGPT', { selector: 'p' })).closest('li')!
+    fireEvent.click(within(row).getByRole('button', { name: 'Manage Usage ChatGPT' }))
+    await waitFor(() => expect(backend.ai.usagePages).toEqual(['chatgpt']))
+    fireEvent.click(within(row).getByRole('button', { name: 'Sign In Again ChatGPT' }))
+    await waitFor(() => expect(backend.ai.oauthRenewals).toEqual(['gpt']))
+    act(() => emit('ai-oauth-result', { ok: true, connectionId: 'gpt' }))
+    await waitFor(() => expect(screen.getByTestId('ai-sign-in-status')).toHaveTextContent('Signed in again. “ChatGPT” is ready to use.'))
+    expect(backend.ai.connections).toHaveLength(1)
+    // The form of a sign-in has no key field and says how to renew.
+    fireEvent.click(within(row).getByRole('button', { name: 'Edit ChatGPT' }))
+    expect(within(form()).queryByLabelText('API key')).toBeNull()
+    expect(form()).toHaveTextContent('Signed in with ChatGPT. If the sign-in has ended, use Sign In Again.')
+    fireEvent.click(within(form()).getByRole('button', { name: 'Cancel' }))
+    // Remove: Rust signs out; when OpenAI does not confirm, the page says where to disconnect.
+    backend.ai.signOutConfirmed = false
+    fireEvent.click(within(row).getByRole('button', { name: 'Remove ChatGPT' }))
+    const ask = await screen.findByRole('dialog', { name: 'Remove “ChatGPT”?' })
+    expect(ask).toHaveTextContent('Novel signs out of ChatGPT')
+    fireEvent.click(within(ask).getByRole('button', { name: 'Remove Connection' }))
+    await waitFor(() => expect(backend.ai.connections).toEqual([]))
+    expect(backend.ai.secrets.has('gpt')).toBe(false)
+    expect(screen.getByTestId('ai-settings-list-status')).toHaveTextContent('ChatGPT did not confirm the sign-out')
+  })
+
+  it('ChatGPT is a sign-in only: it is not in Add Connection’s provider list', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Connection…' }))
+    const options = within(within(form()).getByLabelText('Provider')).getAllByRole('option').map((o) => (o as HTMLOptionElement).value)
+    expect(options).not.toContain('chatgpt')
+    expect(options).toContain('openrouter')
+  })
+
   it('a failed or cancelled sign-in says so and adds nothing', async () => {
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: 'Sign in with OpenRouter' }))

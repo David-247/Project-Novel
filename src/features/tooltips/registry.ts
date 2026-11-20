@@ -340,7 +340,7 @@ const TUTOR_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
     .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description }]),
 )
 
-/** Settings ▸ AI Tutor (ai-tutor slice): connections, Sign in with OpenRouter, the chat history's Clear buttons. */
+/** Settings ▸ AI Tutor (ai-tutor slice): connections, Continue with ChatGPT and Sign in with OpenRouter, the chat history's Clear buttons. */
 const AI_SETTINGS_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   Object.values(AI_SETTINGS_CONTROLS).map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description }]),
 )
