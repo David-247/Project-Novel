@@ -13,6 +13,7 @@
  */
 
 import { AI_COMMAND_NAMES, createFakeAi } from './fake-ai'
+import { createFakeSpell, SPELL_COMMAND_NAMES } from './fake-spellcheck'
 import { createFakeExport, EXPORT_COMMAND_NAMES } from './fake-export'
 
 export interface RecentEntry {
@@ -114,6 +115,7 @@ export const HANDLED_COMMANDS = [
   'plugin:app|version',
   ...EXPORT_COMMAND_NAMES,
   ...AI_COMMAND_NAMES,
+  ...SPELL_COMMAND_NAMES,
 ] as const
 
 /** What `plugin:app|version` answers (tauri.conf.json `version` in the real app). */
@@ -187,10 +189,12 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
 
   const exportFake = createFakeExport(() => state.fonts, () => state.active)
   const aiFake = createFakeAi()
+  const spellFake = createFakeSpell()
 
   function reset(): void {
     exportFake.reset()
     aiFake.reset()
+    spellFake.reset()
     state.files.clear()
     state.dirs.clear()
     state.writes.length = 0
@@ -300,6 +304,7 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     const path = args.path as string
     if ((EXPORT_COMMAND_NAMES as readonly string[]).includes(cmd)) return exportFake.handle(cmd, args, invokeOptions)
     if ((AI_COMMAND_NAMES as readonly string[]).includes(cmd)) return aiFake.handle(cmd, args)
+    if ((SPELL_COMMAND_NAMES as readonly string[]).includes(cmd)) return spellFake.handle(cmd, args)
     switch (cmd) {
       case 'list_system_fonts':
         if (state.failFonts) throw new Error('font enumeration failed')
@@ -528,6 +533,8 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     restartExportSession: exportFake.restartSession,
     /** AI network proxy fake (scripted streams, recorded requests and cancels). */
     ai: aiFake.state,
+    /** Spell checker fake (recorded calls, scripted misspellings). */
+    spell: spellFake.state,
     handle,
     reset,
     hydrate,

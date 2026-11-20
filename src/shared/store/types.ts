@@ -11,6 +11,7 @@ import type { TrackChangesSlice } from './track-changes-slice'
 import type { RewriteSlice } from './rewrite-slice'
 import type { WordCountSlice } from './word-count-slice'
 import type { TutorConnectionsSlice } from './tutor-connections-slice'
+import type { SpellcheckSlice } from './spellcheck-slice'
 
 /**
  * Compose the full store state here: `RootState = AppSlice & EditorSlice & ...`.
@@ -27,7 +28,8 @@ export type RootState = AppSlice &
   TrackChangesSlice &
   RewriteSlice &
   WordCountSlice &
-  TutorConnectionsSlice
+  TutorConnectionsSlice &
+  SpellcheckSlice
 
 /** A slice creator contributes state + named actions to the single store. */
 export type SliceCreator<S> = StateCreator<RootState, [], [], S>

@@ -64,6 +64,7 @@ describe('preferences.json', () => {
       navigationPane: true,
       navigationPaneWidth: 320,
       tutorActiveConnection: 'conn-1',
+      spellcheck: { words: ['Aelinor', 'Zoë'] },
     }
     const parsed = parsePreferences(serializePreferences({ ...values, extra: {} }))
     expect(parsed).toMatchObject({ values, extra: {}, authorNameMissing: false, fallback: null })
@@ -188,5 +189,17 @@ describe('newProjectBookSettings', () => {
 
   it('falls back to the default trim size for an unknown id', () => {
     expect(newProjectBookSettings({ defaultPaper: 'auto', defaultTrimSize: 'gone' })).toMatchObject({ trimSize: 'us-5.5x8.5' })
+  })
+})
+
+describe('the user dictionary preference', () => {
+  const read = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values.spellcheck
+  it('defaults to no words and keeps clean, distinct, single words only', () => {
+    expect(defaultPreferenceValues().spellcheck).toEqual({ words: [] })
+    expect(read({ spellcheck: { words: ['Aelinor', 'aelinor', ' Brynn ', 'two words', 7, '', 'x'.repeat(65)] } })).toEqual({ words: ['Aelinor', 'Brynn'] })
+  })
+  it('wrong types fall back to the default', () => {
+    expect(read({ spellcheck: 'x' })).toEqual({ words: [] })
+    expect(read({ spellcheck: { words: 'Aelinor' } })).toEqual({ words: [] })
   })
 })

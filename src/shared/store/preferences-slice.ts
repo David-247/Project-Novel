@@ -49,6 +49,8 @@ export const createPreferencesSlice: SliceCreator<PreferencesSlice> = (set) => (
           navigationPaneWidth: s.preferences.navigationPaneWidth,
           // The tutor's connection is chosen in the tutor, not in Settings.
           tutorActiveConnection: s.preferences.tutorActiveConnection,
+          // The user dictionary is words the user typed, not a setting of the Settings dialog.
+          spellcheck: s.preferences.spellcheck,
           extra: s.preferences.extra,
           loaded: s.preferences.loaded,
         },

@@ -32,11 +32,13 @@ export const core = createFakeTauriCore({
   },
 })
 
-type Backend = typeof core.state & typeof dialog & { ai: typeof core.ai; reset(): void }
+type Backend = typeof core.state & typeof dialog & { ai: typeof core.ai; spell: typeof core.spell; reset(): void }
 
 export const backend: Backend = Object.assign(core.state, dialog, {
   /** AI proxy fake: `backend.ai.script = { events: sseResponse([...]) }` (./fake-ai.ts). */
   ai: core.ai,
+  /** Spell checker fake: `backend.spell.calls`, `backend.spell.misspellings` (./fake-spellcheck.ts). */
+  spell: core.spell,
   reset() {
     core.reset()
     disk.records.clear()

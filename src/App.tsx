@@ -56,6 +56,7 @@ import {
   setTrackChangesAuthorSource,
   TrackChangesNotice,
 } from '@/features/track-changes'
+import { registerDictionarySideFile } from '@/features/spellcheck'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
 import { createManuscriptExportRenderers, ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile, setExportRenderers } from '@/features/export'
 import { NavigationPane, registerOutlineCommands } from '@/features/outline'
@@ -137,6 +138,8 @@ export function App() {
   useEffect(() => registerRewritesSideFile(), [])
   // export.json (manuscript export settings) likewise; a project without it opens with the defaults.
   useEffect(() => registerExportSideFile(), [])
+  // dictionary.json (the project's spell-check words) likewise.
+  useEffect(() => registerDictionarySideFile(), [])
   // The export wizard's DOCX and PDF generators (File > Export > Manuscript…).
   useEffect(() => setExportRenderers(createManuscriptExportRenderers()), [])
   // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.

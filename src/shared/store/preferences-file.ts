@@ -52,6 +52,8 @@ export interface PreferenceValues {
   navigationPaneWidth: number
   /** The AI tutor's active connection id (Phase 5); null = none chosen. */
   tutorActiveConnection: string | null
+  /** The user dictionary (Phase 5): words the spell checker accepts in every project. */
+  spellcheck: { words: string[] }
 }
 
 export interface Preferences extends PreferenceValues {
@@ -75,6 +77,10 @@ export const PROFILE_MAX = {
 
 export const MAX_EXPORT_FOLDERS = 50
 
+/** Limits of a dictionary word and of the user dictionary (also the project's dictionary.json). */
+export const MAX_DICTIONARY_WORD_LENGTH = 64
+export const MAX_DICTIONARY_WORDS = 5000
+
 /** Navigation pane width limits and default (CSS px). */
 export const NAV_PANE_MIN_WIDTH = 200
 export const NAV_PANE_MAX_WIDTH = 480
@@ -87,6 +93,31 @@ export function clampNavPaneWidth(px: number): number {
 
 /** The default `exportFolders`: one shared object, so a fresh default is `===` the store's (no phantom change). */
 const NO_EXPORT_FOLDERS: Record<string, string> = Object.freeze({}) as Record<string, string>
+
+const NO_WORDS: readonly string[] = Object.freeze([])
+
+/** Dictionary words as stored: trimmed strings without whitespace, in range, no case-insensitive duplicates. */
+export function readDictionaryWords(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const w of v) {
+    if (typeof w !== 'string') continue
+    const word = w.trim()
+    if (word === '' || word.length > MAX_DICTIONARY_WORD_LENGTH || /\s/.test(word)) continue
+    const key = word.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(word)
+    if (out.length === MAX_DICTIONARY_WORDS) break
+  }
+  return out
+}
+
+function readSpellcheck(v: unknown): { words: string[] } | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
+  return { words: readDictionaryWords((v as { words?: unknown }).words) }
+}
 
 function readExportFolders(v: unknown): Record<string, string> | undefined {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
@@ -119,6 +150,7 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     navigationPane: false,
     navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH,
     tutorActiveConnection: null,
+    spellcheck: { words: NO_WORDS as string[] },
   }
 }
 
@@ -143,6 +175,7 @@ const READERS: { [K in keyof PreferenceValues]: (v: unknown) => PreferenceValues
   navigationPane: (v) => (typeof v === 'boolean' ? v : undefined),
   navigationPaneWidth: (v) => (typeof v === 'number' && Number.isFinite(v) ? clampNavPaneWidth(v) : undefined),
   tutorActiveConnection: (v) => (v === null ? null : typeof v === 'string' && v !== '' && v.length <= 128 ? v : undefined),
+  spellcheck: readSpellcheck,
 }
 
 const KNOWN_KEYS = new Set<string>(Object.keys(READERS))
@@ -214,6 +247,7 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     navigationPane: p.navigationPane,
     navigationPaneWidth: clampNavPaneWidth(p.navigationPaneWidth),
     tutorActiveConnection: p.tutorActiveConnection,
+    spellcheck: { words: readDictionaryWords(p.spellcheck.words) },
   }
   return JSON.stringify(out, null, 2) + '\n'
 }
