@@ -17,6 +17,13 @@ export { registerDictionarySideFile, DICTIONARY_FILE } from './persistence'
 
 export { checkBlocks, __resetSpellcheckCacheForTests } from './check'
 
+// The text a block is checked as (No Markup: tracked deletions and footnote references out, a hard break
+// as '\n') and the way back to document positions, for callers that check text themselves (the tutor's
+// check_spelling). hashText(text) is the block key checkBlocks and Ignore Once use for that text.
+export { blockCheckText, textRangeToDoc } from './block-text'
+export type { CheckText, TextSegment } from './block-text'
+export { hashText } from './hash'
+
 // The editor's underlines (Phase 5). createSpellcheckExtension(): pass to <NovelEditor extensions>
 // (composition root); it checks the blocks in view and changed blocks 400 ms after the last edit or
 // scroll, at most 200 per engine call, and underlines with `spell-error` / `grammar-error`.
