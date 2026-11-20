@@ -10,6 +10,8 @@ import { createCommentsSlice } from './comments-slice'
 import { createTrackChangesSlice } from './track-changes-slice'
 import { createRewriteSlice } from './rewrite-slice'
 import { createWordCountSlice } from './word-count-slice'
+import { createTutorConnectionsSlice } from './tutor-connections-slice'
+import { createSpellcheckSlice } from './spellcheck-slice'
 import type { RootState } from './types'
 
 /**
@@ -31,6 +33,8 @@ export const useStore = create<RootState>()((...a) => ({
   ...createTrackChangesSlice(...a),
   ...createRewriteSlice(...a),
   ...createWordCountSlice(...a),
+  ...createTutorConnectionsSlice(...a),
+  ...createSpellcheckSlice(...a),
 }))
 
 export { useColorSchemeSync } from './use-color-scheme-sync'
@@ -50,6 +54,9 @@ export {
   PROFILE_MAX,
   PROFILE_KEYS,
   MAX_EXPORT_FOLDERS,
+  MAX_DICTIONARY_WORD_LENGTH,
+  MAX_DICTIONARY_WORDS,
+  readDictionaryWords,
   NAV_PANE_MIN_WIDTH,
   NAV_PANE_MAX_WIDTH,
   NAV_PANE_DEFAULT_WIDTH,
@@ -62,4 +69,6 @@ export type { CommentsSlice, CommentThread, CommentMessage } from './comments-sl
 export type { TrackChangesSlice } from './track-changes-slice'
 export type { RewriteSlice, RewriteRecord, RewriteVersion, RewriteStatus, RewriteNotice, RewriteLocation } from './rewrite-slice'
 export type { WordCountSlice, CountsWithNotes, ChapterWordCounts, WordCountPublish } from './word-count-slice'
+export type { TutorConnectionsSlice, TutorConnection } from './tutor-connections-slice'
+export type { SpellcheckSlice } from './spellcheck-slice'
 export type { RootState, SliceCreator } from './types'

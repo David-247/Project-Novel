@@ -27,6 +27,8 @@
   --page-find-current-bg: #f5b94a;
   --page-find-ring: #8a3d00; /* outline on the current match; against the page, 3:1 */
   --page-focus-ring: #1d5c68; /* focus outline around the page, drawn on the desk */
+  --page-spell-error: #c0141c; /* spelling underline (red wavy); 3:1 on the page, selection and find fills */
+  --page-grammar-error: #1a56b8; /* grammar underline (blue double) */
   --page-shadow: 0 0 0 1px rgb(20 24 28 / 0.1), 0 1px 3px rgb(20 24 28 / 0.2), 0 8px 24px rgb(20 24 28 / 0.14);
   --page-edge: 0 0 0 0 transparent; /* inner edge shading: none on plain paper */
   --page-texture: none;
@@ -45,6 +47,8 @@
   --page-find-current-bg: #735a10;
   --page-find-ring: #ffd36b;
   --page-focus-ring: #8fd4de;
+  --page-spell-error: #ffa3a3; /* spelling underline (red wavy); 3:1 on the page, selection and find fills */
+  --page-grammar-error: #8cb8ff; /* grammar underline (blue double) */
   --page-shadow: 0 0 0 1px rgb(255 255 255 / 0.07), 0 1px 3px rgb(0 0 0 / 0.5), 0 10px 28px rgb(0 0 0 / 0.55);
   --page-edge: 0 0 0 0 transparent;
   --page-texture: none;
@@ -63,6 +67,8 @@
   --page-find-current-bg: #e8a94a;
   --page-find-ring: #7a3410;
   --page-focus-ring: #1d4f5a;
+  --page-spell-error: #a8121a; /* spelling underline (red wavy); 3:1 on the page, selection and find fills */
+  --page-grammar-error: #1a4ea6; /* grammar underline (blue double) */
   --page-shadow: 0 1px 2px rgb(60 40 15 / 0.28), 0 10px 26px rgb(60 40 15 / 0.22);
   --page-edge: inset 0 0 0 1px rgb(120 85 30 / 0.16), inset 0 0 38px rgb(120 85 30 / 0.12);
   /* Light falls from the top; a faint laid-paper grain. Alphas are low enough that body text
@@ -85,6 +91,8 @@
   --page-find-current-bg: #7a5c16;
   --page-find-ring: #ffcf6e;
   --page-focus-ring: #8fd4de;
+  --page-spell-error: #ffaa9e; /* spelling underline (red wavy); 3:1 on the page, selection and find fills */
+  --page-grammar-error: #93bcff; /* grammar underline (blue double) */
   --page-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 30px rgb(0 0 0 / 0.55);
   --page-edge: inset 0 0 0 1px rgb(255 214 150 / 0.07), inset 0 0 38px rgb(0 0 0 / 0.28);
   --page-texture:

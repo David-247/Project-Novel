@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { newProjectBookSettings } from '@/shared/book'
-import { defaultPreferenceValues, NAV_PANE_DEFAULT_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH, parsePreferences, PREFERENCES_VERSION, serializePreferences } from './preferences-file'
+import { defaultPreferenceValues, MAX_DICTIONARY_WORDS, readDictionaryWords, NAV_PANE_DEFAULT_WIDTH, NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH, parsePreferences, PREFERENCES_VERSION, serializePreferences } from './preferences-file'
 import { setSystemAuthorName } from './preferences-slice'
 import { useStore } from './index'
 
@@ -17,6 +17,15 @@ describe('preferences slice', () => {
   it('starts with the defaults, not loaded', () => {
     expect(prefs()).toEqual({ ...defaultPreferenceValues(), extra: {}, loaded: false })
     expect(prefs().pageNavigation).toBe('book')
+  })
+
+  it('object-valued defaults are shared objects, so a fresh default never looks like a change', () => {
+    const one = defaultPreferenceValues()
+    const two = defaultPreferenceValues()
+    for (const k of Object.keys(one) as (keyof typeof one)[]) {
+      if (typeof one[k] === 'object' && one[k] !== null) expect(two[k], k).toBe(one[k])
+    }
+    expect(Object.isFrozen(one.spellcheck)).toBe(true)
   })
 
   it('set changes one key', () => {
@@ -63,6 +72,9 @@ describe('preferences.json', () => {
       exportFolders: { 'project-id': '/exports' },
       navigationPane: true,
       navigationPaneWidth: 320,
+      tutorActiveConnection: 'conn-1',
+      tutorPlanWarningSeen: true,
+      spellcheck: { enabled: false, words: ['Aelinor', 'Zoë'] },
     }
     const parsed = parsePreferences(serializePreferences({ ...values, extra: {} }))
     expect(parsed).toMatchObject({ values, extra: {}, authorNameMissing: false, fallback: null })
@@ -75,6 +87,19 @@ describe('preferences.json', () => {
     expect(read({ navigationPaneWidth: 10 }).navigationPaneWidth).toBe(NAV_PANE_MIN_WIDTH)
     expect(read({ navigationPaneWidth: 5000 }).navigationPaneWidth).toBe(NAV_PANE_MAX_WIDTH)
     expect(read({ navigationPane: 'yes', navigationPaneWidth: 'wide' })).toMatchObject({ navigationPane: false, navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH })
+  })
+
+  it('the tutor active connection: null or a short id, anything else falls back to none', () => {
+    const read = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values.tutorActiveConnection
+    expect(defaultPreferenceValues().tutorActiveConnection).toBeNull()
+    expect(read({ tutorActiveConnection: 'c1' })).toBe('c1')
+    expect(read({ tutorActiveConnection: '' })).toBeNull()
+    expect(read({ tutorActiveConnection: 7 })).toBeNull()
+    expect(read({ tutorActiveConnection: 'x'.repeat(129) })).toBeNull()
+    const seen = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values.tutorPlanWarningSeen
+    expect(defaultPreferenceValues().tutorPlanWarningSeen).toBe(false)
+    expect(seen({ tutorPlanWarningSeen: true })).toBe(true)
+    expect(seen({ tutorPlanWarningSeen: 'yes' })).toBe(false)
   })
 
   it('writes the version first-class and trims the name', () => {
@@ -178,5 +203,28 @@ describe('newProjectBookSettings', () => {
 
   it('falls back to the default trim size for an unknown id', () => {
     expect(newProjectBookSettings({ defaultPaper: 'auto', defaultTrimSize: 'gone' })).toMatchObject({ trimSize: 'us-5.5x8.5' })
+  })
+})
+
+describe('the user dictionary preference', () => {
+  const read = (o: Record<string, unknown>) => parsePreferences(JSON.stringify({ version: 1, ...o })).values.spellcheck
+  it('defaults to no words and keeps clean, distinct, single words only', () => {
+    expect(defaultPreferenceValues().spellcheck).toEqual({ enabled: true, words: [] })
+    expect(read({ spellcheck: { words: ['Aelinor', 'aelinor', ' Brynn ', 'two words', 7, '', 'x'.repeat(65)] } })).toEqual({ enabled: true, words: ['Aelinor', 'Brynn'] })
+  })
+  it('wrong types fall back to the default', () => {
+    expect(read({ spellcheck: 'x' })).toEqual({ enabled: true, words: [] })
+    expect(read({ spellcheck: { words: 'Aelinor', enabled: 'no' } })).toEqual({ enabled: true, words: [] })
+  })
+  it('View > Spelling & Grammar (spellcheck.enabled) is on by default, and an off is kept', () => {
+    expect(read({})).toEqual({ enabled: true, words: [] })
+    expect(read({ spellcheck: { enabled: false, words: ['Aelinor'] } })).toEqual({ enabled: false, words: ['Aelinor'] })
+    const values = { ...defaultPreferenceValues(), spellcheck: { enabled: false, words: ['Zoë'] } }
+    expect(JSON.parse(serializePreferences({ ...values, extra: {} })).spellcheck).toEqual({ enabled: false, words: ['Zoë'] })
+  })
+  it('readDictionaryWords caps a list at MAX_DICTIONARY_WORDS unless told another limit', () => {
+    const many = Array.from({ length: MAX_DICTIONARY_WORDS + 10 }, (_, i) => `w${i}`)
+    expect(readDictionaryWords(many)).toHaveLength(MAX_DICTIONARY_WORDS)
+    expect(readDictionaryWords(many, Infinity)).toHaveLength(MAX_DICTIONARY_WORDS + 10)
   })
 })

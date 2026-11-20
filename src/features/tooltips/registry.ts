@@ -16,6 +16,8 @@ import { FOOTNOTE_OPTION_CONTROLS } from '@/features/footnotes'
 import { COMMENT_CONTROLS } from '@/features/comments'
 import { REWRITE_CONTROLS } from '@/features/rewrite'
 import { OUTLINE_CONTROLS } from '@/features/outline'
+import { SPELLCHECK_CONTROLS } from '@/features/spellcheck'
+import { AI_SETTINGS_CONTROLS, TUTOR_CONTROLS } from '@/features/ai-tutor'
 import { EXPORT_WIZARD_CONTROLS } from '@/features/export'
 import type { ToolbarControlMeta } from '@/features/editor'
 import { HEADER_FOOTER_CONTROLS } from '@/features/header-footer'
@@ -276,6 +278,8 @@ const WORD_COUNT_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
 /** Settings dialog and the one-time author question (settings slice). */
 const SETTINGS_DESCRIPTIONS: Record<keyof typeof SETTINGS_CONTROLS, string> = {
   open: 'Your name, how pages turn, and what new projects start with. Applies to every project.',
+  // Each page's tab adds what the page holds after this ("Show this page of Settings. It holds ...").
+  page: 'Show this page of Settings.',
   authorName: 'The name on your tracked changes and comments. Starts as your computer account name.',
   authorColor: 'The colour of your tracked changes and comments.',
   authorColorAuto: 'Let Novel pick your colour instead of using the one you chose.',
@@ -312,6 +316,33 @@ const OUTLINE_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
   Object.values(OUTLINE_CONTROLS)
     .filter((c) => c.id !== OUTLINE_CONTROLS.toggle.id)
     .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description, shortcut: 'shortcut' in c ? (c.shortcut as string) : undefined }]),
+)
+
+/**
+ * The spell check's context menu items (spellcheck slice). A suggestion's tooltip names its word (the
+ * item passes its own copy); these entries are the controls'. The toggle (`view.spellcheck`: menu item,
+ * ribbon button) reads its copy from the registry command.
+ */
+const SPELLCHECK_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(SPELLCHECK_CONTROLS)
+    .filter((c) => c.id !== SPELLCHECK_CONTROLS.toggle.id)
+    .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description }]),
+)
+
+/**
+ * The AI tutor panel (ai-tutor slice): its header, composer, + menu, chips, replies, corrections, read
+ * requests and model picker. The toggle (`tutor.toggle`: menu item, ribbon buttons) reads its copy from
+ * the registry command; controls that name their instance (a chip, a chat, a model) pass their own copy.
+ */
+const TUTOR_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(TUTOR_CONTROLS)
+    .filter((c) => c.id !== TUTOR_CONTROLS.toggle.id)
+    .map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description }]),
+)
+
+/** Settings ▸ AI Tutor (ai-tutor slice): connections, Continue with ChatGPT and Sign in with OpenRouter, the chat history's Clear buttons. */
+const AI_SETTINGS_TOOLTIPS: Record<string, TooltipCopy> = Object.fromEntries(
+  Object.values(AI_SETTINGS_CONTROLS).map((c): [string, TooltipCopy] => [c.id, { title: c.label, description: c.description }]),
 )
 
 /** Review: Track Changes and the markup view picker with its choices (track-changes slice). */
@@ -411,6 +442,9 @@ export const TOOLTIP_REGISTRY: Readonly<Record<string, TooltipCopy>> = Object.fr
   ...COMMENT_TOOLTIPS,
   ...REWRITE_TOOLTIPS,
   ...OUTLINE_TOOLTIPS,
+  ...SPELLCHECK_TOOLTIPS,
+  ...TUTOR_TOOLTIPS,
+  ...AI_SETTINGS_TOOLTIPS,
   ...EXPORT_TOOLTIPS,
   ...DIALOG_TOOLTIPS,
   ...MENU_TOOLTIPS,

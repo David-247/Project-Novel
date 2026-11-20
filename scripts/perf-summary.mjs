@@ -206,6 +206,17 @@ export function toMarkdown(results, dir = 'perf-results') {
     md.push('| scenario | measure | engine / OS | ms | budget ms |', '| --- | --- | --- | --- | --- |', ...paneRows, '')
   }
 
+  // Phase 5: spell check (e2e/spellcheck-perf.spec.ts). Typing with it on is in the typing table
+  // (blocking on Windows Chromium like plain typing); here, a typed misspelling's underline after the
+  // pause and the engine calls made while typing and scrolling (reported, no budget).
+  const spell = results.filter((r) => r.spellcheck && typeof r.spellcheck === 'object')
+  if (spell.length) {
+    md.push('#### Spell check (reported, no budget)', '')
+    md.push('| scenario | engine / OS | last keystroke to underline ms | engine calls | most blocks in one call | blocks checked |', '| --- | --- | --- | --- | --- | --- |')
+    for (const r of spell) md.push(`| ${r.scenario} | ${pair(r)} | ${v(r.spellcheck.underlineMs)} | ${v(r.spellcheck.engineCalls)} | ${v(r.spellcheck.maxBlocksPerCall)} | ${v(r.spellcheck.blocksChecked)} |`)
+    md.push('')
+  }
+
   const broken = results.filter((r) => r.error)
   for (const r of broken) md.push(`- ${r.file}: unreadable (${r.error})`)
   return md.join('\n') + '\n'

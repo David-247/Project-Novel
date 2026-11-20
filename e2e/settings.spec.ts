@@ -74,6 +74,18 @@ test('a damaged preferences.json starts the app on defaults and the next change 
   expect(JSON.parse((await prefsFile(page))!)).toMatchObject({ version: 1, authorName: 'Account Name' })
 })
 
+test('the user dictionary and the spell-check toggle are kept across a restart, and loading writes nothing', async ({ page }) => {
+  await launch(page)
+  const saved = JSON.stringify({ version: 1, authorName: 'Kept', spellcheck: { enabled: false, words: ['Aelinor', 'Brannoch'] } })
+  await page.evaluate((t) => window.__nvE2E.setPreferencesFile(t), saved)
+  await launch(page) // restart over the saved file
+  await expect.poll(() => page.evaluate(() => window.__nvE2E.preferences().spellcheck)).toEqual({ enabled: false, words: ['Aelinor', 'Brannoch'] })
+  // Past the 300 ms write debounce: the file is still the one that was read.
+  await page.waitForTimeout(1000)
+  expect(await prefsFile(page)).toBe(saved)
+  expect(await page.evaluate(() => window.__nvE2E.preferences().spellcheck)).toEqual({ enabled: false, words: ['Aelinor', 'Brannoch'] })
+})
+
 test('a deleted preferences.json falls back to defaults', async ({ page }) => {
   await setDefaultAuthor(page, 'Account Name')
   await launch(page)
@@ -147,6 +159,8 @@ test('every control has a tooltip, is reachable with Tab, and the audit finds no
 
   const expected = [
     'dialog.close',
+    // The page list (General, AI Tutor): one Tab stop, the selected page (Phase 5 T10).
+    'settings.page',
     'settings.authorName',
     'settings.authorColor',
     // 'Automatic colour' is disabled until a colour is chosen, so Tab skips it.

@@ -1,6 +1,6 @@
 /**
  * TEST-ONLY in-memory stand-in for the Tauri backend: the Rust storage commands (src-tauri/src/storage.rs),
- * list_system_fonts, the export platform commands (./fake-export.ts), and the plugin commands the app uses (dialog message, SQL, window theme/destroy).
+ * list_system_fonts, the export platform commands (./fake-export.ts), the AI network proxy (./fake-ai.ts), and the plugin commands the app uses (dialog message, SQL, window theme/destroy).
  * One command core, shared by:
  *   - Vitest: src/test-utils/fake-tauri.ts (module mocks; Map persistence),
  *   - Playwright: src/test-utils/e2e-backend.ts (mockIPC; IndexedDB persistence, e2e builds only).
@@ -12,6 +12,8 @@
  * adapter, from which a new core can be hydrated ("relaunch" over the same disk).
  */
 
+import { AI_COMMAND_NAMES, createFakeAi } from './fake-ai'
+import { createFakeSpell, SPELL_COMMAND_NAMES } from './fake-spellcheck'
 import { createFakeExport, EXPORT_COMMAND_NAMES } from './fake-export'
 
 export interface RecentEntry {
@@ -112,10 +114,12 @@ export const HANDLED_COMMANDS = [
   'plugin:window|set_fullscreen',
   'plugin:app|version',
   ...EXPORT_COMMAND_NAMES,
+  ...AI_COMMAND_NAMES,
+  ...SPELL_COMMAND_NAMES,
 ] as const
 
 /** What `plugin:app|version` answers (tauri.conf.json `version` in the real app). */
-export const FAKE_APP_VERSION = '0.4.0'
+export const FAKE_APP_VERSION = '0.5.0'
 
 const notFound = (p: string): FakeError => ({ kind: 'not_found', message: `${p}: not found` })
 const outside = (p: string): FakeError => ({ kind: 'outside_project', message: `${p} is outside the open project folder` })
@@ -184,9 +188,13 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
   }
 
   const exportFake = createFakeExport(() => state.fonts, () => state.active)
+  const aiFake = createFakeAi()
+  const spellFake = createFakeSpell()
 
   function reset(): void {
     exportFake.reset()
+    aiFake.reset()
+    spellFake.reset()
     state.files.clear()
     state.dirs.clear()
     state.writes.length = 0
@@ -295,6 +303,8 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
   ): Promise<unknown> {
     const path = args.path as string
     if ((EXPORT_COMMAND_NAMES as readonly string[]).includes(cmd)) return exportFake.handle(cmd, args, invokeOptions)
+    if ((AI_COMMAND_NAMES as readonly string[]).includes(cmd)) return aiFake.handle(cmd, args)
+    if ((SPELL_COMMAND_NAMES as readonly string[]).includes(cmd)) return spellFake.handle(cmd, args)
     switch (cmd) {
       case 'list_system_fonts':
         if (state.failFonts) throw new Error('font enumeration failed')
@@ -521,6 +531,12 @@ export function createFakeTauriCore(options: FakeCoreOptions = {}) {
     exports: exportFake.state,
     /** A relaunch for the export platform (Rust forgets its Save-dialog grants). */
     restartExportSession: exportFake.restartSession,
+    /** AI network proxy fake (scripted streams, recorded requests and cancels). */
+    ai: aiFake.state,
+    /** Finish a Sign in with OpenRouter as Rust does (the test then emits `ai-oauth-result`). */
+    completeOAuth: aiFake.completeOAuth,
+    /** Spell checker fake (recorded calls, scripted misspellings). */
+    spell: spellFake.state,
     handle,
     reset,
     hydrate,

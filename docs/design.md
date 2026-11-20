@@ -486,14 +486,14 @@ What Word does, and what we took from it:
 | Layout | Paper | The paper surface picker |
 | Layout | Book | Book Details |
 | Layout | Export | Manuscript… (the export wizard), Export Manuscript Again (Word keeps Export in its File view; Novel has no File tab) |
-| Review | Proofing | Word Count (Phase 4, docs/word-count.md; Ctrl/Cmd+Shift+G) |
+| Review | Proofing | Spelling & Grammar, Word Count (Phase 4, docs/word-count.md; Ctrl/Cmd+Shift+G), Tutor (the AI sparkle; the tutor panel, Phase 5: in Proofing, as Word keeps its Editor, since a group of its own would collapse Comments and Re-write at 1400 px) |
 | Review | Tracking | Track Changes, Markup |
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
 | Review | Re-write | Re-write Passage…, Re-writes…, Previous Re-write, Next Re-write (the group's own buttons: an icon on the first, short labels Re-write / Re-writes / Previous / Next; tooltips and the dropdown keep the full names); while a re-write is open, Keep Original / Keep Version; Discard Re-write in the dropdown |
 | View | Views | Single Page, Two-Page Spread; Book, Continuous Scroll (two radio pairs: page view, then navigation mode; Previous / Next Spread are the turn controls on the canvas edges and View menu items, not ribbon buttons) |
 | View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |
-| View | Show | Comments panel |
+| View | Show | Navigation Pane, Comments panel, Tutor |
 | View | Window | Full Screen |
 
 Priorities (higher keeps its size longer): Home Font 90, Styles 80, Paragraph 75, Editing 60 (never collapses: two
@@ -762,3 +762,71 @@ Slice `src/features/outline/` (public interface `index.ts`), modelled on Word's 
   getChapters runs once per document version however often the pane asks. Rows are memoized on their own values (their callbacks are stable),
   so typing in one chapter re-renders its rows only. Perf: e2e/outline-perf.spec.ts (typing on 100k words with
   the pane open under 50 ms, blocking on Windows Chromium CI). No drag-to-reorder (Phase 4 review default).
+
+## Spell check underlines and the editor context menu (Phase 5)
+
+Slices: `src/features/spellcheck/` (the underlines, `extension.ts`; the menu items and View command,
+`menu.ts`) and `src/features/editor/context-menu/` (the menu and its registry). Word is the model.
+
+- **Underlines**: spelling is a red wavy underline (`.spell-error`), grammar a blue double one
+  (`.grammar-error`). Colours are paper-surface tokens, `--page-spell-error` and `--page-grammar-error`
+  (`src/shared/theme/surfaces.css`), contrast-tested at 3:1 against the page, the selection and both
+  find fills on all four surfaces (`SURFACE_CONTRAST_PAIRS`). Only `text-decoration` changes, so an
+  underline never reflows a page. Forced colours draw them in `CanvasText`. The webview's own checker is
+  off (`spellcheck="false"` on the manuscript).
+- **What is checked**: each block's text as No Markup shows it (tracked deletions out, insertions in;
+  footnote references out; a hard break reads as a newline). `spellcheck/block-text.ts` keeps the
+  segments that map block-text offsets (UTF-16, as Harper returns them) back to document positions, so
+  an underline lands on the right characters after curly quotes, accents, emoji, hidden deletions and
+  footnote references. A finding that spans hidden content can be ignored or added, not replaced.
+- **When**: 400 ms after the last edit, scroll, page turn or reflow, never in the keystroke's own
+  transaction. The blocks on the pages in view and one page either side (the store's `layout`), then up
+  to 200 blocks changed elsewhere (a Replace All; beyond that their underlines are dropped until their
+  page is in view), at most 200 blocks per engine call. Unchanged text is answered from the slice's
+  cache. Results land as one decoration-only transaction (no history, no document change); underlines
+  elsewhere are carried through edits by mapping. The word being typed at the caret is not flagged
+  until the caret leaves it.
+- **View ▸ Spelling & Grammar** (`view.spellcheck`, checkable, also Review ▸ Proofing in the ribbon,
+  before Word Count): turns the underlines on or off; saved as `spellcheck.enabled` in preferences.json
+  (default on).
+- **Context menu** (right-click, Shift+F10, the Menu key; listed in Keyboard Shortcuts): Radix
+  ContextMenu opened at the pointer, or just below the caret from the keyboard (then the first item has
+  the focus). A right-click outside the selection first moves the caret there. Word's order: the
+  suggestions (bold; "(No Spelling Suggestions)" when there are none), Ignore Once, Add to Dictionary
+  (spelling only; the user dictionary), then Cut, Copy and Paste (the Edit commands). A suggestion
+  replaces the text in one undoable step, only if the text is still what was flagged. Escape or a choice
+  returns the focus to the manuscript. Every item has a tooltip; a suggestion's names its word.
+- **Adding items**: `registerContextMenuItems(provider)` (editor slice) → unregister. A provider gets
+  `{ editor, pos, selection }` each time the menu opens and returns `MenuItem`s (`id` is the
+  `data-control-id`, registered in the tooltips registry; `group` and `order` place it: suggestions
+  0-99, proofing 100-199, other actions such as the tutor's 200-299, the clipboard 300-399).
+- **Perf**: e2e/spellcheck-perf.spec.ts, typing on the 100k fixture with spell check on, under 50 ms,
+  blocking on Windows Chromium CI like plain typing.
+
+## AI tutor panel (Phase 5)
+
+Slice: `src/features/ai-tutor/` (`panel/`, `commands.ts`); spec docs/superpowers/specs/2026-11-19-ai-tutor-design.md,
+"Chat panel". Copilot in Word is the model: a chat sidebar, not a console.
+
+- **Opening**: View ▸ Tutor (`tutor.toggle`, checkable, Ctrl/Cmd+Shift+Y; not Ctrl/Cmd+Shift+I, which opens
+  the webview's developer tools), Review ▸ Proofing (Tutor, with the AI sparkle) and View ▸ Show.
+  Docked at the right of the pages, 360 px (AppShell's `sidePanel`); below 768 px it floats over the
+  pages like the navigation pane. Escape gives the manuscript the focus (in the overlay it hides the
+  panel). The open state is not saved; opening sends nothing.
+- **Header**: Tutor, ⟲ (the project's chats: open, delete), New chat, ✕ (closing stops a reply).
+- **Opening view**: the scripted greeting and three suggested prompts ("What can you do?" is scripted,
+  no AI call; the other two attach the current chapter or page and pick a script).
+- **Composer**: chips (label and word count; ✕ or Backspace in an empty box removes one), the question
+  (Enter sends, Shift+Enter a new line), + (Current Page, Current Chapter ▸ with each chapter's words,
+  Selection, Whole Manuscript), ➤, which becomes Stop while a reply streams. Below: "Using: <connection>
+  · <model> ▾" (the models are listed when it opens; one without tool support is listed but off, with
+  the reason). Above 20,000 words, or with Whole Manuscript, the send asks first (the app's message box).
+- **Replies**: Markdown rendered as React elements; a quiet activity line while a tool runs; inline read
+  requests (Allow / Don't Allow); errors in words with Retry, the partial reply kept and marked
+  incomplete. Corrections are cards: kind, the location ("Ch 3 ¶4, line 2", a link that selects the
+  text), the fix, why, Fix and Ignore. Fix finds the paragraph by its session id at the click and is off,
+  with the reason shown and in its tooltip, when the paragraph changed, the text is in a locked re-write
+  passage or runs across hidden content. Proposals open the re-write view on a "Tutor suggestion"
+  version (one chapter at most; otherwise the card says why).
+- **Colours**: theme tokens only (`panel/contrast.test.ts` checks every pair in light and dark; the e2e
+  measures the rendered panel).

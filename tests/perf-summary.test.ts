@@ -196,6 +196,21 @@ describe('perf summary', () => {
     expect(md).toContain('| perf-navigation-pane | last outline build (reported) | chromium / win32 (shipping) | 4.3 | – |')
   })
 
+  it('spell check (Phase 5): typing with it on is a blocking typing row; the underline catch-up and engine load are reported', () => {
+    const md = toMarkdown([
+      {
+        scenario: 'perf-spellcheck',
+        browser: 'perf-chromium',
+        platform: 'win32',
+        typing: { medianMs: 14.2, p95Ms: 20, maxMs: 31 },
+        spellcheck: { underlineMs: 512.3, engineCalls: 7, maxBlocksPerCall: 120, blocksChecked: 640 },
+      },
+    ])
+    expect(md).toMatch(/\| perf-spellcheck \| chromium \/ win32 \(shipping\) \| 14\.2 \|/)
+    expect(md).toContain('#### Spell check')
+    expect(md).toContain('| perf-spellcheck | chromium / win32 (shipping) | 512.3 | 7 | 120 | 640 |')
+  })
+
   it('export: the PDF render of the 100k fixture against 15 s, blocking on Windows, a warning on macOS', () => {
     const md = toMarkdown([
       { scenario: 'pdf-export', browser: 'typst', platform: 'win32', pdfRender: { ms: 2300, pages: 363 } },

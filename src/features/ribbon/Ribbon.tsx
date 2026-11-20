@@ -164,7 +164,7 @@ function GroupView({ group, state, placed }: { group: RibbonGroupSpec; state: Gr
   const ownButtons =
     state === 'compact' && group.compactButtons === false
       ? []
-      : buttons(group, placed).map((c) => (iconOnly ? <CommandButton key={c.id} command={c} icon={Icon} iconOnly /> : <CommandButton key={c.id} command={c} />))
+      : buttons(group, placed).map((c) => (iconOnly ? <CommandButton key={c.id} command={c} icon={Icon} iconOnly /> : <CommandButton key={c.id} command={c} icon={c.ribbon?.icon} />))
   return (
     <div
       role="group"

@@ -66,7 +66,6 @@ book settings together with the text.
 - Pages are laid out with the fonts installed on your computer, so the same manuscript can paginate slightly
   differently on macOS and Windows. The automated cross-engine check uses a bundled test font to separate engine
   differences from font differences (see "End-to-end tests").
-- The AI tutor is a later phase (track changes and comments came in Phase 3, manuscript export in Phase 4, below).
 
 ## Development
 
@@ -82,6 +81,8 @@ pnpm typecheck
 pnpm test          # Vitest (jsdom)
 pnpm test:e2e      # Playwright e2e + perf, chromium and webkit (see below)
                    # (first run: pnpm exec playwright install chromium webkit)
+pnpm test:tutor-live  # the tutor's ghostwriting suite against real models (needs NOVEL_LIVE_<PROVIDER>_KEY;
+                      # never in CI; see docs/ai-tutor.md, "The live suite")
 pnpm tauri build   # production build
 ```
 
@@ -264,13 +265,77 @@ restores unsaved ones. The format rules, their sources and every option are in
   manuscript format, not the book layout on screen.
 - The navigation pane does not reorder chapters by dragging.
 
+### AI tutor and spell check (Phase 5)
+
+Version 0.5.0 adds offline spell and grammar checking, and an AI writing tutor. The tutor is an editor and a
+teacher: it explains mistakes, lists corrections for you to apply, and advises on pacing and structure. It does not
+write your book. Spell check runs fully offline. The tutor is the only part of Novel that uses the network: it talks
+only to the provider you connect, and only when you send something. How it works, and how to tune its prompts, is in
+[docs/ai-tutor.md](docs/ai-tutor.md).
+
+| Try | How | What to look for |
+| --- | --- | --- |
+| Spell and grammar check | View > Spelling & Grammar | Misspellings and grammar slips are underlined as you type. Right-click one for suggestions, Ignore Once or Add to Dictionary. It works offline. |
+| Connect a provider | File > Settings… (macOS: Novel > Settings…), AI Tutor, then Add Connection… | An API key (Anthropic, OpenAI, xAI, DeepSeek, GLM, Qwen, OpenRouter), **Sign in with OpenRouter** (your browser opens; the key comes back to Novel), a local model (Ollama or LM Studio, no key), or any OpenAI-compatible address. **Test Connection** lists the models. The key goes to the system keychain. Open Edit again and the field is empty, with "Key saved" beside it. |
+| Use your ChatGPT plan | Settings > AI Tutor, **Continue with ChatGPT** | A one-time warning about using a consumer plan in another app, then your browser opens at ChatGPT. Allow Novel to use your plan, and the connection "ChatGPT (your email)" appears, "Using your ChatGPT plan". **Manage Usage** opens your ChatGPT usage settings. **Sign In Again** renews an ended sign-in. **Remove** signs Novel out at OpenAI. It needs a ChatGPT plan that allows use in other apps (Go, Plus, Pro or Business). |
+| Open the tutor | View > Tutor, Review > Tutor, or Mod+Shift+Y | The panel opens at the right with a greeting and three suggested prompts. Below 768 px it floats over the pages. Nothing is sent until you press Send (or Enter), choose a suggested prompt, or click Allow. |
+| Give it context | **+** in the panel: Current Page, a chapter, Selection or Whole Manuscript. Or right-click the text: Ask the Tutor About This | Each chip shows its word count. Whole Manuscript, or more than 20,000 words, asks "Send about N words to …?" first. Without chips the tutor reads only the current chapter, and asks in the chat before reading anything else. |
+| Ask about a mistake | Attach the page and ask "Is the underlined word wrong?" | An explanation (the rule, then when breaking it works) and a correction list. **Go to text** shows the place, **Fix** applies it (Undo takes it back), **Ignore** sets it aside. Edit the text after the list came in and that correction shows "changed": it can no longer be applied. |
+| Ask it to write for you | "Write the next scene", "Rewrite this paragraph so it's better" | A short, friendly no, followed by real help: questions, options, the craft behind it. A short example of a technique, labelled **Example:**, is fine when you ask for one. |
+| A suggested edit | When the tutor proposes a mechanical fix to whole paragraphs | **Compare Side by Side** opens it in the re-write view as a "Tutor suggestion", and you decide. Anything bigger than a few words per sentence is turned down in code, and the tutor explains in the chat instead. |
+| Chats | The panel's Chat history and New chat buttons; Settings > AI Tutor to clear them | Chats are saved on this computer, keyed to the project (renaming or moving the folder keeps them), with the text you attached. They are never saved in the project folder. |
+| Problems | Disconnect the network, use a wrong key, or press Stop mid-reply | A plain message with **Retry**. What arrived so far stays, marked incomplete. A key never appears in a message. |
+
+**Known limitations (Phase 5).**
+
+- Claude subscriptions (Pro, Max) cannot be used: Anthropic's terms limit subscription login to Anthropic's own apps.
+  Use an Anthropic API key, or OpenRouter.
+- Sign in with ChatGPT uses OpenAI's flow for open-source apps, which OpenAI calls a preview. The plan's own usage
+  limits apply, and some plans or workspaces may not allow it.
+- The tutor needs a model that can call tools. Models known not to are shown as "not supported". For a model of
+  unknown support, tick "This model supports tools" in its connection if you know it can.
+- Chat history is not encrypted, like the project files.
+
 Projects are plain folders (`project.json`, `manuscript.json`, `index.sqlite`); see [docs/project-format.md](docs/project-format.md).
 The storage slice talks to the editor only through the `DocumentProvider` contract in `src/shared/document.ts`.
 
 ## Security and known limitations
 
-- Novel makes no network calls. The webview loads only the bundled app under a strict Content Security Policy
-  (`default-src 'self'`, see `src-tauri/tauri.conf.json`), with no remote content.
+- The webview loads only the bundled app under a strict Content Security Policy (`default-src 'self'`, see
+  `src-tauri/tauri.conf.json`), with no remote content and no `connect-src` widening.
+
+### Security: network and keys
+
+- **Only the AI tutor uses the network**, and only after the writer sends something. Everything else, spell check and
+  export included, is offline.
+- **One path out.** The webview never fetches. Every tutor request goes through the Rust command `ai_fetch`
+  (`src-tauri/src/ai/fetch.rs`), which sends it to one host: the provider's fixed address from
+  `src-tauri/src/ai/providers.rs`, or, for Ollama, LM Studio and custom endpoints, exactly the address saved for
+  that connection. The webview supplies only a path (no `://`, `..` or `\`) and a few allowlisted headers.
+- **Plain http** to an address other than this computer needs the writer's confirmation, because the text would
+  travel unencrypted.
+- **Keys and sign-in tokens** are stored only in the OS keychain (Windows Credential Manager, the macOS Keychain).
+  Rust adds them to each request. The webview can set, delete or check for a key, and can never read one back. Keys
+  are never written to project files, `ai-connections.json`, preferences, SQLite, logs or error messages.
+- **Sign in with OpenRouter** runs OAuth PKCE in Rust, with a one-time `127.0.0.1` callback and a `state` nonce. The
+  system browser is opened from Rust; the webview has no way to open URLs.
+- **Sign in with ChatGPT** follows OpenAI's documented flow for open-source apps
+  ([docs/research/chatgpt-sign-in.md](docs/research/chatgpt-sign-in.md)). Novel registers as itself, never with
+  another app's client id. The flow is PKCE in Rust, with a `state` and an OIDC `nonce`, and the ID token's
+  signature is checked against OpenAI's keys. The access and refresh tokens stay in the keychain and are refreshed
+  in Rust. Requests go to the public Responses API at `api.openai.com`, never to ChatGPT's backend. Removing the
+  connection revokes the sign-in at OpenAI.
+- **Chat history** is kept in the app data folder (`tutor-history/`), never in the project folder, and is not
+  encrypted. Settings > AI Tutor clears it.
+- **What is sent**: the text the writer attached (No Markup view, footnotes included; no comments), the chat so far,
+  and the tutor's tool reads. Tool reads are limited to the attachments, or the current chapter, unless the writer
+  clicks Allow. Manuscript text is wrapped as data (`<manuscript>` blocks), and the charter tells the model never to
+  follow instructions found in it.
+- Provider-specific code is confined to `src/features/ai-tutor/providers/` and `providers.rs`
+  (`scripts/check-provider-isolation.mjs`, part of `pnpm lint`). Details: [docs/ai-tutor.md](docs/ai-tutor.md).
+
+### Other known limitations
+
 - Project files (`project.json`, `manuscript.json`, `.recovery/`) go through Rust commands confined to the project
   folder the user picked (or one from the Rust-written recent list); paths are canonicalized and symlinks are never
   overwritten.

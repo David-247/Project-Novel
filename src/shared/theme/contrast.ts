@@ -126,4 +126,13 @@ export const SURFACE_CONTRAST_PAIRS: ContrastPair[] = [
   { fg: 'page-find-ring', bg: 'page-find-current-bg', kind: 'ui', usage: 'current-match outline against its own fill' },
   { fg: 'page-focus-ring', bg: 'desk-bg', kind: 'ui', usage: 'focus outline around the page, on the desk' },
   { fg: 'page-focus-ring', bg: 'page-bg', kind: 'ui', usage: 'focus outline, page side' },
+  // Spell check underlines (Phase 5): on the page, on selected text and on both find fills.
+  ...(['page-spell-error', 'page-grammar-error'] as const).flatMap((fg): ContrastPair[] =>
+    (['page-bg', 'page-selection-bg', 'page-find-bg', 'page-find-current-bg'] as const).map((bg) => ({
+      fg,
+      bg,
+      kind: 'ui',
+      usage: `${fg === 'page-spell-error' ? 'spelling' : 'grammar'} underline on ${bg}`,
+    })),
+  ),
 ]

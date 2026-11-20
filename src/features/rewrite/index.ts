@@ -20,16 +20,22 @@
 // - While the view is open it registers the editor slice's active editor source (text commands act on
 //   the revision while it has the focus) and the registry's command gate (manuscript-wide commands off).
 //
+// openRewriteWithVersion(range, versionDoc, 'Tutor suggestion') (Phase 5, the AI tutor's proposals): Re-write
+// Passage on the whole blocks `range` touches, opened on a version holding the revision (a passage doc, or a
+// reviser editing a scratch transaction); refused with 'span' / 'locked' / 'open' / 'refused', nothing changed.
+// lockedInRange(state, from, to): the open passage a range overlaps (lockedAtSelection for any range).
+//
 // The choice (T9; choice.ts): Keep Original, Keep This Version (no default shortcut),
 // Discard Re-write, and Reopen from the Re-writes list. Each is one manuscript transaction with a
 // RewriteStateStep (step.ts), so one undo reverts it (the re-write open again with every version) and
 // redo applies it again; the store / rewrites.json follow the step. Keep This Version is a word-level
 // edit (replacePassage), tracked when Track Changes records. setRewriteConfirm(fn): how it asks before
 // adding or removing a chapter title (the composition root: the app's message dialog).
-export { RewriteAnchor, REWRITE_ALLOW_META, REWRITE_SHORTCUT, passageRange, passageRanges, passageProblem, stripAnchors, setAnchor, lockedAtSelection } from './anchor'
+export { RewriteAnchor, REWRITE_ALLOW_META, REWRITE_SHORTCUT, passageRange, passageRanges, passageProblem, stripAnchors, setAnchor, lockedAtSelection, lockedInRange } from './anchor'
 export type { RewriteAnchorOptions, LockedRange } from './anchor'
 export {
   rewritePassage,
+  openRewriteWithVersion,
   openRewrite,
   closeRewrite,
   stepRewrite,
@@ -45,6 +51,7 @@ export {
   currentPassageDoc,
   goToPassage,
 } from './commands'
+export type { RewriteWithVersionResult } from './commands'
 export { registerRewriteCommands, rewriteCommands } from './menu-commands'
 export { keepOriginal, keepVersion, keepVersionNow, discardRewrite, reopenRewrite, locatePassage, setRewriteConfirm } from './choice'
 export type { LocateResult } from './choice'

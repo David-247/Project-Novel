@@ -115,7 +115,7 @@ const REACH: Record<RibbonTab, Record<string, [string, string][]>> = {
     'layout.export': [['ribbon.cmd.export.manuscript', 'export.manuscript'], ['ribbon.cmd.export.again', 'export.again']],
   },
   review: {
-    'review.proofing': [['ribbon.cmd.review.wordCount', 'review.wordCount']],
+    'review.proofing': [['ribbon.cmd.review.wordCount', 'review.wordCount'], ['ribbon.cmd.tutor.toggle', 'tutor.toggle']],
     'review.tracking': [['review.track', 'review.track'], ['review.markup', 'menu.view.markup']],
     'review.changes': [
       ['ribbon.cmd.review.change.prev', 'review.change.prev'],

@@ -1,6 +1,8 @@
+mod ai;
 mod export;
 mod fonts;
 mod preferences;
+mod spellcheck;
 mod menu;
 mod storage;
 
@@ -13,15 +15,41 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::new().build())
         .manage(storage::ProjectRoot::default())
         .manage(export::ExportState::default())
+        .manage(ai::AiState::default())
+        .manage(ai::oauth::OauthState::default())
         .manage(menu::MenuState::<tauri::Wry>::default());
     // macOS: the native menu bar, replaced by the command registry's snapshot (menu_set) once the
     // frontend is up. Windows has no native menu: the frontend draws its own menu bar.
     #[cfg(target_os = "macos")]
     let builder = builder.menu(menu::initial_menu);
     builder
+        .setup(|app| {
+            // The real connection resolver: ai-connections.json (app data dir) + the OS keychain.
+            let file = app.path().app_data_dir()?.join(ai::connections::CONNECTIONS_FILE);
+            app.state::<ai::AiState>().set_resolver(ai::app_resolver(file));
+            Ok(())
+        })
         .on_menu_event(|app, event| menu::handle_menu_event(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
             fonts::list_system_fonts,
+            ai::ai_fetch,
+            ai::ai_fetch_cancel,
+            ai::ai_secret_set,
+            ai::ai_secret_delete,
+            ai::ai_secret_has,
+            ai::ai_connections_get,
+            ai::ai_connection_upsert,
+            ai::ai_connection_remove,
+            ai::tutor_history_list,
+            ai::tutor_history_load,
+            ai::tutor_history_save,
+            ai::tutor_history_delete,
+            ai::tutor_history_clear_all,
+            ai::oauth::ai_oauth_start,
+            ai::oauth::ai_oauth_cancel,
+            ai::oauth::ai_open_key_page,
+            ai::oauth::ai_open_usage_page,
+            ai::oauth::ai_oauth_reusable,
             export::export_pick_save_path,
             export::export_write_file,
             export::export_render_pdf,
@@ -44,6 +72,7 @@ pub fn run() {
             storage::storage_exit_app,
             storage::storage_probe_recent_recovery,
             storage::storage_list_dir,
+            spellcheck::spell_check,
             preferences::preferences_read,
             preferences::preferences_write,
             preferences::preferences_default_author,

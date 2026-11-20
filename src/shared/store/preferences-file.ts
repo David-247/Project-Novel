@@ -50,6 +50,15 @@ export interface PreferenceValues {
   navigationPane: boolean
   /** The docked navigation pane's width in CSS px (NAV_PANE_MIN_WIDTH to NAV_PANE_MAX_WIDTH). */
   navigationPaneWidth: number
+  /** The AI tutor's active connection id (Phase 5); null = none chosen. */
+  tutorActiveConnection: string | null
+  /** The writer has seen the AI tutor's consumer-plan warning (Sign in with ChatGPT, shown once before the first sign-in). */
+  tutorPlanWarningSeen: boolean
+  /**
+   * Spell check (Phase 5). `enabled`: View ▸ Spelling & Grammar, the editor's underlines (default on).
+   * `words`: the user dictionary, words the spell checker accepts in every project.
+   */
+  spellcheck: { enabled: boolean; words: string[] }
 }
 
 export interface Preferences extends PreferenceValues {
@@ -73,6 +82,10 @@ export const PROFILE_MAX = {
 
 export const MAX_EXPORT_FOLDERS = 50
 
+/** Limits of a dictionary word and of the user dictionary (also the project's dictionary.json). */
+export const MAX_DICTIONARY_WORD_LENGTH = 64
+export const MAX_DICTIONARY_WORDS = 5000
+
 /** Navigation pane width limits and default (CSS px). */
 export const NAV_PANE_MIN_WIDTH = 200
 export const NAV_PANE_MAX_WIDTH = 480
@@ -85,6 +98,38 @@ export function clampNavPaneWidth(px: number): number {
 
 /** The default `exportFolders`: one shared object, so a fresh default is `===` the store's (no phantom change). */
 const NO_EXPORT_FOLDERS: Record<string, string> = Object.freeze({}) as Record<string, string>
+
+const NO_WORDS: readonly string[] = Object.freeze([])
+
+/** The default `spellcheck`: one shared object for the same reason as NO_EXPORT_FOLDERS. */
+const DEFAULT_SPELLCHECK: PreferenceValues['spellcheck'] = Object.freeze({ enabled: true, words: NO_WORDS as string[] })
+
+/**
+ * Dictionary words as stored: trimmed strings without whitespace, in range, no case-insensitive
+ * duplicates, at most `limit` (one list: the user's or a project's; a merge of both passes Infinity).
+ */
+export function readDictionaryWords(v: unknown, limit = MAX_DICTIONARY_WORDS): string[] {
+  if (!Array.isArray(v)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const w of v) {
+    if (typeof w !== 'string') continue
+    const word = w.trim()
+    if (word === '' || word.length > MAX_DICTIONARY_WORD_LENGTH || /\s/.test(word)) continue
+    const key = word.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(word)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+function readSpellcheck(v: unknown): PreferenceValues['spellcheck'] | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
+  const { enabled, words } = v as { enabled?: unknown; words?: unknown }
+  return { enabled: typeof enabled === 'boolean' ? enabled : true, words: readDictionaryWords(words) }
+}
 
 function readExportFolders(v: unknown): Record<string, string> | undefined {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
@@ -116,6 +161,9 @@ export function defaultPreferenceValues(authorName = ''): PreferenceValues {
     exportFolders: NO_EXPORT_FOLDERS,
     navigationPane: false,
     navigationPaneWidth: NAV_PANE_DEFAULT_WIDTH,
+    tutorActiveConnection: null,
+    tutorPlanWarningSeen: false,
+    spellcheck: DEFAULT_SPELLCHECK,
   }
 }
 
@@ -139,6 +187,9 @@ const READERS: { [K in keyof PreferenceValues]: (v: unknown) => PreferenceValues
   exportFolders: readExportFolders,
   navigationPane: (v) => (typeof v === 'boolean' ? v : undefined),
   navigationPaneWidth: (v) => (typeof v === 'number' && Number.isFinite(v) ? clampNavPaneWidth(v) : undefined),
+  tutorActiveConnection: (v) => (v === null ? null : typeof v === 'string' && v !== '' && v.length <= 128 ? v : undefined),
+  tutorPlanWarningSeen: (v) => (typeof v === 'boolean' ? v : undefined),
+  spellcheck: readSpellcheck,
 }
 
 const KNOWN_KEYS = new Set<string>(Object.keys(READERS))
@@ -209,6 +260,9 @@ export function serializePreferences(p: PreferenceValues & { extra: Record<strin
     exportFolders: readExportFolders(p.exportFolders) ?? {},
     navigationPane: p.navigationPane,
     navigationPaneWidth: clampNavPaneWidth(p.navigationPaneWidth),
+    tutorActiveConnection: p.tutorActiveConnection,
+    tutorPlanWarningSeen: p.tutorPlanWarningSeen === true,
+    spellcheck: { enabled: p.spellcheck.enabled !== false, words: readDictionaryWords(p.spellcheck.words) },
   }
   return JSON.stringify(out, null, 2) + '\n'
 }

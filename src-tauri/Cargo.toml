@@ -1,6 +1,6 @@
 [package]
 name = "novel"
-version = "0.4.0"
+version = "0.5.0"
 description = "Novel - a desktop novel-writing app"
 license = "MIT"
 edition = "2021"
@@ -22,3 +22,26 @@ tauri-plugin-dialog = "2.8.4"
 tauri-plugin-sql = { version = "2.6.0", features = ["sqlite"] }
 tempfile = "3.27.0"
 whoami = "2"
+# AI tutor network proxy (src/ai). TLS is rustls with the ring provider (aws-lc-rs, reqwest's
+# default rustls provider, carries an OpenSSL-licensed component and needs CMake/NASM to build).
+# No default features: no OS-registry proxy lookup, no HTTP/2, no decompression, no cookies. reqwest
+# still reads the *_PROXY variables; src/ai/fetch.rs turns that off and allows an environment proxy
+# for https host names only (ruling R25).
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { version = "=1.54.1", features = ["macros", "sync", "time", "rt", "net", "io-util"] }
+# AI provider keys live in the OS keychain (src/ai/keychain.rs): Credential Manager on Windows,
+# Keychain on macOS. No default features: no Linux secret-service backend, no async runtime.
+keyring = { version = "=3.6.3", default-features = false, features = ["apple-native", "windows-native"] }
+# Sign in with OpenRouter (src/ai/oauth.rs): PKCE's random verifier and SHA-256 challenge. Already in the
+# tree as rustls' crypto provider; named here to use it directly.
+ring = "=0.17.14"
+# Opens the system browser from Rust only (the OAuth page and each provider's "Get a key" page); the
+# webview has no open-URL capability. ShellExecuteW on Windows rather than `cmd /c start`.
+open = { version = "=5.4.5", features = ["shellexecute-on-windows"] }
+
+# Offline spell and grammar checking (src/spellcheck.rs): Harper's curated dictionary and linters.
+harper-core = { version = "=1.5.1", default-features = false, features = ["concurrent"] }
+
+[dev-dependencies]
+tokio = { version = "=1.54.1", features = ["macros", "sync", "time", "rt", "rt-multi-thread", "net", "io-util"] }

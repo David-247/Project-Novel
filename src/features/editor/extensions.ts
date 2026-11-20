@@ -19,6 +19,7 @@ import { Footnotes } from './footnote/node'
 import { CommentsExtension } from '@/features/comments'
 import { TrackChanges } from '@/features/track-changes'
 import { RewriteAnchor } from '@/features/rewrite'
+import { EditorContextMenuKeys } from './context-menu/opener'
 
 /**
  * Phase 1 base schema.
@@ -36,9 +37,14 @@ export interface EditorExtensionOptions {
    * footnote editor or footnote-area notifications, no re-write lock.
    */
   detached?: boolean
+  /**
+   * More extensions for the manuscript, from slices the editor does not import (the composition root
+   * passes them: the spell check underlines). Added after the editor's own.
+   */
+  extra?: Extensions
 }
 
-export function createEditorExtensions({ detached = false }: EditorExtensionOptions = {}): Extensions {
+export function createEditorExtensions({ detached = false, extra = [] }: EditorExtensionOptions = {}): Extensions {
   return [
     Document,
     Paragraph,
@@ -110,5 +116,9 @@ export function createEditorExtensions({ detached = false }: EditorExtensionOpti
     // --- Re-write (Phase 3): additive only. The `rewriteId` block attribute (passage anchor), the
     // read-only lock on passages in re-write and their side bar, Mod-Alt-w (Re-write Passage…).
     RewriteAnchor.configure({ detached }),
+    // --- Context menu (Phase 5): right-click, Shift+F10 and the Menu key open the manuscript's menu
+    // (context-menu/EditorContextMenu.tsx; items from registerContextMenuItems). Not in detached views.
+    ...(detached ? [] : [EditorContextMenuKeys]),
+    ...extra,
   ]
 }

@@ -12,6 +12,8 @@ export const SETTINGS_SHORTCUT = 'Mod-,'
 
 export const SETTINGS_CONTROLS = {
   open: { id: 'settings.open', label: 'Settings', shortcut: SETTINGS_SHORTCUT },
+  /** A page in the dialog's page list (each tab passes its own name and description). */
+  page: { id: 'settings.page', label: 'Settings page' },
   authorName: { id: 'settings.authorName', label: 'Author name' },
   authorColor: { id: 'settings.authorColor', label: 'Author colour' },
   authorColorAuto: { id: 'settings.authorColorAuto', label: 'Automatic colour' },

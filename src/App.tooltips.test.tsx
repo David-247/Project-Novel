@@ -90,6 +90,7 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'comment.prev',
           'comment.next',
           'comment.showResolved',
+          'view.spellcheck',
           'review.wordCount',
           'review.change.prev',
           'review.change.next',
@@ -110,6 +111,8 @@ describe('tooltip coverage (every control in the app has a registered, wired too
           'view.actualSize',
           'view.navigationPane',
           'view.fullScreen',
+          // The AI tutor's toggle: Review ▸ Proofing and View ▸ Show (both tabs stay mounted).
+          'tutor.toggle',
           'export.manuscript',
           'export.again',
         ].map((id) => `ribbon.cmd.${id}`),

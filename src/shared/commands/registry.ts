@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useSyncExternalStore, type ComponentType } from 'react'
 import { detectPlatform, shortcutSignature, type Platform, type ShortcutSpec } from '@/shared/ui'
 
 /**
@@ -14,6 +14,8 @@ export interface RibbonPlacement {
   group: string
   order: number
   display?: 'button' | 'menu'
+  /** An icon before the button's label (16px, currentColor), e.g. the tutor's AI sparkle. */
+  icon?: ComponentType
 }
 
 export interface Command {

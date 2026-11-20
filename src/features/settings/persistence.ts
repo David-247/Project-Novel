@@ -40,12 +40,19 @@ function valuesOf(p: Preferences): Record<keyof PreferenceValues, unknown> {
   return values as Record<keyof PreferenceValues, unknown>
 }
 
+/** Same value: identical, or (an object-valued preference) the same JSON. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
 /** The values that differ between two states of the store: the user's changes in between. */
 function changesBetween(from: Preferences, to: Preferences): Values {
   const a = valuesOf(from)
   const b = valuesOf(to)
   const out: Record<string, unknown> = {}
-  for (const k of Object.keys(b) as (keyof PreferenceValues)[]) if (a[k] !== b[k]) out[k] = b[k]
+  for (const k of Object.keys(b) as (keyof PreferenceValues)[]) if (!sameValue(a[k], b[k])) out[k] = b[k]
   return out as Values
 }
 

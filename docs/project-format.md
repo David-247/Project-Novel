@@ -11,6 +11,7 @@ My Novel/
 ├── comments.json     comment threads (a side file, Phase 3); optional
 ├── rewrites.json     re-writes of passages and their versions (a side file, Phase 3); optional
 ├── export.json       manuscript export settings (a side file, Phase 4); optional
+├── dictionary.json   words the spell checker accepts in this project (a side file, Phase 5); optional
 ├── index.sqlite      index (revisions); can be rebuilt, never the only copy of text
 └── .recovery/        crash-recovery data
     ├── manuscript.json                 current snapshot (only while there are unsaved changes)
@@ -273,7 +274,7 @@ and crash recovery treat them exactly like unsaved text.
 ## Side files
 
 A side file is a JSON file beside manuscript.json that belongs to one feature: `comments.json` and `rewrites.json`
-(Phase 3), `export.json` (Phase 4). All side files follow the same rules, implemented once in the storage slice
+(Phase 3), `export.json` (Phase 4), `dictionary.json` (Phase 5). All side files follow the same rules, implemented once in the storage slice
 (`src/features/storage/side-files.ts`):
 
 - **Optional.** A missing file is empty. A project without it (every Phase 1 and 2 project) opens unchanged, and
@@ -514,6 +515,30 @@ Rules:
 - **Saved with the manuscript.** Changing a setting is an unsaved change of the project (prompts, autosave); the file is
   written in the save batch, snapshotted by autosave and restored by crash recovery (`sideFiles` in the snapshot), and
   carried by Save a Copy.
+
+## dictionary.json
+
+The project's spell-check dictionary (Phase 5): words the offline spell and grammar checker accepts in this project, such
+as character and place names. Pretty-printed UTF-8 JSON; a side file (see "Side files": optional, saved with the
+manuscript, in crash recovery, guarded when damaged or newer). The writer adds a word with "Add to project dictionary";
+"Add to my dictionary" keeps it in `preferences.json` instead (`spellcheck.words`, every project).
+
+| Field     | Type     | Notes |
+| --------- | -------- | ----- |
+| `version` | integer  | Format version. Current: `1`. |
+| `words`   | string[] | The words, in the order added. |
+
+```json
+{ "version": 1, "words": ["Aelinor", "Brynn"] }
+```
+
+- A word is one run of characters without whitespace, at most 64 characters, at most 5000 words. Entries that are not
+  such strings, and repeats (compared without case), are dropped when the file is read.
+- Words are matched without case, and a possessive ("Aelinor's") matches the word. A word only silences spelling
+  findings; grammar findings are not affected.
+- **A project without dictionary.json** has an empty dictionary; the file is created when the first word is added.
+  A project whose dictionary becomes empty keeps its file (with `"words": []`) only if it already existed.
+- Unknown top-level keys are kept and written back unchanged.
 
 ## export-folders.json (app data, Rust only)
 
@@ -766,6 +791,7 @@ Windows and Cmd+, on macOS).
 | `profilePhone`, `profileEmail` | text, at most 60 and 200 characters | Phone and email for the contact block. |
 | `navigationPane` | `true`/`false` | View ▸ Navigation Pane is shown (Phase 4). Default `false`. Window layout, not a Settings value: Reset to defaults keeps it. |
 | `navigationPaneWidth` | number, 200 to 480 (CSS px; out-of-range values are clamped) | Width of the docked navigation pane. Default 280. Reset to defaults keeps it. |
+| `spellcheck` | object `{ "words": string[] }` | The **user dictionary** (Phase 5): words the spell checker accepts in every project (one word each, at most 64 characters, at most 5000, no repeats ignoring case). Typed data: Reset to defaults keeps it. A project's own words are in `dictionary.json`. |
 
 Rules:
 

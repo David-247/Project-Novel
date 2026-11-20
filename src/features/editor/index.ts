@@ -66,7 +66,7 @@ export type { Editor, JSONContent } from '@tiptap/core'
 export { STYLE_DIALOG_CONTROLS } from './styles/controls'
 export { BookStyleSheet, STYLE_SCOPE } from './styles/BookStyleSheet'
 export { getResolvedStyles, useResolvedStyles } from './styles/resolved'
-export { defaultStyleIdFor, effectiveStyleId } from './styles/block-styles'
+export { defaultStyleIdFor, effectiveStyleId, restyleBlock } from './styles/block-styles'
 export {
   countStyleUses,
   createStyle,
@@ -125,3 +125,12 @@ export { flushWordCount, WORD_COUNT_THROTTLE_MS } from './word-count/publisher'
 export { WordCountDialog, WordCountIndicator, openWordCount, setWordCountLineSource, wordCountText } from './word-count/WordCount'
 export { WORD_COUNT_CONTROLS } from './word-count/controls'
 export type { WordCountControlMeta } from './word-count/controls'
+// The manuscript's context menu (Phase 5): right-click, Shift+F10, the Menu key. Slices add items with
+// registerContextMenuItems(provider) -> unregister; a provider gets { editor, pos, selection } when the
+// menu opens and returns MenuItem[] (id = data-control-id with a tooltips registry entry; order ranges
+// in context-menu/registry.ts: suggestions, proofing, other actions, clipboard). openEditorContextMenu
+// opens it from code (tests, other entry points).
+export { registerContextMenuItems } from './context-menu/registry'
+export type { ContextMenuContext, ContextMenuProvider, MenuItem } from './context-menu/registry'
+export { openEditorContextMenu, isContextMenuKey } from './context-menu/opener'
+export type { ContextMenuRequest } from './context-menu/opener'

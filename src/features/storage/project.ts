@@ -80,6 +80,13 @@ import { withWriteLock } from './write-lock'
 export interface OpenedProject {
   path: string
   meta: ProjectMeta
+  /** Save As (or the first save of an untitled manuscript): the editor's text was kept, not replaced. */
+  keptText?: boolean
+}
+
+/** What a before-replace task is told: `keepsText` on Save As, where the text stays and only the project changes. */
+export interface DocumentReplaceInfo {
+  keepsText: boolean
 }
 
 /** Window in which a repeated manual save of an unchanged doc is ignored (menu + webview Mod-S both fire). */
@@ -302,6 +309,34 @@ async function closeIndex(): Promise<void> {
   if (idx) await idx.close().catch((e) => console.warn('Closing project index failed:', e))
 }
 
+/** Work other slices finish before the editor's manuscript is replaced (open, new, close, restore). */
+const beforeReplaceTasks = new Set<(info: DocumentReplaceInfo) => Promise<void>>()
+
+/**
+ * Run `task` before another manuscript replaces the one in the editor (opening or creating a project,
+ * closing it, restoring a backup), while the current project is still the open one: the AI tutor stops
+ * its reply there and saves its chat to that project (Review Focus 5). A task that fails is logged and
+ * does not stop the switch. Returns unregister.
+ */
+export function registerBeforeDocumentReplace(task: (info: DocumentReplaceInfo) => Promise<void>): () => void {
+  beforeReplaceTasks.add(task)
+  return () => {
+    beforeReplaceTasks.delete(task)
+  }
+}
+
+async function beforeDocumentReplace(info: DocumentReplaceInfo = { keepsText: false }): Promise<void> {
+  await Promise.all(
+    [...beforeReplaceTasks].map(async (task) => {
+      try {
+        await task(info)
+      } catch (e) {
+        console.error('A before-switch task failed:', e)
+      }
+    }),
+  )
+}
+
 /** Load `doc` into the editor; a doc the editor schema rejects is reported as a damaged manuscript. */
 function loadDocument(p: DocumentProvider, doc: DocJSON): void {
   try {
@@ -327,7 +362,7 @@ async function switchIndex(folder: string): Promise<ProjectIndex | null> {
 }
 
 /** Switch module + store state to the project in `folder` (files read/written, index switched). */
-async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex | null) {
+async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex | null, keptText = false) {
   currentMeta = meta
   currentIndex = index
   bookGuard = null
@@ -335,7 +370,7 @@ async function activate(folder: string, meta: ProjectMeta, index: ProjectIndex |
   setPendingRecovery(null)
   suppressSnapshotsAt(null)
   actions().projectOpened({ path: folder, title: meta.title, author: meta.author })
-  openedListeners.forEach((cb) => cb({ path: folder, meta }))
+  openedListeners.forEach((cb) => cb({ path: folder, meta, keptText }))
   await rememberRecent(meta.title)
 }
 
@@ -381,6 +416,8 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
   const bookVersion = getBookVersion()
   await writeFileAtomic(joinPath(folder, BOOK_FILE), serializeBook(book), BOOK_FILE)
   await writeFileAtomic(joinPath(folder, PROJECT_FILE), serializeProjectMeta(meta), PROJECT_FILE)
+  // The previous project is still the open one here (Save As keeps the text, but not the project).
+  await beforeDocumentReplace({ keepsText: !doc })
   if (doc) {
     loadDocument(p, doc)
     resetSideFiles(true)
@@ -391,7 +428,7 @@ export async function createProjectAt(folder: string, doc: DocJSON | null = empt
     resetSideFiles(false)
     sideFilesSaved(side.written)
   }
-  await activate(folder, meta, await switchIndex(folder))
+  await activate(folder, meta, await switchIndex(folder), !doc)
 }
 
 /** Open the project in `folder` (already the granted root). Throws ProjectError for missing/corrupt files. */
@@ -417,7 +454,9 @@ export async function openProjectAt(folder: string): Promise<void> {
     throw e
   }
   const book = await readBookFile(folder)
-  loadDocument(p, parseManuscript(docText))
+  const parsed = parseManuscript(docText)
+  await beforeDocumentReplace()
+  loadDocument(p, parsed)
   bookActions().loadBook(book.settings)
   // After the manuscript: a side file's content refers to it (comment anchors).
   const sideWarnings = await loadSideFiles(folder)
@@ -773,6 +812,7 @@ export function closeProjectInteractive(): Promise<boolean> {
     await finishSideFilesOnClose()
     const p = provider()
     if (!hasPendingRecovery() && !isProjectDirty(p)) await clearRecoveryData()
+    await beforeDocumentReplace()
     await closeProject()
     loadDocument(p, emptyDoc())
     // The untitled manuscript starts without the closed project's side-file data (its comments).
@@ -1049,6 +1089,7 @@ export async function restoreRecovery(): Promise<boolean> {
   if (!pending || pending.folder !== getCurrentProjectPath()) return false
   try {
     const p = provider()
+    await beforeDocumentReplace()
     loadDocument(p, pending.snapshot.doc)
     // Side files (comments) come back with the text they refer to.
     restoreSideFiles(pending.snapshot.sideFiles, pending.snapshot.sideFileGuards)

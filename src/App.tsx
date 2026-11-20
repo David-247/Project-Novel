@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AppShell, useReloadGuard } from '@/features/app-shell'
 import {
   FindReplacePanel,
@@ -34,6 +34,8 @@ import { AppMenuBar, MenuDialogs, useAppMenus } from '@/features/menu'
 import {
   ensureAuthorName,
   getAuthor,
+  openSettings,
+  registerSettingsPage,
   registerSettingsCommands,
   SettingsDialog,
   useSettingsIntegration,
@@ -56,9 +58,11 @@ import {
   setTrackChangesAuthorSource,
   TrackChangesNotice,
 } from '@/features/track-changes'
+import { createSpellcheckExtension, registerDictionarySideFile, registerSpellcheckCommands, registerSpellcheckMenu } from '@/features/spellcheck'
 import { registerRewriteCommands, registerRewritesSideFile, RewriteHost, setRewriteConfirm } from '@/features/rewrite'
 import { createManuscriptExportRenderers, ExportStatus, ExportWizard, registerExportCommands, registerExportSideFile, setExportRenderers } from '@/features/export'
 import { NavigationPane, registerOutlineCommands } from '@/features/outline'
+import { AI_SETTINGS_PAGE_ID, AiTutorSettings, registerTutorCommands, setTutorConnectAction, TutorPanel } from '@/features/ai-tutor'
 import { getTooltipCopy } from '@/features/tooltips'
 import { registerDocumentProvider, type DocJSON, type DocumentProvider } from '@/shared/document'
 import { TooltipProvider } from '@/shared/ui'
@@ -125,18 +129,43 @@ export function App() {
       registerRewriteCommands(),
       registerOutlineCommands(),
       registerExportCommands(),
+      registerSpellcheckCommands(),
+      // The AI tutor: View ▸ Tutor (and its ribbon buttons), "Ask the Tutor About This", its quit flush,
+      // its saved connections once preferences are read.
+      registerTutorCommands(),
       // The toolbar's tabs and groups (Word-style ribbon; commands join groups by their `ribbon` field).
       registerAppRibbon(),
     ]
     return () => offs.forEach((off) => off())
   }, [])
   useAppMenus()
+  // Settings ▸ AI Tutor (the tutor's connections and chat history), and "Connect a Provider…" in the
+  // tutor opens Settings on it.
+  useEffect(() => {
+    const offPage = registerSettingsPage({
+      id: AI_SETTINGS_PAGE_ID,
+      label: 'AI Tutor',
+      description: 'Connect the tutor to an AI provider or a model on this computer, and clear its chat history.',
+      component: AiTutorSettings,
+    })
+    setTutorConnectAction(() => openSettings(AI_SETTINGS_PAGE_ID))
+    return () => {
+      setTutorConnectAction(null)
+      offPage()
+    }
+  }, [])
   // comments.json is saved, autosaved and recovered with the manuscript (storage side file).
   useEffect(() => registerCommentsSideFile(), [])
   // rewrites.json likewise (re-write versions are saved, autosaved and recovered with the manuscript).
   useEffect(() => registerRewritesSideFile(), [])
   // export.json (manuscript export settings) likewise; a project without it opens with the defaults.
   useEffect(() => registerExportSideFile(), [])
+  // dictionary.json (the project's spell-check words) likewise.
+  useEffect(() => registerDictionarySideFile(), [])
+  // Spell check: the manuscript's underlines (an editor extension from the spellcheck slice) and their
+  // suggestions, Ignore Once and Add to Dictionary in the manuscript's context menu.
+  const [manuscriptExtensions] = useState(() => [createSpellcheckExtension()])
+  useEffect(() => registerSpellcheckMenu(), [])
   // The export wizard's DOCX and PDF generators (File > Export > Manuscript…).
   useEffect(() => setExportRenderers(createManuscriptExportRenderers()), [])
   // Keep This Version asks with the app's message dialog before it adds or removes a chapter title.
@@ -186,6 +215,7 @@ export function App() {
         menuBar={<AppMenuBar />}
         toolbar={<Ribbon quickAccess={<RibbonQuickAccess />} />}
         navigation={<NavigationPane />}
+        sidePanel={<TutorPanel />}
         editor={
           <>
             {/* Zero-height sticky anchor: the find panel floats at the top of the scrolling editor
@@ -199,7 +229,7 @@ export function App() {
               {/* The comments margin panel sits beside the pages (a drawer in a narrow window). */}
               <CommentsLayout>
                 <PaginatedView>
-                  <NovelEditor paged />
+                  <NovelEditor paged extensions={manuscriptExtensions} />
                 </PaginatedView>
               </CommentsLayout>
             </RewriteHost>
