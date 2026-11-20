@@ -175,7 +175,8 @@ impl AiState {
         AiState { client: fetch::client(), resolver: RwLock::new(resolver), inflight: Mutex::default() }
     }
 
-    /// The proxy's HTTP client (no redirects, no system proxy), shared with the OAuth code exchange.
+    /// The proxy's HTTP client (no redirects; an environment proxy for https host names only, ruling
+    /// R25), shared with the OAuth code exchanges and ChatGPT token refresh, JWKS and revoke.
     pub fn http_client(&self) -> reqwest::Client {
         self.client.clone()
     }
