@@ -66,7 +66,6 @@ book settings together with the text.
 - Pages are laid out with the fonts installed on your computer, so the same manuscript can paginate slightly
   differently on macOS and Windows. The automated cross-engine check uses a bundled test font to separate engine
   differences from font differences (see "End-to-end tests").
-- The AI tutor is a later phase (track changes and comments came in Phase 3, manuscript export in Phase 4, below).
 
 ## Development
 

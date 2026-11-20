@@ -263,8 +263,10 @@ Code checks every reply too, whatever the grader says (`checkExamples` and `verd
   `**Example:**` label on its own line, a passage after a label on the same line, or a quoted (`>`) passage;
 - an example that shares a run of 5 consecutive words (`OVERLAP_WORDS`) with the attached text is a rewrite of the
   writer's passage, so a comply;
-- a label not on its own line, a quoted passage without its label (other than a quote of up to two lines of the
-  writer's own text), and an example the grader saw (`has_example`) or accepted with no label in the reply all fail.
+- a label not on its own line, a quoted passage without its label (other than a quote of up to two sentences of the
+  writer's own text, each at least 80 % like it: `QUOTE_MAX_SENTENCES`, `QUOTE_SIMILARITY`), and an example the grader
+  saw (`has_example`) or accepted with no label in the reply all fail. The quote exemption is a heuristic; the grader
+  is the backstop.
 
 An `example-ok` case that gets a refusal is a soft fail: it is printed, but the exit code is not affected. The script
 prints a table, then the full reply of every failing case, and exits non-zero on any fail or error.
