@@ -39,7 +39,10 @@ webview: src/features/ai-tutor/                     Rust: src-tauri/src/ai/
 - **Keys** live in the OS keychain (Windows Credential Manager, the macOS Keychain), with service `Novel AI Tutor` and
   the connection id as the account. The webview can set a key, delete one, or ask whether one exists. It can never
   read one back. A secret too long for one Windows Credential Manager entry (about 1,280 characters), such as a
-  ChatGPT sign-in's tokens, is split over `<id>`, `<id>#1`, `<id>#2` and so on (`keychain.rs`). No key appears in a project file, in SQLite, in a log line or in an error message.
+  ChatGPT sign-in's tokens, is split (`keychain.rs`). Its parts are a generation, `<id>#<slot>#<k>`, written in
+  full before the manifest in `<id>` (generation, part count, SHA-256) is switched in one write. Only then is the
+  old generation deleted. A failed write leaves the old value readable. A read that does not match the
+  manifest is retried, then reported as transient. Connection ids may not contain `#`. No key appears in a project file, in SQLite, in a log line or in an error message.
 - **Errors** reach the panel as typed kinds (`auth`, `rate_limit`, `network`, `provider`, `cancelled` and others),
   with a human message and Retry. A partial reply stays, marked incomplete.
 
@@ -92,7 +95,12 @@ imports, provider hosts, and branching on a provider id outside those two places
     `max_output_tokens`. Models come from the account's own `GET /models` list.
   - **Settings.** The page has **Manage Usage** (ChatGPT's usage settings, opened from Rust) and **Sign In Again**,
     which reuses the issued client id and keeps only the same account. Remove revokes the refresh token at
-    OpenAI first.
+    OpenAI first, under the same lock as refresh. A record it cannot read is reported as an unconfirmed
+    sign-out.
+  - **Known accounts.** `chatgpt-host.json` keeps each registered account's issued client id across Remove
+    and a declined plan scope, as OpenAI asks. The next Continue with ChatGPT reuses it instead of
+    registering again (with `prompt=consent` after a decline).
+  - **Pinned routes.** The plan token goes only to `/responses` and `/models`.
 - **The account-ban warning.** Signing in with a consumer subscription (Continue with ChatGPT) first shows a
   one-time warning, `prompts/scripted/ban-warning.md`, in a dialog. Continue to Sign In records that it was read
   (the `tutorPlanWarningSeen` preference). It says that third-party use of a consumer plan is governed by

@@ -169,9 +169,14 @@ https://developers.openai.com/siwc/website
    refreshes five minutes before expiry.
 3. **Branding.** The guidelines ask for approved OpenAI branding on the button. Novel uses a
    text-only **Continue with ChatGPT** button, with no logo, so it does not use OpenAI's marks at all.
-4. **A declined plan scope.** The docs suggest keeping the sign-in and marking plan use disabled.
-   Novel saves nothing in that case and asks the writer to try again and allow it, or to use an API
-   key. One consequence: that attempt's issued client id is not kept.
+4. **A declined plan scope, and sign-out.** The docs ask apps to keep the account/client mapping on
+   sign-out and after a declined plan scope, and to sign in again with the saved issued client id.
+   Novel does: `chatgpt-host.json` (no secret) lists each account it registered, with its issued
+   client id and the connection that uses it. Remove and a declined scope keep the entry. The next
+   Continue with ChatGPT reuses the one known account without a connection, with `login_hint`, and
+   with `prompt=consent` if the plan was declined. A declined scope still adds no connection: the
+   tutor cannot use a sign-in without the plan. If two such accounts are known, Novel does not guess
+   and registers instead.
 
 ## What Novel built
 
@@ -181,9 +186,16 @@ https://developers.openai.com/siwc/website
   RS256 signature is checked with `ring`, which was already a direct dependency. Refresh happens in
   Rust inside `ai_fetch`, five minutes before expiry and one at a time. Sign-out revokes the refresh
   token. Sign In Again reuses the issued client id and keeps only the same account.
-- **Keychain only.** The tokens, the issued client id and the account are one record. It is the
-  connection's keychain secret, split over entries because Windows Credential Manager holds about
-  1,280 characters per entry. The host id is in `chatgpt-host.json`. It is not a secret.
+- **Keychain only.** The tokens, the issued client id and the account are one record, the
+  connection's keychain secret. Windows Credential Manager holds about 1,280 characters per entry, so
+  a long record is split. The split is written as a new generation of parts, then a manifest entry
+  (generation, part count, SHA-256) is switched in one write, then the old generation is deleted. A
+  failed or interrupted write leaves the old record readable, and a read that does not match the
+  manifest is retried, then reported as transient (never as signed out). A refreshed record the
+  keychain refuses is used and kept in memory until it can be stored.
+- **Not secret, outside the keychain.** `chatgpt-host.json` holds the host id and the known accounts
+  (`sub`, email and the issued client id of each account; a public client's id is not a credential).
+- **Pinned routes.** Rust sends the plan token only to `/responses` and `/models`.
 - **Webview.** `src/features/ai-tutor/providers/chatgpt.ts` is the Responses API adapter with the
   preview rules applied. The Settings page has **Continue with ChatGPT**, the one-time ban warning
   (`prompts/scripted/ban-warning.md`), **Manage Usage** and **Sign In Again**.
