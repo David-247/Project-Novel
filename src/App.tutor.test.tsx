@@ -22,7 +22,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
-vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.4.0' }))
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.5.0' }))
 
 // The fake provider: the AI SDK's mock model behind a test adapter (no request reaches ai_fetch).
 const hoisted = vi.hoisted(() => ({ model: null as unknown }))

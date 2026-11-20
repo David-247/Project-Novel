@@ -1,7 +1,7 @@
 {
   "name": "novel",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "license": "MIT",
   "packageManager": "pnpm@9.15.9",

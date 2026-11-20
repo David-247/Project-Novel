@@ -22,7 +22,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
-vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.4.0' }))
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.5.0' }))
 
 // Spell check in the whole app (Phase 5 T5): the composition root wires the underlines, the context
 // menu items and View ▸ Spelling & Grammar.
