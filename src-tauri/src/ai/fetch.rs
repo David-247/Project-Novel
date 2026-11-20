@@ -24,17 +24,60 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// Longest silence between two body reads (a local model may take minutes to load).
 const READ_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// The proxy's HTTP client: rustls (ring) with the OS certificate store, no redirects (a redirect
-/// could leave the connection's host), no system proxy, no cookies.
+/// Hosts that never go through a proxy, whatever `NO_PROXY` says: this machine by name, and every IP
+/// literal (loopback, LAN and public), in hyper-util's `NO_PROXY` syntax.
+const NEVER_PROXIED: &str = "localhost,0.0.0.0/0,::/0";
+
+/// The AI HTTP client (every Rust call in `src/ai`: `ai_fetch`, the OAuth code exchanges, ChatGPT
+/// token refresh, JWKS and revoke): rustls (ring) with the OS certificate store, no redirects (a
+/// redirect could leave the connection's host), no cookies, and proxies only per ruling R25.
 pub(super) fn client() -> Client {
+    client_with_env(&|name| std::env::var(name).ok())
+}
+
+/// [`client`] with the environment read through `env` (tests pass their own).
+///
+/// Proxies (ruling R25). reqwest would otherwise follow `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`
+/// for every target (the OS-registry lookup is not built in, but the variables are always read).
+/// Here only https targets with a host name may use a proxy, from `HTTPS_PROXY` or else `ALL_PROXY`,
+/// through a CONNECT tunnel, so TLS still runs end to end with the provider. Plain http targets and
+/// `localhost` or IP-literal hosts always connect directly: their prompts and keys would otherwise
+/// cross the proxy in the clear, or leave the machine. `NO_PROXY` is honoured on top.
+pub(super) fn client_with_env(env: &dyn Fn(&str) -> Option<String>) -> Client {
     // Fails only if a provider is already installed, which is fine.
     let _ = rustls::crypto::ring::default_provider().install_default();
-    Client::builder()
+    let builder = Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(READ_TIMEOUT)
-        .build()
-        .expect("the AI HTTP client builds with static settings")
+        // Drop reqwest's environment proxy; the one allowed below is added explicitly.
+        .no_proxy();
+    let builder = match proxy_settings(env) {
+        Some((proxy, no_proxy)) => match reqwest::Proxy::https(proxy.as_str()) {
+            Ok(p) => builder.proxy(p.no_proxy(reqwest::NoProxy::from_string(&no_proxy))),
+            Err(_) => builder,
+        },
+        None => builder,
+    };
+    builder.build().expect("the AI HTTP client builds with static settings")
+}
+
+/// The proxy for https targets (`HTTPS_PROXY`, else `ALL_PROXY`, either case) and the hosts that
+/// bypass it (`NO_PROXY` plus [`NEVER_PROXIED`]). `None` when no usable http(s) proxy is set: SOCKS
+/// is not built in, and an unparsable value means no proxy rather than a broken one.
+pub(super) fn proxy_settings(env: &dyn Fn(&str) -> Option<String>) -> Option<(String, String)> {
+    let first = |names: &[&str]| names.iter().find_map(|n| env(n).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()));
+    let raw = first(&["HTTPS_PROXY", "https_proxy"]).or_else(|| first(&["ALL_PROXY", "all_proxy"]))?;
+    let with_scheme = if raw.contains("://") { raw } else { format!("http://{raw}") };
+    let url = Url::parse(&with_scheme).ok()?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none_or(str::is_empty) {
+        return None;
+    }
+    let no_proxy = match first(&["NO_PROXY", "no_proxy"]) {
+        Some(list) => format!("{list},{NEVER_PROXIED}"),
+        None => NEVER_PROXIED.to_owned(),
+    };
+    Some((url.to_string(), no_proxy))
 }
 
 /// Run one request and stream it through `emit` (Head, Chunk..., End). `emit` returning false
@@ -492,6 +535,7 @@ mod tests {
                 base_url: Some(self.0.clone()),
                 secret: Some(Secret::new(SECRET)),
                 insecure_http_accepted: false,
+                binding: String::new(),
             })
         }
     }
@@ -803,5 +847,148 @@ mod tests {
         let (result, events) = fetch(&s, 12, post("/chat/completions", &[])).await;
         assert_eq!(result.unwrap_err().kind, "not_connected");
         assert!(matches!(events.as_slice(), [AiFetchEvent::Error { kind: "not_connected", .. }]));
+    }
+
+    // ---- Proxies (ruling R25): only https targets, never http, loopback or IP literals ----
+
+    /// A listener that records the first request line of every connection and answers 403.
+    async fn recording_listener() -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let log = log.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut tmp = [0u8; 1024];
+                    // A TLS ClientHello (0x16) has no HTTP head: record it and hang up.
+                    while !buf.windows(4).any(|w| w == b"\r\n\r\n") && buf.first() != Some(&0x16) {
+                        match sock.read(&mut tmp).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                        }
+                    }
+                    if buf.first() == Some(&0x16) {
+                        log.lock().unwrap().push("<tls>".to_owned());
+                        return;
+                    }
+                    let text = String::from_utf8_lossy(&buf).into_owned();
+                    log.lock().unwrap().push(text.lines().next().unwrap_or("<empty>").to_owned());
+                    let _ = sock.write_all(b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n").await;
+                });
+            }
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    fn env_of(vars: &[(&'static str, String)]) -> impl Fn(&str) -> Option<String> {
+        let vars: Vec<(&'static str, String)> = vars.to_vec();
+        move |k| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone())
+    }
+
+    /// Every proxy variable pointing at `proxy`.
+    fn all_proxy_vars(proxy: &str) -> Vec<(&'static str, String)> {
+        ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]
+            .into_iter()
+            .map(|k| (k, proxy.to_owned()))
+            .collect()
+    }
+
+    async fn send(client: &Client, url: &str) -> Result<reqwest::Response, reqwest::Error> {
+        tokio::time::timeout(Duration::from_secs(25), client.get(url).send()).await.expect("request timed out")
+    }
+
+    #[tokio::test]
+    async fn plain_http_to_loopback_never_goes_through_a_proxy() {
+        let (proxy, via_proxy) = recording_listener().await;
+        let m = mock(vec![status(200, "OK", "{}")]).await;
+        let client = client_with_env(&env_of(&all_proxy_vars(&proxy)));
+        let res = send(&client, &format!("{}/models", m.base_url)).await.unwrap();
+        assert_eq!(res.status(), 200);
+        // `localhost` may resolve to ::1 first; only "not via the proxy" matters here.
+        let _ = send(&client, &format!("{}/models", m.base_url.replace("127.0.0.1", "localhost"))).await;
+        assert!(via_proxy.lock().unwrap().is_empty(), "{:?}", via_proxy.lock().unwrap());
+        assert!(!m.requests.lock().unwrap().is_empty(), "the request went straight to the server");
+    }
+
+    #[tokio::test]
+    async fn plain_http_to_a_named_host_is_never_proxied() {
+        let (proxy, via_proxy) = recording_listener().await;
+        let client = client_with_env(&env_of(&all_proxy_vars(&proxy)));
+        // `.invalid` never resolves: the request fails without touching the proxy.
+        assert!(send(&client, "http://provider.invalid/v1/models").await.is_err());
+        assert!(via_proxy.lock().unwrap().is_empty(), "{:?}", via_proxy.lock().unwrap());
+    }
+
+    #[tokio::test]
+    async fn https_to_a_named_host_tunnels_through_the_https_proxy() {
+        for var in ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
+            let (proxy, via_proxy) = recording_listener().await;
+            let client = client_with_env(&env_of(&[(var, proxy)]));
+            // The proxy refuses the tunnel, so the request fails; it must have asked for a CONNECT.
+            assert!(send(&client, "https://provider.example/v1/models").await.is_err(), "{var}");
+            assert_eq!(*via_proxy.lock().unwrap(), vec!["CONNECT provider.example:443 HTTP/1.1".to_owned()], "{var}");
+        }
+    }
+
+    #[tokio::test]
+    async fn http_proxy_alone_does_not_carry_https() {
+        let (proxy, via_proxy) = recording_listener().await;
+        let client = client_with_env(&env_of(&[("HTTP_PROXY", proxy.clone()), ("http_proxy", proxy)]));
+        let _ = send(&client, "https://provider.invalid/v1/models").await;
+        assert!(via_proxy.lock().unwrap().is_empty(), "{:?}", via_proxy.lock().unwrap());
+    }
+
+    #[tokio::test]
+    async fn https_to_loopback_or_an_ip_literal_is_never_proxied() {
+        let (proxy, via_proxy) = recording_listener().await;
+        let (direct, reached) = recording_listener().await;
+        let port = direct.rsplit(':').next().unwrap().to_owned();
+        let client = client_with_env(&env_of(&all_proxy_vars(&proxy)));
+        // The direct listener is not TLS, so these fail; they must have gone to it, not the proxy.
+        assert!(send(&client, &format!("https://127.0.0.1:{port}/v1")).await.is_err());
+        // These may hang on connect; a proxied request would have reached the proxy at once.
+        for url in [format!("https://localhost:{port}/v1"), "https://[::1]:9/v1".into(), "https://192.0.2.1:9/v1".into()] {
+            let _ = tokio::time::timeout(Duration::from_secs(2), client.get(&url).send()).await;
+        }
+        assert!(via_proxy.lock().unwrap().is_empty(), "{:?}", via_proxy.lock().unwrap());
+        assert!(!reached.lock().unwrap().is_empty(), "the request went straight to the server");
+    }
+
+    #[tokio::test]
+    async fn no_proxy_is_honoured_for_https() {
+        let (proxy, via_proxy) = recording_listener().await;
+        let mut vars = all_proxy_vars(&proxy);
+        vars.push(("NO_PROXY", "example.org, provider.invalid".to_owned()));
+        let client = client_with_env(&env_of(&vars));
+        assert!(send(&client, "https://api.provider.invalid/v1/models").await.is_err());
+        assert!(via_proxy.lock().unwrap().is_empty(), "{:?}", via_proxy.lock().unwrap());
+    }
+
+    #[test]
+    fn proxy_settings_pick_https_then_all_and_skip_unusable_values() {
+        let env = |vars: &[(&'static str, &str)]| {
+            let v: Vec<(&'static str, String)> = vars.iter().map(|(k, v)| (*k, v.to_string())).collect();
+            proxy_settings(&env_of(&v))
+        };
+        assert_eq!(env(&[]), None);
+        assert_eq!(env(&[("HTTP_PROXY", "http://p:1")]), None, "HTTP_PROXY is for http targets, which are never proxied");
+        assert_eq!(env(&[("HTTPS_PROXY", "http://p:1")]).unwrap().0, "http://p:1/");
+        assert_eq!(env(&[("https_proxy", "http://q:2"), ("ALL_PROXY", "http://a:3")]).unwrap().0, "http://q:2/");
+        assert_eq!(env(&[("ALL_PROXY", "http://a:3")]).unwrap().0, "http://a:3/");
+        assert_eq!(env(&[("HTTPS_PROXY", " "), ("ALL_PROXY", "http://a:3")]).unwrap().0, "http://a:3/");
+        // A bare host:port is read as http, as curl does.
+        assert_eq!(env(&[("HTTPS_PROXY", "p:8080")]).unwrap().0, "http://p:8080/");
+        // SOCKS is not built in, and nonsense is ignored: no proxy rather than a broken one.
+        assert_eq!(env(&[("HTTPS_PROXY", "socks5://p:1080")]), None);
+        assert_eq!(env(&[("HTTPS_PROXY", "http://")]), None);
+        let (_, no) = env(&[("HTTPS_PROXY", "http://p:1"), ("no_proxy", "corp.example")]).unwrap();
+        assert!(no.starts_with("corp.example,"), "{no}");
+        for always in ["localhost", "0.0.0.0/0", "::/0"] {
+            assert!(no.split(',').any(|p| p == always), "{always} in {no}");
+        }
     }
 }

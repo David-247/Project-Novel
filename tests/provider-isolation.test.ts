@@ -48,4 +48,29 @@ describe('provider isolation gate', () => {
     expect(violations('src/features/ai-tutor/connections/types.ts', "export const IDS = ['anthropic', 'openai']")).toEqual([])
     expect(violations('src-tauri/src/ai/x.rs', 'fn a() {}\n#[cfg(test)]\nmod t { const H: &str = "https://api.openai.com"; }')).toEqual([])
   })
+
+  it('flags the sign-in and plan hosts too', () => {
+    for (const line of [
+      'const T: &str = "https://auth.openai.com/oauth/token";',
+      'const U: &str = "https://chatgpt.com/";',
+      'const B: &str = "https://chatgpt.com/backend-api/codex";',
+      'const K: &str = "https://openrouter.ai/api/v1/auth/keys";',
+      'const A: &str = "https://openrouter.ai/auth?callback_url=x";',
+    ]) {
+      expect(violations('src-tauri/src/ai/chatgpt.rs', line), line).toHaveLength(1)
+    }
+  })
+
+  it('scans Rust code after a #[cfg(test)] item that is not the test module', () => {
+    const text = [
+      '#[cfg(test)]',
+      'pub fn helper() {}',
+      'pub fn sign_in() { let u = "https://auth.openai.com/oauth/authorize"; }',
+      '#[cfg(test)]',
+      'mod tests {',
+      '    const H: &str = "https://api.openai.com";',
+      '}',
+    ].join('\n')
+    expect(violations('src-tauri/src/ai/chatgpt.rs', text)).toEqual([{ line: 3, rule: 'provider API host outside providers/ and providers.rs' }])
+  })
 })

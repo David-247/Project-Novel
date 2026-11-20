@@ -21,12 +21,11 @@ export function getConnections(): Promise<Connection[]> {
   return invoke<Connection[]>('ai_connections_get')
 }
 
-/** Replace the saved connections. Rust validates them (a bad `baseUrl` rejects the whole save). */
-export function saveConnections(connections: Connection[]): Promise<void> {
-  return invoke<void>('ai_connections_save', { connections })
-}
-
-/** Add a connection, or replace the saved one with its id; Rust leaves every other connection as it is on disk. */
+/**
+ * Add a connection, or replace the saved one with its id; Rust leaves every other connection as it is on
+ * disk, validates this one (a bad `baseUrl` rejects it) and drops its key if it was re-pointed. There is
+ * deliberately no whole-list save: it could drop a connection added meanwhile (a sign-in).
+ */
 export function upsertConnection(connection: Connection): Promise<void> {
   return invoke<void>('ai_connection_upsert', { connection })
 }

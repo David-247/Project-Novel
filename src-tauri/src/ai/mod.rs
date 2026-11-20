@@ -131,15 +131,21 @@ pub struct ResolvedConnection {
     /// The user accepted plain `http` for a non-loopback host (a LAN server). Ignored for https and
     /// loopback hosts.
     pub insecure_http_accepted: bool,
+    /// What the secret was released for: the saved connection's provider, auth and origin
+    /// (`connections::binding`). Empty when no saved connection backs it (tests).
+    pub binding: String,
 }
 
 /// Turns a connection id into its provider, saved base URL and secret (see the module docs).
 pub trait ConnectionResolver: Send + Sync + 'static {
     fn resolve(&self, connection_id: &str) -> Result<ResolvedConnection, AiError>;
 
-    /// Replace a saved connection's secret (a plan sign-in's refreshed token record, `chatgpt.rs`).
-    /// May block. A resolver that cannot store refuses.
-    fn store_secret(&self, _connection_id: &str, _secret: &Secret) -> Result<(), AiError> {
+    /// Replace a saved connection's secret (a plan sign-in's refreshed token record, `chatgpt.rs`),
+    /// only while the connection still has `expected_binding` (the `binding` of the
+    /// [`ResolvedConnection`] the old secret was read from): a connection re-pointed or removed
+    /// meanwhile gets nothing (`connections::changed_meanwhile`). May block. A resolver that cannot
+    /// store refuses.
+    fn store_secret(&self, _connection_id: &str, _expected_binding: &str, _secret: &Secret) -> Result<(), AiError> {
         Err(AiError::new("auth", "The renewed sign-in could not be saved."))
     }
 }
@@ -175,7 +181,8 @@ impl AiState {
         AiState { client: fetch::client(), resolver: RwLock::new(resolver), inflight: Mutex::default() }
     }
 
-    /// The proxy's HTTP client (no redirects, no system proxy), shared with the OAuth code exchange.
+    /// The proxy's HTTP client (no redirects; an environment proxy for https host names only, ruling
+    /// R25), shared with the OAuth code exchanges and ChatGPT token refresh, JWKS and revoke.
     pub fn http_client(&self) -> reqwest::Client {
         self.client.clone()
     }
@@ -357,16 +364,6 @@ pub async fn ai_secret_has<R: Runtime>(app: AppHandle<R>, connection_id: String)
 pub async fn ai_connections_get<R: Runtime>(app: AppHandle<R>) -> Result<Vec<connections::Connection>, AiError> {
     let path = connections_file(&app)?;
     blocking(move || connections::load_connections(&path)).await
-}
-
-/// Validate and replace the saved connections (atomic; see `connections.rs`).
-#[tauri::command]
-pub async fn ai_connections_save<R: Runtime>(
-    app: AppHandle<R>,
-    connections: Vec<connections::Connection>,
-) -> Result<(), AiError> {
-    let path = connections_file(&app)?;
-    blocking(move || connections::save_connections(&path, &keychain::KeyringStore, connections)).await
 }
 
 /// Add a connection, or replace the saved one with its id; the others stay as they are on disk

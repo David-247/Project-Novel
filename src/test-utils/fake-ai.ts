@@ -34,7 +34,6 @@ export const AI_COMMAND_NAMES = [
   'ai_secret_delete',
   'ai_secret_has',
   'ai_connections_get',
-  'ai_connections_save',
   'ai_connection_upsert',
   'ai_connection_remove',
   'tutor_history_list',
@@ -74,6 +73,11 @@ export interface FakeAiScript {
    * rejection races the channel (Rust's command result can arrive before the channel's last events).
    */
   rejectWith?: { kind: string; message: string }
+  /**
+   * With `rejectWith`: events the channel delivers only after the invoke has rejected, each on its own
+   * later macrotask (the channel lagging behind the command result, as Tauri allows).
+   */
+  afterReject?: FakeAiEvent[]
 }
 
 interface ChannelLike {
@@ -230,7 +234,16 @@ export function createFakeAi() {
       }
       if (script!.pauseAfter === script!.events.length) await new Promise<void>((resolve) => (wake = resolve))
       if (cancelled) failWith('cancelled', 'The request was cancelled.')
-      if (script!.rejectWith) throw fail(script!.rejectWith.kind, script!.rejectWith.message)
+      if (script!.rejectWith) {
+        const late = script!.afterReject ?? []
+        void (async () => {
+          for (const event of late) {
+            await new Promise((resolve) => setTimeout(resolve, 5))
+            send(event)
+          }
+        })()
+        throw fail(script!.rejectWith.kind, script!.rejectWith.message)
+      }
     } finally {
       running.delete(requestId)
     }
@@ -353,9 +366,6 @@ export function createFakeAi() {
         return state.secrets.has(checkSecretArgs(args))
       case 'ai_connections_get':
         return structuredClone(state.connections)
-      case 'ai_connections_save':
-        saveConnections(structuredClone(args.connections as Record<string, unknown>[]))
-        return null
       case 'ai_connection_upsert': {
         // As Rust: merged into the stored list, so other connections (and their keys) are kept.
         const c = structuredClone(args.connection as Record<string, unknown>)

@@ -28,17 +28,7 @@ export async function loadTutorConnections(): Promise<void> {
   state().tutorConnectionsActions.setConnections(list, pickActive(list, state().preferences.tutorActiveConnection))
 }
 
-/** Replace all connections (Rust validates; a rejection leaves the store as it was). */
-export async function saveTutorConnections(list: Connection[]): Promise<void> {
-  await ipc.saveConnections(list)
-  // Keep what Rust stored (it trims, and drops a hosted provider's baseUrl).
-  const saved = await ipc.getConnections()
-  const activeId = pickActive(saved, state().tutorConnections.activeId)
-  state().tutorConnectionsActions.setConnections(saved, activeId)
-  rememberActive(activeId)
-}
-
-/** Read what Rust stored and keep the active one (else the first). */
+/** Read what Rust stored (it trims, and drops a hosted provider's baseUrl) and keep the active one (else the first). */
 async function reload(): Promise<void> {
   const saved = await ipc.getConnections()
   const activeId = pickActive(saved, state().tutorConnections.activeId)
