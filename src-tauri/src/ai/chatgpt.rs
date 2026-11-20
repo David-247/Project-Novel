@@ -283,6 +283,11 @@ impl std::fmt::Debug for Callback {
 }
 
 const NOT_EXPECTED: &str = "The sign-in reply was not the one Novel expected. Try again.";
+/// Error kinds of a sign-in (they reach the webview only as the message): the writer said no, or OpenAI
+/// no longer knows the client id Novel sent.
+pub const DENIED: &str = "denied";
+pub const INVALID_CLIENT: &str = "invalid_client";
+const STALE_CLIENT: &str = "ChatGPT no longer knows the registration Novel saved for this account, so Novel forgot it. Continue with ChatGPT again to sign in.";
 
 /// The code and client id in a callback request head: exactly `GET <callback_path>?...` with this
 /// sign-in's `state`, one code, and (on a first registration) the issued client id. On a renewal a
@@ -315,7 +320,9 @@ pub fn parse_callback(head: &str, plan: &PlanSignIn, state: &str, saved_client: 
     }
     if !errors.is_empty() {
         return Err(if errors.iter().any(|e| e == "access_denied") {
-            refused("You did not allow Novel to use your ChatGPT account. Try again if you meant to sign in.")
+            AiError::new(DENIED, "You did not allow Novel to use your ChatGPT account. Try again if you meant to sign in.")
+        } else if errors.iter().any(|e| e == "invalid_client" || e == "unauthorized_client") {
+            AiError::new(INVALID_CLIENT, STALE_CLIENT)
         } else {
             refused("ChatGPT did not finish the sign-in. Try again.")
         });
@@ -327,7 +334,7 @@ pub fn parse_callback(head: &str, plan: &PlanSignIn, state: &str, saved_client: 
     let client_id = match (clients.as_slice(), saved_client) {
         ([], Some(saved)) => saved.to_owned(),
         ([c], Some(saved)) if c == saved => c.clone(),
-        ([_], Some(_)) => return Err(refused("ChatGPT answered for another registration, so Novel kept this connection as it was. Try again.")),
+        ([_], Some(_)) => return Err(refused("ChatGPT answered for another registration, so Novel saved nothing. Try again.")),
         ([c], None) if token_ok(c, MAX_ID_CHARS) && c != plan.register_client => c.clone(),
         _ => return Err(refused("ChatGPT did not finish registering Novel. Try again.")),
     };
@@ -443,6 +450,7 @@ pub async fn exchange_code(client: &reqwest::Client, plan: &PlanSignIn, client_i
     if !(200..300).contains(&status) {
         return Err(match error_code(&body).as_deref() {
             Some("invalid_grant") => AiError::new("auth", "The sign-in code expired before Novel could use it. Try again."),
+            Some("invalid_client" | "unauthorized_client") => AiError::new(INVALID_CLIENT, STALE_CLIENT),
             _ => AiError::new("auth", format!("ChatGPT refused the sign-in (HTTP {status}). Try again.")),
         });
     }
@@ -956,6 +964,39 @@ fn reauth_for(path: &Path, provider: &str, connection_id: &str) -> Result<Reauth
     })
 }
 
+/// A reuse of a known account's client (`connection_id` None) failed before anything was saved. Kept as
+/// is only when the writer cancelled or said no. A client OpenAI no longer knows is forgotten (the next
+/// sign-in registers anew); any other failure (another client came back, an OpenAI error, a refused
+/// exchange, an ID token that does not check out, a timeout) marks the account to be skipped next time,
+/// so a dead client is never retried forever.
+pub fn after_reuse_failure(host_path: &Path, reuse: &Reauth, e: &AiError) -> Result<(), AiError> {
+    if reuse.connection_id.is_some() {
+        return Ok(());
+    }
+    match e.kind {
+        "cancelled" | "superseded" | DENIED => Ok(()),
+        INVALID_CLIENT => forget_account(host_path, &reuse.sub),
+        _ => skip_account(host_path, &reuse.sub),
+    }
+}
+
+/// Forget an account entirely (its client id is dead).
+pub fn forget_account(path: &Path, sub: &str) -> Result<(), AiError> {
+    let _lock = HOST.lock().unwrap_or_else(|e| e.into_inner());
+    let mut f = load_host(path)?;
+    let before = f.accounts.len();
+    f.accounts.retain(|a| a.sub != sub);
+    if f.accounts.len() != before {
+        save_host(path, &f)?;
+    }
+    Ok(())
+}
+
+/// The email (or "") of the account Continue with ChatGPT would reuse, if any (`ai_oauth_reusable`).
+pub fn reusable_email(path: &Path, host_path: &Path) -> Result<Option<String>, AiError> {
+    Ok(reuse_for(path, host_path)?.map(|r| r.login_hint.unwrap_or_default()))
+}
+
 /// A new sign-in: the known account to reuse, if there is exactly one without a connection.
 fn reuse_for(path: &Path, host_path: &Path) -> Result<Option<Reauth>, AiError> {
     let live: Vec<String> = connections::load_connections(path)?.into_iter().map(|c| c.id).collect();
@@ -982,12 +1023,15 @@ pub async fn start<R: Runtime>(
     provider: String,
     plan: PlanSignIn,
     connection_id: Option<String>,
+    new_account: bool,
 ) -> Result<(), AiError> {
     let path = super::connections_file(&app)?;
     let host_path = app_file(&app, HOST_FILE)?;
     let (p, prov, hp) = (path.clone(), provider.clone(), host_path.clone());
     let reauth = match connection_id {
         Some(id) => Some(super::blocking(move || reauth_for(&p, &prov, &id)).await?),
+        // "Use Another Account": no reuse this time, a fresh registration.
+        None if new_account => None,
         None => super::blocking(move || reuse_for(&p, &hp)).await?,
     };
     let hp = host_path.clone();
@@ -1009,9 +1053,22 @@ pub async fn start<R: Runtime>(
         let outcome = async {
             let wanted = stop.clone();
             let saved_client = reauth.as_ref().map(|r| r.client_id.clone());
-            let callback = oauth::wait_for_reply(listener, CALLBACK_TIMEOUT, stop, |head| parse_callback(head, &plan, &state, saved_client.as_deref())).await?;
-            let redirect = redirect_uri(&plan, port);
-            let (record, identity) = exchange_and_verify(&client, &plan, &callback, &pkce.verifier, &redirect, &nonce, now_secs()).await?;
+            let verified = async {
+                let callback = oauth::wait_for_reply(listener, CALLBACK_TIMEOUT, stop, |head| parse_callback(head, &plan, &state, saved_client.as_deref())).await?;
+                let redirect = redirect_uri(&plan, port);
+                exchange_and_verify(&client, &plan, &callback, &pkce.verifier, &redirect, &nonce, now_secs()).await
+            }
+            .await;
+            let (record, identity) = match verified {
+                Ok(v) => v,
+                Err(e) => {
+                    if let Some(r) = reauth.clone() {
+                        let (hp, e2) = (host_path.clone(), e.clone());
+                        let _ = super::blocking(move || after_reuse_failure(&hp, &r, &e2)).await;
+                    }
+                    return Err(e);
+                }
+            };
             // Cancelled (or replaced) meanwhile: the tokens are dropped, nothing is saved.
             oauth::still_wanted(&wanted)?;
             // Under REFRESH: a refresh of the connection being renewed cannot overwrite the new record.
@@ -1731,6 +1788,100 @@ mod tests {
         with_access_token(&client, r.clone(), conn_id, r.resolve(conn_id).unwrap(), &p).await.unwrap();
         assert_eq!(TokenRecord::parse(&r.secret.lock().unwrap()).unwrap().refresh_token, "REFRESH-NEW");
         assert!(pending_get(conn_id).is_none());
+    }
+
+    fn reuse_with_dead_client() -> (Files, Reauth) {
+        let f = Files::new();
+        let id = f.save(None, record(NOW + 3600), &writer()).unwrap();
+        // Removed (here: the connection is gone from the file), so the account is free for reuse.
+        connections::remove_connection(&f.conns(), &f.secrets, &id).unwrap();
+        let r = reuse(&f).expect("one known account without a connection");
+        (f, r)
+    }
+
+    #[test]
+    fn every_failure_of_a_reuse_but_a_cancel_or_a_no_moves_off_that_client() {
+        let kinds = [
+            ("cancelled", "kept"),
+            ("superseded", "kept"),
+            (DENIED, "kept"),
+            (INVALID_CLIENT, "forgotten"),
+            ("auth", "skipped"),     // another client id came back, an OpenAI error, a refused exchange, a bad ID token
+            ("network", "skipped"),  // OpenAI unreachable
+            ("provider", "skipped"), // an unreadable answer
+        ];
+        for (kind, want) in kinds {
+            let (f, r) = reuse_with_dead_client();
+            after_reuse_failure(&f.host(), &r, &AiError::new(kind, "x")).unwrap();
+            let accounts = f.accounts();
+            let got = match accounts.as_slice() {
+                [] => "forgotten",
+                [a] if a.skip => "skipped",
+                [_] => "kept",
+                _ => unreachable!(),
+            };
+            assert_eq!(got, want, "{kind}");
+            // Only a kept entry is reused next time; otherwise Continue with ChatGPT registers anew.
+            assert_eq!(reuse(&f).is_some(), want == "kept", "{kind}");
+        }
+        // A renewal of a saved connection is never touched.
+        let f = Files::new();
+        let id = f.save(None, record(NOW + 3600), &writer()).unwrap();
+        let renewal = reauth_for_test(&id);
+        after_reuse_failure(&f.host(), &renewal, &AiError::new(INVALID_CLIENT, "x")).unwrap();
+        assert_eq!(f.accounts().len(), 1);
+    }
+
+    fn reauth_for_test(connection_id: &str) -> Reauth {
+        Reauth {
+            connection_id: Some(connection_id.into()),
+            client_id: "oaiapp_1".into(),
+            sub: "user-sub".into(),
+            id_token_hint: None,
+            login_hint: None,
+            prompt_consent: false,
+        }
+    }
+
+    #[test]
+    fn the_failure_kinds_come_from_the_callback() {
+        let p = plan();
+        let kind = |head: &str| parse_callback(head, &p, "S", Some("oaiapp_1")).unwrap_err().kind;
+        assert_eq!(kind("GET /auth/callback?error=access_denied&state=S HTTP/1.1\r\n\r\n"), DENIED);
+        assert_eq!(kind("GET /auth/callback?error=invalid_client&state=S HTTP/1.1\r\n\r\n"), INVALID_CLIENT);
+        assert_eq!(kind("GET /auth/callback?error=unauthorized_client&state=S HTTP/1.1\r\n\r\n"), INVALID_CLIENT);
+        assert_eq!(kind("GET /auth/callback?error=server_error&state=S HTTP/1.1\r\n\r\n"), "auth");
+        let other = parse_callback("GET /auth/callback?code=C&state=S&client_id=oaiapp_2 HTTP/1.1\r\n\r\n", &p, "S", Some("oaiapp_1")).unwrap_err();
+        assert_eq!(other.kind, "auth");
+        assert!(!other.message.contains("kept this connection"), "no connection exists in a reuse: {}", other.message);
+    }
+
+    #[tokio::test]
+    async fn an_exchange_refused_for_the_client_is_an_invalid_client() {
+        for code in ["invalid_client", "unauthorized_client"] {
+            let body: &'static str = if code == "invalid_client" { r#"{"error":"invalid_client"}"# } else { r#"{"error":"unauthorized_client"}"# };
+            let (base, _) = mock("401 Unauthorized", body).await;
+            let e = exchange_code(&super::super::fetch::client(), &plan_at(&base), "oaiapp_1", "C", "V", "x").await.unwrap_err();
+            assert_eq!(e.kind, INVALID_CLIENT, "{code}");
+        }
+    }
+
+    #[test]
+    fn the_reusable_account_is_offered_by_email_and_a_second_account_can_be_added() {
+        let (f, _) = reuse_with_dead_client();
+        assert_eq!(reusable_email(&f.conns(), &f.host()).unwrap().as_deref(), Some("writer@example.com"));
+        // "Use Another Account": a fresh registration for another account, saved beside the known one.
+        let other = Identity { sub: "second-sub".into(), email: Some("second@example.com".into()) };
+        let mut rec = record(NOW + 3600);
+        rec.client_id = "oaiapp_2".into();
+        rec.sub = "second-sub".into();
+        let id = f.save(None, rec, &other).unwrap();
+        assert_eq!(f.live(), [id]);
+        let mut subs: Vec<String> = f.accounts().into_iter().map(|a| a.sub).collect();
+        subs.sort();
+        assert_eq!(subs, ["second-sub", "user-sub"]);
+        // The first account is still the one a plain Continue with ChatGPT would reuse.
+        assert_eq!(reusable_email(&f.conns(), &f.host()).unwrap().as_deref(), Some("writer@example.com"));
     }
 
 }

@@ -431,12 +431,17 @@ pub async fn ai_oauth_start<R: Runtime>(
     oauth: State<'_, OauthState>,
     provider: String,
     connection_id: Option<String>,
+    new_account: Option<bool>,
 ) -> Result<(), AiError> {
     let descriptor = super::providers::descriptor(&provider).ok_or_else(|| AiError::bad_request("This provider has no sign-in."))?;
     if let Some(plan) = descriptor.plan_sign_in {
-        return super::chatgpt::start(app, ai.http_client(), &oauth, provider, plan, connection_id).await;
+        let new_account = new_account == Some(true);
+        if new_account && connection_id.is_some() {
+            return Err(AiError::bad_request("Sign In Again renews the same account."));
+        }
+        return super::chatgpt::start(app, ai.http_client(), &oauth, provider, plan, connection_id, new_account).await;
     }
-    if connection_id.is_some() {
+    if connection_id.is_some() || new_account.is_some() {
         return Err(AiError::bad_request("This provider cannot sign a connection in again."));
     }
     let sign_in = descriptor.sign_in.ok_or_else(|| AiError::bad_request("This provider has no sign-in."))?;
@@ -486,6 +491,23 @@ pub(super) fn report<R: Runtime>(app: &AppHandle<R>, flow: u64, outcome: Result<
 #[tauri::command]
 pub fn ai_oauth_cancel(oauth: State<'_, OauthState>) {
     oauth.cancel();
+}
+
+/// For a plan sign-in: the email ("" when unknown) of the known account Continue with ChatGPT would sign
+/// in with again, or None when it would register a new one. Settings shows it and offers "Use Another
+/// Account". No secret: the account's email is already in the connection's name.
+#[tauri::command]
+pub async fn ai_oauth_reusable<R: Runtime>(app: AppHandle<R>, provider: String) -> Result<Option<String>, AiError> {
+    let Some(_) = super::providers::descriptor(&provider).and_then(|d| d.plan_sign_in) else { return Ok(None) };
+    let path = super::connections_file(&app)?;
+    let host = {
+        use tauri::Manager as _;
+        app.path()
+            .app_data_dir()
+            .map(|d| d.join(super::chatgpt::HOST_FILE))
+            .map_err(|_| AiError::bad_request("The app data folder is not available."))?
+    };
+    super::blocking(move || super::chatgpt::reusable_email(&path, &host)).await
 }
 
 /// Open the provider's usage settings page ("Manage Usage": the allowlisted `usage_url` of its plan
