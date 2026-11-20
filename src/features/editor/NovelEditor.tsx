@@ -1,3 +1,4 @@
+import type { Extensions } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { useEffect, useState } from 'react'
 import { useStore } from '@/shared/store'
@@ -6,6 +7,7 @@ import { createEditorExtensions } from './extensions'
 import { SYSTEM_FONT_STACK } from './fonts'
 import { BookStyleSheet } from './styles/BookStyleSheet'
 import { FootnoteEditor } from './footnote/FootnoteEditor'
+import { EditorContextMenu } from './context-menu/EditorContextMenu'
 import './editor.css'
 
 export interface NovelEditorProps {
@@ -14,6 +16,8 @@ export interface NovelEditorProps {
    * lays it out as pages (the pagination slice's PaginatedView). Typography then comes from the host.
    */
   paged?: boolean
+  /** More extensions for the manuscript (createEditorExtensions `extra`), read once at mount. */
+  extensions?: Extensions
 }
 
 /**
@@ -21,8 +25,8 @@ export interface NovelEditorProps {
  * (AppShell's editor slot scrolls); this renders a centered text column.
  * React does not re-render on transactions (typing latency budget).
  */
-export function NovelEditor({ paged = false }: NovelEditorProps = {}) {
-  const [extensions] = useState(createEditorExtensions)
+export function NovelEditor({ paged = false, extensions: extra }: NovelEditorProps = {}) {
+  const [extensions] = useState(() => createEditorExtensions({ extra }))
   const editor = useEditor({
     extensions,
     immediatelyRender: true,
@@ -61,6 +65,7 @@ export function NovelEditor({ paged = false }: NovelEditorProps = {}) {
       <BookStyleSheet />
       <EditorContent editor={editor} />
       <FootnoteEditor />
+      <EditorContextMenu />
     </div>
   )
 }

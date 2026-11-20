@@ -6,7 +6,8 @@ import type { Platform, ShortcutSpec } from '@/shared/ui'
  *  - PageUp / PageDown, Mod-Home / Mod-End: src/features/pagination/PaginatedView.tsx;
  *  - Home / End on a page-turn control: src/features/pagination/TurnControls.tsx;
  *  - Escape in the ribbon: src/features/ribbon/Ribbon.tsx;
- *  - Alt and F10 for the menu bar (not on macOS: the native menu bar): src/features/menu/MenuBar.tsx.
+ *  - Alt and F10 for the menu bar (not on macOS: the native menu bar): src/features/menu/MenuBar.tsx;
+ *  - Shift+F10 and the Menu key for the manuscript's context menu: src/features/editor/context-menu/opener.ts.
  */
 export interface ExtraShortcut {
   id: string
@@ -45,5 +46,11 @@ export const EXTRA_SHORTCUTS: readonly ExtraShortcut[] = [
     label: 'Menu Bar',
     description: 'Move to the menu bar (Alt with a menu’s underlined letter opens that menu).',
     keys: (p) => (p === 'mac' ? [] : ['Alt', 'F10']),
+  },
+  {
+    id: 'nav.contextMenu',
+    label: 'Context Menu',
+    description: 'In the manuscript: open the menu of spelling suggestions and editing actions at the cursor.',
+    keys: () => ['Shift-F10', 'ContextMenu'],
   },
 ]

@@ -62,7 +62,7 @@ function runHistory(cmd: 'undo' | 'redo'): void {
 }
 
 /** Insert text from the system clipboard into the manuscript (Paste / Paste as Plain Text from a menu). */
-async function pasteFromClipboard(plain: boolean): Promise<void> {
+export async function pasteFromClipboard(plain: boolean): Promise<void> {
   const ed = ready()
   if (!ed) return
   try {
