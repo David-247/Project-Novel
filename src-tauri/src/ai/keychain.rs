@@ -86,6 +86,7 @@ pub fn delete_secret(store: &dyn SecretStore, connection_id: &str) -> Result<(),
     store.delete(connection_id)
 }
 
+#[cfg(test)]
 pub fn has_secret(store: &dyn SecretStore, connection_id: &str) -> Result<bool, AiError> {
     check_id(connection_id)?;
     Ok(store.get(connection_id)?.is_some())
