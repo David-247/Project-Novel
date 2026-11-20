@@ -37,3 +37,11 @@ export { createOutputTools, createCorrectionBook, EXPLAIN_INSTEAD } from './harn
 export type { Correction, CorrectionBook, CorrectionKind, CorrectionState, ProposedChange, Rejection, OutputToolsContext } from './harness/output-tools'
 export { createTutorSession, runTutorTurn, MAX_STEPS } from './harness/run-turn'
 export type { TurnArgs, TurnEvent, TutorSession } from './harness/run-turn'
+
+// Chat history (Task 8): chats live in the app data folder, keyed by the open project's meta.id.
+// useTutorHistory(): { chat, chats, error, startNew, open, append, update, flush, close, refresh, remove,
+// clearProject }. clearAllChats() clears every project's chats (settings). The app has no delete-project
+// flow, so nothing calls clearProject on delete; Task 10's settings page offers it.
+export { useTutorHistory, chatTitle, SAVE_DEBOUNCE_MS } from './history/store'
+export { clearAllChats } from './history/ipc'
+export type { Chat, ChatSummary, StoredMessage, StoredAttachment } from './history/types'

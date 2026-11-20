@@ -15,6 +15,9 @@
  * id, a bad `baseUrl` for ollama, lmstudio and custom; a hosted provider's `baseUrl` is dropped) and
  * deletes the secret of a removed connection or one whose provider, auth or base URL origin changed
  * (a secret can only be set for a saved connection, as in Rust). `failSecrets` makes the keychain commands fail.
+ *
+ * Chat history (`tutor_history_*`) is `state.history` (project id to chat id to chat) with Rust's id check
+ * (`^[A-Za-z0-9-]{1,64}$`) and 8 MB size cap; `historySaves` logs every save, `failHistory` makes the commands fail.
  */
 
 export const AI_COMMAND_NAMES = [
@@ -27,6 +30,11 @@ export const AI_COMMAND_NAMES = [
   'ai_secret_has',
   'ai_connections_get',
   'ai_connections_save',
+  'tutor_history_list',
+  'tutor_history_load',
+  'tutor_history_save',
+  'tutor_history_delete',
+  'tutor_history_clear_all',
 ] as const
 
 /** Mirrors Rust's AiFetchEvent (serde tag "type"). */
@@ -106,6 +114,12 @@ export function createFakeAi() {
     connections: [] as Record<string, unknown>[],
     /** true: ai_secret_* fail as if the keychain were locked. */
     failSecrets: false,
+    /** tutor-history in the app data dir: project id to chat id to chat. */
+    history: new Map<string, Map<string, Record<string, unknown>>>(),
+    /** Every tutor_history_save, in order (the project id and a copy of the chat). */
+    historySaves: [] as { projectId: string; chat: Record<string, unknown> }[],
+    /** true: tutor_history_* fail. */
+    failHistory: false,
   }
   const running = new Map<number, () => void>()
   const earlyCancels = new Set<number>()
@@ -119,6 +133,9 @@ export function createFakeAi() {
     state.secrets.clear()
     state.connections = []
     state.failSecrets = false
+    state.history.clear()
+    state.historySaves.length = 0
+    state.failHistory = false
     running.clear()
     earlyCancels.clear()
   }
@@ -207,6 +224,48 @@ export function createFakeAi() {
     state.connections = saved
   }
 
+  const MAX_CHAT_BYTES = 8 * 1024 * 1024
+  const validId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id)
+
+  function historyCommand(cmd: string, args: Record<string, unknown>): unknown {
+    if (state.failHistory) throw fail('bad_request', 'The chat history could not be read.')
+    if (cmd === 'tutor_history_clear_all') {
+      state.history.clear()
+      return null
+    }
+    if (!validId(args.projectId)) throw fail('bad_request', 'The project id is not valid.')
+    const chats = state.history.get(args.projectId)
+    switch (cmd) {
+      case 'tutor_history_list':
+        return [...(chats?.values() ?? [])]
+          .map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt }))
+          .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.id).localeCompare(String(b.id)))
+      case 'tutor_history_load': {
+        if (!validId(args.chatId)) throw fail('bad_request', 'The chat id is not valid.')
+        const chat = chats?.get(args.chatId)
+        if (!chat) throw fail('bad_request', 'The chat history could not be read.')
+        return structuredClone(chat)
+      }
+      case 'tutor_history_save': {
+        const chat = structuredClone(args.chat) as Record<string, unknown>
+        if (!validId(chat?.id)) throw fail('bad_request', 'The chat id is not valid.')
+        if (JSON.stringify(chat).length > MAX_CHAT_BYTES) throw fail('bad_request', 'This chat is too large to save. Start a new chat.')
+        const bucket = chats ?? new Map<string, Record<string, unknown>>()
+        bucket.set(chat.id, chat)
+        state.history.set(args.projectId, bucket)
+        state.historySaves.push({ projectId: args.projectId, chat: structuredClone(chat) })
+        return null
+      }
+      default: {
+        // tutor_history_delete: one chat, or (no chatId) the project's folder.
+        if (args.chatId == null) state.history.delete(args.projectId)
+        else if (!validId(args.chatId)) throw fail('bad_request', 'The chat id is not valid.')
+        else chats?.delete(args.chatId)
+        return null
+      }
+    }
+  }
+
   async function handle(cmd: string, args: Record<string, unknown>): Promise<unknown> {
     switch (cmd) {
       case 'ai_fetch':
@@ -241,6 +300,12 @@ export function createFakeAi() {
       case 'ai_connections_save':
         saveConnections(structuredClone(args.connections as Record<string, unknown>[]))
         return null
+      case 'tutor_history_list':
+      case 'tutor_history_load':
+      case 'tutor_history_save':
+      case 'tutor_history_delete':
+      case 'tutor_history_clear_all':
+        return historyCommand(cmd, args)
       default:
         throw new Error(`unexpected command ${cmd}`)
     }

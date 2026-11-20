@@ -24,6 +24,7 @@
 
 pub mod connections;
 pub mod fetch;
+pub mod history;
 pub mod keychain;
 pub mod providers;
 
@@ -401,4 +402,44 @@ pub async fn ai_connections_save<R: Runtime>(
 ) -> Result<(), AiError> {
     let path = connections_file(&app)?;
     blocking(move || connections::save_connections(&path, &keychain::KeyringStore, connections)).await
+}
+
+// ---- Chat history (Task 8) -------------------------------------------------------------------------
+
+fn history_root<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, AiError> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join(history::HISTORY_DIR))
+        .map_err(|_| AiError::bad_request("The app data folder is not available."))
+}
+
+#[tauri::command]
+pub async fn tutor_history_list<R: Runtime>(app: AppHandle<R>, project_id: String) -> Result<Vec<history::ChatSummary>, AiError> {
+    let root = history_root(&app)?;
+    blocking(move || history::list(&root, &project_id)).await
+}
+
+#[tauri::command]
+pub async fn tutor_history_load<R: Runtime>(app: AppHandle<R>, project_id: String, chat_id: String) -> Result<history::Chat, AiError> {
+    let root = history_root(&app)?;
+    blocking(move || history::load(&root, &project_id, &chat_id)).await
+}
+
+#[tauri::command]
+pub async fn tutor_history_save<R: Runtime>(app: AppHandle<R>, project_id: String, chat: history::Chat) -> Result<(), AiError> {
+    let root = history_root(&app)?;
+    blocking(move || history::save(&root, &project_id, &chat)).await
+}
+
+/// Delete one chat, or all of the project's chats (`chat_id` absent).
+#[tauri::command]
+pub async fn tutor_history_delete<R: Runtime>(app: AppHandle<R>, project_id: String, chat_id: Option<String>) -> Result<(), AiError> {
+    let root = history_root(&app)?;
+    blocking(move || history::delete(&root, &project_id, chat_id.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn tutor_history_clear_all<R: Runtime>(app: AppHandle<R>) -> Result<(), AiError> {
+    let root = history_root(&app)?;
+    blocking(move || history::clear_all(&root)).await
 }
