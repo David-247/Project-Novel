@@ -45,7 +45,7 @@ import { getCommands, runCommand } from '@/shared/commands'
 import { formatShortcut } from '@/shared/ui'
 import { auditTooltipCoverage, CONTROL_SELECTOR } from '@/features/tooltips'
 import { canonical, createFakeTauriCore, type FakePersistence, type MessageDialogArgs, type PersistedRecord } from './fake-tauri-core'
-import { openAiChatStream } from './fake-ai'
+import { openAiChatStream, sseResponse } from './fake-ai'
 
 /** Set by tests before the app boots (page.addInitScript). */
 export interface E2EConfig {
@@ -167,6 +167,14 @@ function controlFor(core: ReturnType<typeof createFakeTauriCore>) {
       for (const r of replies) core.ai.queue.push({ events: openAiChatStream(r) })
     },
     aiRequests: () => core.ai.requests.length,
+    /** Queue a plain JSON answer (a provider's `GET /models`) for the next model request. */
+    tutorQueueJson: (value: unknown) => {
+      const events = sseResponse([JSON.stringify(value)])
+      events[0] = { type: 'head', status: 200, headers: [['content-type', 'application/json']] }
+      core.ai.queue.push({ events })
+    },
+    /** Every ai_fetch as sent (method, path, body): what reached the provider, in order. */
+    aiRequestLog: () => core.ai.requests.map((r) => ({ method: r.req.method, path: r.req.path, body: r.req.body ?? null })),
     /** ai-connections.json as stored (no secret may ever appear in it). */
     tutorConnectionsFile: () => JSON.stringify(core.ai.connections),
     /** The connection ids the keychain holds a secret for, and whether one holds exactly `value`. */
