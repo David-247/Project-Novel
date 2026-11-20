@@ -201,6 +201,10 @@ spell checker, not AI, so it does not pass through the guard.
 - **Providers.** What the writer sends goes to the provider they connected, under that provider's own terms and data
   policy. Novel adds no telemetry and contacts no other host. A local model (Ollama, LM Studio) keeps everything on
   this computer.
+- **System proxies** (`HTTPS_PROXY`, `ALL_PROXY`) are used only for `https` connections to a named host, where the
+  proxy only tunnels the encrypted connection. Plain `http` addresses, `localhost` and IP addresses always connect
+  directly, so manuscript text and keys never pass through a proxy unencrypted. A local or custom model that can
+  only be reached through a proxy is therefore not supported.
 
 ## Tests
 
