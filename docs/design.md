@@ -491,14 +491,15 @@ What Word does, and what we took from it:
 | Review | Changes | Previous Change, Next Change; Accept ▾ and Reject ▾ (split buttons: the main half accepts / rejects the change at the cursor or in the selection; the arrow lists Accept Change, Accept and Move to Next, Accept All Changes and the Accept All by Author ▸ submenu, and the same for Reject) |
 | Review | Comments | New Comment, Previous Comment, Next Comment, Show Resolved Comments |
 | Review | Re-write | Re-write Passage…, Re-writes…, Previous Re-write, Next Re-write (the group's own buttons: an icon on the first, short labels Re-write / Re-writes / Previous / Next; tooltips and the dropdown keep the full names); while a re-write is open, Keep Original / Keep Version; Discard Re-write in the dropdown |
+| Review | Tutor | Tutor (the AI sparkle; opens the tutor panel, Phase 5) |
 | View | Views | Single Page, Two-Page Spread; Book, Continuous Scroll (two radio pairs: page view, then navigation mode; Previous / Next Spread are the turn controls on the canvas edges and View menu items, not ribbon buttons) |
 | View | Zoom | Zoom Out, Zoom In, Fit Spread, Fit Width, Actual Size |
-| View | Show | Comments panel |
+| View | Show | Navigation Pane, Comments panel, Tutor |
 | View | Window | Full Screen |
 
 Priorities (higher keeps its size longer): Home Font 90, Styles 80, Paragraph 75, Editing 60 (never collapses: two
 small buttons); Insert Breaks 90, Footnotes 80, Comments 70; Layout Page Setup 90, Header & Footer 80, Paper 70, Book
-60, Export 50; Review Tracking 90, Changes 85, Comments 80, Re-write 70, Proofing 60; View Views 90, Zoom 80, Show 70, Window 60. A group
+60, Export 50; Review Tracking 90, Changes 85, Comments 80, Re-write 70, Tutor 65, Proofing 60; View Views 90, Zoom 80, Show 70, Window 60. A group
 whose own controls are no wider than its group button (one icon) never collapses either; it only moves into More.
 
 **Model** (`src/shared/ribbon`, data only; any slice may use it):
@@ -802,3 +803,31 @@ Slices: `src/features/spellcheck/` (the underlines, `extension.ts`; the menu ite
   0-99, proofing 100-199, other actions such as the tutor's 200-299, the clipboard 300-399).
 - **Perf**: e2e/spellcheck-perf.spec.ts, typing on the 100k fixture with spell check on, under 50 ms,
   blocking on Windows Chromium CI like plain typing.
+
+## AI tutor panel (Phase 5)
+
+Slice: `src/features/ai-tutor/` (`panel/`, `commands.ts`); spec docs/superpowers/specs/2026-11-19-ai-tutor-design.md,
+"Chat panel". Copilot in Word is the model: a chat sidebar, not a console.
+
+- **Opening**: View ▸ Tutor (`tutor.toggle`, checkable, Ctrl/Cmd+Shift+Y; not Ctrl/Cmd+Shift+I, which opens
+  the webview's developer tools), Review ▸ Tutor (its own ribbon group, the AI sparkle) and View ▸ Show.
+  Docked at the right of the pages, 360 px (AppShell's `sidePanel`); below 768 px it floats over the
+  pages like the navigation pane. Escape gives the manuscript the focus (in the overlay it hides the
+  panel). The open state is not saved; opening sends nothing.
+- **Header**: Tutor, ⟲ (the project's chats: open, delete), New chat, ✕ (closing stops a reply).
+- **Opening view**: the scripted greeting and three suggested prompts ("What can you do?" is scripted,
+  no AI call; the other two attach the current chapter or page and pick a script).
+- **Composer**: chips (label and word count; ✕ or Backspace in an empty box removes one), the question
+  (Enter sends, Shift+Enter a new line), + (Current Page, Current Chapter ▸ with each chapter's words,
+  Selection, Whole Manuscript), ➤, which becomes Stop while a reply streams. Below: "Using: <connection>
+  · <model> ▾" (the models are listed when it opens; one without tool support is listed but off, with
+  the reason). Above 20,000 words, or with Whole Manuscript, the send asks first (the app's message box).
+- **Replies**: Markdown rendered as React elements; a quiet activity line while a tool runs; inline read
+  requests (Allow / Don't Allow); errors in words with Retry, the partial reply kept and marked
+  incomplete. Corrections are cards: kind, the location ("Ch 3 ¶4, line 2", a link that selects the
+  text), the fix, why, Fix and Ignore. Fix finds the paragraph by its session id at the click and is off,
+  with the reason shown and in its tooltip, when the paragraph changed, the text is in a locked re-write
+  passage or runs across hidden content. Proposals open the re-write view on a "Tutor suggestion"
+  version (one chapter at most; otherwise the card says why).
+- **Colours**: theme tokens only (`panel/contrast.test.ts` checks every pair in light and dark; the e2e
+  measures the rendered panel).
