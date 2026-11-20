@@ -1,5 +1,5 @@
 import type { Node as PMNode, Schema } from '@tiptap/pm/model'
-import { TextSelection } from '@tiptap/pm/state'
+import { TextSelection, type Transaction } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
 import { Transform } from '@tiptap/pm/transform'
 import { chapterIndexAt, getChapters, getEditor, onStyleDeleted, type StyleRemap } from '@/features/editor'
@@ -17,7 +17,7 @@ import {
   setSideBarClickHandler,
   setStateStepsMirroredHandler,
 } from './anchor'
-import { cleanVersionName, newRewriteId, nextVersionName, passageDoc } from './model'
+import { cleanVersionName, newRewriteId, nextVersionName, passageDoc, withoutAnchor } from './model'
 
 /**
  * Re-write actions (docs/design.md, "Re-write"). The data model (store `rewrite`, rewrites.json):
@@ -129,13 +129,18 @@ function selectedBlocks(doc: PMNode, from: number, to: number): [number, number]
   return [first, Math.max(first, last)]
 }
 
-/** Re-write Passage…: the selection widened to whole paragraphs (or the paragraph at the caret). */
-export function rewritePassage(): boolean {
-  const ed = getEditor()
-  if (!ed || ed.isDestroyed || store().rewrite.openId) return false
+/** Why a passage cannot be made from a range: a chapter start inside it, or a block already in an open re-write. */
+type PassageRefusal = { refused: 'span' } | { refused: 'locked'; existing: string } | { refused: 'refused' }
+
+/**
+ * Make top-level blocks `first..last` a new passage (the anchor set, one closed history group) and build
+ * its re-write record, not yet stored or opened. At most one chapter (decision 4ec247fc); a block already
+ * in an open re-write is refused with that re-write's id.
+ */
+function createPassage(first: number, last: number): { id: string; record: RewriteRecord } | PassageRefusal {
+  const ed = getEditor()!
   const { state } = ed
   const doc = state.doc
-  const [first, last] = selectedBlocks(doc, state.selection.from, state.selection.to)
   let from = 0
   for (let i = 0; i < first; i++) from += doc.child(i).nodeSize
   let to = from
@@ -144,19 +149,14 @@ export function rewritePassage(): boolean {
     blocks.push(doc.child(i))
     to += doc.child(i).nodeSize
   }
-  // A passage already in an open re-write (any block of the selection): open that one.
   const openAnchors = new Map(store().rewrite.rewrites.filter((r) => r.status === 'open').map((r) => [r.anchor, r.id]))
   for (const b of blocks) {
     const existing = openAnchors.get(b.attrs[REWRITE_BLOCK_ATTR] as string)
-    if (existing) return openRewrite(existing)
+    if (existing) return { refused: 'locked', existing }
   }
-  // At most one chapter (decision 4ec247fc): the selection must not cross a chapter start.
   const chapters = getChapters(doc)
   const lastStart = to - blocks[blocks.length - 1].nodeSize
-  if (chapterIndexAt(chapters, from) !== chapterIndexAt(chapters, lastStart)) {
-    actions().setNotice({ kind: 'span', seq: nextSeq() })
-    return false
-  }
+  if (chapterIndexAt(chapters, from) !== chapterIndexAt(chapters, lastStart)) return { refused: 'span' }
   const id = newRewriteId()
   const now = new Date().toISOString()
   const original = passageDoc(blocks.map(compact))
@@ -175,11 +175,87 @@ export function rewritePassage(): boolean {
   if (ed.state.doc.nodeAt(from)?.attrs[REWRITE_BLOCK_ATTR] !== id) {
     // Refused: back to the manuscript, selection as it was.
     ed.view.focus()
+    return { refused: 'refused' }
+  }
+  return { id, record }
+}
+
+/** Re-write Passage…: the selection widened to whole paragraphs (or the paragraph at the caret). */
+export function rewritePassage(): boolean {
+  const ed = getEditor()
+  if (!ed || ed.isDestroyed || store().rewrite.openId) return false
+  const { selection, doc } = ed.state
+  const [first, last] = selectedBlocks(doc, selection.from, selection.to)
+  const made = createPassage(first, last)
+  if ('refused' in made) {
+    // A passage already in an open re-write (any block of the selection): open that one.
+    if (made.refused === 'locked') return openRewrite(made.existing)
+    if (made.refused === 'span') actions().setNotice({ kind: 'span', seq: nextSeq() })
     return false
   }
-  actions().changed([...store().rewrite.rewrites, record])
+  actions().changed([...store().rewrite.rewrites, made.record])
   sideFileChanged()
-  return openRewrite(id)
+  return openRewrite(made.id)
+}
+
+export type RewriteWithVersionResult =
+  | { ok: true; rewriteId: string; versionId: string }
+  /**
+   * span: the range crosses a chapter start; locked: part of it is in an open re-write; open: the view is
+   * open; refused: no manuscript, or the reviser failed.
+   */
+  | { ok: false; reason: 'span' | 'locked' | 'open' | 'refused' }
+
+/**
+ * A re-write of the whole top-level blocks `range` touches, opened on a ready-made version (the AI
+ * tutor's proposals, Phase 5): Re-write Passage on that range, then a version holding the revision.
+ * `versionDoc` is the version's passage doc, or a reviser that edits a scratch transaction of the
+ * manuscript as it is now (never dispatched; false refuses), whose passage blocks become the version.
+ * The writer then decides with Keep Original, Keep This Version or Discard. Nothing changes on a refusal.
+ */
+export function openRewriteWithVersion(
+  range: { from: number; to: number },
+  versionDoc: DocNodeJSON | ((tr: Transaction) => boolean),
+  versionName = 'Tutor suggestion',
+): RewriteWithVersionResult {
+  const ed = getEditor()
+  if (!ed || ed.isDestroyed) return { ok: false, reason: 'refused' }
+  if (store().rewrite.openId) return { ok: false, reason: 'open' }
+  const doc = ed.state.doc
+  const lo = Math.max(0, Math.min(range.from, range.to, doc.content.size))
+  const hi = Math.min(doc.content.size, Math.max(range.from, range.to))
+  const [first, last] = selectedBlocks(doc, lo, hi)
+  // The version first, from the manuscript before the anchor is set (a refusal leaves no trace).
+  let version: DocNodeJSON
+  if (typeof versionDoc === 'function') {
+    const tr = ed.state.tr
+    if (!versionDoc(tr)) return { ok: false, reason: 'refused' }
+    let from = 0
+    for (let i = 0; i < first; i++) from += doc.child(i).nodeSize
+    let to = from
+    for (let i = first; i <= last; i++) to += doc.child(i).nodeSize
+    const a = tr.mapping.map(from, -1)
+    const b = tr.mapping.map(to, 1)
+    const blocks: DocNodeJSON[] = []
+    tr.doc.nodesBetween(a, b, (node, pos) => {
+      if (pos >= a && pos + node.nodeSize <= b) blocks.push(compact(node))
+      return false
+    })
+    if (!blocks.length) return { ok: false, reason: 'refused' }
+    version = withoutAnchors(passageDoc(blocks))
+  } else version = withoutAnchors(versionDoc)
+  const made = createPassage(first, last)
+  if ('refused' in made) return { ok: false, reason: made.refused }
+  const v: RewriteVersion = { id: newRewriteId('v'), name: cleanVersionName(versionName, 'Tutor suggestion'), doc: version, updatedAt: new Date().toISOString() }
+  actions().changed([...store().rewrite.rewrites, { ...made.record, versions: [...made.record.versions, v], currentVersionId: v.id }])
+  sideFileChanged()
+  if (!openRewrite(made.id, v.id)) return { ok: false, reason: 'refused' }
+  return { ok: true, rewriteId: made.id, versionId: v.id }
+}
+
+/** A passage doc's blocks without a re-write anchor (a version never carries one). */
+function withoutAnchors(doc: DocNodeJSON): DocNodeJSON {
+  return { ...doc, content: (doc.content ?? []).map(withoutAnchor) }
 }
 
 /** Open the comparison view on re-write `id` (its last viewed version, or `versionId`). */

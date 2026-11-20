@@ -378,6 +378,13 @@ export function lockedAtSelection(state: EditorState): LockedRange | null {
   return selectionLocked(state)
 }
 
+/** The locked passage (open re-write) that `[from, to)` overlaps, or null. */
+export function lockedInRange(state: EditorState, from: number, to: number): LockedRange | null {
+  const ranges = rewriteAnchorKey.getState(state)?.ranges ?? []
+  for (const r of ranges) if (from < r.to && Math.max(to, from + 1) > r.from) return r
+  return null
+}
+
 function createAnchorPlugin(): Plugin<AnchorState> {
   return new Plugin<AnchorState>({
     key: rewriteAnchorKey,
