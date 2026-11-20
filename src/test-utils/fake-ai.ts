@@ -225,7 +225,8 @@ export function createFakeAi() {
   }
 
   const MAX_CHAT_BYTES = 8 * 1024 * 1024
-  const validId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id)
+  const RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i // Windows device names, refused like Rust
+  const validId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(id) && !RESERVED.test(id)
 
   function historyCommand(cmd: string, args: Record<string, unknown>): unknown {
     if (state.failHistory) throw fail('bad_request', 'The chat history could not be read.')

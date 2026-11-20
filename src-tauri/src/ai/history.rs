@@ -43,9 +43,19 @@ pub struct ChatSummary {
     pub updated_at: String,
 }
 
-/// `^[A-Za-z0-9-]{1,64}$`: a project's `meta.id` is a UUID, a chat id is generated the same way.
+/// Windows device names: a file called one of these is not a file (also with an extension).
+const RESERVED_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3",
+    "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// `^[A-Za-z0-9-]{1,64}$` and not a Windows reserved device name (any case): a project's `meta.id` is
+/// a UUID, a chat id is generated the same way.
 pub fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= MAX_ID_CHARS && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    !id.is_empty()
+        && id.len() <= MAX_ID_CHARS
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && !RESERVED_NAMES.iter().any(|r| id.eq_ignore_ascii_case(r))
 }
 
 fn check_id(id: &str, what: &str) -> Result<(), AiError> {
@@ -202,6 +212,12 @@ mod tests {
             assert_eq!(save(dir.path(), bad, &chat("chat-1", "t")).unwrap_err().kind, "bad_request");
             assert_eq!(save(dir.path(), PROJECT, &chat(bad, "t")).unwrap_err().kind, "bad_request");
         }
+        for reserved in ["CON", "con", "Nul", "AUX", "prn", "COM1", "com9", "LPT1", "lpt9"] {
+            assert_eq!(load(dir.path(), PROJECT, reserved).unwrap_err().kind, "bad_request", "chat {reserved}");
+            assert_eq!(list(dir.path(), reserved).unwrap_err().kind, "bad_request", "project {reserved}");
+            assert_eq!(save(dir.path(), PROJECT, &chat(reserved, "t")).unwrap_err().kind, "bad_request");
+        }
+        assert!(valid_id("com10") && valid_id("con-1") && valid_id("COM0") && valid_id("lpt"));
         assert!(valid_id(&"a".repeat(64)));
         assert!(valid_id(PROJECT));
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);

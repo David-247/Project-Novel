@@ -28,12 +28,17 @@ interface HistoryState {
   chats: ChatSummary[]
   /** The last failure, in words; never the chat's text. */
   error: string | null
-  startNew(opts?: { connectionId?: string; modelId?: string }): void
+  /** Start an empty chat; returns its id, the handle later writes to it must name. */
+  startNew(opts?: { connectionId?: string; modelId?: string }): string
   open(id: string): Promise<void>
-  /** Add a message to the open chat (ignored when there is none) and schedule the save. */
-  append(message: StoredMessage): void
-  /** Change the message at `index` (the streamed reply being finished, a correction applied). */
-  update(index: number, patch: Partial<StoredMessage>): void
+  /**
+   * Add a message to chat `chatId` and schedule the save. A write is bound to its chat: if that chat is
+   * no longer the open one (another project, a new chat, another chat opened) it is dropped, so a turn
+   * that streams on after a switch cannot land in the wrong chat (Review Focus 5).
+   */
+  append(chatId: string, message: StoredMessage): void
+  /** Change the message at `index` of chat `chatId` (the streamed reply being finished, a correction applied); dropped like `append`. */
+  update(chatId: string, index: number, patch: Partial<StoredMessage>): void
   /** Save now. Resolves once every queued write has finished. */
   flush(): Promise<void>
   /** The panel closes: save what is pending, then forget the open chat. */
@@ -42,12 +47,25 @@ interface HistoryState {
   remove(id: string): Promise<void>
   /** Delete all of the open project's chats (Task 10's settings page; the delete-project prompt). */
   clearProject(): Promise<void>
+  /** Delete every project's chats (the settings page's "Clear all"). */
+  clearAll(): Promise<void>
 }
 
 let dirty = false
 let timer: ReturnType<typeof setTimeout> | null = null
 /** Writes run one after another, so an older snapshot never lands after a newer one. */
 let queue: Promise<void> = Promise.resolve()
+/**
+ * Bumped whenever the open chat is replaced, dropped or edited. `open` loads a chat asynchronously and
+ * discards the result if this moved meanwhile: the simpler choice than merging, and it never loses edits.
+ */
+let generation = 0
+
+/** Run `task` after every write and delete queued before it (saves and deletes share one queue). */
+function enqueue(task: () => Promise<void>): Promise<void> {
+  queue = queue.then(task)
+  return queue
+}
 
 const currentProjectId = (): string | null => getCurrentProjectMeta()?.id ?? null
 
@@ -85,12 +103,14 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
   }
 
   function drop() {
+    generation++
     cancelTimer()
     dirty = false
     set({ chat: null, projectId: null })
   }
 
   function touch(next: Chat) {
+    generation++
     set({ chat: { ...next, updatedAt: new Date().toISOString() } })
     dirty = true
     cancelTimer()
@@ -103,7 +123,7 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
     const projectId = get().projectId
     if (dirty && chat && projectId) {
       dirty = false
-      queue = queue.then(async () => {
+      void enqueue(async () => {
         // The project may have changed while this write waited its turn.
         if (currentProjectId() !== projectId) return
         try {
@@ -130,11 +150,13 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
     startNew(opts) {
       void flush()
       const now = new Date().toISOString()
+      const id = crypto.randomUUID()
+      generation++
       dirty = false
       set({
         projectId: currentProjectId(),
         chat: {
-          id: crypto.randomUUID(),
+          id,
           title: NEW_CHAT_TITLE,
           createdAt: now,
           updatedAt: now,
@@ -143,9 +165,11 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
           messages: [],
         },
       })
+      return id
     },
 
     async open(id) {
+      const gen = generation // from the call, so edits made while the flush or the load runs also count
       await flush()
       const projectId = currentProjectId()
       if (!projectId) {
@@ -154,7 +178,8 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
       }
       try {
         const chat = await ipc.loadChat(projectId, id)
-        if (currentProjectId() !== projectId) return
+        // The chat changed while loading (a new chat, an edit): keep that, discard this.
+        if (currentProjectId() !== projectId || gen !== generation) return
         dirty = false
         cancelTimer()
         set({ chat, projectId, error: null })
@@ -163,16 +188,16 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
       }
     },
 
-    append(message) {
+    append(chatId, message) {
       const chat = validChat()
-      if (!chat) return
+      if (!chat || chat.id !== chatId) return
       const first = message.role === 'user' && !chat.messages.some((m) => m.role === 'user')
       touch({ ...chat, title: first ? chatTitle(message) : chat.title, messages: [...chat.messages, message] })
     },
 
-    update(index, patch) {
+    update(chatId, index, patch) {
       const chat = validChat()
-      if (!chat || index < 0 || index >= chat.messages.length) return
+      if (!chat || chat.id !== chatId || index < 0 || index >= chat.messages.length) return
       const messages = chat.messages.slice()
       messages[index] = { ...messages[index], ...patch } as StoredMessage
       touch({ ...chat, messages })
@@ -202,15 +227,16 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
 
     async remove(id) {
       if (get().chat?.id === id) drop()
-      await queue
       const projectId = currentProjectId()
       if (!projectId) return
-      try {
-        await ipc.deleteChats(projectId, id)
-        set({ error: null })
-      } catch (e) {
-        set({ error: messageOf(e, 'The chat could not be deleted.') })
-      }
+      await enqueue(async () => {
+        try {
+          await ipc.deleteChats(projectId, id)
+          set({ error: null })
+        } catch (e) {
+          set({ error: messageOf(e, 'The chat could not be deleted.') })
+        }
+      })
       await get().refresh()
     },
 
@@ -218,19 +244,33 @@ export const useTutorHistory = create<HistoryState>()((set, get) => {
       const projectId = currentProjectId()
       if (!projectId) return
       drop()
-      await queue
-      try {
-        await ipc.deleteChats(projectId)
-        set({ chats: [], error: null })
-      } catch (e) {
-        set({ error: messageOf(e, 'The chats could not be deleted.') })
-      }
+      await enqueue(async () => {
+        try {
+          await ipc.deleteChats(projectId)
+          set({ chats: [], error: null })
+        } catch (e) {
+          set({ error: messageOf(e, 'The chats could not be deleted.') })
+        }
+      })
+    },
+
+    async clearAll() {
+      drop()
+      await enqueue(async () => {
+        try {
+          await ipc.clearAllChats()
+          set({ chats: [], error: null })
+        } catch (e) {
+          set({ error: messageOf(e, 'The chats could not be deleted.') })
+        }
+      })
     },
   }
 })
 
 // A project was opened: the open chat and the list belong to the previous one.
 onProjectOpened(() => {
+  generation++
   cancelTimer()
   dirty = false
   useTutorHistory.setState({ chat: null, projectId: null, chats: [] })

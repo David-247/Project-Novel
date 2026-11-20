@@ -37,5 +37,9 @@ describe('history ipc', () => {
     await expect(ipc.listChats('../x')).rejects.toMatchObject({ kind: 'bad_request' })
     await expect(ipc.saveChat('p-1', chat('a/b'))).rejects.toMatchObject({ kind: 'bad_request' })
     await expect(ipc.loadChat('p-1', '..')).rejects.toMatchObject({ kind: 'bad_request' })
+    for (const name of ['CON', 'nul', 'Com1', 'LPT9']) {
+      await expect(ipc.listChats(name)).rejects.toMatchObject({ kind: 'bad_request' })
+      await expect(ipc.saveChat('p-1', chat(name))).rejects.toMatchObject({ kind: 'bad_request' })
+    }
   })
 })
