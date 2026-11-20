@@ -167,6 +167,40 @@ describe('spell check underlines', () => {
     expect(sent).not.toContain('Line 400 teh')
   })
 
+  it('a failed check keeps the changed blocks marked, so the next check takes them again (final C-M9)', async () => {
+    const many = Array.from({ length: 500 }, (_, i) => p(t(`Line ${i} teh`)))
+    const ed = mount(doc(...many))
+    let at = 0
+    const pages: PageInfo[] = []
+    for (let k = 0; k < 5; k++) {
+      const from = at
+      for (let i = k * 100; i < (k + 1) * 100; i++) at += ed.state.doc.child(i).nodeSize
+      pages.push({ index: k, side: 'recto' as const, from, to: at, isBlank: false, startsBlockType: 'paragraph', chapterIndex: 0 })
+    }
+    act(() => {
+      useStore.getState().layoutActions.setPages(pages)
+      useStore.getState().layoutActions.setVisibleSpread({ index: 2, first: 2, last: 2 })
+    })
+    await idle()
+    const posOf = (i: number) => {
+      let pos = 0
+      for (let k = 0; k < i; k++) pos += ed.state.doc.child(k).nodeSize
+      return pos
+    }
+    // An edit on page 1, out of view: only the record of changed blocks brings it to the engine.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    backend.spell.fail = true
+    act(() => ed.view.dispatch(ed.state.tr.insertText('Edited ', posOf(10) + 1)))
+    await idle()
+    backend.spell.fail = false
+    backend.spell.calls.length = 0
+    // Any later change runs the next check.
+    act(() => ed.view.dispatch(ed.state.tr.insertText('x', posOf(250) + 1)))
+    await idle()
+    expect(backend.spell.calls.flatMap((c) => c.blocks.map((b) => b.text))).toContain('Edited Line 10 teh')
+    spy.mockRestore()
+  })
+
   it('View > Spelling & Grammar off removes every underline; on brings them back', async () => {
     mount(doc(p(t('teh one'))))
     await idle()

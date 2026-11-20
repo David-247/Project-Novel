@@ -119,6 +119,8 @@ interface Target {
   pos: number
   key: string
   text: string
+  /** From the record of changed blocks (not only in view): kept in it when the check fails. */
+  changed?: boolean
 }
 
 /** The textblocks touching [from, to). */
@@ -175,6 +177,20 @@ function addDirty(c: Controller, tr: Transaction) {
   c.dirty = ranges
 }
 
+/** Mark `targets` (positions as of the check's start, carried by `mapping`) as changed again. */
+function keepDirty(c: Controller, targets: readonly Target[], mapping: Mapping) {
+  const doc = c.view && !c.view.isDestroyed ? c.view.state.doc : null
+  if (!doc) return
+  const ranges = c.dirty.slice()
+  for (const t of targets) {
+    const at = mapping.mapResult(t.pos, 1)
+    if (at.deleted) continue
+    const node = doc.nodeAt(at.pos)
+    if (node?.isTextblock) ranges.push([at.pos, at.pos + node.nodeSize])
+  }
+  c.dirty = ranges.length > MAX_DIRTY_RANGES ? [[Math.min(...ranges.map((r) => r[0])), Math.max(...ranges.map((r) => r[1]))]] : ranges
+}
+
 const enabled = () => useStore.getState().preferences.spellcheck.enabled !== false
 
 /** Collect what to check now: the blocks in view, then changed blocks elsewhere (up to one chunk). */
@@ -182,21 +198,21 @@ function targetsFor(state: EditorState, c: Controller): { targets: Target[]; dro
   const seen = new Set<number>()
   const targets: Target[] = []
   const dropped: { from: number; to: number }[] = []
-  const add = (node: PMNode, pos: number) => {
+  const add = (node: PMNode, pos: number, changed = false) => {
     if (seen.has(pos)) return
     seen.add(pos)
     const { text } = blockCheckText(node, pos)
-    targets.push({ pos, key: hashText(text), text })
+    targets.push({ pos, key: hashText(text), text, ...(changed ? { changed } : {}) })
   }
   const view = visibleRange(state, useStore.getState())
-  textblocksIn(state.doc, view.from, view.to, add)
+  textblocksIn(state.doc, view.from, view.to, (node, pos) => add(node, pos))
   let budget = SPELL_CHECK_CHUNK
   for (const [a, b] of c.dirty) {
     textblocksIn(state.doc, a, b, (node, pos) => {
       if (seen.has(pos)) return
       if (budget > 0) {
         budget--
-        add(node, pos)
+        add(node, pos, true)
       } else {
         // Beyond the budget: no stale underline is left; the block is checked when it comes into view.
         seen.add(pos)
@@ -232,6 +248,8 @@ async function runCheck(c: Controller): Promise<void> {
       } catch (e) {
         if (!c.failed) console.error('[spellcheck] the check failed; underlines stay as they were', e)
         c.failed = true
+        // What was not checked stays marked as changed, so the next check takes it again (final C-M9).
+        keepDirty(c, targets.slice(i).filter((t) => t.changed), mapping)
         return
       }
       const v = c.view
