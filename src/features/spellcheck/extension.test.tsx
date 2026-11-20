@@ -18,6 +18,7 @@ import {
   registerSpellcheckMenu,
   SPELL_CHECK_DEBOUNCE_MS,
 } from './index'
+import { getUnderlineSpecsForTests } from './extension'
 
 const stamp = { id: 'c1', author: 'Ann', date: '2026-01-01T00:00:00.000Z', authorColor: null }
 const t = (text: string, marks?: JSONContent['marks']): JSONContent => ({ type: 'text', text, ...(marks ? { marks } : {}) })
@@ -257,6 +258,52 @@ describe('the editor context menu', () => {
     await openAt('te')
     expect(screen.getByRole('menuitem', { name: 'the' })).toHaveAttribute('data-disabled')
     expect(screen.getByRole('menuitem', { name: 'Ignore Once' })).not.toHaveAttribute('data-disabled')
+  })
+
+  /** Run a recheck (a page turn) while the menu stays open. */
+  async function recheck() {
+    act(() => useStore.getState().layoutActions.setVisibleSpread({ index: 1, first: 1, last: 1 }))
+    await idle()
+    act(() => useStore.getState().layoutActions.setVisibleSpread({ index: 0, first: 0, last: 0 }))
+    await idle()
+  }
+
+  it('REGRESSION: a recheck while the menu is open does not break its suggestion', async () => {
+    const ed = mount(doc(p(t('I saw teh dog.'))))
+    await idle()
+    await openAt('teh')
+    const calls = backend.spell.calls.length
+    __resetSpellcheckCacheForTests() // the recheck really answers again (new Finding objects)
+    await recheck()
+    expect(backend.spell.calls.length).toBeGreaterThan(calls)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'the' }))
+    expect(ed.state.doc.textContent).toBe('I saw the dog.')
+    expect(underlines()).toEqual([])
+  })
+
+  it('REGRESSION: a recheck while the menu is open does not break Ignore Once', async () => {
+    mount(doc(p(t('I saw teh dog.'))))
+    await idle()
+    await openAt('teh')
+    __resetSpellcheckCacheForTests()
+    await recheck()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Ignore Once' }))
+    expect(underlines()).toEqual([])
+  })
+
+  it('a recheck with unchanged findings keeps the same decorations (the block is not redrawn)', async () => {
+    const ed = mount(doc(p(t('I saw teh dog.')), p(t('More teh.'))))
+    await idle()
+    const specs = () => getUnderlineSpecsForTests(ed.state)
+    const before = specs()
+    expect(before).toHaveLength(2)
+    const el = document.querySelector('.novel-editor-content .spell-error')
+    __resetSpellcheckCacheForTests()
+    await recheck()
+    expect(specs()).toHaveLength(2)
+    specs().forEach((s, i) => expect(s).toBe(before[i]))
+    // The same DOM node: ProseMirror did not redraw the underlined text.
+    expect(document.querySelector('.novel-editor-content .spell-error')).toBe(el)
   })
 
   it('Ignore Once hides that one finding only', async () => {

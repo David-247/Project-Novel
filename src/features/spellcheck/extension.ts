@@ -73,6 +73,35 @@ export function wordKey(word: string): string {
   return m ? m[1] : w
 }
 
+/**
+ * The same underline, whichever check made its spec: the menu holds the spec of the underline it
+ * opened on, and a recheck since may have replaced the object (same block text, same finding).
+ */
+export function sameUnderline(a: SpellSpec, b: SpellSpec): boolean {
+  return a === b || (a.blockKey === b.blockKey && a.finding.start === b.finding.start && a.finding.end === b.finding.end && a.finding.kind === b.finding.kind && a.finding.rule === b.finding.rule)
+}
+
+/** Whether a block's underlines would be redrawn the same: then the old decorations are kept as they are. */
+function sameDecorations(old: readonly Decoration[], fresh: readonly Decoration[]): boolean {
+  if (old.length !== fresh.length) return false
+  const a = [...old].sort((x, y) => x.from - y.from || x.to - y.to)
+  const b = [...fresh].sort((x, y) => x.from - y.from || x.to - y.to)
+  return a.every((d, i) => {
+    const e = b[i]
+    const x = specOf(d)!
+    const y = specOf(e)!
+    return (
+      d.from === e.from &&
+      d.to === e.to &&
+      sameUnderline(x, y) &&
+      x.text === y.text &&
+      x.contiguous === y.contiguous &&
+      x.finding.message === y.finding.message &&
+      x.finding.suggestions.join('\n') === y.finding.suggestions.join('\n')
+    )
+  })
+}
+
 /** The underlines of one block (at `pos`, with its check text) for its findings. */
 function blockDecorations(check: CheckText, findings: readonly Finding[], blockKey: string, suppressAt: number | null): Decoration[] {
   const out: Decoration[] = []
@@ -222,7 +251,11 @@ async function runCheck(c: Controller): Promise<void> {
         if (check.text !== t.text) continue
         const decorations = blockDecorations(check, found.get(t.key) ?? [], t.key, typing)
         if (typing !== null && decorations.length < (found.get(t.key) ?? []).length) c.heldBack = true
-        replace.push({ from: at.pos, to: at.pos + node.nodeSize, decorations })
+        // Unchanged: keep the decorations (and their specs) as they are, so the block is not redrawn
+        // (an IME composition in it is left alone) and an open menu's underline is still the same one.
+        const to = at.pos + node.nodeSize
+        if (sameDecorations(st.set.find(at.pos + 1, Math.max(at.pos + 1, to - 1), isSpell), decorations)) continue
+        replace.push({ from: at.pos, to, decorations })
       }
       if (replace.length) v.dispatch(state.tr.setMeta(spellcheckKey, { replace } satisfies SpellMeta).setMeta('addToHistory', false))
     }
@@ -366,5 +399,10 @@ export function getFindingsInRange(from: number, to: number): LocatedFinding[] {
 
 /** Remove one underline (Ignore Once, an applied suggestion) in the transaction `tr`, or on its own. */
 export function removeUnderline(tr: Transaction, spec: SpellSpec): Transaction {
-  return tr.setMeta(spellcheckKey, { remove: (s) => s === spec } satisfies SpellMeta)
+  return tr.setMeta(spellcheckKey, { remove: (s) => sameUnderline(s, spec) } satisfies SpellMeta)
+}
+
+/** Test-only: the specs of every underline of `state`, in document order. */
+export function getUnderlineSpecsForTests(state: EditorState): SpellSpec[] {
+  return findingsIn(state, 0, state.doc.content.size).map((f) => f.spec)
 }

@@ -4,15 +4,20 @@ import { notifyCommandStateChanged, registerCommands, type Command } from '@/sha
 import { useStore } from '@/shared/store'
 import { SPELLCHECK_CONTROLS as C } from './controls'
 import { addWord, ignoreOnce } from './dictionary'
-import { findingsIn, removeUnderline, spellcheckKey, type SpellSpec } from './extension'
+import { findingsIn, removeUnderline, sameUnderline, spellcheckKey, type SpellSpec } from './extension'
 
 /** A dictionary word for flagged text: without a possessive ('s or ’s), which Rust ignores anyway. */
 const dictionaryForm = (text: string) => text.replace(/['’]s$/i, '')
 
-/** Where the underline of `spec` is now, or null when it is gone. */
+/**
+ * Where the underline of `spec` is now, or null when it is gone: the same object, else (a recheck
+ * replaced it while the menu was open) the same block text and finding, nearest the menu's place.
+ */
 function locate(ctx: ContextMenuContext, spec: SpellSpec) {
   const st = spellcheckKey.getState(ctx.editor.state)
-  const d = st?.set.find(undefined, undefined, (s: { spell?: SpellSpec }) => s.spell === spec)[0]
+  if (!st) return null
+  const all = st.set.find(undefined, undefined, (s: { spell?: SpellSpec }) => !!s.spell && sameUnderline(s.spell, spec))
+  const d = all.find((x) => (x.spec as { spell?: SpellSpec }).spell === spec) ?? all.sort((a, b) => Math.abs(a.from - ctx.pos) - Math.abs(b.from - ctx.pos))[0]
   return d ? { from: d.from, to: d.to } : null
 }
 
