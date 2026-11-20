@@ -26,7 +26,7 @@ whoami = "2"
 # default rustls provider, carries an OpenSSL-licensed component and needs CMake/NASM to build).
 # No default features: no system proxy, no HTTP/2, no decompression, no cookies.
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider"] }
-rustls = { version = "=0.23.37", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 tokio = { version = "=1.54.1", features = ["macros", "sync", "time", "rt"] }
 
 [dev-dependencies]
