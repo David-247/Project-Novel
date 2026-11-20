@@ -2,6 +2,7 @@ mod ai;
 mod export;
 mod fonts;
 mod preferences;
+mod spellcheck;
 mod menu;
 mod storage;
 
@@ -61,6 +62,7 @@ pub fn run() {
             storage::storage_exit_app,
             storage::storage_probe_recent_recovery,
             storage::storage_list_dir,
+            spellcheck::spell_check,
             preferences::preferences_read,
             preferences::preferences_write,
             preferences::preferences_default_author,
