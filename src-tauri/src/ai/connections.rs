@@ -221,7 +221,8 @@ fn validate(mut connections: Vec<Connection>) -> Result<Vec<Connection>, AiError
         return Err(AiError::bad_request("Too many AI connections."));
     }
     for c in connections.iter_mut() {
-        if c.id.len() > MAX_ID_BYTES || !text_ok(&c.id, MAX_ID_BYTES) {
+        // `#` is reserved for the keychain's split-secret parts (`<id>#<slot>#<k>`, keychain.rs).
+        if c.id.len() > MAX_ID_BYTES || !text_ok(&c.id, MAX_ID_BYTES) || c.id.contains('#') {
             return Err(AiError::bad_request("A connection id is not valid."));
         }
         if providers::descriptor(&c.provider).is_none() {
@@ -486,6 +487,7 @@ mod tests {
         assert!(f.save(vec![conn("c1", "nope", None)]).is_err());
         assert!(f.save(vec![conn("c1", "openai", None), conn("c1", "xai", None)]).is_err());
         assert!(f.save(vec![conn("", "openai", None)]).is_err());
+        assert!(f.save(vec![conn("X#1", "openai", None)]).is_err(), "an id with # would alias a keychain part");
         let mut c = conn("c1", "openai", None);
         c.label = "\u{7}label".into();
         assert!(f.save(vec![c]).is_err());
