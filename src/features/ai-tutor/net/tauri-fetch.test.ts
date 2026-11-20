@@ -80,6 +80,58 @@ describe('createTauriFetch', () => {
     expect((error as AiFetchError).kind).toBe('network')
   })
 
+  /** Read the whole body; the text read and the error it ended with, if any. */
+  const drain = async (res: Response) => {
+    const reader = res.body!.getReader()
+    let text = ''
+    let error: unknown = null
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        text += decoder.decode(value)
+      }
+    } catch (e) {
+      error = e
+    }
+    return { text, error }
+  }
+
+  it('an invoke rejection that overtakes the whole stream still gives the reply, in order, then its error', async () => {
+    const reply = sseResponse(['one ', 'two ', 'three'])
+    backend.ai.script = {
+      events: [],
+      rejectWith: { kind: 'provider', message: 'The provider stopped.' },
+      afterReject: [...reply.slice(0, 4), { type: 'error', kind: 'provider', message: 'The provider stopped.' }],
+    }
+    const res = await createTauriFetch('c1')('https://provider.invalid/v1/chat/completions', { method: 'POST', body: '{}' })
+    expect(res.status).toBe(200)
+    const { text, error } = await drain(res)
+    expect(text).toBe('one two three')
+    expect(error).toBeInstanceOf(AiFetchError)
+    expect((error as AiFetchError).kind).toBe('provider')
+  })
+
+  it('an invoke rejection mid-stream keeps the chunks the channel has yet to deliver', async () => {
+    const reply = sseResponse(['one ', 'two ', 'three'])
+    backend.ai.script = {
+      events: reply.slice(0, 2),
+      rejectWith: { kind: 'network', message: 'The connection dropped.' },
+      afterReject: [...reply.slice(2, 4), { type: 'error', kind: 'network', message: 'The connection dropped.' }],
+    }
+    const res = await createTauriFetch('c1')('https://provider.invalid/v1/chat/completions', { method: 'POST', body: '{}' })
+    const { text, error } = await drain(res)
+    expect(text).toBe('one two three')
+    expect((error as AiFetchError).kind).toBe('network')
+  })
+
+  it('an invoke rejection with no channel event at all still rejects the fetch', async () => {
+    backend.ai.script = { events: [], rejectWith: { kind: 'auth', message: 'Signed out.' } }
+    const e = await createTauriFetch('c1')('https://provider.invalid/v1/models').catch((x: unknown) => x)
+    expect(e).toBeInstanceOf(AiFetchError)
+    expect((e as AiFetchError).kind).toBe('auth')
+  })
+
   it('streams the scripted SSE text deltas through streamText in order', async () => {
     backend.ai.script = { events: sseResponse([delta('Hel'), delta('lo, '), delta('writer', 'stop') + 'data: [DONE]\n\n']) }
     const result = streamText({ model: model(), prompt: 'hi' })

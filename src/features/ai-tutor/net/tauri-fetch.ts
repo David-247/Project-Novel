@@ -57,6 +57,13 @@ const STRIPPED_HEADERS = new Set(['authorization', 'x-api-key', 'api-key'])
 /** Statuses a Response may not carry a body for. */
 const NULL_BODY_STATUS = new Set([101, 103, 204, 205, 304])
 
+/**
+ * How long a rejected `ai_fetch` waits for the channel to go quiet before its error is used. Rust sends
+ * every failure on the channel before the command returns, but Tauri does not order the command result
+ * against channel messages, so the channel's own `error` (after any chunks still in flight) wins.
+ */
+const CHANNEL_GRACE_MS = 300
+
 let nextRequestId = 1
 
 function toAiError(e: unknown): AiFetchError {
@@ -131,9 +138,25 @@ export function createTauriFetch(connectionId: string): typeof fetch {
      * reply is kept (Review Focus 3); erroring a stream at once would throw its queue away. An abort
      * errors at once.
      */
+    /** The command's rejection, held until the channel has been quiet for CHANNEL_GRACE_MS. */
+    let commandError: unknown = null
+    let graceTimer: ReturnType<typeof setTimeout> | null = null
+    const stopGrace = () => {
+      if (graceTimer !== null) clearTimeout(graceTimer)
+      graceTimer = null
+    }
+    const armGrace = () => {
+      stopGrace()
+      graceTimer = setTimeout(() => {
+        graceTimer = null
+        fail(commandError, true)
+      }, CHANNEL_GRACE_MS)
+    }
+
     const fail = (e: unknown, drain = false) => {
       if (finished) return
       finished = true
+      stopGrace()
       signal?.removeEventListener('abort', onAbort)
       if (!settled) {
         settled = true
@@ -161,6 +184,8 @@ export function createTauriFetch(connectionId: string): typeof fetch {
     const channel = new Channel<AiFetchEvent>()
     channel.onmessage = (event) => {
       if (finished) return
+      // The channel is still delivering: the held rejection waits for it to go quiet again.
+      if (graceTimer !== null) armGrace()
       switch (event.type) {
         case 'head': {
           const stream = NULL_BODY_STATUS.has(event.status)
@@ -177,6 +202,7 @@ export function createTauriFetch(connectionId: string): typeof fetch {
                   // The reader gave up: stop the request too.
                   if (finished) return
                   finished = true
+                  stopGrace()
                   signal?.removeEventListener('abort', onAbort)
                   void invoke('ai_fetch_cancel', { requestId }).catch(() => {})
                 },
@@ -190,6 +216,7 @@ export function createTauriFetch(connectionId: string): typeof fetch {
           break
         case 'end':
           finished = true
+          stopGrace()
           signal?.removeEventListener('abort', onAbort)
           if (!settled) {
             settled = true
@@ -204,14 +231,19 @@ export function createTauriFetch(connectionId: string): typeof fetch {
       }
     }
 
-    // The command's rejection can overtake the channel's last events: like a provider error event, it
-    // waits behind the chunks already queued (an abort was handled by onAbort, at once).
+    // The command's rejection can overtake the channel's events, even its head: it is only a fallback,
+    // used once the channel has been quiet for CHANNEL_GRACE_MS without ending the request, and then it
+    // too waits behind the chunks already queued. An abort was handled by onAbort, at once.
     invoke('ai_fetch', {
       requestId,
       connectionId,
       req: { method, path: url.pathname + url.search, headers, body: body ?? null },
       onEvent: channel,
-    }).catch((e: unknown) => fail(toAiError(e), !signal?.aborted))
+    }).catch((e: unknown) => {
+      if (finished) return
+      commandError = toAiError(e)
+      armGrace()
+    })
 
     return head
   }

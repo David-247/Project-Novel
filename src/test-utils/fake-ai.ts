@@ -74,6 +74,11 @@ export interface FakeAiScript {
    * rejection races the channel (Rust's command result can arrive before the channel's last events).
    */
   rejectWith?: { kind: string; message: string }
+  /**
+   * With `rejectWith`: events the channel delivers only after the invoke has rejected, each on its own
+   * later macrotask (the channel lagging behind the command result, as Tauri allows).
+   */
+  afterReject?: FakeAiEvent[]
 }
 
 interface ChannelLike {
@@ -230,7 +235,16 @@ export function createFakeAi() {
       }
       if (script!.pauseAfter === script!.events.length) await new Promise<void>((resolve) => (wake = resolve))
       if (cancelled) failWith('cancelled', 'The request was cancelled.')
-      if (script!.rejectWith) throw fail(script!.rejectWith.kind, script!.rejectWith.message)
+      if (script!.rejectWith) {
+        const late = script!.afterReject ?? []
+        void (async () => {
+          for (const event of late) {
+            await new Promise((resolve) => setTimeout(resolve, 5))
+            send(event)
+          }
+        })()
+        throw fail(script!.rejectWith.kind, script!.rejectWith.message)
+      }
     } finally {
       running.delete(requestId)
     }
